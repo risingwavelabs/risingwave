@@ -1,6 +1,4 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 import { Source } from "./catalog";
 import { ActorInfo, Status } from "./common";
 import { Epoch } from "./data";
@@ -135,37 +133,6 @@ function createBaseHangingChannel(): HangingChannel {
 }
 
 export const HangingChannel = {
-  encode(message: HangingChannel, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.upstream !== undefined) {
-      ActorInfo.encode(message.upstream, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.downstream !== undefined) {
-      ActorInfo.encode(message.downstream, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HangingChannel {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHangingChannel();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.upstream = ActorInfo.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.downstream = ActorInfo.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HangingChannel {
     return {
       upstream: isSet(object.upstream) ? ActorInfo.fromJSON(object.upstream) : undefined,
@@ -199,43 +166,6 @@ function createBaseUpdateActorsRequest(): UpdateActorsRequest {
 }
 
 export const UpdateActorsRequest = {
-  encode(message: UpdateActorsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    for (const v of message.actors) {
-      StreamActor.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    for (const v of message.hangingChannels) {
-      HangingChannel.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateActorsRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateActorsRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          message.actors.push(StreamActor.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.hangingChannels.push(HangingChannel.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateActorsRequest {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -276,31 +206,6 @@ function createBaseUpdateActorsResponse(): UpdateActorsResponse {
 }
 
 export const UpdateActorsResponse = {
-  encode(message: UpdateActorsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateActorsResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateActorsResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateActorsResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -325,31 +230,6 @@ function createBaseBroadcastActorInfoTableRequest(): BroadcastActorInfoTableRequ
 }
 
 export const BroadcastActorInfoTableRequest = {
-  encode(message: BroadcastActorInfoTableRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.info) {
-      ActorInfo.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): BroadcastActorInfoTableRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBroadcastActorInfoTableRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.info.push(ActorInfo.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): BroadcastActorInfoTableRequest {
     return { info: Array.isArray(object?.info) ? object.info.map((e: any) => ActorInfo.fromJSON(e)) : [] };
   },
@@ -378,46 +258,6 @@ function createBaseBuildActorsRequest(): BuildActorsRequest {
 }
 
 export const BuildActorsRequest = {
-  encode(message: BuildActorsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.actorId) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): BuildActorsRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBuildActorsRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.actorId.push(reader.uint32());
-            }
-          } else {
-            message.actorId.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): BuildActorsRequest {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -449,37 +289,6 @@ function createBaseBuildActorsResponse(): BuildActorsResponse {
 }
 
 export const BuildActorsResponse = {
-  encode(message: BuildActorsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): BuildActorsResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBuildActorsResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): BuildActorsResponse {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -509,46 +318,6 @@ function createBaseDropActorsRequest(): DropActorsRequest {
 }
 
 export const DropActorsRequest = {
-  encode(message: DropActorsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.actorIds) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropActorsRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropActorsRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.actorIds.push(reader.uint32());
-            }
-          } else {
-            message.actorIds.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropActorsRequest {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -580,37 +349,6 @@ function createBaseDropActorsResponse(): DropActorsResponse {
 }
 
 export const DropActorsResponse = {
-  encode(message: DropActorsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropActorsResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropActorsResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropActorsResponse {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -640,37 +378,6 @@ function createBaseForceStopActorsRequest(): ForceStopActorsRequest {
 }
 
 export const ForceStopActorsRequest = {
-  encode(message: ForceStopActorsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    if (message.epoch !== undefined) {
-      Epoch.encode(message.epoch, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ForceStopActorsRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseForceStopActorsRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          message.epoch = Epoch.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ForceStopActorsRequest {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -698,37 +405,6 @@ function createBaseForceStopActorsResponse(): ForceStopActorsResponse {
 }
 
 export const ForceStopActorsResponse = {
-  encode(message: ForceStopActorsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ForceStopActorsResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseForceStopActorsResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ForceStopActorsResponse {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -758,67 +434,6 @@ function createBaseInjectBarrierRequest(): InjectBarrierRequest {
 }
 
 export const InjectBarrierRequest = {
-  encode(message: InjectBarrierRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    if (message.barrier !== undefined) {
-      Barrier.encode(message.barrier, writer.uint32(18).fork()).ldelim();
-    }
-    writer.uint32(26).fork();
-    for (const v of message.actorIdsToSend) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    writer.uint32(34).fork();
-    for (const v of message.actorIdsToCollect) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): InjectBarrierRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseInjectBarrierRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          message.barrier = Barrier.decode(reader, reader.uint32());
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.actorIdsToSend.push(reader.uint32());
-            }
-          } else {
-            message.actorIdsToSend.push(reader.uint32());
-          }
-          break;
-        case 4:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.actorIdsToCollect.push(reader.uint32());
-            }
-          } else {
-            message.actorIdsToCollect.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): InjectBarrierRequest {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -864,37 +479,6 @@ function createBaseInjectBarrierResponse(): InjectBarrierResponse {
 }
 
 export const InjectBarrierResponse = {
-  encode(message: InjectBarrierResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): InjectBarrierResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseInjectBarrierResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): InjectBarrierResponse {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -924,37 +508,6 @@ function createBaseBarrierCompleteRequest(): BarrierCompleteRequest {
 }
 
 export const BarrierCompleteRequest = {
-  encode(message: BarrierCompleteRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    if (message.prevEpoch !== 0) {
-      writer.uint32(16).uint64(message.prevEpoch);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): BarrierCompleteRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBarrierCompleteRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          message.prevEpoch = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): BarrierCompleteRequest {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -989,61 +542,6 @@ function createBaseBarrierCompleteResponse(): BarrierCompleteResponse {
 }
 
 export const BarrierCompleteResponse = {
-  encode(message: BarrierCompleteResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.requestId !== "") {
-      writer.uint32(10).string(message.requestId);
-    }
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(18).fork()).ldelim();
-    }
-    for (const v of message.createMviewProgress) {
-      BarrierCompleteResponse_CreateMviewProgress.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    for (const v of message.syncedSstables) {
-      BarrierCompleteResponse_GroupedSstableInfo.encode(v!, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.workerId !== 0) {
-      writer.uint32(40).uint32(message.workerId);
-    }
-    if (message.checkpoint === true) {
-      writer.uint32(48).bool(message.checkpoint);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): BarrierCompleteResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBarrierCompleteResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.requestId = reader.string();
-          break;
-        case 2:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.createMviewProgress.push(BarrierCompleteResponse_CreateMviewProgress.decode(reader, reader.uint32()));
-          break;
-        case 4:
-          message.syncedSstables.push(BarrierCompleteResponse_GroupedSstableInfo.decode(reader, reader.uint32()));
-          break;
-        case 5:
-          message.workerId = reader.uint32();
-          break;
-        case 6:
-          message.checkpoint = reader.bool();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): BarrierCompleteResponse {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
@@ -1103,43 +601,6 @@ function createBaseBarrierCompleteResponse_CreateMviewProgress(): BarrierComplet
 }
 
 export const BarrierCompleteResponse_CreateMviewProgress = {
-  encode(message: BarrierCompleteResponse_CreateMviewProgress, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.chainActorId !== 0) {
-      writer.uint32(8).uint32(message.chainActorId);
-    }
-    if (message.done === true) {
-      writer.uint32(16).bool(message.done);
-    }
-    if (message.consumedEpoch !== 0) {
-      writer.uint32(24).uint64(message.consumedEpoch);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): BarrierCompleteResponse_CreateMviewProgress {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBarrierCompleteResponse_CreateMviewProgress();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.chainActorId = reader.uint32();
-          break;
-        case 2:
-          message.done = reader.bool();
-          break;
-        case 3:
-          message.consumedEpoch = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): BarrierCompleteResponse_CreateMviewProgress {
     return {
       chainActorId: isSet(object.chainActorId) ? Number(object.chainActorId) : 0,
@@ -1172,37 +633,6 @@ function createBaseBarrierCompleteResponse_GroupedSstableInfo(): BarrierComplete
 }
 
 export const BarrierCompleteResponse_GroupedSstableInfo = {
-  encode(message: BarrierCompleteResponse_GroupedSstableInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.compactionGroupId !== 0) {
-      writer.uint32(8).uint64(message.compactionGroupId);
-    }
-    if (message.sst !== undefined) {
-      SstableInfo.encode(message.sst, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): BarrierCompleteResponse_GroupedSstableInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBarrierCompleteResponse_GroupedSstableInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.compactionGroupId = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.sst = SstableInfo.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): BarrierCompleteResponse_GroupedSstableInfo {
     return {
       compactionGroupId: isSet(object.compactionGroupId) ? Number(object.compactionGroupId) : 0,
@@ -1232,31 +662,6 @@ function createBaseBroadcastActorInfoTableResponse(): BroadcastActorInfoTableRes
 }
 
 export const BroadcastActorInfoTableResponse = {
-  encode(message: BroadcastActorInfoTableResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): BroadcastActorInfoTableResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBroadcastActorInfoTableResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): BroadcastActorInfoTableResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -1283,31 +688,6 @@ function createBaseCreateSourceRequest(): CreateSourceRequest {
 }
 
 export const CreateSourceRequest = {
-  encode(message: CreateSourceRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.source !== undefined) {
-      Source.encode(message.source, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateSourceRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateSourceRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.source = Source.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateSourceRequest {
     return { source: isSet(object.source) ? Source.fromJSON(object.source) : undefined };
   },
@@ -1332,31 +712,6 @@ function createBaseCreateSourceResponse(): CreateSourceResponse {
 }
 
 export const CreateSourceResponse = {
-  encode(message: CreateSourceResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateSourceResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateSourceResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateSourceResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -1381,31 +736,6 @@ function createBaseDropSourceRequest(): DropSourceRequest {
 }
 
 export const DropSourceRequest = {
-  encode(message: DropSourceRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.sourceId !== 0) {
-      writer.uint32(8).uint32(message.sourceId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropSourceRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropSourceRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.sourceId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropSourceRequest {
     return { sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0 };
   },
@@ -1428,31 +758,6 @@ function createBaseDropSourceResponse(): DropSourceResponse {
 }
 
 export const DropSourceResponse = {
-  encode(message: DropSourceResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropSourceResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropSourceResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropSourceResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -1477,31 +782,6 @@ function createBaseSyncSourcesRequest(): SyncSourcesRequest {
 }
 
 export const SyncSourcesRequest = {
-  encode(message: SyncSourcesRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.sources) {
-      Source.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SyncSourcesRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSyncSourcesRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.sources.push(Source.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SyncSourcesRequest {
     return { sources: Array.isArray(object?.sources) ? object.sources.map((e: any) => Source.fromJSON(e)) : [] };
   },
@@ -1528,31 +808,6 @@ function createBaseSyncSourcesResponse(): SyncSourcesResponse {
 }
 
 export const SyncSourcesResponse = {
-  encode(message: SyncSourcesResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SyncSourcesResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSyncSourcesResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SyncSourcesResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -1572,25 +827,6 @@ export const SyncSourcesResponse = {
   },
 };
 
-declare var self: any | undefined;
-declare var window: any | undefined;
-declare var global: any | undefined;
-var globalThis: any = (() => {
-  if (typeof globalThis !== "undefined") {
-    return globalThis;
-  }
-  if (typeof self !== "undefined") {
-    return self;
-  }
-  if (typeof window !== "undefined") {
-    return window;
-  }
-  if (typeof global !== "undefined") {
-    return global;
-  }
-  throw "Unable to locate global object";
-})();
-
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
 export type DeepPartial<T> = T extends Builtin ? T
@@ -1602,20 +838,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;

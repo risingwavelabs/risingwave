@@ -15,11 +15,17 @@
  *
  */
 
-import { Box, Text } from "@chakra-ui/react";
-import Title from "../components/Title";
+import { Box, useToast } from "@chakra-ui/react"
+import NoData from "../components/NoData"
+import Title from "../components/Title"
 
-export default function Batch() {
-    return (
-        <Box p={3}><Title>Batch</Title></Box>
-    );
+export default function BatchTasks() {
+  const toast = useToast()
+
+  return (
+    <Box p={3}>
+      <Title>Batch Tasks</Title>
+      <NoData />
+    </Box>
+  )
 }

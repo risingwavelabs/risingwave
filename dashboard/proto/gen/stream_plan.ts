@@ -1,6 +1,4 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 import { Table } from "./catalog";
 import { Buffer } from "./common";
 import { Epoch, IntervalUnit, StreamChunk } from "./data";
@@ -18,27 +16,29 @@ import { ConnectorSplits } from "./source";
 
 export const protobufPackage = "stream_plan";
 
-export enum DispatcherType {
-  UNSPECIFIED = 0,
+export const DispatcherType = {
+  UNSPECIFIED: "UNSPECIFIED",
   /** HASH - Dispatch by hash key, hashed by consistent hash. */
-  HASH = 1,
+  HASH: "HASH",
   /**
    * BROADCAST - Broadcast to all downstreams.
    *
    * Note a broadcast cannot be represented as multiple simple dispatchers, since they are
    * different when we update dispatchers during scaling.
    */
-  BROADCAST = 2,
+  BROADCAST: "BROADCAST",
   /** SIMPLE - Only one downstream. */
-  SIMPLE = 3,
+  SIMPLE: "SIMPLE",
   /**
    * NO_SHUFFLE - A special kind of exchange that doesn't involve shuffle. The upstream actor will be directly
    * piped into the downstream actor, if there are the same number of actors. If number of actors
    * are not the same, should use hash instead. Should be only used when distribution is the same.
    */
-  NO_SHUFFLE = 4,
-  UNRECOGNIZED = -1,
-}
+  NO_SHUFFLE: "NO_SHUFFLE",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type DispatcherType = typeof DispatcherType[keyof typeof DispatcherType];
 
 export function dispatcherTypeFromJSON(object: any): DispatcherType {
   switch (object) {
@@ -82,14 +82,16 @@ export function dispatcherTypeToJSON(object: DispatcherType): string {
   }
 }
 
-export enum FragmentType {
-  FRAGMENT_UNSPECIFIED = 0,
-  OTHERS = 1,
-  SOURCE = 2,
+export const FragmentType = {
+  FRAGMENT_UNSPECIFIED: "FRAGMENT_UNSPECIFIED",
+  OTHERS: "OTHERS",
+  SOURCE: "SOURCE",
   /** SINK - TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now. */
-  SINK = 3,
-  UNRECOGNIZED = -1,
-}
+  SINK: "SINK",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type FragmentType = typeof FragmentType[keyof typeof FragmentType];
 
 export function fragmentTypeFromJSON(object: any): FragmentType {
   switch (object) {
@@ -261,12 +263,14 @@ export interface SourceNode {
   stateTableId: number;
 }
 
-export enum SourceNode_SourceType {
-  UNSPECIFIED = 0,
-  TABLE = 1,
-  SOURCE = 2,
-  UNRECOGNIZED = -1,
-}
+export const SourceNode_SourceType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  TABLE: "TABLE",
+  SOURCE: "SOURCE",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type SourceNode_SourceType = typeof SourceNode_SourceType[keyof typeof SourceNode_SourceType];
 
 export function sourceNode_SourceTypeFromJSON(object: any): SourceNode_SourceType {
   switch (object) {
@@ -739,43 +743,6 @@ function createBaseAddMutation(): AddMutation {
 }
 
 export const AddMutation = {
-  encode(message: AddMutation, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    Object.entries(message.actorDispatchers).forEach(([key, value]) => {
-      AddMutation_ActorDispatchersEntry.encode({ key: key as any, value }, writer.uint32(10).fork()).ldelim();
-    });
-    Object.entries(message.actorSplits).forEach(([key, value]) => {
-      AddMutation_ActorSplitsEntry.encode({ key: key as any, value }, writer.uint32(18).fork()).ldelim();
-    });
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AddMutation {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAddMutation();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          const entry1 = AddMutation_ActorDispatchersEntry.decode(reader, reader.uint32());
-          if (entry1.value !== undefined) {
-            message.actorDispatchers[entry1.key] = entry1.value;
-          }
-          break;
-        case 2:
-          const entry2 = AddMutation_ActorSplitsEntry.decode(reader, reader.uint32());
-          if (entry2.value !== undefined) {
-            message.actorSplits[entry2.key] = entry2.value;
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AddMutation {
     return {
       actorDispatchers: isObject(object.actorDispatchers)
@@ -841,31 +808,6 @@ function createBaseAddMutation_Dispatchers(): AddMutation_Dispatchers {
 }
 
 export const AddMutation_Dispatchers = {
-  encode(message: AddMutation_Dispatchers, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.dispatchers) {
-      Dispatcher.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AddMutation_Dispatchers {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAddMutation_Dispatchers();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.dispatchers.push(Dispatcher.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AddMutation_Dispatchers {
     return {
       dispatchers: Array.isArray(object?.dispatchers) ? object.dispatchers.map((e: any) => Dispatcher.fromJSON(e)) : [],
@@ -894,37 +836,6 @@ function createBaseAddMutation_ActorDispatchersEntry(): AddMutation_ActorDispatc
 }
 
 export const AddMutation_ActorDispatchersEntry = {
-  encode(message: AddMutation_ActorDispatchersEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      AddMutation_Dispatchers.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AddMutation_ActorDispatchersEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAddMutation_ActorDispatchersEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = AddMutation_Dispatchers.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AddMutation_ActorDispatchersEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -957,37 +868,6 @@ function createBaseAddMutation_ActorSplitsEntry(): AddMutation_ActorSplitsEntry 
 }
 
 export const AddMutation_ActorSplitsEntry = {
-  encode(message: AddMutation_ActorSplitsEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      ConnectorSplits.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AddMutation_ActorSplitsEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAddMutation_ActorSplitsEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = ConnectorSplits.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AddMutation_ActorSplitsEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -1017,40 +897,6 @@ function createBaseStopMutation(): StopMutation {
 }
 
 export const StopMutation = {
-  encode(message: StopMutation, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.actors) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StopMutation {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStopMutation();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.actors.push(reader.uint32());
-            }
-          } else {
-            message.actors.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StopMutation {
     return { actors: Array.isArray(object?.actors) ? object.actors.map((e: any) => Number(e)) : [] };
   },
@@ -1077,67 +923,6 @@ function createBaseUpdateMutation(): UpdateMutation {
 }
 
 export const UpdateMutation = {
-  encode(message: UpdateMutation, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    Object.entries(message.actorDispatcherUpdate).forEach(([key, value]) => {
-      UpdateMutation_ActorDispatcherUpdateEntry.encode({ key: key as any, value }, writer.uint32(10).fork()).ldelim();
-    });
-    Object.entries(message.actorMergeUpdate).forEach(([key, value]) => {
-      UpdateMutation_ActorMergeUpdateEntry.encode({ key: key as any, value }, writer.uint32(18).fork()).ldelim();
-    });
-    Object.entries(message.actorVnodeBitmapUpdate).forEach(([key, value]) => {
-      UpdateMutation_ActorVnodeBitmapUpdateEntry.encode({ key: key as any, value }, writer.uint32(26).fork()).ldelim();
-    });
-    writer.uint32(34).fork();
-    for (const v of message.droppedActors) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateMutation {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateMutation();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          const entry1 = UpdateMutation_ActorDispatcherUpdateEntry.decode(reader, reader.uint32());
-          if (entry1.value !== undefined) {
-            message.actorDispatcherUpdate[entry1.key] = entry1.value;
-          }
-          break;
-        case 2:
-          const entry2 = UpdateMutation_ActorMergeUpdateEntry.decode(reader, reader.uint32());
-          if (entry2.value !== undefined) {
-            message.actorMergeUpdate[entry2.key] = entry2.value;
-          }
-          break;
-        case 3:
-          const entry3 = UpdateMutation_ActorVnodeBitmapUpdateEntry.decode(reader, reader.uint32());
-          if (entry3.value !== undefined) {
-            message.actorVnodeBitmapUpdate[entry3.key] = entry3.value;
-          }
-          break;
-        case 4:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.droppedActors.push(reader.uint32());
-            }
-          } else {
-            message.droppedActors.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateMutation {
     return {
       actorDispatcherUpdate: isObject(object.actorDispatcherUpdate)
@@ -1164,7 +949,9 @@ export const UpdateMutation = {
           return acc;
         }, {})
         : {},
-      droppedActors: Array.isArray(object?.droppedActors) ? object.droppedActors.map((e: any) => Number(e)) : [],
+      droppedActors: Array.isArray(object?.droppedActors)
+        ? object.droppedActors.map((e: any) => Number(e))
+        : [],
     };
   },
 
@@ -1232,67 +1019,6 @@ function createBaseUpdateMutation_DispatcherUpdate(): UpdateMutation_DispatcherU
 }
 
 export const UpdateMutation_DispatcherUpdate = {
-  encode(message: UpdateMutation_DispatcherUpdate, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.dispatcherId !== 0) {
-      writer.uint32(8).uint64(message.dispatcherId);
-    }
-    if (message.hashMapping !== undefined) {
-      ActorMapping.encode(message.hashMapping, writer.uint32(18).fork()).ldelim();
-    }
-    writer.uint32(26).fork();
-    for (const v of message.addedDownstreamActorId) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    writer.uint32(34).fork();
-    for (const v of message.removedDownstreamActorId) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateMutation_DispatcherUpdate {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateMutation_DispatcherUpdate();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.dispatcherId = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.hashMapping = ActorMapping.decode(reader, reader.uint32());
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.addedDownstreamActorId.push(reader.uint32());
-            }
-          } else {
-            message.addedDownstreamActorId.push(reader.uint32());
-          }
-          break;
-        case 4:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.removedDownstreamActorId.push(reader.uint32());
-            }
-          } else {
-            message.removedDownstreamActorId.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateMutation_DispatcherUpdate {
     return {
       dispatcherId: isSet(object.dispatcherId) ? Number(object.dispatcherId) : 0,
@@ -1343,55 +1069,6 @@ function createBaseUpdateMutation_MergeUpdate(): UpdateMutation_MergeUpdate {
 }
 
 export const UpdateMutation_MergeUpdate = {
-  encode(message: UpdateMutation_MergeUpdate, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.addedUpstreamActorId) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    writer.uint32(18).fork();
-    for (const v of message.removedUpstreamActorId) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateMutation_MergeUpdate {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateMutation_MergeUpdate();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.addedUpstreamActorId.push(reader.uint32());
-            }
-          } else {
-            message.addedUpstreamActorId.push(reader.uint32());
-          }
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.removedUpstreamActorId.push(reader.uint32());
-            }
-          } else {
-            message.removedUpstreamActorId.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateMutation_MergeUpdate {
     return {
       addedUpstreamActorId: Array.isArray(object?.addedUpstreamActorId)
@@ -1431,37 +1108,6 @@ function createBaseUpdateMutation_ActorDispatcherUpdateEntry(): UpdateMutation_A
 }
 
 export const UpdateMutation_ActorDispatcherUpdateEntry = {
-  encode(message: UpdateMutation_ActorDispatcherUpdateEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      UpdateMutation_DispatcherUpdate.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateMutation_ActorDispatcherUpdateEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateMutation_ActorDispatcherUpdateEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = UpdateMutation_DispatcherUpdate.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateMutation_ActorDispatcherUpdateEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -1494,37 +1140,6 @@ function createBaseUpdateMutation_ActorMergeUpdateEntry(): UpdateMutation_ActorM
 }
 
 export const UpdateMutation_ActorMergeUpdateEntry = {
-  encode(message: UpdateMutation_ActorMergeUpdateEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      UpdateMutation_MergeUpdate.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateMutation_ActorMergeUpdateEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateMutation_ActorMergeUpdateEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = UpdateMutation_MergeUpdate.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateMutation_ActorMergeUpdateEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -1557,37 +1172,6 @@ function createBaseUpdateMutation_ActorVnodeBitmapUpdateEntry(): UpdateMutation_
 }
 
 export const UpdateMutation_ActorVnodeBitmapUpdateEntry = {
-  encode(message: UpdateMutation_ActorVnodeBitmapUpdateEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      Buffer.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateMutation_ActorVnodeBitmapUpdateEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateMutation_ActorVnodeBitmapUpdateEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = Buffer.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateMutation_ActorVnodeBitmapUpdateEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -1619,34 +1203,6 @@ function createBaseSourceChangeSplitMutation(): SourceChangeSplitMutation {
 }
 
 export const SourceChangeSplitMutation = {
-  encode(message: SourceChangeSplitMutation, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    Object.entries(message.actorSplits).forEach(([key, value]) => {
-      SourceChangeSplitMutation_ActorSplitsEntry.encode({ key: key as any, value }, writer.uint32(18).fork()).ldelim();
-    });
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SourceChangeSplitMutation {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSourceChangeSplitMutation();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 2:
-          const entry2 = SourceChangeSplitMutation_ActorSplitsEntry.decode(reader, reader.uint32());
-          if (entry2.value !== undefined) {
-            message.actorSplits[entry2.key] = entry2.value;
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SourceChangeSplitMutation {
     return {
       actorSplits: isObject(object.actorSplits)
@@ -1689,37 +1245,6 @@ function createBaseSourceChangeSplitMutation_ActorSplitsEntry(): SourceChangeSpl
 }
 
 export const SourceChangeSplitMutation_ActorSplitsEntry = {
-  encode(message: SourceChangeSplitMutation_ActorSplitsEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      ConnectorSplits.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SourceChangeSplitMutation_ActorSplitsEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSourceChangeSplitMutation_ActorSplitsEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = ConnectorSplits.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SourceChangeSplitMutation_ActorSplitsEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -1751,25 +1276,6 @@ function createBasePauseMutation(): PauseMutation {
 }
 
 export const PauseMutation = {
-  encode(_: PauseMutation, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): PauseMutation {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePauseMutation();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): PauseMutation {
     return {};
   },
@@ -1790,25 +1296,6 @@ function createBaseResumeMutation(): ResumeMutation {
 }
 
 export const ResumeMutation = {
-  encode(_: ResumeMutation, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ResumeMutation {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseResumeMutation();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): ResumeMutation {
     return {};
   },
@@ -1829,94 +1316,6 @@ function createBaseBarrier(): Barrier {
 }
 
 export const Barrier = {
-  encode(message: Barrier, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.epoch !== undefined) {
-      Epoch.encode(message.epoch, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.mutation?.$case === "add") {
-      AddMutation.encode(message.mutation.add, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.mutation?.$case === "stop") {
-      StopMutation.encode(message.mutation.stop, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.mutation?.$case === "update") {
-      UpdateMutation.encode(message.mutation.update, writer.uint32(42).fork()).ldelim();
-    }
-    if (message.mutation?.$case === "splits") {
-      SourceChangeSplitMutation.encode(message.mutation.splits, writer.uint32(50).fork()).ldelim();
-    }
-    if (message.mutation?.$case === "pause") {
-      PauseMutation.encode(message.mutation.pause, writer.uint32(58).fork()).ldelim();
-    }
-    if (message.mutation?.$case === "resume") {
-      ResumeMutation.encode(message.mutation.resume, writer.uint32(66).fork()).ldelim();
-    }
-    if (message.span.length !== 0) {
-      writer.uint32(18).bytes(message.span);
-    }
-    if (message.checkpoint === true) {
-      writer.uint32(72).bool(message.checkpoint);
-    }
-    writer.uint32(2042).fork();
-    for (const v of message.passedActors) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Barrier {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBarrier();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.epoch = Epoch.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.mutation = { $case: "add", add: AddMutation.decode(reader, reader.uint32()) };
-          break;
-        case 4:
-          message.mutation = { $case: "stop", stop: StopMutation.decode(reader, reader.uint32()) };
-          break;
-        case 5:
-          message.mutation = { $case: "update", update: UpdateMutation.decode(reader, reader.uint32()) };
-          break;
-        case 6:
-          message.mutation = { $case: "splits", splits: SourceChangeSplitMutation.decode(reader, reader.uint32()) };
-          break;
-        case 7:
-          message.mutation = { $case: "pause", pause: PauseMutation.decode(reader, reader.uint32()) };
-          break;
-        case 8:
-          message.mutation = { $case: "resume", resume: ResumeMutation.decode(reader, reader.uint32()) };
-          break;
-        case 2:
-          message.span = reader.bytes();
-          break;
-        case 9:
-          message.checkpoint = reader.bool();
-          break;
-        case 255:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.passedActors.push(reader.uint32());
-            }
-          } else {
-            message.passedActors.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Barrier {
     return {
       epoch: isSet(object.epoch) ? Epoch.fromJSON(object.epoch) : undefined,
@@ -1935,7 +1334,9 @@ export const Barrier = {
         : undefined,
       span: isSet(object.span) ? bytesFromBase64(object.span) : new Uint8Array(),
       checkpoint: isSet(object.checkpoint) ? Boolean(object.checkpoint) : false,
-      passedActors: Array.isArray(object?.passedActors) ? object.passedActors.map((e: any) => Number(e)) : [],
+      passedActors: Array.isArray(object?.passedActors)
+        ? object.passedActors.map((e: any) => Number(e))
+        : [],
     };
   },
 
@@ -2004,37 +1405,6 @@ function createBaseStreamMessage(): StreamMessage {
 }
 
 export const StreamMessage = {
-  encode(message: StreamMessage, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.streamMessage?.$case === "streamChunk") {
-      StreamChunk.encode(message.streamMessage.streamChunk, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.streamMessage?.$case === "barrier") {
-      Barrier.encode(message.streamMessage.barrier, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamMessage {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamMessage();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.streamMessage = { $case: "streamChunk", streamChunk: StreamChunk.decode(reader, reader.uint32()) };
-          break;
-        case 2:
-          message.streamMessage = { $case: "barrier", barrier: Barrier.decode(reader, reader.uint32()) };
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StreamMessage {
     return {
       streamMessage: isSet(object.streamChunk)
@@ -2083,55 +1453,6 @@ function createBaseActorMapping(): ActorMapping {
 }
 
 export const ActorMapping = {
-  encode(message: ActorMapping, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.originalIndices) {
-      writer.uint64(v);
-    }
-    writer.ldelim();
-    writer.uint32(18).fork();
-    for (const v of message.data) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ActorMapping {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseActorMapping();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.originalIndices.push(longToNumber(reader.uint64() as Long));
-            }
-          } else {
-            message.originalIndices.push(longToNumber(reader.uint64() as Long));
-          }
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.data.push(reader.uint32());
-            }
-          } else {
-            message.data.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ActorMapping {
     return {
       originalIndices: Array.isArray(object?.originalIndices) ? object.originalIndices.map((e: any) => Number(e)) : [],
@@ -2163,67 +1484,17 @@ export const ActorMapping = {
 };
 
 function createBaseSourceNode(): SourceNode {
-  return { sourceId: 0, columnIds: [], sourceType: 0, stateTableId: 0 };
+  return { sourceId: 0, columnIds: [], sourceType: SourceNode_SourceType.UNSPECIFIED, stateTableId: 0 };
 }
 
 export const SourceNode = {
-  encode(message: SourceNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.sourceId !== 0) {
-      writer.uint32(8).uint32(message.sourceId);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.columnIds) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    if (message.sourceType !== 0) {
-      writer.uint32(24).int32(message.sourceType);
-    }
-    if (message.stateTableId !== 0) {
-      writer.uint32(32).uint32(message.stateTableId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SourceNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSourceNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.sourceId = reader.uint32();
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnIds.push(reader.int32());
-            }
-          } else {
-            message.columnIds.push(reader.int32());
-          }
-          break;
-        case 3:
-          message.sourceType = reader.int32() as any;
-          break;
-        case 4:
-          message.stateTableId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SourceNode {
     return {
       sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0,
       columnIds: Array.isArray(object?.columnIds) ? object.columnIds.map((e: any) => Number(e)) : [],
-      sourceType: isSet(object.sourceType) ? sourceNode_SourceTypeFromJSON(object.sourceType) : 0,
+      sourceType: isSet(object.sourceType)
+        ? sourceNode_SourceTypeFromJSON(object.sourceType)
+        : SourceNode_SourceType.UNSPECIFIED,
       stateTableId: isSet(object.stateTableId) ? Number(object.stateTableId) : 0,
     };
   },
@@ -2245,7 +1516,7 @@ export const SourceNode = {
     const message = createBaseSourceNode();
     message.sourceId = object.sourceId ?? 0;
     message.columnIds = object.columnIds?.map((e) => e) || [];
-    message.sourceType = object.sourceType ?? 0;
+    message.sourceType = object.sourceType ?? SourceNode_SourceType.UNSPECIFIED;
     message.stateTableId = object.stateTableId ?? 0;
     return message;
   },
@@ -2256,55 +1527,6 @@ function createBaseSinkNode(): SinkNode {
 }
 
 export const SinkNode = {
-  encode(message: SinkNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableId !== 0) {
-      writer.uint32(8).uint32(message.tableId);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.columnIds) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    Object.entries(message.properties).forEach(([key, value]) => {
-      SinkNode_PropertiesEntry.encode({ key: key as any, value }, writer.uint32(26).fork()).ldelim();
-    });
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SinkNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSinkNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableId = reader.uint32();
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnIds.push(reader.int32());
-            }
-          } else {
-            message.columnIds.push(reader.int32());
-          }
-          break;
-        case 3:
-          const entry3 = SinkNode_PropertiesEntry.decode(reader, reader.uint32());
-          if (entry3.value !== undefined) {
-            message.properties[entry3.key] = entry3.value;
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SinkNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
@@ -2357,37 +1579,6 @@ function createBaseSinkNode_PropertiesEntry(): SinkNode_PropertiesEntry {
 }
 
 export const SinkNode_PropertiesEntry = {
-  encode(message: SinkNode_PropertiesEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== "") {
-      writer.uint32(10).string(message.key);
-    }
-    if (message.value !== "") {
-      writer.uint32(18).string(message.value);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SinkNode_PropertiesEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSinkNode_PropertiesEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.string();
-          break;
-        case 2:
-          message.value = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SinkNode_PropertiesEntry {
     return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
   },
@@ -2412,31 +1603,6 @@ function createBaseProjectNode(): ProjectNode {
 }
 
 export const ProjectNode = {
-  encode(message: ProjectNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.selectList) {
-      ExprNode.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ProjectNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseProjectNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.selectList.push(ExprNode.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ProjectNode {
     return {
       selectList: Array.isArray(object?.selectList) ? object.selectList.map((e: any) => ExprNode.fromJSON(e)) : [],
@@ -2465,31 +1631,6 @@ function createBaseFilterNode(): FilterNode {
 }
 
 export const FilterNode = {
-  encode(message: FilterNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.searchCondition !== undefined) {
-      ExprNode.encode(message.searchCondition, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): FilterNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseFilterNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.searchCondition = ExprNode.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): FilterNode {
     return { searchCondition: isSet(object.searchCondition) ? ExprNode.fromJSON(object.searchCondition) : undefined };
   },
@@ -2515,43 +1656,6 @@ function createBaseMaterializeNode(): MaterializeNode {
 }
 
 export const MaterializeNode = {
-  encode(message: MaterializeNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableId !== 0) {
-      writer.uint32(8).uint32(message.tableId);
-    }
-    for (const v of message.columnOrders) {
-      ColumnOrder.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.table !== undefined) {
-      Table.encode(message.table, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): MaterializeNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseMaterializeNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableId = reader.uint32();
-          break;
-        case 2:
-          message.columnOrders.push(ColumnOrder.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.table = Table.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): MaterializeNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
@@ -2588,64 +1692,6 @@ function createBaseSimpleAggNode(): SimpleAggNode {
 }
 
 export const SimpleAggNode = {
-  encode(message: SimpleAggNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.aggCalls) {
-      AggCall.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    writer.uint32(18).fork();
-    for (const v of message.distributionKey) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    for (const v of message.internalTables) {
-      Table.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    for (const v of message.columnMappings) {
-      ColumnMapping.encode(v!, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.isAppendOnly === true) {
-      writer.uint32(40).bool(message.isAppendOnly);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SimpleAggNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSimpleAggNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.aggCalls.push(AggCall.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.distributionKey.push(reader.uint32());
-            }
-          } else {
-            message.distributionKey.push(reader.uint32());
-          }
-          break;
-        case 3:
-          message.internalTables.push(Table.decode(reader, reader.uint32()));
-          break;
-        case 4:
-          message.columnMappings.push(ColumnMapping.decode(reader, reader.uint32()));
-          break;
-        case 5:
-          message.isAppendOnly = reader.bool();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SimpleAggNode {
     return {
       aggCalls: Array.isArray(object?.aggCalls) ? object.aggCalls.map((e: any) => AggCall.fromJSON(e)) : [],
@@ -2702,40 +1748,6 @@ function createBaseColumnMapping(): ColumnMapping {
 }
 
 export const ColumnMapping = {
-  encode(message: ColumnMapping, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.indices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ColumnMapping {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseColumnMapping();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.indices.push(reader.uint32());
-            }
-          } else {
-            message.indices.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ColumnMapping {
     return { indices: Array.isArray(object?.indices) ? object.indices.map((e: any) => Number(e)) : [] };
   },
@@ -2762,64 +1774,6 @@ function createBaseHashAggNode(): HashAggNode {
 }
 
 export const HashAggNode = {
-  encode(message: HashAggNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.groupKey) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    for (const v of message.aggCalls) {
-      AggCall.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    for (const v of message.internalTables) {
-      Table.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    for (const v of message.columnMappings) {
-      ColumnMapping.encode(v!, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.isAppendOnly === true) {
-      writer.uint32(40).bool(message.isAppendOnly);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HashAggNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHashAggNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.groupKey.push(reader.uint32());
-            }
-          } else {
-            message.groupKey.push(reader.uint32());
-          }
-          break;
-        case 2:
-          message.aggCalls.push(AggCall.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.internalTables.push(Table.decode(reader, reader.uint32()));
-          break;
-        case 4:
-          message.columnMappings.push(ColumnMapping.decode(reader, reader.uint32()));
-          break;
-        case 5:
-          message.isAppendOnly = reader.bool();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HashAggNode {
     return {
       groupKey: Array.isArray(object?.groupKey) ? object.groupKey.map((e: any) => Number(e)) : [],
@@ -2876,43 +1830,6 @@ function createBaseTopNNode(): TopNNode {
 }
 
 export const TopNNode = {
-  encode(message: TopNNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.limit !== 0) {
-      writer.uint32(8).uint64(message.limit);
-    }
-    if (message.offset !== 0) {
-      writer.uint32(16).uint64(message.offset);
-    }
-    if (message.table !== undefined) {
-      Table.encode(message.table, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TopNNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTopNNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.limit = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.offset = longToNumber(reader.uint64() as Long);
-          break;
-        case 3:
-          message.table = Table.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TopNNode {
     return {
       limit: isSet(object.limit) ? Number(object.limit) : 0,
@@ -2943,70 +1860,6 @@ function createBaseAppendOnlyTopNNode(): AppendOnlyTopNNode {
 }
 
 export const AppendOnlyTopNNode = {
-  encode(message: AppendOnlyTopNNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.columnOrders) {
-      ColumnOrder.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.limit !== 0) {
-      writer.uint32(16).uint64(message.limit);
-    }
-    if (message.offset !== 0) {
-      writer.uint32(24).uint64(message.offset);
-    }
-    writer.uint32(34).fork();
-    for (const v of message.distributionKey) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.tableIdL !== 0) {
-      writer.uint32(40).uint32(message.tableIdL);
-    }
-    if (message.tableIdH !== 0) {
-      writer.uint32(48).uint32(message.tableIdH);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AppendOnlyTopNNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAppendOnlyTopNNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.columnOrders.push(ColumnOrder.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.limit = longToNumber(reader.uint64() as Long);
-          break;
-        case 3:
-          message.offset = longToNumber(reader.uint64() as Long);
-          break;
-        case 4:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.distributionKey.push(reader.uint32());
-            }
-          } else {
-            message.distributionKey.push(reader.uint32());
-          }
-          break;
-        case 5:
-          message.tableIdL = reader.uint32();
-          break;
-        case 6:
-          message.tableIdH = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AppendOnlyTopNNode {
     return {
       columnOrders: Array.isArray(object?.columnOrders)
@@ -3014,7 +1867,9 @@ export const AppendOnlyTopNNode = {
         : [],
       limit: isSet(object.limit) ? Number(object.limit) : 0,
       offset: isSet(object.offset) ? Number(object.offset) : 0,
-      distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
+      distributionKey: Array.isArray(object?.distributionKey)
+        ? object.distributionKey.map((e: any) => Number(e))
+        : [],
       tableIdL: isSet(object.tableIdL) ? Number(object.tableIdL) : 0,
       tableIdH: isSet(object.tableIdH) ? Number(object.tableIdH) : 0,
     };
@@ -3056,58 +1911,6 @@ function createBaseGroupTopNNode(): GroupTopNNode {
 }
 
 export const GroupTopNNode = {
-  encode(message: GroupTopNNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.limit !== 0) {
-      writer.uint32(8).uint64(message.limit);
-    }
-    if (message.offset !== 0) {
-      writer.uint32(16).uint64(message.offset);
-    }
-    writer.uint32(26).fork();
-    for (const v of message.groupKey) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.table !== undefined) {
-      Table.encode(message.table, writer.uint32(34).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GroupTopNNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGroupTopNNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.limit = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.offset = longToNumber(reader.uint64() as Long);
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.groupKey.push(reader.uint32());
-            }
-          } else {
-            message.groupKey.push(reader.uint32());
-          }
-          break;
-        case 4:
-          message.table = Table.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GroupTopNNode {
     return {
       limit: isSet(object.limit) ? Number(object.limit) : 0,
@@ -3142,7 +1945,7 @@ export const GroupTopNNode = {
 
 function createBaseHashJoinNode(): HashJoinNode {
   return {
-    joinType: 0,
+    joinType: JoinType.UNSPECIFIED,
     leftKey: [],
     rightKey: [],
     condition: undefined,
@@ -3155,118 +1958,9 @@ function createBaseHashJoinNode(): HashJoinNode {
 }
 
 export const HashJoinNode = {
-  encode(message: HashJoinNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.joinType !== 0) {
-      writer.uint32(8).int32(message.joinType);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.leftKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    writer.uint32(26).fork();
-    for (const v of message.rightKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    if (message.condition !== undefined) {
-      ExprNode.encode(message.condition, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.leftTable !== undefined) {
-      Table.encode(message.leftTable, writer.uint32(50).fork()).ldelim();
-    }
-    if (message.rightTable !== undefined) {
-      Table.encode(message.rightTable, writer.uint32(58).fork()).ldelim();
-    }
-    if (message.isAppendOnly === true) {
-      writer.uint32(64).bool(message.isAppendOnly);
-    }
-    writer.uint32(74).fork();
-    for (const v of message.outputIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    writer.uint32(82).fork();
-    for (const v of message.nullSafe) {
-      writer.bool(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HashJoinNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHashJoinNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.joinType = reader.int32() as any;
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.leftKey.push(reader.int32());
-            }
-          } else {
-            message.leftKey.push(reader.int32());
-          }
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.rightKey.push(reader.int32());
-            }
-          } else {
-            message.rightKey.push(reader.int32());
-          }
-          break;
-        case 4:
-          message.condition = ExprNode.decode(reader, reader.uint32());
-          break;
-        case 6:
-          message.leftTable = Table.decode(reader, reader.uint32());
-          break;
-        case 7:
-          message.rightTable = Table.decode(reader, reader.uint32());
-          break;
-        case 8:
-          message.isAppendOnly = reader.bool();
-          break;
-        case 9:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.outputIndices.push(reader.uint32());
-            }
-          } else {
-            message.outputIndices.push(reader.uint32());
-          }
-          break;
-        case 10:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.nullSafe.push(reader.bool());
-            }
-          } else {
-            message.nullSafe.push(reader.bool());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HashJoinNode {
     return {
-      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : 0,
+      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       leftKey: Array.isArray(object?.leftKey) ? object.leftKey.map((e: any) => Number(e)) : [],
       rightKey: Array.isArray(object?.rightKey) ? object.rightKey.map((e: any) => Number(e)) : [],
       condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
@@ -3313,7 +2007,7 @@ export const HashJoinNode = {
 
   fromPartial<I extends Exact<DeepPartial<HashJoinNode>, I>>(object: I): HashJoinNode {
     const message = createBaseHashJoinNode();
-    message.joinType = object.joinType ?? 0;
+    message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.leftKey = object.leftKey?.map((e) => e) || [];
     message.rightKey = object.rightKey?.map((e) => e) || [];
     message.condition = (object.condition !== undefined && object.condition !== null)
@@ -3337,49 +2031,6 @@ function createBaseDynamicFilterNode(): DynamicFilterNode {
 }
 
 export const DynamicFilterNode = {
-  encode(message: DynamicFilterNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.leftKey !== 0) {
-      writer.uint32(8).uint32(message.leftKey);
-    }
-    if (message.condition !== undefined) {
-      ExprNode.encode(message.condition, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.leftTable !== undefined) {
-      Table.encode(message.leftTable, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.rightTable !== undefined) {
-      Table.encode(message.rightTable, writer.uint32(34).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DynamicFilterNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDynamicFilterNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.leftKey = reader.uint32();
-          break;
-        case 2:
-          message.condition = ExprNode.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.leftTable = Table.decode(reader, reader.uint32());
-          break;
-        case 4:
-          message.rightTable = Table.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DynamicFilterNode {
     return {
       leftKey: isSet(object.leftKey) ? Number(object.leftKey) : 0,
@@ -3419,7 +2070,7 @@ export const DynamicFilterNode = {
 
 function createBaseDeltaIndexJoinNode(): DeltaIndexJoinNode {
   return {
-    joinType: 0,
+    joinType: JoinType.UNSPECIFIED,
     leftKey: [],
     rightKey: [],
     condition: undefined,
@@ -3432,109 +2083,9 @@ function createBaseDeltaIndexJoinNode(): DeltaIndexJoinNode {
 }
 
 export const DeltaIndexJoinNode = {
-  encode(message: DeltaIndexJoinNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.joinType !== 0) {
-      writer.uint32(8).int32(message.joinType);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.leftKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    writer.uint32(26).fork();
-    for (const v of message.rightKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    if (message.condition !== undefined) {
-      ExprNode.encode(message.condition, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.leftTableId !== 0) {
-      writer.uint32(56).uint32(message.leftTableId);
-    }
-    if (message.rightTableId !== 0) {
-      writer.uint32(64).uint32(message.rightTableId);
-    }
-    if (message.leftInfo !== undefined) {
-      ArrangementInfo.encode(message.leftInfo, writer.uint32(74).fork()).ldelim();
-    }
-    if (message.rightInfo !== undefined) {
-      ArrangementInfo.encode(message.rightInfo, writer.uint32(82).fork()).ldelim();
-    }
-    writer.uint32(90).fork();
-    for (const v of message.outputIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DeltaIndexJoinNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDeltaIndexJoinNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.joinType = reader.int32() as any;
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.leftKey.push(reader.int32());
-            }
-          } else {
-            message.leftKey.push(reader.int32());
-          }
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.rightKey.push(reader.int32());
-            }
-          } else {
-            message.rightKey.push(reader.int32());
-          }
-          break;
-        case 4:
-          message.condition = ExprNode.decode(reader, reader.uint32());
-          break;
-        case 7:
-          message.leftTableId = reader.uint32();
-          break;
-        case 8:
-          message.rightTableId = reader.uint32();
-          break;
-        case 9:
-          message.leftInfo = ArrangementInfo.decode(reader, reader.uint32());
-          break;
-        case 10:
-          message.rightInfo = ArrangementInfo.decode(reader, reader.uint32());
-          break;
-        case 11:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.outputIndices.push(reader.uint32());
-            }
-          } else {
-            message.outputIndices.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DeltaIndexJoinNode {
     return {
-      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : 0,
+      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       leftKey: Array.isArray(object?.leftKey) ? object.leftKey.map((e: any) => Number(e)) : [],
       rightKey: Array.isArray(object?.rightKey) ? object.rightKey.map((e: any) => Number(e)) : [],
       condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
@@ -3577,7 +2128,7 @@ export const DeltaIndexJoinNode = {
 
   fromPartial<I extends Exact<DeepPartial<DeltaIndexJoinNode>, I>>(object: I): DeltaIndexJoinNode {
     const message = createBaseDeltaIndexJoinNode();
-    message.joinType = object.joinType ?? 0;
+    message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.leftKey = object.leftKey?.map((e) => e) || [];
     message.rightKey = object.rightKey?.map((e) => e) || [];
     message.condition = (object.condition !== undefined && object.condition !== null)
@@ -3601,58 +2152,6 @@ function createBaseHopWindowNode(): HopWindowNode {
 }
 
 export const HopWindowNode = {
-  encode(message: HopWindowNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.timeCol !== undefined) {
-      InputRefExpr.encode(message.timeCol, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.windowSlide !== undefined) {
-      IntervalUnit.encode(message.windowSlide, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.windowSize !== undefined) {
-      IntervalUnit.encode(message.windowSize, writer.uint32(26).fork()).ldelim();
-    }
-    writer.uint32(34).fork();
-    for (const v of message.outputIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HopWindowNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHopWindowNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.timeCol = InputRefExpr.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.windowSlide = IntervalUnit.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.windowSize = IntervalUnit.decode(reader, reader.uint32());
-          break;
-        case 4:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.outputIndices.push(reader.uint32());
-            }
-          } else {
-            message.outputIndices.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HopWindowNode {
     return {
       timeCol: isSet(object.timeCol) ? InputRefExpr.fromJSON(object.timeCol) : undefined,
@@ -3698,52 +2197,6 @@ function createBaseMergeNode(): MergeNode {
 }
 
 export const MergeNode = {
-  encode(message: MergeNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.upstreamActorId) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.upstreamFragmentId !== 0) {
-      writer.uint32(16).uint32(message.upstreamFragmentId);
-    }
-    for (const v of message.fields) {
-      Field.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): MergeNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseMergeNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.upstreamActorId.push(reader.uint32());
-            }
-          } else {
-            message.upstreamActorId.push(reader.uint32());
-          }
-          break;
-        case 2:
-          message.upstreamFragmentId = reader.uint32();
-          break;
-        case 3:
-          message.fields.push(Field.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): MergeNode {
     return {
       upstreamActorId: Array.isArray(object?.upstreamActorId) ? object.upstreamActorId.map((e: any) => Number(e)) : [],
@@ -3782,31 +2235,6 @@ function createBaseExchangeNode(): ExchangeNode {
 }
 
 export const ExchangeNode = {
-  encode(message: ExchangeNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.strategy !== undefined) {
-      DispatchStrategy.encode(message.strategy, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExchangeNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExchangeNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 2:
-          message.strategy = DispatchStrategy.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExchangeNode {
     return { strategy: isSet(object.strategy) ? DispatchStrategy.fromJSON(object.strategy) : undefined };
   },
@@ -3839,70 +2267,6 @@ function createBaseChainNode(): ChainNode {
 }
 
 export const ChainNode = {
-  encode(message: ChainNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableId !== 0) {
-      writer.uint32(8).uint32(message.tableId);
-    }
-    for (const v of message.upstreamFields) {
-      Field.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    writer.uint32(26).fork();
-    for (const v of message.upstreamColumnIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.disableRearrange === true) {
-      writer.uint32(32).bool(message.disableRearrange);
-    }
-    if (message.sameWorkerNode === true) {
-      writer.uint32(40).bool(message.sameWorkerNode);
-    }
-    if (message.isSingleton === true) {
-      writer.uint32(48).bool(message.isSingleton);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ChainNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseChainNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableId = reader.uint32();
-          break;
-        case 2:
-          message.upstreamFields.push(Field.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.upstreamColumnIndices.push(reader.uint32());
-            }
-          } else {
-            message.upstreamColumnIndices.push(reader.uint32());
-          }
-          break;
-        case 4:
-          message.disableRearrange = reader.bool();
-          break;
-        case 5:
-          message.sameWorkerNode = reader.bool();
-          break;
-        case 6:
-          message.isSingleton = reader.bool();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ChainNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
@@ -3954,46 +2318,6 @@ function createBaseBatchPlanNode(): BatchPlanNode {
 }
 
 export const BatchPlanNode = {
-  encode(message: BatchPlanNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableDesc !== undefined) {
-      StorageTableDesc.encode(message.tableDesc, writer.uint32(10).fork()).ldelim();
-    }
-    writer.uint32(18).fork();
-    for (const v of message.columnIds) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): BatchPlanNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBatchPlanNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableDesc = StorageTableDesc.decode(reader, reader.uint32());
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnIds.push(reader.int32());
-            }
-          } else {
-            message.columnIds.push(reader.int32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): BatchPlanNode {
     return {
       tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
@@ -4028,43 +2352,14 @@ function createBaseArrangementInfo(): ArrangementInfo {
 }
 
 export const ArrangementInfo = {
-  encode(message: ArrangementInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.arrangeKeyOrders) {
-      ColumnOrder.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.columnDescs) {
-      ColumnDesc.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ArrangementInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseArrangementInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.arrangeKeyOrders.push(ColumnOrder.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.columnDescs.push(ColumnDesc.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ArrangementInfo {
     return {
       arrangeKeyOrders: Array.isArray(object?.arrangeKeyOrders)
         ? object.arrangeKeyOrders.map((e: any) => ColumnOrder.fromJSON(e))
         : [],
-      columnDescs: Array.isArray(object?.columnDescs) ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e)) : [],
+      columnDescs: Array.isArray(object?.columnDescs)
+        ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e))
+        : [],
     };
   },
 
@@ -4096,52 +2391,6 @@ function createBaseArrangeNode(): ArrangeNode {
 }
 
 export const ArrangeNode = {
-  encode(message: ArrangeNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableInfo !== undefined) {
-      ArrangementInfo.encode(message.tableInfo, writer.uint32(10).fork()).ldelim();
-    }
-    writer.uint32(18).fork();
-    for (const v of message.distributionKey) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.table !== undefined) {
-      Table.encode(message.table, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ArrangeNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseArrangeNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableInfo = ArrangementInfo.decode(reader, reader.uint32());
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.distributionKey.push(reader.uint32());
-            }
-          } else {
-            message.distributionKey.push(reader.uint32());
-          }
-          break;
-        case 3:
-          message.table = Table.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ArrangeNode {
     return {
       tableInfo: isSet(object.tableInfo) ? ArrangementInfo.fromJSON(object.tableInfo) : undefined,
@@ -4187,100 +2436,6 @@ function createBaseLookupNode(): LookupNode {
 }
 
 export const LookupNode = {
-  encode(message: LookupNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.arrangeKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    writer.uint32(18).fork();
-    for (const v of message.streamKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    if (message.useCurrentEpoch === true) {
-      writer.uint32(24).bool(message.useCurrentEpoch);
-    }
-    writer.uint32(34).fork();
-    for (const v of message.columnMapping) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    if (message.arrangementTableId?.$case === "tableId") {
-      writer.uint32(40).uint32(message.arrangementTableId.tableId);
-    }
-    if (message.arrangementTableId?.$case === "indexId") {
-      writer.uint32(48).uint32(message.arrangementTableId.indexId);
-    }
-    if (message.arrangementTableInfo !== undefined) {
-      ArrangementInfo.encode(message.arrangementTableInfo, writer.uint32(58).fork()).ldelim();
-    }
-    if (message.arrangementTable !== undefined) {
-      Table.encode(message.arrangementTable, writer.uint32(66).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): LookupNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLookupNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.arrangeKey.push(reader.int32());
-            }
-          } else {
-            message.arrangeKey.push(reader.int32());
-          }
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.streamKey.push(reader.int32());
-            }
-          } else {
-            message.streamKey.push(reader.int32());
-          }
-          break;
-        case 3:
-          message.useCurrentEpoch = reader.bool();
-          break;
-        case 4:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnMapping.push(reader.int32());
-            }
-          } else {
-            message.columnMapping.push(reader.int32());
-          }
-          break;
-        case 5:
-          message.arrangementTableId = { $case: "tableId", tableId: reader.uint32() };
-          break;
-        case 6:
-          message.arrangementTableId = { $case: "indexId", indexId: reader.uint32() };
-          break;
-        case 7:
-          message.arrangementTableInfo = ArrangementInfo.decode(reader, reader.uint32());
-          break;
-        case 8:
-          message.arrangementTable = Table.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): LookupNode {
     return {
       arrangeKey: Array.isArray(object?.arrangeKey) ? object.arrangeKey.map((e: any) => Number(e)) : [],
@@ -4362,25 +2517,6 @@ function createBaseUnionNode(): UnionNode {
 }
 
 export const UnionNode = {
-  encode(_: UnionNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UnionNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUnionNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): UnionNode {
     return {};
   },
@@ -4401,40 +2537,6 @@ function createBaseLookupUnionNode(): LookupUnionNode {
 }
 
 export const LookupUnionNode = {
-  encode(message: LookupUnionNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.order) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): LookupUnionNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLookupUnionNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.order.push(reader.uint32());
-            }
-          } else {
-            message.order.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): LookupUnionNode {
     return { order: Array.isArray(object?.order) ? object.order.map((e: any) => Number(e)) : [] };
   },
@@ -4461,31 +2563,6 @@ function createBaseExpandNode(): ExpandNode {
 }
 
 export const ExpandNode = {
-  encode(message: ExpandNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.columnSubsets) {
-      ExpandNode_Subset.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExpandNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExpandNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.columnSubsets.push(ExpandNode_Subset.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExpandNode {
     return {
       columnSubsets: Array.isArray(object?.columnSubsets)
@@ -4516,40 +2593,6 @@ function createBaseExpandNode_Subset(): ExpandNode_Subset {
 }
 
 export const ExpandNode_Subset = {
-  encode(message: ExpandNode_Subset, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.columnIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExpandNode_Subset {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExpandNode_Subset();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnIndices.push(reader.uint32());
-            }
-          } else {
-            message.columnIndices.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExpandNode_Subset {
     return {
       columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
@@ -4578,31 +2621,6 @@ function createBaseProjectSetNode(): ProjectSetNode {
 }
 
 export const ProjectSetNode = {
-  encode(message: ProjectSetNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.selectList) {
-      ProjectSetSelectItem.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ProjectSetNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseProjectSetNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.selectList.push(ProjectSetSelectItem.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ProjectSetNode {
     return {
       selectList: Array.isArray(object?.selectList)
@@ -4633,232 +2651,6 @@ function createBaseStreamNode(): StreamNode {
 }
 
 export const StreamNode = {
-  encode(message: StreamNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.nodeBody?.$case === "source") {
-      SourceNode.encode(message.nodeBody.source, writer.uint32(802).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "project") {
-      ProjectNode.encode(message.nodeBody.project, writer.uint32(810).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "filter") {
-      FilterNode.encode(message.nodeBody.filter, writer.uint32(818).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "materialize") {
-      MaterializeNode.encode(message.nodeBody.materialize, writer.uint32(826).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "localSimpleAgg") {
-      SimpleAggNode.encode(message.nodeBody.localSimpleAgg, writer.uint32(834).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "globalSimpleAgg") {
-      SimpleAggNode.encode(message.nodeBody.globalSimpleAgg, writer.uint32(842).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "hashAgg") {
-      HashAggNode.encode(message.nodeBody.hashAgg, writer.uint32(850).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "appendOnlyTopN") {
-      AppendOnlyTopNNode.encode(message.nodeBody.appendOnlyTopN, writer.uint32(858).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "hashJoin") {
-      HashJoinNode.encode(message.nodeBody.hashJoin, writer.uint32(866).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "topN") {
-      TopNNode.encode(message.nodeBody.topN, writer.uint32(874).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "hopWindow") {
-      HopWindowNode.encode(message.nodeBody.hopWindow, writer.uint32(882).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "merge") {
-      MergeNode.encode(message.nodeBody.merge, writer.uint32(890).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "exchange") {
-      ExchangeNode.encode(message.nodeBody.exchange, writer.uint32(898).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "chain") {
-      ChainNode.encode(message.nodeBody.chain, writer.uint32(906).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "batchPlan") {
-      BatchPlanNode.encode(message.nodeBody.batchPlan, writer.uint32(914).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "lookup") {
-      LookupNode.encode(message.nodeBody.lookup, writer.uint32(922).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "arrange") {
-      ArrangeNode.encode(message.nodeBody.arrange, writer.uint32(930).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "lookupUnion") {
-      LookupUnionNode.encode(message.nodeBody.lookupUnion, writer.uint32(938).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "union") {
-      UnionNode.encode(message.nodeBody.union, writer.uint32(946).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "deltaIndexJoin") {
-      DeltaIndexJoinNode.encode(message.nodeBody.deltaIndexJoin, writer.uint32(954).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "sink") {
-      SinkNode.encode(message.nodeBody.sink, writer.uint32(962).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "expand") {
-      ExpandNode.encode(message.nodeBody.expand, writer.uint32(970).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "dynamicFilter") {
-      DynamicFilterNode.encode(message.nodeBody.dynamicFilter, writer.uint32(978).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "projectSet") {
-      ProjectSetNode.encode(message.nodeBody.projectSet, writer.uint32(986).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "groupTopN") {
-      GroupTopNNode.encode(message.nodeBody.groupTopN, writer.uint32(994).fork()).ldelim();
-    }
-    if (message.operatorId !== 0) {
-      writer.uint32(8).uint64(message.operatorId);
-    }
-    for (const v of message.input) {
-      StreamNode.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    writer.uint32(18).fork();
-    for (const v of message.streamKey) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.appendOnly === true) {
-      writer.uint32(192).bool(message.appendOnly);
-    }
-    if (message.identity !== "") {
-      writer.uint32(146).string(message.identity);
-    }
-    for (const v of message.fields) {
-      Field.encode(v!, writer.uint32(154).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 100:
-          message.nodeBody = { $case: "source", source: SourceNode.decode(reader, reader.uint32()) };
-          break;
-        case 101:
-          message.nodeBody = { $case: "project", project: ProjectNode.decode(reader, reader.uint32()) };
-          break;
-        case 102:
-          message.nodeBody = { $case: "filter", filter: FilterNode.decode(reader, reader.uint32()) };
-          break;
-        case 103:
-          message.nodeBody = { $case: "materialize", materialize: MaterializeNode.decode(reader, reader.uint32()) };
-          break;
-        case 104:
-          message.nodeBody = { $case: "localSimpleAgg", localSimpleAgg: SimpleAggNode.decode(reader, reader.uint32()) };
-          break;
-        case 105:
-          message.nodeBody = {
-            $case: "globalSimpleAgg",
-            globalSimpleAgg: SimpleAggNode.decode(reader, reader.uint32()),
-          };
-          break;
-        case 106:
-          message.nodeBody = { $case: "hashAgg", hashAgg: HashAggNode.decode(reader, reader.uint32()) };
-          break;
-        case 107:
-          message.nodeBody = {
-            $case: "appendOnlyTopN",
-            appendOnlyTopN: AppendOnlyTopNNode.decode(reader, reader.uint32()),
-          };
-          break;
-        case 108:
-          message.nodeBody = { $case: "hashJoin", hashJoin: HashJoinNode.decode(reader, reader.uint32()) };
-          break;
-        case 109:
-          message.nodeBody = { $case: "topN", topN: TopNNode.decode(reader, reader.uint32()) };
-          break;
-        case 110:
-          message.nodeBody = { $case: "hopWindow", hopWindow: HopWindowNode.decode(reader, reader.uint32()) };
-          break;
-        case 111:
-          message.nodeBody = { $case: "merge", merge: MergeNode.decode(reader, reader.uint32()) };
-          break;
-        case 112:
-          message.nodeBody = { $case: "exchange", exchange: ExchangeNode.decode(reader, reader.uint32()) };
-          break;
-        case 113:
-          message.nodeBody = { $case: "chain", chain: ChainNode.decode(reader, reader.uint32()) };
-          break;
-        case 114:
-          message.nodeBody = { $case: "batchPlan", batchPlan: BatchPlanNode.decode(reader, reader.uint32()) };
-          break;
-        case 115:
-          message.nodeBody = { $case: "lookup", lookup: LookupNode.decode(reader, reader.uint32()) };
-          break;
-        case 116:
-          message.nodeBody = { $case: "arrange", arrange: ArrangeNode.decode(reader, reader.uint32()) };
-          break;
-        case 117:
-          message.nodeBody = { $case: "lookupUnion", lookupUnion: LookupUnionNode.decode(reader, reader.uint32()) };
-          break;
-        case 118:
-          message.nodeBody = { $case: "union", union: UnionNode.decode(reader, reader.uint32()) };
-          break;
-        case 119:
-          message.nodeBody = {
-            $case: "deltaIndexJoin",
-            deltaIndexJoin: DeltaIndexJoinNode.decode(reader, reader.uint32()),
-          };
-          break;
-        case 120:
-          message.nodeBody = { $case: "sink", sink: SinkNode.decode(reader, reader.uint32()) };
-          break;
-        case 121:
-          message.nodeBody = { $case: "expand", expand: ExpandNode.decode(reader, reader.uint32()) };
-          break;
-        case 122:
-          message.nodeBody = {
-            $case: "dynamicFilter",
-            dynamicFilter: DynamicFilterNode.decode(reader, reader.uint32()),
-          };
-          break;
-        case 123:
-          message.nodeBody = { $case: "projectSet", projectSet: ProjectSetNode.decode(reader, reader.uint32()) };
-          break;
-        case 124:
-          message.nodeBody = { $case: "groupTopN", groupTopN: GroupTopNNode.decode(reader, reader.uint32()) };
-          break;
-        case 1:
-          message.operatorId = longToNumber(reader.uint64() as Long);
-          break;
-        case 3:
-          message.input.push(StreamNode.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.streamKey.push(reader.uint32());
-            }
-          } else {
-            message.streamKey.push(reader.uint32());
-          }
-          break;
-        case 24:
-          message.appendOnly = reader.bool();
-          break;
-        case 18:
-          message.identity = reader.string();
-          break;
-        case 19:
-          message.fields.push(Field.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StreamNode {
     return {
       nodeBody: isSet(object.source)
@@ -4913,7 +2705,9 @@ export const StreamNode = {
         ? { $case: "groupTopN", groupTopN: GroupTopNNode.fromJSON(object.groupTopN) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
-      input: Array.isArray(object?.input) ? object.input.map((e: any) => StreamNode.fromJSON(e)) : [],
+      input: Array.isArray(object?.input)
+        ? object.input.map((e: any) => StreamNode.fromJSON(e))
+        : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
       appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
       identity: isSet(object.identity) ? String(object.identity) : "",
@@ -4982,7 +2776,9 @@ export const StreamNode = {
       (obj.groupTopN = message.nodeBody?.groupTopN ? GroupTopNNode.toJSON(message.nodeBody?.groupTopN) : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
-      obj.input = message.input.map((e) => e ? StreamNode.toJSON(e) : undefined);
+      obj.input = message.input.map((e) =>
+        e ? StreamNode.toJSON(e) : undefined
+      );
     } else {
       obj.input = [];
     }
@@ -5182,53 +2978,13 @@ export const StreamNode = {
 };
 
 function createBaseDispatchStrategy(): DispatchStrategy {
-  return { type: 0, columnIndices: [] };
+  return { type: DispatcherType.UNSPECIFIED, columnIndices: [] };
 }
 
 export const DispatchStrategy = {
-  encode(message: DispatchStrategy, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.type !== 0) {
-      writer.uint32(8).int32(message.type);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.columnIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DispatchStrategy {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDispatchStrategy();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.type = reader.int32() as any;
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnIndices.push(reader.uint32());
-            }
-          } else {
-            message.columnIndices.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DispatchStrategy {
     return {
-      type: isSet(object.type) ? dispatcherTypeFromJSON(object.type) : 0,
+      type: isSet(object.type) ? dispatcherTypeFromJSON(object.type) : DispatcherType.UNSPECIFIED,
       columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
     };
   },
@@ -5246,87 +3002,26 @@ export const DispatchStrategy = {
 
   fromPartial<I extends Exact<DeepPartial<DispatchStrategy>, I>>(object: I): DispatchStrategy {
     const message = createBaseDispatchStrategy();
-    message.type = object.type ?? 0;
+    message.type = object.type ?? DispatcherType.UNSPECIFIED;
     message.columnIndices = object.columnIndices?.map((e) => e) || [];
     return message;
   },
 };
 
 function createBaseDispatcher(): Dispatcher {
-  return { type: 0, columnIndices: [], hashMapping: undefined, dispatcherId: 0, downstreamActorId: [] };
+  return {
+    type: DispatcherType.UNSPECIFIED,
+    columnIndices: [],
+    hashMapping: undefined,
+    dispatcherId: 0,
+    downstreamActorId: [],
+  };
 }
 
 export const Dispatcher = {
-  encode(message: Dispatcher, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.type !== 0) {
-      writer.uint32(8).int32(message.type);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.columnIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.hashMapping !== undefined) {
-      ActorMapping.encode(message.hashMapping, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.dispatcherId !== 0) {
-      writer.uint32(32).uint64(message.dispatcherId);
-    }
-    writer.uint32(42).fork();
-    for (const v of message.downstreamActorId) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Dispatcher {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDispatcher();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.type = reader.int32() as any;
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnIndices.push(reader.uint32());
-            }
-          } else {
-            message.columnIndices.push(reader.uint32());
-          }
-          break;
-        case 3:
-          message.hashMapping = ActorMapping.decode(reader, reader.uint32());
-          break;
-        case 4:
-          message.dispatcherId = longToNumber(reader.uint64() as Long);
-          break;
-        case 5:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.downstreamActorId.push(reader.uint32());
-            }
-          } else {
-            message.downstreamActorId.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Dispatcher {
     return {
-      type: isSet(object.type) ? dispatcherTypeFromJSON(object.type) : 0,
+      type: isSet(object.type) ? dispatcherTypeFromJSON(object.type) : DispatcherType.UNSPECIFIED,
       columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
       hashMapping: isSet(object.hashMapping) ? ActorMapping.fromJSON(object.hashMapping) : undefined,
       dispatcherId: isSet(object.dispatcherId) ? Number(object.dispatcherId) : 0,
@@ -5357,7 +3052,7 @@ export const Dispatcher = {
 
   fromPartial<I extends Exact<DeepPartial<Dispatcher>, I>>(object: I): Dispatcher {
     const message = createBaseDispatcher();
-    message.type = object.type ?? 0;
+    message.type = object.type ?? DispatcherType.UNSPECIFIED;
     message.columnIndices = object.columnIndices?.map((e) => e) || [];
     message.hashMapping = (object.hashMapping !== undefined && object.hashMapping !== null)
       ? ActorMapping.fromPartial(object.hashMapping)
@@ -5381,76 +3076,6 @@ function createBaseStreamActor(): StreamActor {
 }
 
 export const StreamActor = {
-  encode(message: StreamActor, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.actorId !== 0) {
-      writer.uint32(8).uint32(message.actorId);
-    }
-    if (message.fragmentId !== 0) {
-      writer.uint32(16).uint32(message.fragmentId);
-    }
-    if (message.nodes !== undefined) {
-      StreamNode.encode(message.nodes, writer.uint32(26).fork()).ldelim();
-    }
-    for (const v of message.dispatcher) {
-      Dispatcher.encode(v!, writer.uint32(34).fork()).ldelim();
-    }
-    writer.uint32(50).fork();
-    for (const v of message.upstreamActorId) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.sameWorkerNodeAsUpstream === true) {
-      writer.uint32(56).bool(message.sameWorkerNodeAsUpstream);
-    }
-    if (message.vnodeBitmap !== undefined) {
-      Buffer.encode(message.vnodeBitmap, writer.uint32(66).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamActor {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamActor();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.actorId = reader.uint32();
-          break;
-        case 2:
-          message.fragmentId = reader.uint32();
-          break;
-        case 3:
-          message.nodes = StreamNode.decode(reader, reader.uint32());
-          break;
-        case 4:
-          message.dispatcher.push(Dispatcher.decode(reader, reader.uint32()));
-          break;
-        case 6:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.upstreamActorId.push(reader.uint32());
-            }
-          } else {
-            message.upstreamActorId.push(reader.uint32());
-          }
-          break;
-        case 7:
-          message.sameWorkerNodeAsUpstream = reader.bool();
-          break;
-        case 8:
-          message.vnodeBitmap = Buffer.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StreamActor {
     return {
       actorId: isSet(object.actorId) ? Number(object.actorId) : 0,
@@ -5508,61 +3133,6 @@ function createBaseStreamFragmentGraph(): StreamFragmentGraph {
 }
 
 export const StreamFragmentGraph = {
-  encode(message: StreamFragmentGraph, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    Object.entries(message.fragments).forEach(([key, value]) => {
-      StreamFragmentGraph_FragmentsEntry.encode({ key: key as any, value }, writer.uint32(10).fork()).ldelim();
-    });
-    for (const v of message.edges) {
-      StreamFragmentGraph_StreamFragmentEdge.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    writer.uint32(26).fork();
-    for (const v of message.dependentTableIds) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.tableIdsCnt !== 0) {
-      writer.uint32(32).uint32(message.tableIdsCnt);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamFragmentGraph {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamFragmentGraph();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          const entry1 = StreamFragmentGraph_FragmentsEntry.decode(reader, reader.uint32());
-          if (entry1.value !== undefined) {
-            message.fragments[entry1.key] = entry1.value;
-          }
-          break;
-        case 2:
-          message.edges.push(StreamFragmentGraph_StreamFragmentEdge.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.dependentTableIds.push(reader.uint32());
-            }
-          } else {
-            message.dependentTableIds.push(reader.uint32());
-          }
-          break;
-        case 4:
-          message.tableIdsCnt = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StreamFragmentGraph {
     return {
       fragments: isObject(object.fragments)
@@ -5624,79 +3194,24 @@ export const StreamFragmentGraph = {
 };
 
 function createBaseStreamFragmentGraph_StreamFragment(): StreamFragmentGraph_StreamFragment {
-  return { fragmentId: 0, node: undefined, fragmentType: 0, isSingleton: false, tableIdsCnt: 0, upstreamTableIds: [] };
+  return {
+    fragmentId: 0,
+    node: undefined,
+    fragmentType: FragmentType.FRAGMENT_UNSPECIFIED,
+    isSingleton: false,
+    tableIdsCnt: 0,
+    upstreamTableIds: [],
+  };
 }
 
 export const StreamFragmentGraph_StreamFragment = {
-  encode(message: StreamFragmentGraph_StreamFragment, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.fragmentId !== 0) {
-      writer.uint32(8).uint32(message.fragmentId);
-    }
-    if (message.node !== undefined) {
-      StreamNode.encode(message.node, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.fragmentType !== 0) {
-      writer.uint32(24).int32(message.fragmentType);
-    }
-    if (message.isSingleton === true) {
-      writer.uint32(32).bool(message.isSingleton);
-    }
-    if (message.tableIdsCnt !== 0) {
-      writer.uint32(40).uint32(message.tableIdsCnt);
-    }
-    writer.uint32(50).fork();
-    for (const v of message.upstreamTableIds) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamFragmentGraph_StreamFragment {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamFragmentGraph_StreamFragment();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.fragmentId = reader.uint32();
-          break;
-        case 2:
-          message.node = StreamNode.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.fragmentType = reader.int32() as any;
-          break;
-        case 4:
-          message.isSingleton = reader.bool();
-          break;
-        case 5:
-          message.tableIdsCnt = reader.uint32();
-          break;
-        case 6:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.upstreamTableIds.push(reader.uint32());
-            }
-          } else {
-            message.upstreamTableIds.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StreamFragmentGraph_StreamFragment {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
       node: isSet(object.node) ? StreamNode.fromJSON(object.node) : undefined,
-      fragmentType: isSet(object.fragmentType) ? fragmentTypeFromJSON(object.fragmentType) : 0,
+      fragmentType: isSet(object.fragmentType)
+        ? fragmentTypeFromJSON(object.fragmentType)
+        : FragmentType.FRAGMENT_UNSPECIFIED,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       upstreamTableIds: Array.isArray(object?.upstreamTableIds)
@@ -5728,7 +3243,7 @@ export const StreamFragmentGraph_StreamFragment = {
     message.node = (object.node !== undefined && object.node !== null)
       ? StreamNode.fromPartial(object.node)
       : undefined;
-    message.fragmentType = object.fragmentType ?? 0;
+    message.fragmentType = object.fragmentType ?? FragmentType.FRAGMENT_UNSPECIFIED;
     message.isSingleton = object.isSingleton ?? false;
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
     message.upstreamTableIds = object.upstreamTableIds?.map((e) => e) || [];
@@ -5741,55 +3256,6 @@ function createBaseStreamFragmentGraph_StreamFragmentEdge(): StreamFragmentGraph
 }
 
 export const StreamFragmentGraph_StreamFragmentEdge = {
-  encode(message: StreamFragmentGraph_StreamFragmentEdge, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.dispatchStrategy !== undefined) {
-      DispatchStrategy.encode(message.dispatchStrategy, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.sameWorkerNode === true) {
-      writer.uint32(16).bool(message.sameWorkerNode);
-    }
-    if (message.linkId !== 0) {
-      writer.uint32(24).uint64(message.linkId);
-    }
-    if (message.upstreamId !== 0) {
-      writer.uint32(32).uint32(message.upstreamId);
-    }
-    if (message.downstreamId !== 0) {
-      writer.uint32(40).uint32(message.downstreamId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamFragmentGraph_StreamFragmentEdge {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamFragmentGraph_StreamFragmentEdge();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.dispatchStrategy = DispatchStrategy.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.sameWorkerNode = reader.bool();
-          break;
-        case 3:
-          message.linkId = longToNumber(reader.uint64() as Long);
-          break;
-        case 4:
-          message.upstreamId = reader.uint32();
-          break;
-        case 5:
-          message.downstreamId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StreamFragmentGraph_StreamFragmentEdge {
     return {
       dispatchStrategy: isSet(object.dispatchStrategy) ? DispatchStrategy.fromJSON(object.dispatchStrategy) : undefined,
@@ -5831,37 +3297,6 @@ function createBaseStreamFragmentGraph_FragmentsEntry(): StreamFragmentGraph_Fra
 }
 
 export const StreamFragmentGraph_FragmentsEntry = {
-  encode(message: StreamFragmentGraph_FragmentsEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      StreamFragmentGraph_StreamFragment.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamFragmentGraph_FragmentsEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamFragmentGraph_FragmentsEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = StreamFragmentGraph_StreamFragment.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StreamFragmentGraph_FragmentsEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -5944,20 +3379,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isObject(value: any): boolean {
   return typeof value === "object" && value !== null;

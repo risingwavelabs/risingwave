@@ -1,6 +1,4 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 import { Status } from "./common";
 
 export const protobufPackage = "user";
@@ -11,14 +9,16 @@ export interface AuthInfo {
   encryptedValue: Uint8Array;
 }
 
-export enum AuthInfo_EncryptionType {
-  UNSPECIFIED = 0,
-  UNKNOWN = 1,
-  PLAINTEXT = 2,
-  SHA256 = 3,
-  MD5 = 4,
-  UNRECOGNIZED = -1,
-}
+export const AuthInfo_EncryptionType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  UNKNOWN: "UNKNOWN",
+  PLAINTEXT: "PLAINTEXT",
+  SHA256: "SHA256",
+  MD5: "MD5",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type AuthInfo_EncryptionType = typeof AuthInfo_EncryptionType[keyof typeof AuthInfo_EncryptionType];
 
 export function authInfo_EncryptionTypeFromJSON(object: any): AuthInfo_EncryptionType {
   switch (object) {
@@ -89,17 +89,19 @@ export interface GrantPrivilege {
   actionWithOpts: GrantPrivilege_ActionWithGrantOption[];
 }
 
-export enum GrantPrivilege_Action {
-  UNSPECIFIED = 0,
-  UNKNOWN = 1,
-  SELECT = 2,
-  INSERT = 3,
-  UPDATE = 4,
-  DELETE = 5,
-  CREATE = 6,
-  CONNECT = 7,
-  UNRECOGNIZED = -1,
-}
+export const GrantPrivilege_Action = {
+  UNSPECIFIED: "UNSPECIFIED",
+  UNKNOWN: "UNKNOWN",
+  SELECT: "SELECT",
+  INSERT: "INSERT",
+  UPDATE: "UPDATE",
+  DELETE: "DELETE",
+  CREATE: "CREATE",
+  CONNECT: "CONNECT",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type GrantPrivilege_Action = typeof GrantPrivilege_Action[keyof typeof GrantPrivilege_Action];
 
 export function grantPrivilege_ActionFromJSON(object: any): GrantPrivilege_Action {
   switch (object) {
@@ -187,16 +189,19 @@ export interface UpdateUserRequest {
   updateFields: UpdateUserRequest_UpdateField[];
 }
 
-export enum UpdateUserRequest_UpdateField {
-  UNKNOWN = 0,
-  SUPER = 1,
-  LOGIN = 2,
-  CREATE_DB = 3,
-  AUTH_INFO = 4,
-  RENAME = 5,
-  CREATE_USER = 6,
-  UNRECOGNIZED = -1,
-}
+export const UpdateUserRequest_UpdateField = {
+  UNKNOWN: "UNKNOWN",
+  SUPER: "SUPER",
+  LOGIN: "LOGIN",
+  CREATE_DB: "CREATE_DB",
+  AUTH_INFO: "AUTH_INFO",
+  RENAME: "RENAME",
+  CREATE_USER: "CREATE_USER",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type UpdateUserRequest_UpdateField =
+  typeof UpdateUserRequest_UpdateField[keyof typeof UpdateUserRequest_UpdateField];
 
 export function updateUserRequest_UpdateFieldFromJSON(object: any): UpdateUserRequest_UpdateField {
   switch (object) {
@@ -282,44 +287,15 @@ export interface RevokePrivilegeResponse {
 }
 
 function createBaseAuthInfo(): AuthInfo {
-  return { encryptionType: 0, encryptedValue: new Uint8Array() };
+  return { encryptionType: AuthInfo_EncryptionType.UNSPECIFIED, encryptedValue: new Uint8Array() };
 }
 
 export const AuthInfo = {
-  encode(message: AuthInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.encryptionType !== 0) {
-      writer.uint32(8).int32(message.encryptionType);
-    }
-    if (message.encryptedValue.length !== 0) {
-      writer.uint32(18).bytes(message.encryptedValue);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AuthInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAuthInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.encryptionType = reader.int32() as any;
-          break;
-        case 2:
-          message.encryptedValue = reader.bytes();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AuthInfo {
     return {
-      encryptionType: isSet(object.encryptionType) ? authInfo_EncryptionTypeFromJSON(object.encryptionType) : 0,
+      encryptionType: isSet(object.encryptionType)
+        ? authInfo_EncryptionTypeFromJSON(object.encryptionType)
+        : AuthInfo_EncryptionType.UNSPECIFIED,
       encryptedValue: isSet(object.encryptedValue) ? bytesFromBase64(object.encryptedValue) : new Uint8Array(),
     };
   },
@@ -337,7 +313,7 @@ export const AuthInfo = {
 
   fromPartial<I extends Exact<DeepPartial<AuthInfo>, I>>(object: I): AuthInfo {
     const message = createBaseAuthInfo();
-    message.encryptionType = object.encryptionType ?? 0;
+    message.encryptionType = object.encryptionType ?? AuthInfo_EncryptionType.UNSPECIFIED;
     message.encryptedValue = object.encryptedValue ?? new Uint8Array();
     return message;
   },
@@ -357,73 +333,6 @@ function createBaseUserInfo(): UserInfo {
 }
 
 export const UserInfo = {
-  encode(message: UserInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    if (message.name !== "") {
-      writer.uint32(18).string(message.name);
-    }
-    if (message.isSuper === true) {
-      writer.uint32(24).bool(message.isSuper);
-    }
-    if (message.canCreateDb === true) {
-      writer.uint32(32).bool(message.canCreateDb);
-    }
-    if (message.canCreateUser === true) {
-      writer.uint32(40).bool(message.canCreateUser);
-    }
-    if (message.canLogin === true) {
-      writer.uint32(48).bool(message.canLogin);
-    }
-    if (message.authInfo !== undefined) {
-      AuthInfo.encode(message.authInfo, writer.uint32(58).fork()).ldelim();
-    }
-    for (const v of message.grantPrivileges) {
-      GrantPrivilege.encode(v!, writer.uint32(66).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UserInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUserInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 2:
-          message.name = reader.string();
-          break;
-        case 3:
-          message.isSuper = reader.bool();
-          break;
-        case 4:
-          message.canCreateDb = reader.bool();
-          break;
-        case 5:
-          message.canCreateUser = reader.bool();
-          break;
-        case 6:
-          message.canLogin = reader.bool();
-          break;
-        case 7:
-          message.authInfo = AuthInfo.decode(reader, reader.uint32());
-          break;
-        case 8:
-          message.grantPrivileges.push(GrantPrivilege.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UserInfo {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -477,67 +386,6 @@ function createBaseGrantPrivilege(): GrantPrivilege {
 }
 
 export const GrantPrivilege = {
-  encode(message: GrantPrivilege, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.object?.$case === "databaseId") {
-      writer.uint32(8).uint32(message.object.databaseId);
-    }
-    if (message.object?.$case === "schemaId") {
-      writer.uint32(16).uint32(message.object.schemaId);
-    }
-    if (message.object?.$case === "tableId") {
-      writer.uint32(24).uint32(message.object.tableId);
-    }
-    if (message.object?.$case === "sourceId") {
-      writer.uint32(32).uint32(message.object.sourceId);
-    }
-    if (message.object?.$case === "allTablesSchemaId") {
-      writer.uint32(40).uint32(message.object.allTablesSchemaId);
-    }
-    if (message.object?.$case === "allSourcesSchemaId") {
-      writer.uint32(48).uint32(message.object.allSourcesSchemaId);
-    }
-    for (const v of message.actionWithOpts) {
-      GrantPrivilege_ActionWithGrantOption.encode(v!, writer.uint32(58).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GrantPrivilege {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGrantPrivilege();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.object = { $case: "databaseId", databaseId: reader.uint32() };
-          break;
-        case 2:
-          message.object = { $case: "schemaId", schemaId: reader.uint32() };
-          break;
-        case 3:
-          message.object = { $case: "tableId", tableId: reader.uint32() };
-          break;
-        case 4:
-          message.object = { $case: "sourceId", sourceId: reader.uint32() };
-          break;
-        case 5:
-          message.object = { $case: "allTablesSchemaId", allTablesSchemaId: reader.uint32() };
-          break;
-        case 6:
-          message.object = { $case: "allSourcesSchemaId", allSourcesSchemaId: reader.uint32() };
-          break;
-        case 7:
-          message.actionWithOpts.push(GrantPrivilege_ActionWithGrantOption.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GrantPrivilege {
     return {
       object: isSet(object.databaseId)
@@ -622,50 +470,13 @@ export const GrantPrivilege = {
 };
 
 function createBaseGrantPrivilege_ActionWithGrantOption(): GrantPrivilege_ActionWithGrantOption {
-  return { action: 0, withGrantOption: false, grantedBy: 0 };
+  return { action: GrantPrivilege_Action.UNSPECIFIED, withGrantOption: false, grantedBy: 0 };
 }
 
 export const GrantPrivilege_ActionWithGrantOption = {
-  encode(message: GrantPrivilege_ActionWithGrantOption, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.action !== 0) {
-      writer.uint32(8).int32(message.action);
-    }
-    if (message.withGrantOption === true) {
-      writer.uint32(16).bool(message.withGrantOption);
-    }
-    if (message.grantedBy !== 0) {
-      writer.uint32(24).uint32(message.grantedBy);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GrantPrivilege_ActionWithGrantOption {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGrantPrivilege_ActionWithGrantOption();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.action = reader.int32() as any;
-          break;
-        case 2:
-          message.withGrantOption = reader.bool();
-          break;
-        case 3:
-          message.grantedBy = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GrantPrivilege_ActionWithGrantOption {
     return {
-      action: isSet(object.action) ? grantPrivilege_ActionFromJSON(object.action) : 0,
+      action: isSet(object.action) ? grantPrivilege_ActionFromJSON(object.action) : GrantPrivilege_Action.UNSPECIFIED,
       withGrantOption: isSet(object.withGrantOption) ? Boolean(object.withGrantOption) : false,
       grantedBy: isSet(object.grantedBy) ? Number(object.grantedBy) : 0,
     };
@@ -683,7 +494,7 @@ export const GrantPrivilege_ActionWithGrantOption = {
     object: I,
   ): GrantPrivilege_ActionWithGrantOption {
     const message = createBaseGrantPrivilege_ActionWithGrantOption();
-    message.action = object.action ?? 0;
+    message.action = object.action ?? GrantPrivilege_Action.UNSPECIFIED;
     message.withGrantOption = object.withGrantOption ?? false;
     message.grantedBy = object.grantedBy ?? 0;
     return message;
@@ -695,31 +506,6 @@ function createBaseCreateUserRequest(): CreateUserRequest {
 }
 
 export const CreateUserRequest = {
-  encode(message: CreateUserRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.user !== undefined) {
-      UserInfo.encode(message.user, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateUserRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateUserRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.user = UserInfo.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateUserRequest {
     return { user: isSet(object.user) ? UserInfo.fromJSON(object.user) : undefined };
   },
@@ -742,37 +528,6 @@ function createBaseCreateUserResponse(): CreateUserResponse {
 }
 
 export const CreateUserResponse = {
-  encode(message: CreateUserResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateUserResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateUserResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateUserResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -802,31 +557,6 @@ function createBaseDropUserRequest(): DropUserRequest {
 }
 
 export const DropUserRequest = {
-  encode(message: DropUserRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.userId !== 0) {
-      writer.uint32(8).uint32(message.userId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropUserRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropUserRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.userId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropUserRequest {
     return { userId: isSet(object.userId) ? Number(object.userId) : 0 };
   },
@@ -849,37 +579,6 @@ function createBaseDropUserResponse(): DropUserResponse {
 }
 
 export const DropUserResponse = {
-  encode(message: DropUserResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropUserResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropUserResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropUserResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -909,46 +608,6 @@ function createBaseUpdateUserRequest(): UpdateUserRequest {
 }
 
 export const UpdateUserRequest = {
-  encode(message: UpdateUserRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.user !== undefined) {
-      UserInfo.encode(message.user, writer.uint32(10).fork()).ldelim();
-    }
-    writer.uint32(18).fork();
-    for (const v of message.updateFields) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateUserRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateUserRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.user = UserInfo.decode(reader, reader.uint32());
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.updateFields.push(reader.int32() as any);
-            }
-          } else {
-            message.updateFields.push(reader.int32() as any);
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateUserRequest {
     return {
       user: isSet(object.user) ? UserInfo.fromJSON(object.user) : undefined,
@@ -982,37 +641,6 @@ function createBaseUpdateUserResponse(): UpdateUserResponse {
 }
 
 export const UpdateUserResponse = {
-  encode(message: UpdateUserResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateUserResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateUserResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateUserResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1042,58 +670,6 @@ function createBaseGrantPrivilegeRequest(): GrantPrivilegeRequest {
 }
 
 export const GrantPrivilegeRequest = {
-  encode(message: GrantPrivilegeRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.userIds) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    for (const v of message.privileges) {
-      GrantPrivilege.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.withGrantOption === true) {
-      writer.uint32(24).bool(message.withGrantOption);
-    }
-    if (message.grantedBy !== 0) {
-      writer.uint32(32).uint32(message.grantedBy);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GrantPrivilegeRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGrantPrivilegeRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.userIds.push(reader.uint32());
-            }
-          } else {
-            message.userIds.push(reader.uint32());
-          }
-          break;
-        case 2:
-          message.privileges.push(GrantPrivilege.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.withGrantOption = reader.bool();
-          break;
-        case 4:
-          message.grantedBy = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GrantPrivilegeRequest {
     return {
       userIds: Array.isArray(object?.userIds) ? object.userIds.map((e: any) => Number(e)) : [],
@@ -1137,37 +713,6 @@ function createBaseGrantPrivilegeResponse(): GrantPrivilegeResponse {
 }
 
 export const GrantPrivilegeResponse = {
-  encode(message: GrantPrivilegeResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GrantPrivilegeResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGrantPrivilegeResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GrantPrivilegeResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1197,70 +742,6 @@ function createBaseRevokePrivilegeRequest(): RevokePrivilegeRequest {
 }
 
 export const RevokePrivilegeRequest = {
-  encode(message: RevokePrivilegeRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.userIds) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    for (const v of message.privileges) {
-      GrantPrivilege.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.grantedBy !== 0) {
-      writer.uint32(24).uint32(message.grantedBy);
-    }
-    if (message.revokeBy !== 0) {
-      writer.uint32(32).uint32(message.revokeBy);
-    }
-    if (message.revokeGrantOption === true) {
-      writer.uint32(40).bool(message.revokeGrantOption);
-    }
-    if (message.cascade === true) {
-      writer.uint32(48).bool(message.cascade);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): RevokePrivilegeRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseRevokePrivilegeRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.userIds.push(reader.uint32());
-            }
-          } else {
-            message.userIds.push(reader.uint32());
-          }
-          break;
-        case 2:
-          message.privileges.push(GrantPrivilege.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.grantedBy = reader.uint32();
-          break;
-        case 4:
-          message.revokeBy = reader.uint32();
-          break;
-        case 5:
-          message.revokeGrantOption = reader.bool();
-          break;
-        case 6:
-          message.cascade = reader.bool();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): RevokePrivilegeRequest {
     return {
       userIds: Array.isArray(object?.userIds) ? object.userIds.map((e: any) => Number(e)) : [],
@@ -1310,37 +791,6 @@ function createBaseRevokePrivilegeResponse(): RevokePrivilegeResponse {
 }
 
 export const RevokePrivilegeResponse = {
-  encode(message: RevokePrivilegeResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): RevokePrivilegeResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseRevokePrivilegeResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): RevokePrivilegeResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1420,20 +870,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;

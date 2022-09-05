@@ -1,6 +1,4 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 import { ExprNode } from "./expr";
 import { ColumnCatalog, ColumnOrder, RowFormatType, rowFormatTypeFromJSON, rowFormatTypeToJSON } from "./plan_common";
 
@@ -130,31 +128,6 @@ function createBaseColumnIndex(): ColumnIndex {
 }
 
 export const ColumnIndex = {
-  encode(message: ColumnIndex, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.index !== 0) {
-      writer.uint32(8).uint64(message.index);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ColumnIndex {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseColumnIndex();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.index = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ColumnIndex {
     return { index: isSet(object.index) ? Number(object.index) : 0 };
   },
@@ -173,77 +146,17 @@ export const ColumnIndex = {
 };
 
 function createBaseStreamSourceInfo(): StreamSourceInfo {
-  return { properties: {}, rowFormat: 0, rowSchemaLocation: "", rowIdIndex: undefined, columns: [], pkColumnIds: [] };
+  return {
+    properties: {},
+    rowFormat: RowFormatType.ROW_UNSPECIFIED,
+    rowSchemaLocation: "",
+    rowIdIndex: undefined,
+    columns: [],
+    pkColumnIds: [],
+  };
 }
 
 export const StreamSourceInfo = {
-  encode(message: StreamSourceInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    Object.entries(message.properties).forEach(([key, value]) => {
-      StreamSourceInfo_PropertiesEntry.encode({ key: key as any, value }, writer.uint32(10).fork()).ldelim();
-    });
-    if (message.rowFormat !== 0) {
-      writer.uint32(16).int32(message.rowFormat);
-    }
-    if (message.rowSchemaLocation !== "") {
-      writer.uint32(26).string(message.rowSchemaLocation);
-    }
-    if (message.rowIdIndex !== undefined) {
-      ColumnIndex.encode(message.rowIdIndex, writer.uint32(34).fork()).ldelim();
-    }
-    for (const v of message.columns) {
-      ColumnCatalog.encode(v!, writer.uint32(42).fork()).ldelim();
-    }
-    writer.uint32(50).fork();
-    for (const v of message.pkColumnIds) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamSourceInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamSourceInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          const entry1 = StreamSourceInfo_PropertiesEntry.decode(reader, reader.uint32());
-          if (entry1.value !== undefined) {
-            message.properties[entry1.key] = entry1.value;
-          }
-          break;
-        case 2:
-          message.rowFormat = reader.int32() as any;
-          break;
-        case 3:
-          message.rowSchemaLocation = reader.string();
-          break;
-        case 4:
-          message.rowIdIndex = ColumnIndex.decode(reader, reader.uint32());
-          break;
-        case 5:
-          message.columns.push(ColumnCatalog.decode(reader, reader.uint32()));
-          break;
-        case 6:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.pkColumnIds.push(reader.int32());
-            }
-          } else {
-            message.pkColumnIds.push(reader.int32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StreamSourceInfo {
     return {
       properties: isObject(object.properties)
@@ -252,7 +165,7 @@ export const StreamSourceInfo = {
           return acc;
         }, {})
         : {},
-      rowFormat: isSet(object.rowFormat) ? rowFormatTypeFromJSON(object.rowFormat) : 0,
+      rowFormat: isSet(object.rowFormat) ? rowFormatTypeFromJSON(object.rowFormat) : RowFormatType.ROW_UNSPECIFIED,
       rowSchemaLocation: isSet(object.rowSchemaLocation) ? String(object.rowSchemaLocation) : "",
       rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
@@ -296,7 +209,7 @@ export const StreamSourceInfo = {
       },
       {},
     );
-    message.rowFormat = object.rowFormat ?? 0;
+    message.rowFormat = object.rowFormat ?? RowFormatType.ROW_UNSPECIFIED;
     message.rowSchemaLocation = object.rowSchemaLocation ?? "";
     message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
       ? ColumnIndex.fromPartial(object.rowIdIndex)
@@ -312,37 +225,6 @@ function createBaseStreamSourceInfo_PropertiesEntry(): StreamSourceInfo_Properti
 }
 
 export const StreamSourceInfo_PropertiesEntry = {
-  encode(message: StreamSourceInfo_PropertiesEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== "") {
-      writer.uint32(10).string(message.key);
-    }
-    if (message.value !== "") {
-      writer.uint32(18).string(message.value);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamSourceInfo_PropertiesEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamSourceInfo_PropertiesEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.string();
-          break;
-        case 2:
-          message.value = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StreamSourceInfo_PropertiesEntry {
     return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
   },
@@ -369,61 +251,6 @@ function createBaseTableSourceInfo(): TableSourceInfo {
 }
 
 export const TableSourceInfo = {
-  encode(message: TableSourceInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.rowIdIndex !== undefined) {
-      ColumnIndex.encode(message.rowIdIndex, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.columns) {
-      ColumnCatalog.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    writer.uint32(26).fork();
-    for (const v of message.pkColumnIds) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    Object.entries(message.properties).forEach(([key, value]) => {
-      TableSourceInfo_PropertiesEntry.encode({ key: key as any, value }, writer.uint32(34).fork()).ldelim();
-    });
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TableSourceInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTableSourceInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.rowIdIndex = ColumnIndex.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.columns.push(ColumnCatalog.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.pkColumnIds.push(reader.int32());
-            }
-          } else {
-            message.pkColumnIds.push(reader.int32());
-          }
-          break;
-        case 4:
-          const entry4 = TableSourceInfo_PropertiesEntry.decode(reader, reader.uint32());
-          if (entry4.value !== undefined) {
-            message.properties[entry4.key] = entry4.value;
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TableSourceInfo {
     return {
       rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
@@ -486,37 +313,6 @@ function createBaseTableSourceInfo_PropertiesEntry(): TableSourceInfo_Properties
 }
 
 export const TableSourceInfo_PropertiesEntry = {
-  encode(message: TableSourceInfo_PropertiesEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== "") {
-      writer.uint32(10).string(message.key);
-    }
-    if (message.value !== "") {
-      writer.uint32(18).string(message.value);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TableSourceInfo_PropertiesEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTableSourceInfo_PropertiesEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.string();
-          break;
-        case 2:
-          message.value = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TableSourceInfo_PropertiesEntry {
     return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
   },
@@ -543,67 +339,6 @@ function createBaseSource(): Source {
 }
 
 export const Source = {
-  encode(message: Source, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    if (message.schemaId !== 0) {
-      writer.uint32(16).uint32(message.schemaId);
-    }
-    if (message.databaseId !== 0) {
-      writer.uint32(24).uint32(message.databaseId);
-    }
-    if (message.name !== "") {
-      writer.uint32(34).string(message.name);
-    }
-    if (message.info?.$case === "streamSource") {
-      StreamSourceInfo.encode(message.info.streamSource, writer.uint32(42).fork()).ldelim();
-    }
-    if (message.info?.$case === "tableSource") {
-      TableSourceInfo.encode(message.info.tableSource, writer.uint32(50).fork()).ldelim();
-    }
-    if (message.owner !== 0) {
-      writer.uint32(56).uint32(message.owner);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Source {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSource();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 2:
-          message.schemaId = reader.uint32();
-          break;
-        case 3:
-          message.databaseId = reader.uint32();
-          break;
-        case 4:
-          message.name = reader.string();
-          break;
-        case 5:
-          message.info = { $case: "streamSource", streamSource: StreamSourceInfo.decode(reader, reader.uint32()) };
-          break;
-        case 6:
-          message.info = { $case: "tableSource", tableSource: TableSourceInfo.decode(reader, reader.uint32()) };
-          break;
-        case 7:
-          message.owner = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Source {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -672,85 +407,6 @@ function createBaseSink(): Sink {
 }
 
 export const Sink = {
-  encode(message: Sink, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    if (message.schemaId !== 0) {
-      writer.uint32(16).uint32(message.schemaId);
-    }
-    if (message.databaseId !== 0) {
-      writer.uint32(24).uint32(message.databaseId);
-    }
-    if (message.name !== "") {
-      writer.uint32(34).string(message.name);
-    }
-    if (message.associatedTableId !== 0) {
-      writer.uint32(40).uint32(message.associatedTableId);
-    }
-    Object.entries(message.properties).forEach(([key, value]) => {
-      Sink_PropertiesEntry.encode({ key: key as any, value }, writer.uint32(50).fork()).ldelim();
-    });
-    if (message.owner !== 0) {
-      writer.uint32(56).uint32(message.owner);
-    }
-    writer.uint32(66).fork();
-    for (const v of message.dependentRelations) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Sink {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSink();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 2:
-          message.schemaId = reader.uint32();
-          break;
-        case 3:
-          message.databaseId = reader.uint32();
-          break;
-        case 4:
-          message.name = reader.string();
-          break;
-        case 5:
-          message.associatedTableId = reader.uint32();
-          break;
-        case 6:
-          const entry6 = Sink_PropertiesEntry.decode(reader, reader.uint32());
-          if (entry6.value !== undefined) {
-            message.properties[entry6.key] = entry6.value;
-          }
-          break;
-        case 7:
-          message.owner = reader.uint32();
-          break;
-        case 8:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.dependentRelations.push(reader.uint32());
-            }
-          } else {
-            message.dependentRelations.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Sink {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -820,37 +476,6 @@ function createBaseSink_PropertiesEntry(): Sink_PropertiesEntry {
 }
 
 export const Sink_PropertiesEntry = {
-  encode(message: Sink_PropertiesEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== "") {
-      writer.uint32(10).string(message.key);
-    }
-    if (message.value !== "") {
-      writer.uint32(18).string(message.value);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Sink_PropertiesEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSink_PropertiesEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.string();
-          break;
-        case 2:
-          message.value = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Sink_PropertiesEntry {
     return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
   },
@@ -875,73 +500,6 @@ function createBaseIndex(): Index {
 }
 
 export const Index = {
-  encode(message: Index, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    if (message.schemaId !== 0) {
-      writer.uint32(16).uint32(message.schemaId);
-    }
-    if (message.databaseId !== 0) {
-      writer.uint32(24).uint32(message.databaseId);
-    }
-    if (message.name !== "") {
-      writer.uint32(34).string(message.name);
-    }
-    if (message.owner !== 0) {
-      writer.uint32(40).uint32(message.owner);
-    }
-    if (message.indexTableId !== 0) {
-      writer.uint32(48).uint32(message.indexTableId);
-    }
-    if (message.primaryTableId !== 0) {
-      writer.uint32(56).uint32(message.primaryTableId);
-    }
-    for (const v of message.indexItem) {
-      ExprNode.encode(v!, writer.uint32(66).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Index {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseIndex();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 2:
-          message.schemaId = reader.uint32();
-          break;
-        case 3:
-          message.databaseId = reader.uint32();
-          break;
-        case 4:
-          message.name = reader.string();
-          break;
-        case 5:
-          message.owner = reader.uint32();
-          break;
-        case 6:
-          message.indexTableId = reader.uint32();
-          break;
-        case 7:
-          message.primaryTableId = reader.uint32();
-          break;
-        case 8:
-          message.indexItem.push(ExprNode.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Index {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -951,7 +509,9 @@ export const Index = {
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       indexTableId: isSet(object.indexTableId) ? Number(object.indexTableId) : 0,
       primaryTableId: isSet(object.primaryTableId) ? Number(object.primaryTableId) : 0,
-      indexItem: Array.isArray(object?.indexItem) ? object.indexItem.map((e: any) => ExprNode.fromJSON(e)) : [],
+      indexItem: Array.isArray(object?.indexItem)
+        ? object.indexItem.map((e: any) => ExprNode.fromJSON(e))
+        : [],
     };
   },
 
@@ -1009,157 +569,6 @@ function createBaseTable(): Table {
 }
 
 export const Table = {
-  encode(message: Table, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    if (message.schemaId !== 0) {
-      writer.uint32(16).uint32(message.schemaId);
-    }
-    if (message.databaseId !== 0) {
-      writer.uint32(24).uint32(message.databaseId);
-    }
-    if (message.name !== "") {
-      writer.uint32(34).string(message.name);
-    }
-    for (const v of message.columns) {
-      ColumnCatalog.encode(v!, writer.uint32(42).fork()).ldelim();
-    }
-    for (const v of message.orderKey) {
-      ColumnOrder.encode(v!, writer.uint32(50).fork()).ldelim();
-    }
-    writer.uint32(66).fork();
-    for (const v of message.dependentRelations) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.optionalAssociatedSourceId?.$case === "associatedSourceId") {
-      writer.uint32(72).uint32(message.optionalAssociatedSourceId.associatedSourceId);
-    }
-    if (message.isIndex === true) {
-      writer.uint32(80).bool(message.isIndex);
-    }
-    if (message.indexOnId !== 0) {
-      writer.uint32(88).uint32(message.indexOnId);
-    }
-    writer.uint32(98).fork();
-    for (const v of message.distributionKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    writer.uint32(106).fork();
-    for (const v of message.streamKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    if (message.appendonly === true) {
-      writer.uint32(112).bool(message.appendonly);
-    }
-    if (message.owner !== 0) {
-      writer.uint32(120).uint32(message.owner);
-    }
-    Object.entries(message.properties).forEach(([key, value]) => {
-      Table_PropertiesEntry.encode({ key: key as any, value }, writer.uint32(130).fork()).ldelim();
-    });
-    if (message.fragmentId !== 0) {
-      writer.uint32(136).uint32(message.fragmentId);
-    }
-    if (message.vnodeColIdx !== undefined) {
-      ColumnIndex.encode(message.vnodeColIdx, writer.uint32(146).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Table {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTable();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 2:
-          message.schemaId = reader.uint32();
-          break;
-        case 3:
-          message.databaseId = reader.uint32();
-          break;
-        case 4:
-          message.name = reader.string();
-          break;
-        case 5:
-          message.columns.push(ColumnCatalog.decode(reader, reader.uint32()));
-          break;
-        case 6:
-          message.orderKey.push(ColumnOrder.decode(reader, reader.uint32()));
-          break;
-        case 8:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.dependentRelations.push(reader.uint32());
-            }
-          } else {
-            message.dependentRelations.push(reader.uint32());
-          }
-          break;
-        case 9:
-          message.optionalAssociatedSourceId = { $case: "associatedSourceId", associatedSourceId: reader.uint32() };
-          break;
-        case 10:
-          message.isIndex = reader.bool();
-          break;
-        case 11:
-          message.indexOnId = reader.uint32();
-          break;
-        case 12:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.distributionKey.push(reader.int32());
-            }
-          } else {
-            message.distributionKey.push(reader.int32());
-          }
-          break;
-        case 13:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.streamKey.push(reader.int32());
-            }
-          } else {
-            message.streamKey.push(reader.int32());
-          }
-          break;
-        case 14:
-          message.appendonly = reader.bool();
-          break;
-        case 15:
-          message.owner = reader.uint32();
-          break;
-        case 16:
-          const entry16 = Table_PropertiesEntry.decode(reader, reader.uint32());
-          if (entry16.value !== undefined) {
-            message.properties[entry16.key] = entry16.value;
-          }
-          break;
-        case 17:
-          message.fragmentId = reader.uint32();
-          break;
-        case 18:
-          message.vnodeColIdx = ColumnIndex.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Table {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -1176,8 +585,12 @@ export const Table = {
         : undefined,
       isIndex: isSet(object.isIndex) ? Boolean(object.isIndex) : false,
       indexOnId: isSet(object.indexOnId) ? Number(object.indexOnId) : 0,
-      distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
-      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      distributionKey: Array.isArray(object?.distributionKey)
+        ? object.distributionKey.map((e: any) => Number(e))
+        : [],
+      streamKey: Array.isArray(object?.streamKey)
+        ? object.streamKey.map((e: any) => Number(e))
+        : [],
       appendonly: isSet(object.appendonly) ? Boolean(object.appendonly) : false,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
@@ -1287,37 +700,6 @@ function createBaseTable_PropertiesEntry(): Table_PropertiesEntry {
 }
 
 export const Table_PropertiesEntry = {
-  encode(message: Table_PropertiesEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== "") {
-      writer.uint32(10).string(message.key);
-    }
-    if (message.value !== "") {
-      writer.uint32(18).string(message.value);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Table_PropertiesEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTable_PropertiesEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.string();
-          break;
-        case 2:
-          message.value = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Table_PropertiesEntry {
     return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
   },
@@ -1342,49 +724,6 @@ function createBaseSchema(): Schema {
 }
 
 export const Schema = {
-  encode(message: Schema, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    if (message.databaseId !== 0) {
-      writer.uint32(16).uint32(message.databaseId);
-    }
-    if (message.name !== "") {
-      writer.uint32(26).string(message.name);
-    }
-    if (message.owner !== 0) {
-      writer.uint32(32).uint32(message.owner);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Schema {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSchema();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 2:
-          message.databaseId = reader.uint32();
-          break;
-        case 3:
-          message.name = reader.string();
-          break;
-        case 4:
-          message.owner = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Schema {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -1418,43 +757,6 @@ function createBaseDatabase(): Database {
 }
 
 export const Database = {
-  encode(message: Database, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    if (message.name !== "") {
-      writer.uint32(18).string(message.name);
-    }
-    if (message.owner !== 0) {
-      writer.uint32(24).uint32(message.owner);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Database {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDatabase();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 2:
-          message.name = reader.string();
-          break;
-        case 3:
-          message.owner = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Database {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -1480,25 +782,6 @@ export const Database = {
   },
 };
 
-declare var self: any | undefined;
-declare var window: any | undefined;
-declare var global: any | undefined;
-var globalThis: any = (() => {
-  if (typeof globalThis !== "undefined") {
-    return globalThis;
-  }
-  if (typeof self !== "undefined") {
-    return self;
-  }
-  if (typeof window !== "undefined") {
-    return window;
-  }
-  if (typeof global !== "undefined") {
-    return global;
-  }
-  throw "Unable to locate global object";
-})();
-
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
 export type DeepPartial<T> = T extends Builtin ? T
@@ -1510,20 +793,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isObject(value: any): boolean {
   return typeof value === "object" && value !== null;

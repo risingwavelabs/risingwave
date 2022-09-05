@@ -1,6 +1,4 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 import { Buffer, HostAddress, WorkerNode } from "./common";
 import { IntervalUnit } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem, TableFunction } from "./expr";
@@ -284,14 +282,17 @@ export interface ExchangeInfo {
   };
 }
 
-export enum ExchangeInfo_DistributionMode {
+export const ExchangeInfo_DistributionMode = {
   /** UNSPECIFIED - No partitioning at all, used for root segment which aggregates query results */
-  UNSPECIFIED = 0,
-  SINGLE = 1,
-  BROADCAST = 2,
-  HASH = 3,
-  UNRECOGNIZED = -1,
-}
+  UNSPECIFIED: "UNSPECIFIED",
+  SINGLE: "SINGLE",
+  BROADCAST: "BROADCAST",
+  HASH: "HASH",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type ExchangeInfo_DistributionMode =
+  typeof ExchangeInfo_DistributionMode[keyof typeof ExchangeInfo_DistributionMode];
 
 export function exchangeInfo_DistributionModeFromJSON(object: any): ExchangeInfo_DistributionMode {
   switch (object) {
@@ -349,58 +350,6 @@ function createBaseRowSeqScanNode(): RowSeqScanNode {
 }
 
 export const RowSeqScanNode = {
-  encode(message: RowSeqScanNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableDesc !== undefined) {
-      StorageTableDesc.encode(message.tableDesc, writer.uint32(10).fork()).ldelim();
-    }
-    writer.uint32(18).fork();
-    for (const v of message.columnIds) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    for (const v of message.scanRanges) {
-      ScanRange.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.vnodeBitmap !== undefined) {
-      Buffer.encode(message.vnodeBitmap, writer.uint32(34).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): RowSeqScanNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseRowSeqScanNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableDesc = StorageTableDesc.decode(reader, reader.uint32());
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnIds.push(reader.int32());
-            }
-          } else {
-            message.columnIds.push(reader.int32());
-          }
-          break;
-        case 3:
-          message.scanRanges.push(ScanRange.decode(reader, reader.uint32()));
-          break;
-        case 4:
-          message.vnodeBitmap = Buffer.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): RowSeqScanNode {
     return {
       tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
@@ -448,37 +397,6 @@ function createBaseSysRowSeqScanNode(): SysRowSeqScanNode {
 }
 
 export const SysRowSeqScanNode = {
-  encode(message: SysRowSeqScanNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableName !== "") {
-      writer.uint32(10).string(message.tableName);
-    }
-    for (const v of message.columnDescs) {
-      ColumnDesc.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SysRowSeqScanNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSysRowSeqScanNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableName = reader.string();
-          break;
-        case 2:
-          message.columnDescs.push(ColumnDesc.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SysRowSeqScanNode {
     return {
       tableName: isSet(object.tableName) ? String(object.tableName) : "",
@@ -510,43 +428,6 @@ function createBaseScanRange(): ScanRange {
 }
 
 export const ScanRange = {
-  encode(message: ScanRange, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.eqConds) {
-      writer.uint32(10).bytes(v!);
-    }
-    if (message.lowerBound !== undefined) {
-      ScanRange_Bound.encode(message.lowerBound, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.upperBound !== undefined) {
-      ScanRange_Bound.encode(message.upperBound, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ScanRange {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseScanRange();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.eqConds.push(reader.bytes());
-          break;
-        case 2:
-          message.lowerBound = ScanRange_Bound.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.upperBound = ScanRange_Bound.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ScanRange {
     return {
       eqConds: Array.isArray(object?.eqConds) ? object.eqConds.map((e: any) => bytesFromBase64(e)) : [],
@@ -587,37 +468,6 @@ function createBaseScanRange_Bound(): ScanRange_Bound {
 }
 
 export const ScanRange_Bound = {
-  encode(message: ScanRange_Bound, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.value.length !== 0) {
-      writer.uint32(10).bytes(message.value);
-    }
-    if (message.inclusive === true) {
-      writer.uint32(16).bool(message.inclusive);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ScanRange_Bound {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseScanRange_Bound();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.value = reader.bytes();
-          break;
-        case 2:
-          message.inclusive = reader.bool();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ScanRange_Bound {
     return {
       value: isSet(object.value) ? bytesFromBase64(object.value) : new Uint8Array(),
@@ -646,52 +496,6 @@ function createBaseSourceScanNode(): SourceScanNode {
 }
 
 export const SourceScanNode = {
-  encode(message: SourceScanNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableId !== 0) {
-      writer.uint32(8).uint32(message.tableId);
-    }
-    if (message.timestampMs !== 0) {
-      writer.uint32(16).int64(message.timestampMs);
-    }
-    writer.uint32(26).fork();
-    for (const v of message.columnIds) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SourceScanNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSourceScanNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableId = reader.uint32();
-          break;
-        case 2:
-          message.timestampMs = longToNumber(reader.int64() as Long);
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnIds.push(reader.int32());
-            }
-          } else {
-            message.columnIds.push(reader.int32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SourceScanNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
@@ -726,31 +530,6 @@ function createBaseProjectNode(): ProjectNode {
 }
 
 export const ProjectNode = {
-  encode(message: ProjectNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.selectList) {
-      ExprNode.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ProjectNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseProjectNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.selectList.push(ExprNode.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ProjectNode {
     return {
       selectList: Array.isArray(object?.selectList) ? object.selectList.map((e: any) => ExprNode.fromJSON(e)) : [],
@@ -779,31 +558,6 @@ function createBaseFilterNode(): FilterNode {
 }
 
 export const FilterNode = {
-  encode(message: FilterNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.searchCondition !== undefined) {
-      ExprNode.encode(message.searchCondition, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): FilterNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseFilterNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.searchCondition = ExprNode.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): FilterNode {
     return { searchCondition: isSet(object.searchCondition) ? ExprNode.fromJSON(object.searchCondition) : undefined };
   },
@@ -829,52 +583,6 @@ function createBaseInsertNode(): InsertNode {
 }
 
 export const InsertNode = {
-  encode(message: InsertNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableSourceId !== 0) {
-      writer.uint32(8).uint32(message.tableSourceId);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.columnIds) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    if (message.associatedMviewId !== 0) {
-      writer.uint32(24).uint32(message.associatedMviewId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): InsertNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseInsertNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableSourceId = reader.uint32();
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnIds.push(reader.int32());
-            }
-          } else {
-            message.columnIds.push(reader.int32());
-          }
-          break;
-        case 3:
-          message.associatedMviewId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): InsertNode {
     return {
       tableSourceId: isSet(object.tableSourceId) ? Number(object.tableSourceId) : 0,
@@ -909,37 +617,6 @@ function createBaseDeleteNode(): DeleteNode {
 }
 
 export const DeleteNode = {
-  encode(message: DeleteNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableSourceId !== 0) {
-      writer.uint32(8).uint32(message.tableSourceId);
-    }
-    if (message.associatedMviewId !== 0) {
-      writer.uint32(16).uint32(message.associatedMviewId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DeleteNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDeleteNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableSourceId = reader.uint32();
-          break;
-        case 2:
-          message.associatedMviewId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DeleteNode {
     return {
       tableSourceId: isSet(object.tableSourceId) ? Number(object.tableSourceId) : 0,
@@ -967,43 +644,6 @@ function createBaseUpdateNode(): UpdateNode {
 }
 
 export const UpdateNode = {
-  encode(message: UpdateNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableSourceId !== 0) {
-      writer.uint32(8).uint32(message.tableSourceId);
-    }
-    for (const v of message.exprs) {
-      ExprNode.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.associatedMviewId !== 0) {
-      writer.uint32(24).uint32(message.associatedMviewId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUpdateNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableSourceId = reader.uint32();
-          break;
-        case 2:
-          message.exprs.push(ExprNode.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.associatedMviewId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UpdateNode {
     return {
       tableSourceId: isSet(object.tableSourceId) ? Number(object.tableSourceId) : 0,
@@ -1038,37 +678,6 @@ function createBaseValuesNode(): ValuesNode {
 }
 
 export const ValuesNode = {
-  encode(message: ValuesNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.tuples) {
-      ValuesNode_ExprTuple.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.fields) {
-      Field.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ValuesNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseValuesNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tuples.push(ValuesNode_ExprTuple.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.fields.push(Field.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ValuesNode {
     return {
       tuples: Array.isArray(object?.tuples) ? object.tuples.map((e: any) => ValuesNode_ExprTuple.fromJSON(e)) : [],
@@ -1104,31 +713,6 @@ function createBaseValuesNode_ExprTuple(): ValuesNode_ExprTuple {
 }
 
 export const ValuesNode_ExprTuple = {
-  encode(message: ValuesNode_ExprTuple, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.cells) {
-      ExprNode.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ValuesNode_ExprTuple {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseValuesNode_ExprTuple();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.cells.push(ExprNode.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ValuesNode_ExprTuple {
     return { cells: Array.isArray(object?.cells) ? object.cells.map((e: any) => ExprNode.fromJSON(e)) : [] };
   },
@@ -1155,31 +739,6 @@ function createBaseOrderByNode(): OrderByNode {
 }
 
 export const OrderByNode = {
-  encode(message: OrderByNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.columnOrders) {
-      ColumnOrder.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): OrderByNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseOrderByNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.columnOrders.push(ColumnOrder.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): OrderByNode {
     return {
       columnOrders: Array.isArray(object?.columnOrders)
@@ -1210,43 +769,6 @@ function createBaseTopNNode(): TopNNode {
 }
 
 export const TopNNode = {
-  encode(message: TopNNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.columnOrders) {
-      ColumnOrder.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.limit !== 0) {
-      writer.uint32(16).uint64(message.limit);
-    }
-    if (message.offset !== 0) {
-      writer.uint32(24).uint64(message.offset);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TopNNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTopNNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.columnOrders.push(ColumnOrder.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.limit = longToNumber(reader.uint64() as Long);
-          break;
-        case 3:
-          message.offset = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TopNNode {
     return {
       columnOrders: Array.isArray(object?.columnOrders)
@@ -1283,37 +805,6 @@ function createBaseLimitNode(): LimitNode {
 }
 
 export const LimitNode = {
-  encode(message: LimitNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.limit !== 0) {
-      writer.uint32(8).uint64(message.limit);
-    }
-    if (message.offset !== 0) {
-      writer.uint32(16).uint64(message.offset);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): LimitNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLimitNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.limit = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.offset = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): LimitNode {
     return {
       limit: isSet(object.limit) ? Number(object.limit) : 0,
@@ -1337,59 +828,13 @@ export const LimitNode = {
 };
 
 function createBaseNestedLoopJoinNode(): NestedLoopJoinNode {
-  return { joinType: 0, joinCond: undefined, outputIndices: [] };
+  return { joinType: JoinType.UNSPECIFIED, joinCond: undefined, outputIndices: [] };
 }
 
 export const NestedLoopJoinNode = {
-  encode(message: NestedLoopJoinNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.joinType !== 0) {
-      writer.uint32(8).int32(message.joinType);
-    }
-    if (message.joinCond !== undefined) {
-      ExprNode.encode(message.joinCond, writer.uint32(18).fork()).ldelim();
-    }
-    writer.uint32(26).fork();
-    for (const v of message.outputIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): NestedLoopJoinNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseNestedLoopJoinNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.joinType = reader.int32() as any;
-          break;
-        case 2:
-          message.joinCond = ExprNode.decode(reader, reader.uint32());
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.outputIndices.push(reader.uint32());
-            }
-          } else {
-            message.outputIndices.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): NestedLoopJoinNode {
     return {
-      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : 0,
+      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       joinCond: isSet(object.joinCond) ? ExprNode.fromJSON(object.joinCond) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
     };
@@ -1409,7 +854,7 @@ export const NestedLoopJoinNode = {
 
   fromPartial<I extends Exact<DeepPartial<NestedLoopJoinNode>, I>>(object: I): NestedLoopJoinNode {
     const message = createBaseNestedLoopJoinNode();
-    message.joinType = object.joinType ?? 0;
+    message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.joinCond = (object.joinCond !== undefined && object.joinCond !== null)
       ? ExprNode.fromPartial(object.joinCond)
       : undefined;
@@ -1423,46 +868,6 @@ function createBaseHashAggNode(): HashAggNode {
 }
 
 export const HashAggNode = {
-  encode(message: HashAggNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.groupKey) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    for (const v of message.aggCalls) {
-      AggCall.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HashAggNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHashAggNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.groupKey.push(reader.uint32());
-            }
-          } else {
-            message.groupKey.push(reader.uint32());
-          }
-          break;
-        case 2:
-          message.aggCalls.push(AggCall.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HashAggNode {
     return {
       groupKey: Array.isArray(object?.groupKey) ? object.groupKey.map((e: any) => Number(e)) : [],
@@ -1498,31 +903,6 @@ function createBaseExpandNode(): ExpandNode {
 }
 
 export const ExpandNode = {
-  encode(message: ExpandNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.columnSubsets) {
-      ExpandNode_Subset.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExpandNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExpandNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.columnSubsets.push(ExpandNode_Subset.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExpandNode {
     return {
       columnSubsets: Array.isArray(object?.columnSubsets)
@@ -1553,40 +933,6 @@ function createBaseExpandNode_Subset(): ExpandNode_Subset {
 }
 
 export const ExpandNode_Subset = {
-  encode(message: ExpandNode_Subset, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.columnIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExpandNode_Subset {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExpandNode_Subset();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.columnIndices.push(reader.uint32());
-            }
-          } else {
-            message.columnIndices.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExpandNode_Subset {
     return {
       columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
@@ -1615,31 +961,6 @@ function createBaseProjectSetNode(): ProjectSetNode {
 }
 
 export const ProjectSetNode = {
-  encode(message: ProjectSetNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.selectList) {
-      ProjectSetSelectItem.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ProjectSetNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseProjectSetNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.selectList.push(ProjectSetSelectItem.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ProjectSetNode {
     return {
       selectList: Array.isArray(object?.selectList)
@@ -1670,37 +991,6 @@ function createBaseSortAggNode(): SortAggNode {
 }
 
 export const SortAggNode = {
-  encode(message: SortAggNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.groupKey) {
-      ExprNode.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.aggCalls) {
-      AggCall.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SortAggNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSortAggNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.groupKey.push(ExprNode.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.aggCalls.push(AggCall.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SortAggNode {
     return {
       groupKey: Array.isArray(object?.groupKey) ? object.groupKey.map((e: any) => ExprNode.fromJSON(e)) : [],
@@ -1732,104 +1022,20 @@ export const SortAggNode = {
 };
 
 function createBaseHashJoinNode(): HashJoinNode {
-  return { joinType: 0, leftKey: [], rightKey: [], condition: undefined, outputIndices: [], nullSafe: [] };
+  return {
+    joinType: JoinType.UNSPECIFIED,
+    leftKey: [],
+    rightKey: [],
+    condition: undefined,
+    outputIndices: [],
+    nullSafe: [],
+  };
 }
 
 export const HashJoinNode = {
-  encode(message: HashJoinNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.joinType !== 0) {
-      writer.uint32(8).int32(message.joinType);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.leftKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    writer.uint32(26).fork();
-    for (const v of message.rightKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    if (message.condition !== undefined) {
-      ExprNode.encode(message.condition, writer.uint32(34).fork()).ldelim();
-    }
-    writer.uint32(42).fork();
-    for (const v of message.outputIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    writer.uint32(50).fork();
-    for (const v of message.nullSafe) {
-      writer.bool(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HashJoinNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHashJoinNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.joinType = reader.int32() as any;
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.leftKey.push(reader.int32());
-            }
-          } else {
-            message.leftKey.push(reader.int32());
-          }
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.rightKey.push(reader.int32());
-            }
-          } else {
-            message.rightKey.push(reader.int32());
-          }
-          break;
-        case 4:
-          message.condition = ExprNode.decode(reader, reader.uint32());
-          break;
-        case 5:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.outputIndices.push(reader.uint32());
-            }
-          } else {
-            message.outputIndices.push(reader.uint32());
-          }
-          break;
-        case 6:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.nullSafe.push(reader.bool());
-            }
-          } else {
-            message.nullSafe.push(reader.bool());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HashJoinNode {
     return {
-      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : 0,
+      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       leftKey: Array.isArray(object?.leftKey) ? object.leftKey.map((e: any) => Number(e)) : [],
       rightKey: Array.isArray(object?.rightKey) ? object.rightKey.map((e: any) => Number(e)) : [],
       condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
@@ -1868,7 +1074,7 @@ export const HashJoinNode = {
 
   fromPartial<I extends Exact<DeepPartial<HashJoinNode>, I>>(object: I): HashJoinNode {
     const message = createBaseHashJoinNode();
-    message.joinType = object.joinType ?? 0;
+    message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.leftKey = object.leftKey?.map((e) => e) || [];
     message.rightKey = object.rightKey?.map((e) => e) || [];
     message.condition = (object.condition !== undefined && object.condition !== null)
@@ -1881,92 +1087,22 @@ export const HashJoinNode = {
 };
 
 function createBaseSortMergeJoinNode(): SortMergeJoinNode {
-  return { joinType: 0, leftKey: [], rightKey: [], direction: 0, outputIndices: [] };
+  return {
+    joinType: JoinType.UNSPECIFIED,
+    leftKey: [],
+    rightKey: [],
+    direction: OrderType.ORDER_UNSPECIFIED,
+    outputIndices: [],
+  };
 }
 
 export const SortMergeJoinNode = {
-  encode(message: SortMergeJoinNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.joinType !== 0) {
-      writer.uint32(8).int32(message.joinType);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.leftKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    writer.uint32(26).fork();
-    for (const v of message.rightKey) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    if (message.direction !== 0) {
-      writer.uint32(32).int32(message.direction);
-    }
-    writer.uint32(42).fork();
-    for (const v of message.outputIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SortMergeJoinNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSortMergeJoinNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.joinType = reader.int32() as any;
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.leftKey.push(reader.int32());
-            }
-          } else {
-            message.leftKey.push(reader.int32());
-          }
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.rightKey.push(reader.int32());
-            }
-          } else {
-            message.rightKey.push(reader.int32());
-          }
-          break;
-        case 4:
-          message.direction = reader.int32() as any;
-          break;
-        case 5:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.outputIndices.push(reader.uint32());
-            }
-          } else {
-            message.outputIndices.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SortMergeJoinNode {
     return {
-      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : 0,
+      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       leftKey: Array.isArray(object?.leftKey) ? object.leftKey.map((e: any) => Number(e)) : [],
       rightKey: Array.isArray(object?.rightKey) ? object.rightKey.map((e: any) => Number(e)) : [],
-      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : 0,
+      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : OrderType.ORDER_UNSPECIFIED,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
     };
   },
@@ -1995,10 +1131,10 @@ export const SortMergeJoinNode = {
 
   fromPartial<I extends Exact<DeepPartial<SortMergeJoinNode>, I>>(object: I): SortMergeJoinNode {
     const message = createBaseSortMergeJoinNode();
-    message.joinType = object.joinType ?? 0;
+    message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.leftKey = object.leftKey?.map((e) => e) || [];
     message.rightKey = object.rightKey?.map((e) => e) || [];
-    message.direction = object.direction ?? 0;
+    message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     return message;
   },
@@ -2009,58 +1145,6 @@ function createBaseHopWindowNode(): HopWindowNode {
 }
 
 export const HopWindowNode = {
-  encode(message: HopWindowNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.timeCol !== undefined) {
-      InputRefExpr.encode(message.timeCol, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.windowSlide !== undefined) {
-      IntervalUnit.encode(message.windowSlide, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.windowSize !== undefined) {
-      IntervalUnit.encode(message.windowSize, writer.uint32(26).fork()).ldelim();
-    }
-    writer.uint32(34).fork();
-    for (const v of message.outputIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HopWindowNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHopWindowNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.timeCol = InputRefExpr.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.windowSlide = IntervalUnit.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.windowSize = IntervalUnit.decode(reader, reader.uint32());
-          break;
-        case 4:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.outputIndices.push(reader.uint32());
-            }
-          } else {
-            message.outputIndices.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HopWindowNode {
     return {
       timeCol: isSet(object.timeCol) ? InputRefExpr.fromJSON(object.timeCol) : undefined,
@@ -2106,31 +1190,6 @@ function createBaseTableFunctionNode(): TableFunctionNode {
 }
 
 export const TableFunctionNode = {
-  encode(message: TableFunctionNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableFunction !== undefined) {
-      TableFunction.encode(message.tableFunction, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TableFunctionNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTableFunctionNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableFunction = TableFunction.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TableFunctionNode {
     return { tableFunction: isSet(object.tableFunction) ? TableFunction.fromJSON(object.tableFunction) : undefined };
   },
@@ -2156,43 +1215,6 @@ function createBaseTaskId(): TaskId {
 }
 
 export const TaskId = {
-  encode(message: TaskId, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.queryId !== "") {
-      writer.uint32(10).string(message.queryId);
-    }
-    if (message.stageId !== 0) {
-      writer.uint32(16).uint32(message.stageId);
-    }
-    if (message.taskId !== 0) {
-      writer.uint32(24).uint32(message.taskId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TaskId {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTaskId();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.queryId = reader.string();
-          break;
-        case 2:
-          message.stageId = reader.uint32();
-          break;
-        case 3:
-          message.taskId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TaskId {
     return {
       queryId: isSet(object.queryId) ? String(object.queryId) : "",
@@ -2223,37 +1245,6 @@ function createBaseTaskOutputId(): TaskOutputId {
 }
 
 export const TaskOutputId = {
-  encode(message: TaskOutputId, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.taskId !== undefined) {
-      TaskId.encode(message.taskId, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.outputId !== 0) {
-      writer.uint32(16).uint32(message.outputId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TaskOutputId {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTaskOutputId();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.taskId = TaskId.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.outputId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TaskOutputId {
     return {
       taskId: isSet(object.taskId) ? TaskId.fromJSON(object.taskId) : undefined,
@@ -2283,37 +1274,6 @@ function createBaseLocalExecutePlan(): LocalExecutePlan {
 }
 
 export const LocalExecutePlan = {
-  encode(message: LocalExecutePlan, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.plan !== undefined) {
-      PlanFragment.encode(message.plan, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.epoch !== 0) {
-      writer.uint32(16).uint64(message.epoch);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): LocalExecutePlan {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLocalExecutePlan();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.plan = PlanFragment.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.epoch = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): LocalExecutePlan {
     return {
       plan: isSet(object.plan) ? PlanFragment.fromJSON(object.plan) : undefined,
@@ -2343,43 +1303,6 @@ function createBaseExchangeSource(): ExchangeSource {
 }
 
 export const ExchangeSource = {
-  encode(message: ExchangeSource, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.taskOutputId !== undefined) {
-      TaskOutputId.encode(message.taskOutputId, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.host !== undefined) {
-      HostAddress.encode(message.host, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.localExecutePlan?.$case === "plan") {
-      LocalExecutePlan.encode(message.localExecutePlan.plan, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExchangeSource {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExchangeSource();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.taskOutputId = TaskOutputId.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.host = HostAddress.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.localExecutePlan = { $case: "plan", plan: LocalExecutePlan.decode(reader, reader.uint32()) };
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExchangeSource {
     return {
       taskOutputId: isSet(object.taskOutputId) ? TaskOutputId.fromJSON(object.taskOutputId) : undefined,
@@ -2424,37 +1347,6 @@ function createBaseExchangeNode(): ExchangeNode {
 }
 
 export const ExchangeNode = {
-  encode(message: ExchangeNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.sources) {
-      ExchangeSource.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.inputSchema) {
-      Field.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExchangeNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExchangeNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.sources.push(ExchangeSource.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.inputSchema.push(Field.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExchangeNode {
     return {
       sources: Array.isArray(object?.sources) ? object.sources.map((e: any) => ExchangeSource.fromJSON(e)) : [],
@@ -2490,37 +1382,6 @@ function createBaseMergeSortExchangeNode(): MergeSortExchangeNode {
 }
 
 export const MergeSortExchangeNode = {
-  encode(message: MergeSortExchangeNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.exchange !== undefined) {
-      ExchangeNode.encode(message.exchange, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.columnOrders) {
-      ColumnOrder.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): MergeSortExchangeNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseMergeSortExchangeNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.exchange = ExchangeNode.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.columnOrders.push(ColumnOrder.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): MergeSortExchangeNode {
     return {
       exchange: isSet(object.exchange) ? ExchangeNode.fromJSON(object.exchange) : undefined,
@@ -2554,7 +1415,7 @@ export const MergeSortExchangeNode = {
 
 function createBaseLookupJoinNode(): LookupJoinNode {
   return {
-    joinType: 0,
+    joinType: JoinType.UNSPECIFIED,
     condition: undefined,
     buildSideKey: [],
     probeSideTableDesc: undefined,
@@ -2566,112 +1427,9 @@ function createBaseLookupJoinNode(): LookupJoinNode {
 }
 
 export const LookupJoinNode = {
-  encode(message: LookupJoinNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.joinType !== 0) {
-      writer.uint32(8).int32(message.joinType);
-    }
-    if (message.condition !== undefined) {
-      ExprNode.encode(message.condition, writer.uint32(18).fork()).ldelim();
-    }
-    writer.uint32(26).fork();
-    for (const v of message.buildSideKey) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.probeSideTableDesc !== undefined) {
-      StorageTableDesc.encode(message.probeSideTableDesc, writer.uint32(34).fork()).ldelim();
-    }
-    writer.uint32(42).fork();
-    for (const v of message.probeSideVnodeMapping) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    writer.uint32(50).fork();
-    for (const v of message.probeSideColumnIds) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    writer.uint32(58).fork();
-    for (const v of message.outputIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    for (const v of message.workerNodes) {
-      WorkerNode.encode(v!, writer.uint32(66).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): LookupJoinNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLookupJoinNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.joinType = reader.int32() as any;
-          break;
-        case 2:
-          message.condition = ExprNode.decode(reader, reader.uint32());
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.buildSideKey.push(reader.uint32());
-            }
-          } else {
-            message.buildSideKey.push(reader.uint32());
-          }
-          break;
-        case 4:
-          message.probeSideTableDesc = StorageTableDesc.decode(reader, reader.uint32());
-          break;
-        case 5:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.probeSideVnodeMapping.push(reader.uint32());
-            }
-          } else {
-            message.probeSideVnodeMapping.push(reader.uint32());
-          }
-          break;
-        case 6:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.probeSideColumnIds.push(reader.int32());
-            }
-          } else {
-            message.probeSideColumnIds.push(reader.int32());
-          }
-          break;
-        case 7:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.outputIndices.push(reader.uint32());
-            }
-          } else {
-            message.outputIndices.push(reader.uint32());
-          }
-          break;
-        case 8:
-          message.workerNodes.push(WorkerNode.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): LookupJoinNode {
     return {
-      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : 0,
+      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
       buildSideKey: Array.isArray(object?.buildSideKey) ? object.buildSideKey.map((e: any) => Number(e)) : [],
       probeSideTableDesc: isSet(object.probeSideTableDesc)
@@ -2683,7 +1441,9 @@ export const LookupJoinNode = {
       probeSideColumnIds: Array.isArray(object?.probeSideColumnIds)
         ? object.probeSideColumnIds.map((e: any) => Number(e))
         : [],
-      outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      outputIndices: Array.isArray(object?.outputIndices)
+        ? object.outputIndices.map((e: any) => Number(e))
+        : [],
       workerNodes: Array.isArray(object?.workerNodes) ? object.workerNodes.map((e: any) => WorkerNode.fromJSON(e)) : [],
     };
   },
@@ -2726,7 +1486,7 @@ export const LookupJoinNode = {
 
   fromPartial<I extends Exact<DeepPartial<LookupJoinNode>, I>>(object: I): LookupJoinNode {
     const message = createBaseLookupJoinNode();
-    message.joinType = object.joinType ?? 0;
+    message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.condition = (object.condition !== undefined && object.condition !== null)
       ? ExprNode.fromPartial(object.condition)
       : undefined;
@@ -2747,25 +1507,6 @@ function createBaseUnionNode(): UnionNode {
 }
 
 export const UnionNode = {
-  encode(_: UnionNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UnionNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUnionNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): UnionNode {
     return {};
   },
@@ -2786,196 +1527,6 @@ function createBasePlanNode(): PlanNode {
 }
 
 export const PlanNode = {
-  encode(message: PlanNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.children) {
-      PlanNode.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "insert") {
-      InsertNode.encode(message.nodeBody.insert, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "delete") {
-      DeleteNode.encode(message.nodeBody.delete, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "update") {
-      UpdateNode.encode(message.nodeBody.update, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "project") {
-      ProjectNode.encode(message.nodeBody.project, writer.uint32(42).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "hashAgg") {
-      HashAggNode.encode(message.nodeBody.hashAgg, writer.uint32(58).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "filter") {
-      FilterNode.encode(message.nodeBody.filter, writer.uint32(66).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "exchange") {
-      ExchangeNode.encode(message.nodeBody.exchange, writer.uint32(74).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "orderBy") {
-      OrderByNode.encode(message.nodeBody.orderBy, writer.uint32(82).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "nestedLoopJoin") {
-      NestedLoopJoinNode.encode(message.nodeBody.nestedLoopJoin, writer.uint32(90).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "topN") {
-      TopNNode.encode(message.nodeBody.topN, writer.uint32(114).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "sortAgg") {
-      SortAggNode.encode(message.nodeBody.sortAgg, writer.uint32(122).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "rowSeqScan") {
-      RowSeqScanNode.encode(message.nodeBody.rowSeqScan, writer.uint32(130).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "limit") {
-      LimitNode.encode(message.nodeBody.limit, writer.uint32(138).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "values") {
-      ValuesNode.encode(message.nodeBody.values, writer.uint32(146).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "hashJoin") {
-      HashJoinNode.encode(message.nodeBody.hashJoin, writer.uint32(154).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "mergeSortExchange") {
-      MergeSortExchangeNode.encode(message.nodeBody.mergeSortExchange, writer.uint32(170).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "sortMergeJoin") {
-      SortMergeJoinNode.encode(message.nodeBody.sortMergeJoin, writer.uint32(178).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "hopWindow") {
-      HopWindowNode.encode(message.nodeBody.hopWindow, writer.uint32(202).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "tableFunction") {
-      TableFunctionNode.encode(message.nodeBody.tableFunction, writer.uint32(210).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "sysRowSeqScan") {
-      SysRowSeqScanNode.encode(message.nodeBody.sysRowSeqScan, writer.uint32(218).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "expand") {
-      ExpandNode.encode(message.nodeBody.expand, writer.uint32(226).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "lookupJoin") {
-      LookupJoinNode.encode(message.nodeBody.lookupJoin, writer.uint32(234).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "projectSet") {
-      ProjectSetNode.encode(message.nodeBody.projectSet, writer.uint32(242).fork()).ldelim();
-    }
-    if (message.nodeBody?.$case === "union") {
-      UnionNode.encode(message.nodeBody.union, writer.uint32(250).fork()).ldelim();
-    }
-    if (message.identity !== "") {
-      writer.uint32(194).string(message.identity);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): PlanNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePlanNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.children.push(PlanNode.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.nodeBody = { $case: "insert", insert: InsertNode.decode(reader, reader.uint32()) };
-          break;
-        case 3:
-          message.nodeBody = { $case: "delete", delete: DeleteNode.decode(reader, reader.uint32()) };
-          break;
-        case 4:
-          message.nodeBody = { $case: "update", update: UpdateNode.decode(reader, reader.uint32()) };
-          break;
-        case 5:
-          message.nodeBody = { $case: "project", project: ProjectNode.decode(reader, reader.uint32()) };
-          break;
-        case 7:
-          message.nodeBody = { $case: "hashAgg", hashAgg: HashAggNode.decode(reader, reader.uint32()) };
-          break;
-        case 8:
-          message.nodeBody = { $case: "filter", filter: FilterNode.decode(reader, reader.uint32()) };
-          break;
-        case 9:
-          message.nodeBody = { $case: "exchange", exchange: ExchangeNode.decode(reader, reader.uint32()) };
-          break;
-        case 10:
-          message.nodeBody = { $case: "orderBy", orderBy: OrderByNode.decode(reader, reader.uint32()) };
-          break;
-        case 11:
-          message.nodeBody = {
-            $case: "nestedLoopJoin",
-            nestedLoopJoin: NestedLoopJoinNode.decode(reader, reader.uint32()),
-          };
-          break;
-        case 14:
-          message.nodeBody = { $case: "topN", topN: TopNNode.decode(reader, reader.uint32()) };
-          break;
-        case 15:
-          message.nodeBody = { $case: "sortAgg", sortAgg: SortAggNode.decode(reader, reader.uint32()) };
-          break;
-        case 16:
-          message.nodeBody = { $case: "rowSeqScan", rowSeqScan: RowSeqScanNode.decode(reader, reader.uint32()) };
-          break;
-        case 17:
-          message.nodeBody = { $case: "limit", limit: LimitNode.decode(reader, reader.uint32()) };
-          break;
-        case 18:
-          message.nodeBody = { $case: "values", values: ValuesNode.decode(reader, reader.uint32()) };
-          break;
-        case 19:
-          message.nodeBody = { $case: "hashJoin", hashJoin: HashJoinNode.decode(reader, reader.uint32()) };
-          break;
-        case 21:
-          message.nodeBody = {
-            $case: "mergeSortExchange",
-            mergeSortExchange: MergeSortExchangeNode.decode(reader, reader.uint32()),
-          };
-          break;
-        case 22:
-          message.nodeBody = {
-            $case: "sortMergeJoin",
-            sortMergeJoin: SortMergeJoinNode.decode(reader, reader.uint32()),
-          };
-          break;
-        case 25:
-          message.nodeBody = { $case: "hopWindow", hopWindow: HopWindowNode.decode(reader, reader.uint32()) };
-          break;
-        case 26:
-          message.nodeBody = {
-            $case: "tableFunction",
-            tableFunction: TableFunctionNode.decode(reader, reader.uint32()),
-          };
-          break;
-        case 27:
-          message.nodeBody = {
-            $case: "sysRowSeqScan",
-            sysRowSeqScan: SysRowSeqScanNode.decode(reader, reader.uint32()),
-          };
-          break;
-        case 28:
-          message.nodeBody = { $case: "expand", expand: ExpandNode.decode(reader, reader.uint32()) };
-          break;
-        case 29:
-          message.nodeBody = { $case: "lookupJoin", lookupJoin: LookupJoinNode.decode(reader, reader.uint32()) };
-          break;
-        case 30:
-          message.nodeBody = { $case: "projectSet", projectSet: ProjectSetNode.decode(reader, reader.uint32()) };
-          break;
-        case 31:
-          message.nodeBody = { $case: "union", union: UnionNode.decode(reader, reader.uint32()) };
-          break;
-        case 24:
-          message.identity = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): PlanNode {
     return {
       children: Array.isArray(object?.children) ? object.children.map((e: any) => PlanNode.fromJSON(e)) : [],
@@ -3264,53 +1815,15 @@ export const PlanNode = {
 };
 
 function createBaseExchangeInfo(): ExchangeInfo {
-  return { mode: 0, distribution: undefined };
+  return { mode: ExchangeInfo_DistributionMode.UNSPECIFIED, distribution: undefined };
 }
 
 export const ExchangeInfo = {
-  encode(message: ExchangeInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.mode !== 0) {
-      writer.uint32(8).int32(message.mode);
-    }
-    if (message.distribution?.$case === "broadcastInfo") {
-      ExchangeInfo_BroadcastInfo.encode(message.distribution.broadcastInfo, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.distribution?.$case === "hashInfo") {
-      ExchangeInfo_HashInfo.encode(message.distribution.hashInfo, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExchangeInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExchangeInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.mode = reader.int32() as any;
-          break;
-        case 2:
-          message.distribution = {
-            $case: "broadcastInfo",
-            broadcastInfo: ExchangeInfo_BroadcastInfo.decode(reader, reader.uint32()),
-          };
-          break;
-        case 3:
-          message.distribution = { $case: "hashInfo", hashInfo: ExchangeInfo_HashInfo.decode(reader, reader.uint32()) };
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExchangeInfo {
     return {
-      mode: isSet(object.mode) ? exchangeInfo_DistributionModeFromJSON(object.mode) : 0,
+      mode: isSet(object.mode)
+        ? exchangeInfo_DistributionModeFromJSON(object.mode)
+        : ExchangeInfo_DistributionMode.UNSPECIFIED,
       distribution: isSet(object.broadcastInfo)
         ? { $case: "broadcastInfo", broadcastInfo: ExchangeInfo_BroadcastInfo.fromJSON(object.broadcastInfo) }
         : isSet(object.hashInfo)
@@ -3333,7 +1846,7 @@ export const ExchangeInfo = {
 
   fromPartial<I extends Exact<DeepPartial<ExchangeInfo>, I>>(object: I): ExchangeInfo {
     const message = createBaseExchangeInfo();
-    message.mode = object.mode ?? 0;
+    message.mode = object.mode ?? ExchangeInfo_DistributionMode.UNSPECIFIED;
     if (
       object.distribution?.$case === "broadcastInfo" &&
       object.distribution?.broadcastInfo !== undefined &&
@@ -3363,31 +1876,6 @@ function createBaseExchangeInfo_BroadcastInfo(): ExchangeInfo_BroadcastInfo {
 }
 
 export const ExchangeInfo_BroadcastInfo = {
-  encode(message: ExchangeInfo_BroadcastInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.count !== 0) {
-      writer.uint32(8).uint32(message.count);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExchangeInfo_BroadcastInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExchangeInfo_BroadcastInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.count = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExchangeInfo_BroadcastInfo {
     return { count: isSet(object.count) ? Number(object.count) : 0 };
   },
@@ -3410,46 +1898,6 @@ function createBaseExchangeInfo_HashInfo(): ExchangeInfo_HashInfo {
 }
 
 export const ExchangeInfo_HashInfo = {
-  encode(message: ExchangeInfo_HashInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.outputCount !== 0) {
-      writer.uint32(8).uint32(message.outputCount);
-    }
-    writer.uint32(26).fork();
-    for (const v of message.key) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExchangeInfo_HashInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExchangeInfo_HashInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.outputCount = reader.uint32();
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.key.push(reader.uint32());
-            }
-          } else {
-            message.key.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExchangeInfo_HashInfo {
     return {
       outputCount: isSet(object.outputCount) ? Number(object.outputCount) : 0,
@@ -3481,37 +1929,6 @@ function createBasePlanFragment(): PlanFragment {
 }
 
 export const PlanFragment = {
-  encode(message: PlanFragment, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.root !== undefined) {
-      PlanNode.encode(message.root, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.exchangeInfo !== undefined) {
-      ExchangeInfo.encode(message.exchangeInfo, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): PlanFragment {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePlanFragment();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.root = PlanNode.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.exchangeInfo = ExchangeInfo.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): PlanFragment {
     return {
       root: isSet(object.root) ? PlanNode.fromJSON(object.root) : undefined,
@@ -3592,20 +2009,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;

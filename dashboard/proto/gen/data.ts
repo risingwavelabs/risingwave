@@ -1,28 +1,28 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 import { Buffer } from "./common";
 
 export const protobufPackage = "data";
 
-export enum RwArrayType {
-  UNSPECIFIED = 0,
-  INT16 = 1,
-  INT32 = 2,
-  INT64 = 3,
-  FLOAT32 = 4,
-  FLOAT64 = 5,
-  UTF8 = 6,
-  BOOL = 7,
-  DECIMAL = 8,
-  DATE = 9,
-  TIME = 10,
-  TIMESTAMP = 11,
-  INTERVAL = 12,
-  STRUCT = 13,
-  LIST = 14,
-  UNRECOGNIZED = -1,
-}
+export const RwArrayType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  INT16: "INT16",
+  INT32: "INT32",
+  INT64: "INT64",
+  FLOAT32: "FLOAT32",
+  FLOAT64: "FLOAT64",
+  UTF8: "UTF8",
+  BOOL: "BOOL",
+  DECIMAL: "DECIMAL",
+  DATE: "DATE",
+  TIME: "TIME",
+  TIMESTAMP: "TIMESTAMP",
+  INTERVAL: "INTERVAL",
+  STRUCT: "STRUCT",
+  LIST: "LIST",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type RwArrayType = typeof RwArrayType[keyof typeof RwArrayType];
 
 export function rwArrayTypeFromJSON(object: any): RwArrayType {
   switch (object) {
@@ -116,14 +116,16 @@ export function rwArrayTypeToJSON(object: RwArrayType): string {
   }
 }
 
-export enum Op {
-  OP_UNSPECIFIED = 0,
-  INSERT = 1,
-  DELETE = 2,
-  UPDATE_INSERT = 3,
-  UPDATE_DELETE = 4,
-  UNRECOGNIZED = -1,
-}
+export const Op = {
+  OP_UNSPECIFIED: "OP_UNSPECIFIED",
+  INSERT: "INSERT",
+  DELETE: "DELETE",
+  UPDATE_INSERT: "UPDATE_INSERT",
+  UPDATE_DELETE: "UPDATE_DELETE",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type Op = typeof Op[keyof typeof Op];
 
 export function opFromJSON(object: any): Op {
   switch (object) {
@@ -195,23 +197,25 @@ export interface DataType {
   fieldNames: string[];
 }
 
-export enum DataType_IntervalType {
-  UNSPECIFIED = 0,
-  YEAR = 1,
-  MONTH = 2,
-  DAY = 3,
-  HOUR = 4,
-  MINUTE = 5,
-  SECOND = 6,
-  YEAR_TO_MONTH = 7,
-  DAY_TO_HOUR = 8,
-  DAY_TO_MINUTE = 9,
-  DAY_TO_SECOND = 10,
-  HOUR_TO_MINUTE = 11,
-  HOUR_TO_SECOND = 12,
-  MINUTE_TO_SECOND = 13,
-  UNRECOGNIZED = -1,
-}
+export const DataType_IntervalType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  YEAR: "YEAR",
+  MONTH: "MONTH",
+  DAY: "DAY",
+  HOUR: "HOUR",
+  MINUTE: "MINUTE",
+  SECOND: "SECOND",
+  YEAR_TO_MONTH: "YEAR_TO_MONTH",
+  DAY_TO_HOUR: "DAY_TO_HOUR",
+  DAY_TO_MINUTE: "DAY_TO_MINUTE",
+  DAY_TO_SECOND: "DAY_TO_SECOND",
+  HOUR_TO_MINUTE: "HOUR_TO_MINUTE",
+  HOUR_TO_SECOND: "HOUR_TO_SECOND",
+  MINUTE_TO_SECOND: "MINUTE_TO_SECOND",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type DataType_IntervalType = typeof DataType_IntervalType[keyof typeof DataType_IntervalType];
 
 export function dataType_IntervalTypeFromJSON(object: any): DataType_IntervalType {
   switch (object) {
@@ -300,26 +304,28 @@ export function dataType_IntervalTypeToJSON(object: DataType_IntervalType): stri
   }
 }
 
-export enum DataType_TypeName {
-  TYPE_UNSPECIFIED = 0,
-  INT16 = 1,
-  INT32 = 2,
-  INT64 = 3,
-  FLOAT = 4,
-  DOUBLE = 5,
-  BOOLEAN = 6,
-  VARCHAR = 7,
-  DECIMAL = 8,
-  TIME = 9,
-  TIMESTAMP = 10,
-  INTERVAL = 11,
-  DATE = 12,
+export const DataType_TypeName = {
+  TYPE_UNSPECIFIED: "TYPE_UNSPECIFIED",
+  INT16: "INT16",
+  INT32: "INT32",
+  INT64: "INT64",
+  FLOAT: "FLOAT",
+  DOUBLE: "DOUBLE",
+  BOOLEAN: "BOOLEAN",
+  VARCHAR: "VARCHAR",
+  DECIMAL: "DECIMAL",
+  TIME: "TIME",
+  TIMESTAMP: "TIMESTAMP",
+  INTERVAL: "INTERVAL",
+  DATE: "DATE",
   /** TIMESTAMPZ - Timestamp type with timezone */
-  TIMESTAMPZ = 13,
-  STRUCT = 15,
-  LIST = 16,
-  UNRECOGNIZED = -1,
-}
+  TIMESTAMPZ: "TIMESTAMPZ",
+  STRUCT: "STRUCT",
+  LIST: "LIST",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type DataType_TypeName = typeof DataType_TypeName[keyof typeof DataType_TypeName];
 
 export function dataType_TypeNameFromJSON(object: any): DataType_TypeName {
   switch (object) {
@@ -471,43 +477,6 @@ function createBaseIntervalUnit(): IntervalUnit {
 }
 
 export const IntervalUnit = {
-  encode(message: IntervalUnit, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.months !== 0) {
-      writer.uint32(8).int32(message.months);
-    }
-    if (message.days !== 0) {
-      writer.uint32(16).int32(message.days);
-    }
-    if (message.ms !== 0) {
-      writer.uint32(24).int64(message.ms);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): IntervalUnit {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseIntervalUnit();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.months = reader.int32();
-          break;
-        case 2:
-          message.days = reader.int32();
-          break;
-        case 3:
-          message.ms = longToNumber(reader.int64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): IntervalUnit {
     return {
       months: isSet(object.months) ? Number(object.months) : 0,
@@ -534,78 +503,29 @@ export const IntervalUnit = {
 };
 
 function createBaseDataType(): DataType {
-  return { typeName: 0, precision: 0, scale: 0, isNullable: false, intervalType: 0, fieldType: [], fieldNames: [] };
+  return {
+    typeName: DataType_TypeName.TYPE_UNSPECIFIED,
+    precision: 0,
+    scale: 0,
+    isNullable: false,
+    intervalType: DataType_IntervalType.UNSPECIFIED,
+    fieldType: [],
+    fieldNames: [],
+  };
 }
 
 export const DataType = {
-  encode(message: DataType, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.typeName !== 0) {
-      writer.uint32(8).int32(message.typeName);
-    }
-    if (message.precision !== 0) {
-      writer.uint32(16).uint32(message.precision);
-    }
-    if (message.scale !== 0) {
-      writer.uint32(24).uint32(message.scale);
-    }
-    if (message.isNullable === true) {
-      writer.uint32(32).bool(message.isNullable);
-    }
-    if (message.intervalType !== 0) {
-      writer.uint32(40).int32(message.intervalType);
-    }
-    for (const v of message.fieldType) {
-      DataType.encode(v!, writer.uint32(50).fork()).ldelim();
-    }
-    for (const v of message.fieldNames) {
-      writer.uint32(58).string(v!);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DataType {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDataType();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.typeName = reader.int32() as any;
-          break;
-        case 2:
-          message.precision = reader.uint32();
-          break;
-        case 3:
-          message.scale = reader.uint32();
-          break;
-        case 4:
-          message.isNullable = reader.bool();
-          break;
-        case 5:
-          message.intervalType = reader.int32() as any;
-          break;
-        case 6:
-          message.fieldType.push(DataType.decode(reader, reader.uint32()));
-          break;
-        case 7:
-          message.fieldNames.push(reader.string());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DataType {
     return {
-      typeName: isSet(object.typeName) ? dataType_TypeNameFromJSON(object.typeName) : 0,
+      typeName: isSet(object.typeName)
+        ? dataType_TypeNameFromJSON(object.typeName)
+        : DataType_TypeName.TYPE_UNSPECIFIED,
       precision: isSet(object.precision) ? Number(object.precision) : 0,
       scale: isSet(object.scale) ? Number(object.scale) : 0,
       isNullable: isSet(object.isNullable) ? Boolean(object.isNullable) : false,
-      intervalType: isSet(object.intervalType) ? dataType_IntervalTypeFromJSON(object.intervalType) : 0,
+      intervalType: isSet(object.intervalType)
+        ? dataType_IntervalTypeFromJSON(object.intervalType)
+        : DataType_IntervalType.UNSPECIFIED,
       fieldType: Array.isArray(object?.fieldType) ? object.fieldType.map((e: any) => DataType.fromJSON(e)) : [],
       fieldNames: Array.isArray(object?.fieldNames) ? object.fieldNames.map((e: any) => String(e)) : [],
     };
@@ -633,11 +553,11 @@ export const DataType = {
 
   fromPartial<I extends Exact<DeepPartial<DataType>, I>>(object: I): DataType {
     const message = createBaseDataType();
-    message.typeName = object.typeName ?? 0;
+    message.typeName = object.typeName ?? DataType_TypeName.TYPE_UNSPECIFIED;
     message.precision = object.precision ?? 0;
     message.scale = object.scale ?? 0;
     message.isNullable = object.isNullable ?? false;
-    message.intervalType = object.intervalType ?? 0;
+    message.intervalType = object.intervalType ?? DataType_IntervalType.UNSPECIFIED;
     message.fieldType = object.fieldType?.map((e) => DataType.fromPartial(e)) || [];
     message.fieldNames = object.fieldNames?.map((e) => e) || [];
     return message;
@@ -649,37 +569,6 @@ function createBaseStructRwArrayData(): StructRwArrayData {
 }
 
 export const StructRwArrayData = {
-  encode(message: StructRwArrayData, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.childrenArray) {
-      RwArray.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.childrenType) {
-      DataType.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StructRwArrayData {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStructRwArrayData();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.childrenArray.push(RwArray.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.childrenType.push(DataType.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StructRwArrayData {
     return {
       childrenArray: Array.isArray(object?.childrenArray)
@@ -719,52 +608,6 @@ function createBaseListRwArrayData(): ListRwArrayData {
 }
 
 export const ListRwArrayData = {
-  encode(message: ListRwArrayData, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.offsets) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.value !== undefined) {
-      RwArray.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.valueType !== undefined) {
-      DataType.encode(message.valueType, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListRwArrayData {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListRwArrayData();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.offsets.push(reader.uint32());
-            }
-          } else {
-            message.offsets.push(reader.uint32());
-          }
-          break;
-        case 2:
-          message.value = RwArray.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.valueType = DataType.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ListRwArrayData {
     return {
       offsets: Array.isArray(object?.offsets) ? object.offsets.map((e: any) => Number(e)) : [],
@@ -800,62 +643,19 @@ export const ListRwArrayData = {
 };
 
 function createBaseRwArray(): RwArray {
-  return { arrayType: 0, nullBitmap: undefined, values: [], structArrayData: undefined, listArrayData: undefined };
+  return {
+    arrayType: RwArrayType.UNSPECIFIED,
+    nullBitmap: undefined,
+    values: [],
+    structArrayData: undefined,
+    listArrayData: undefined,
+  };
 }
 
 export const RwArray = {
-  encode(message: RwArray, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.arrayType !== 0) {
-      writer.uint32(8).int32(message.arrayType);
-    }
-    if (message.nullBitmap !== undefined) {
-      Buffer.encode(message.nullBitmap, writer.uint32(18).fork()).ldelim();
-    }
-    for (const v of message.values) {
-      Buffer.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.structArrayData !== undefined) {
-      StructRwArrayData.encode(message.structArrayData, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.listArrayData !== undefined) {
-      ListRwArrayData.encode(message.listArrayData, writer.uint32(42).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): RwArray {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseRwArray();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.arrayType = reader.int32() as any;
-          break;
-        case 2:
-          message.nullBitmap = Buffer.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.values.push(Buffer.decode(reader, reader.uint32()));
-          break;
-        case 4:
-          message.structArrayData = StructRwArrayData.decode(reader, reader.uint32());
-          break;
-        case 5:
-          message.listArrayData = ListRwArrayData.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): RwArray {
     return {
-      arrayType: isSet(object.arrayType) ? rwArrayTypeFromJSON(object.arrayType) : 0,
+      arrayType: isSet(object.arrayType) ? rwArrayTypeFromJSON(object.arrayType) : RwArrayType.UNSPECIFIED,
       nullBitmap: isSet(object.nullBitmap) ? Buffer.fromJSON(object.nullBitmap) : undefined,
       values: Array.isArray(object?.values) ? object.values.map((e: any) => Buffer.fromJSON(e)) : [],
       structArrayData: isSet(object.structArrayData) ? StructRwArrayData.fromJSON(object.structArrayData) : undefined,
@@ -882,7 +682,7 @@ export const RwArray = {
 
   fromPartial<I extends Exact<DeepPartial<RwArray>, I>>(object: I): RwArray {
     const message = createBaseRwArray();
-    message.arrayType = object.arrayType ?? 0;
+    message.arrayType = object.arrayType ?? RwArrayType.UNSPECIFIED;
     message.nullBitmap = (object.nullBitmap !== undefined && object.nullBitmap !== null)
       ? Buffer.fromPartial(object.nullBitmap)
       : undefined;
@@ -902,31 +702,6 @@ function createBaseColumn(): Column {
 }
 
 export const Column = {
-  encode(message: Column, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.array !== undefined) {
-      RwArray.encode(message.array, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Column {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseColumn();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 2:
-          message.array = RwArray.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Column {
     return { array: isSet(object.array) ? RwArray.fromJSON(object.array) : undefined };
   },
@@ -951,37 +726,6 @@ function createBaseDataChunk(): DataChunk {
 }
 
 export const DataChunk = {
-  encode(message: DataChunk, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.cardinality !== 0) {
-      writer.uint32(8).uint32(message.cardinality);
-    }
-    for (const v of message.columns) {
-      Column.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DataChunk {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDataChunk();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.cardinality = reader.uint32();
-          break;
-        case 2:
-          message.columns.push(Column.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DataChunk {
     return {
       cardinality: isSet(object.cardinality) ? Number(object.cardinality) : 0,
@@ -1013,52 +757,6 @@ function createBaseStreamChunk(): StreamChunk {
 }
 
 export const StreamChunk = {
-  encode(message: StreamChunk, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.cardinality !== 0) {
-      writer.uint32(8).uint32(message.cardinality);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.ops) {
-      writer.int32(v);
-    }
-    writer.ldelim();
-    for (const v of message.columns) {
-      Column.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamChunk {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamChunk();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.cardinality = reader.uint32();
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.ops.push(reader.int32() as any);
-            }
-          } else {
-            message.ops.push(reader.int32() as any);
-          }
-          break;
-        case 3:
-          message.columns.push(Column.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StreamChunk {
     return {
       cardinality: isSet(object.cardinality) ? Number(object.cardinality) : 0,
@@ -1097,37 +795,6 @@ function createBaseEpoch(): Epoch {
 }
 
 export const Epoch = {
-  encode(message: Epoch, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.curr !== 0) {
-      writer.uint32(8).uint64(message.curr);
-    }
-    if (message.prev !== 0) {
-      writer.uint32(16).uint64(message.prev);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Epoch {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseEpoch();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.curr = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.prev = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Epoch {
     return { curr: isSet(object.curr) ? Number(object.curr) : 0, prev: isSet(object.prev) ? Number(object.prev) : 0 };
   },
@@ -1152,25 +819,6 @@ function createBaseTerminate(): Terminate {
 }
 
 export const Terminate = {
-  encode(_: Terminate, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Terminate {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTerminate();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): Terminate {
     return {};
   },
@@ -1186,25 +834,6 @@ export const Terminate = {
   },
 };
 
-declare var self: any | undefined;
-declare var window: any | undefined;
-declare var global: any | undefined;
-var globalThis: any = (() => {
-  if (typeof globalThis !== "undefined") {
-    return globalThis;
-  }
-  if (typeof self !== "undefined") {
-    return self;
-  }
-  if (typeof window !== "undefined") {
-    return window;
-  }
-  if (typeof global !== "undefined") {
-    return global;
-  }
-  throw "Unable to locate global object";
-})();
-
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
 export type DeepPartial<T> = T extends Builtin ? T
@@ -1216,20 +845,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;

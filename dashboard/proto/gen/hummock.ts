@@ -1,16 +1,16 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 import { Status } from "./common";
 
 export const protobufPackage = "hummock";
 
-export enum LevelType {
-  UNSPECIFIED = 0,
-  NONOVERLAPPING = 1,
-  OVERLAPPING = 2,
-  UNRECOGNIZED = -1,
-}
+export const LevelType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  NONOVERLAPPING: "NONOVERLAPPING",
+  OVERLAPPING: "OVERLAPPING",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type LevelType = typeof LevelType[keyof typeof LevelType];
 
 export function levelTypeFromJSON(object: any): LevelType {
   switch (object) {
@@ -249,13 +249,15 @@ export interface CompactTask {
   targetSubLevelId: number;
 }
 
-export enum CompactTask_TaskStatus {
-  PENDING = 0,
-  SUCCESS = 1,
-  FAILED = 2,
-  CANCELED = 3,
-  UNRECOGNIZED = -1,
-}
+export const CompactTask_TaskStatus = {
+  PENDING: "PENDING",
+  SUCCESS: "SUCCESS",
+  FAILED: "FAILED",
+  CANCELED: "CANCELED",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type CompactTask_TaskStatus = typeof CompactTask_TaskStatus[keyof typeof CompactTask_TaskStatus];
 
 export function compactTask_TaskStatusFromJSON(object: any): CompactTask_TaskStatus {
   switch (object) {
@@ -466,12 +468,15 @@ export interface CompactionConfig {
   maxSubCompaction: number;
 }
 
-export enum CompactionConfig_CompactionMode {
-  UNSPECIFIED = 0,
-  RANGE = 1,
-  CONSISTENT_HASH = 2,
-  UNRECOGNIZED = -1,
-}
+export const CompactionConfig_CompactionMode = {
+  UNSPECIFIED: "UNSPECIFIED",
+  RANGE: "RANGE",
+  CONSISTENT_HASH: "CONSISTENT_HASH",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type CompactionConfig_CompactionMode =
+  typeof CompactionConfig_CompactionMode[keyof typeof CompactionConfig_CompactionMode];
 
 export function compactionConfig_CompactionModeFromJSON(object: any): CompactionConfig_CompactionMode {
   switch (object) {
@@ -510,58 +515,6 @@ function createBaseSstableInfo(): SstableInfo {
 }
 
 export const SstableInfo = {
-  encode(message: SstableInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint64(message.id);
-    }
-    if (message.keyRange !== undefined) {
-      KeyRange.encode(message.keyRange, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.fileSize !== 0) {
-      writer.uint32(24).uint64(message.fileSize);
-    }
-    writer.uint32(34).fork();
-    for (const v of message.tableIds) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SstableInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSstableInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.keyRange = KeyRange.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.fileSize = longToNumber(reader.uint64() as Long);
-          break;
-        case 4:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.tableIds.push(reader.uint32());
-            }
-          } else {
-            message.tableIds.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SstableInfo {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -601,37 +554,6 @@ function createBaseOverlappingLevel(): OverlappingLevel {
 }
 
 export const OverlappingLevel = {
-  encode(message: OverlappingLevel, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.subLevels) {
-      Level.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.totalFileSize !== 0) {
-      writer.uint32(16).uint64(message.totalFileSize);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): OverlappingLevel {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseOverlappingLevel();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.subLevels.push(Level.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.totalFileSize = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): OverlappingLevel {
     return {
       subLevels: Array.isArray(object?.subLevels) ? object.subLevels.map((e: any) => Level.fromJSON(e)) : [],
@@ -659,63 +581,14 @@ export const OverlappingLevel = {
 };
 
 function createBaseLevel(): Level {
-  return { levelIdx: 0, levelType: 0, tableInfos: [], totalFileSize: 0, subLevelId: 0 };
+  return { levelIdx: 0, levelType: LevelType.UNSPECIFIED, tableInfos: [], totalFileSize: 0, subLevelId: 0 };
 }
 
 export const Level = {
-  encode(message: Level, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.levelIdx !== 0) {
-      writer.uint32(8).uint32(message.levelIdx);
-    }
-    if (message.levelType !== 0) {
-      writer.uint32(16).int32(message.levelType);
-    }
-    for (const v of message.tableInfos) {
-      SstableInfo.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.totalFileSize !== 0) {
-      writer.uint32(32).uint64(message.totalFileSize);
-    }
-    if (message.subLevelId !== 0) {
-      writer.uint32(40).uint64(message.subLevelId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Level {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLevel();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.levelIdx = reader.uint32();
-          break;
-        case 2:
-          message.levelType = reader.int32() as any;
-          break;
-        case 3:
-          message.tableInfos.push(SstableInfo.decode(reader, reader.uint32()));
-          break;
-        case 4:
-          message.totalFileSize = longToNumber(reader.uint64() as Long);
-          break;
-        case 5:
-          message.subLevelId = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Level {
     return {
       levelIdx: isSet(object.levelIdx) ? Number(object.levelIdx) : 0,
-      levelType: isSet(object.levelType) ? levelTypeFromJSON(object.levelType) : 0,
+      levelType: isSet(object.levelType) ? levelTypeFromJSON(object.levelType) : LevelType.UNSPECIFIED,
       tableInfos: Array.isArray(object?.tableInfos) ? object.tableInfos.map((e: any) => SstableInfo.fromJSON(e)) : [],
       totalFileSize: isSet(object.totalFileSize) ? Number(object.totalFileSize) : 0,
       subLevelId: isSet(object.subLevelId) ? Number(object.subLevelId) : 0,
@@ -739,7 +612,7 @@ export const Level = {
   fromPartial<I extends Exact<DeepPartial<Level>, I>>(object: I): Level {
     const message = createBaseLevel();
     message.levelIdx = object.levelIdx ?? 0;
-    message.levelType = object.levelType ?? 0;
+    message.levelType = object.levelType ?? LevelType.UNSPECIFIED;
     message.tableInfos = object.tableInfos?.map((e) => SstableInfo.fromPartial(e)) || [];
     message.totalFileSize = object.totalFileSize ?? 0;
     message.subLevelId = object.subLevelId ?? 0;
@@ -748,51 +621,14 @@ export const Level = {
 };
 
 function createBaseInputLevel(): InputLevel {
-  return { levelIdx: 0, levelType: 0, tableInfos: [] };
+  return { levelIdx: 0, levelType: LevelType.UNSPECIFIED, tableInfos: [] };
 }
 
 export const InputLevel = {
-  encode(message: InputLevel, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.levelIdx !== 0) {
-      writer.uint32(8).uint32(message.levelIdx);
-    }
-    if (message.levelType !== 0) {
-      writer.uint32(16).int32(message.levelType);
-    }
-    for (const v of message.tableInfos) {
-      SstableInfo.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): InputLevel {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseInputLevel();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.levelIdx = reader.uint32();
-          break;
-        case 2:
-          message.levelType = reader.int32() as any;
-          break;
-        case 3:
-          message.tableInfos.push(SstableInfo.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): InputLevel {
     return {
       levelIdx: isSet(object.levelIdx) ? Number(object.levelIdx) : 0,
-      levelType: isSet(object.levelType) ? levelTypeFromJSON(object.levelType) : 0,
+      levelType: isSet(object.levelType) ? levelTypeFromJSON(object.levelType) : LevelType.UNSPECIFIED,
       tableInfos: Array.isArray(object?.tableInfos) ? object.tableInfos.map((e: any) => SstableInfo.fromJSON(e)) : [],
     };
   },
@@ -812,7 +648,7 @@ export const InputLevel = {
   fromPartial<I extends Exact<DeepPartial<InputLevel>, I>>(object: I): InputLevel {
     const message = createBaseInputLevel();
     message.levelIdx = object.levelIdx ?? 0;
-    message.levelType = object.levelType ?? 0;
+    message.levelType = object.levelType ?? LevelType.UNSPECIFIED;
     message.tableInfos = object.tableInfos?.map((e) => SstableInfo.fromPartial(e)) || [];
     return message;
   },
@@ -823,58 +659,6 @@ function createBaseLevelDelta(): LevelDelta {
 }
 
 export const LevelDelta = {
-  encode(message: LevelDelta, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.levelIdx !== 0) {
-      writer.uint32(8).uint32(message.levelIdx);
-    }
-    if (message.l0SubLevelId !== 0) {
-      writer.uint32(16).uint64(message.l0SubLevelId);
-    }
-    writer.uint32(26).fork();
-    for (const v of message.removedTableIds) {
-      writer.uint64(v);
-    }
-    writer.ldelim();
-    for (const v of message.insertedTableInfos) {
-      SstableInfo.encode(v!, writer.uint32(34).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): LevelDelta {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLevelDelta();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.levelIdx = reader.uint32();
-          break;
-        case 2:
-          message.l0SubLevelId = longToNumber(reader.uint64() as Long);
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.removedTableIds.push(longToNumber(reader.uint64() as Long));
-            }
-          } else {
-            message.removedTableIds.push(longToNumber(reader.uint64() as Long));
-          }
-          break;
-        case 4:
-          message.insertedTableInfos.push(SstableInfo.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): LevelDelta {
     return {
       levelIdx: isSet(object.levelIdx) ? Number(object.levelIdx) : 0,
@@ -918,37 +702,6 @@ function createBaseUncommittedEpoch(): UncommittedEpoch {
 }
 
 export const UncommittedEpoch = {
-  encode(message: UncommittedEpoch, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.epoch !== 0) {
-      writer.uint32(8).uint64(message.epoch);
-    }
-    for (const v of message.tables) {
-      SstableInfo.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UncommittedEpoch {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUncommittedEpoch();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.epoch = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.tables.push(SstableInfo.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UncommittedEpoch {
     return {
       epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
@@ -980,58 +733,6 @@ function createBaseHummockVersion(): HummockVersion {
 }
 
 export const HummockVersion = {
-  encode(message: HummockVersion, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint64(message.id);
-    }
-    Object.entries(message.levels).forEach(([key, value]) => {
-      HummockVersion_LevelsEntry.encode({ key: key as any, value }, writer.uint32(18).fork()).ldelim();
-    });
-    if (message.maxCommittedEpoch !== 0) {
-      writer.uint32(32).uint64(message.maxCommittedEpoch);
-    }
-    if (message.safeEpoch !== 0) {
-      writer.uint32(40).uint64(message.safeEpoch);
-    }
-    if (message.maxCurrentEpoch !== 0) {
-      writer.uint32(48).uint64(message.maxCurrentEpoch);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HummockVersion {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHummockVersion();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          const entry2 = HummockVersion_LevelsEntry.decode(reader, reader.uint32());
-          if (entry2.value !== undefined) {
-            message.levels[entry2.key] = entry2.value;
-          }
-          break;
-        case 4:
-          message.maxCommittedEpoch = longToNumber(reader.uint64() as Long);
-          break;
-        case 5:
-          message.safeEpoch = longToNumber(reader.uint64() as Long);
-          break;
-        case 6:
-          message.maxCurrentEpoch = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HummockVersion {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -1086,37 +787,6 @@ function createBaseHummockVersion_Levels(): HummockVersion_Levels {
 }
 
 export const HummockVersion_Levels = {
-  encode(message: HummockVersion_Levels, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.levels) {
-      Level.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.l0 !== undefined) {
-      OverlappingLevel.encode(message.l0, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HummockVersion_Levels {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHummockVersion_Levels();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.levels.push(Level.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.l0 = OverlappingLevel.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HummockVersion_Levels {
     return {
       levels: Array.isArray(object?.levels) ? object.levels.map((e: any) => Level.fromJSON(e)) : [],
@@ -1148,37 +818,6 @@ function createBaseHummockVersion_LevelsEntry(): HummockVersion_LevelsEntry {
 }
 
 export const HummockVersion_LevelsEntry = {
-  encode(message: HummockVersion_LevelsEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint64(message.key);
-    }
-    if (message.value !== undefined) {
-      HummockVersion_Levels.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HummockVersion_LevelsEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHummockVersion_LevelsEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.value = HummockVersion_Levels.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HummockVersion_LevelsEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -1217,70 +856,6 @@ function createBaseHummockVersionDelta(): HummockVersionDelta {
 }
 
 export const HummockVersionDelta = {
-  encode(message: HummockVersionDelta, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint64(message.id);
-    }
-    if (message.prevId !== 0) {
-      writer.uint32(16).uint64(message.prevId);
-    }
-    Object.entries(message.levelDeltas).forEach(([key, value]) => {
-      HummockVersionDelta_LevelDeltasEntry.encode({ key: key as any, value }, writer.uint32(26).fork()).ldelim();
-    });
-    if (message.maxCommittedEpoch !== 0) {
-      writer.uint32(32).uint64(message.maxCommittedEpoch);
-    }
-    if (message.safeEpoch !== 0) {
-      writer.uint32(40).uint64(message.safeEpoch);
-    }
-    if (message.trivialMove === true) {
-      writer.uint32(48).bool(message.trivialMove);
-    }
-    if (message.maxCurrentEpoch !== 0) {
-      writer.uint32(56).uint64(message.maxCurrentEpoch);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HummockVersionDelta {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHummockVersionDelta();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.prevId = longToNumber(reader.uint64() as Long);
-          break;
-        case 3:
-          const entry3 = HummockVersionDelta_LevelDeltasEntry.decode(reader, reader.uint32());
-          if (entry3.value !== undefined) {
-            message.levelDeltas[entry3.key] = entry3.value;
-          }
-          break;
-        case 4:
-          message.maxCommittedEpoch = longToNumber(reader.uint64() as Long);
-          break;
-        case 5:
-          message.safeEpoch = longToNumber(reader.uint64() as Long);
-          break;
-        case 6:
-          message.trivialMove = reader.bool();
-          break;
-        case 7:
-          message.maxCurrentEpoch = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HummockVersionDelta {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -1343,31 +918,6 @@ function createBaseHummockVersionDelta_LevelDeltas(): HummockVersionDelta_LevelD
 }
 
 export const HummockVersionDelta_LevelDeltas = {
-  encode(message: HummockVersionDelta_LevelDeltas, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.levelDeltas) {
-      LevelDelta.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HummockVersionDelta_LevelDeltas {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHummockVersionDelta_LevelDeltas();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.levelDeltas.push(LevelDelta.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HummockVersionDelta_LevelDeltas {
     return {
       levelDeltas: Array.isArray(object?.levelDeltas) ? object.levelDeltas.map((e: any) => LevelDelta.fromJSON(e)) : [],
@@ -1398,37 +948,6 @@ function createBaseHummockVersionDelta_LevelDeltasEntry(): HummockVersionDelta_L
 }
 
 export const HummockVersionDelta_LevelDeltasEntry = {
-  encode(message: HummockVersionDelta_LevelDeltasEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint64(message.key);
-    }
-    if (message.value !== undefined) {
-      HummockVersionDelta_LevelDeltas.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HummockVersionDelta_LevelDeltasEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHummockVersionDelta_LevelDeltasEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.value = HummockVersionDelta_LevelDeltas.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HummockVersionDelta_LevelDeltasEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -1461,31 +980,6 @@ function createBaseHummockVersionDeltas(): HummockVersionDeltas {
 }
 
 export const HummockVersionDeltas = {
-  encode(message: HummockVersionDeltas, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.versionDeltas) {
-      HummockVersionDelta.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HummockVersionDeltas {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHummockVersionDeltas();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.versionDeltas.push(HummockVersionDelta.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HummockVersionDeltas {
     return {
       versionDeltas: Array.isArray(object?.versionDeltas)
@@ -1516,37 +1010,6 @@ function createBaseHummockSnapshot(): HummockSnapshot {
 }
 
 export const HummockSnapshot = {
-  encode(message: HummockSnapshot, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.committedEpoch !== 0) {
-      writer.uint32(8).uint64(message.committedEpoch);
-    }
-    if (message.currentEpoch !== 0) {
-      writer.uint32(16).uint64(message.currentEpoch);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HummockSnapshot {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHummockSnapshot();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.committedEpoch = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.currentEpoch = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HummockSnapshot {
     return {
       committedEpoch: isSet(object.committedEpoch) ? Number(object.committedEpoch) : 0,
@@ -1574,37 +1037,6 @@ function createBasePinVersionRequest(): PinVersionRequest {
 }
 
 export const PinVersionRequest = {
-  encode(message: PinVersionRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.contextId !== 0) {
-      writer.uint32(8).uint32(message.contextId);
-    }
-    if (message.lastPinned !== 0) {
-      writer.uint32(16).uint64(message.lastPinned);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): PinVersionRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePinVersionRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.contextId = reader.uint32();
-          break;
-        case 2:
-          message.lastPinned = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): PinVersionRequest {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
@@ -1632,46 +1064,6 @@ function createBasePinVersionResponse(): PinVersionResponse {
 }
 
 export const PinVersionResponse = {
-  encode(message: PinVersionResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.payload?.$case === "versionDeltas") {
-      PinVersionResponse_HummockVersionDeltas.encode(message.payload.versionDeltas, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.payload?.$case === "pinnedVersion") {
-      HummockVersion.encode(message.payload.pinnedVersion, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): PinVersionResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePinVersionResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.payload = {
-            $case: "versionDeltas",
-            versionDeltas: PinVersionResponse_HummockVersionDeltas.decode(reader, reader.uint32()),
-          };
-          break;
-        case 3:
-          message.payload = { $case: "pinnedVersion", pinnedVersion: HummockVersion.decode(reader, reader.uint32()) };
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): PinVersionResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1732,31 +1124,6 @@ function createBasePinVersionResponse_HummockVersionDeltas(): PinVersionResponse
 }
 
 export const PinVersionResponse_HummockVersionDeltas = {
-  encode(message: PinVersionResponse_HummockVersionDeltas, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.delta) {
-      HummockVersionDelta.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): PinVersionResponse_HummockVersionDeltas {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePinVersionResponse_HummockVersionDeltas();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.delta.push(HummockVersionDelta.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): PinVersionResponse_HummockVersionDeltas {
     return { delta: Array.isArray(object?.delta) ? object.delta.map((e: any) => HummockVersionDelta.fromJSON(e)) : [] };
   },
@@ -1785,37 +1152,6 @@ function createBaseUnpinVersionBeforeRequest(): UnpinVersionBeforeRequest {
 }
 
 export const UnpinVersionBeforeRequest = {
-  encode(message: UnpinVersionBeforeRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.contextId !== 0) {
-      writer.uint32(8).uint32(message.contextId);
-    }
-    if (message.unpinVersionBefore !== 0) {
-      writer.uint32(16).uint64(message.unpinVersionBefore);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UnpinVersionBeforeRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUnpinVersionBeforeRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.contextId = reader.uint32();
-          break;
-        case 2:
-          message.unpinVersionBefore = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UnpinVersionBeforeRequest {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
@@ -1843,31 +1179,6 @@ function createBaseUnpinVersionBeforeResponse(): UnpinVersionBeforeResponse {
 }
 
 export const UnpinVersionBeforeResponse = {
-  encode(message: UnpinVersionBeforeResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UnpinVersionBeforeResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUnpinVersionBeforeResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UnpinVersionBeforeResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -1892,31 +1203,6 @@ function createBaseUnpinVersionRequest(): UnpinVersionRequest {
 }
 
 export const UnpinVersionRequest = {
-  encode(message: UnpinVersionRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.contextId !== 0) {
-      writer.uint32(8).uint32(message.contextId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UnpinVersionRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUnpinVersionRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.contextId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UnpinVersionRequest {
     return { contextId: isSet(object.contextId) ? Number(object.contextId) : 0 };
   },
@@ -1939,31 +1225,6 @@ function createBaseUnpinVersionResponse(): UnpinVersionResponse {
 }
 
 export const UnpinVersionResponse = {
-  encode(message: UnpinVersionResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UnpinVersionResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUnpinVersionResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UnpinVersionResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -1988,31 +1249,6 @@ function createBasePinSnapshotRequest(): PinSnapshotRequest {
 }
 
 export const PinSnapshotRequest = {
-  encode(message: PinSnapshotRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.contextId !== 0) {
-      writer.uint32(8).uint32(message.contextId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): PinSnapshotRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePinSnapshotRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.contextId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): PinSnapshotRequest {
     return { contextId: isSet(object.contextId) ? Number(object.contextId) : 0 };
   },
@@ -2035,37 +1271,6 @@ function createBasePinSnapshotResponse(): PinSnapshotResponse {
 }
 
 export const PinSnapshotResponse = {
-  encode(message: PinSnapshotResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.snapshot !== undefined) {
-      HummockSnapshot.encode(message.snapshot, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): PinSnapshotResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePinSnapshotResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.snapshot = HummockSnapshot.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): PinSnapshotResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -2098,25 +1303,6 @@ function createBaseGetEpochRequest(): GetEpochRequest {
 }
 
 export const GetEpochRequest = {
-  encode(_: GetEpochRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetEpochRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetEpochRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): GetEpochRequest {
     return {};
   },
@@ -2137,37 +1323,6 @@ function createBaseGetEpochResponse(): GetEpochResponse {
 }
 
 export const GetEpochResponse = {
-  encode(message: GetEpochResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.snapshot !== undefined) {
-      HummockSnapshot.encode(message.snapshot, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetEpochResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetEpochResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.snapshot = HummockSnapshot.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetEpochResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -2200,31 +1355,6 @@ function createBaseUnpinSnapshotRequest(): UnpinSnapshotRequest {
 }
 
 export const UnpinSnapshotRequest = {
-  encode(message: UnpinSnapshotRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.contextId !== 0) {
-      writer.uint32(8).uint32(message.contextId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UnpinSnapshotRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUnpinSnapshotRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.contextId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UnpinSnapshotRequest {
     return { contextId: isSet(object.contextId) ? Number(object.contextId) : 0 };
   },
@@ -2247,31 +1377,6 @@ function createBaseUnpinSnapshotResponse(): UnpinSnapshotResponse {
 }
 
 export const UnpinSnapshotResponse = {
-  encode(message: UnpinSnapshotResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UnpinSnapshotResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUnpinSnapshotResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UnpinSnapshotResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -2296,37 +1401,6 @@ function createBaseUnpinSnapshotBeforeRequest(): UnpinSnapshotBeforeRequest {
 }
 
 export const UnpinSnapshotBeforeRequest = {
-  encode(message: UnpinSnapshotBeforeRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.contextId !== 0) {
-      writer.uint32(8).uint32(message.contextId);
-    }
-    if (message.minSnapshot !== undefined) {
-      HummockSnapshot.encode(message.minSnapshot, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UnpinSnapshotBeforeRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUnpinSnapshotBeforeRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.contextId = reader.uint32();
-          break;
-        case 3:
-          message.minSnapshot = HummockSnapshot.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UnpinSnapshotBeforeRequest {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
@@ -2357,31 +1431,6 @@ function createBaseUnpinSnapshotBeforeResponse(): UnpinSnapshotBeforeResponse {
 }
 
 export const UnpinSnapshotBeforeResponse = {
-  encode(message: UnpinSnapshotBeforeResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): UnpinSnapshotBeforeResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseUnpinSnapshotBeforeResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): UnpinSnapshotBeforeResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -2406,43 +1455,6 @@ function createBaseKeyRange(): KeyRange {
 }
 
 export const KeyRange = {
-  encode(message: KeyRange, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.left.length !== 0) {
-      writer.uint32(10).bytes(message.left);
-    }
-    if (message.right.length !== 0) {
-      writer.uint32(18).bytes(message.right);
-    }
-    if (message.inf === true) {
-      writer.uint32(24).bool(message.inf);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): KeyRange {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseKeyRange();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.left = reader.bytes();
-          break;
-        case 2:
-          message.right = reader.bytes();
-          break;
-        case 3:
-          message.inf = reader.bool();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): KeyRange {
     return {
       left: isSet(object.left) ? bytesFromBase64(object.left) : new Uint8Array(),
@@ -2475,31 +1487,6 @@ function createBaseTableOption(): TableOption {
 }
 
 export const TableOption = {
-  encode(message: TableOption, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.retentionSeconds !== 0) {
-      writer.uint32(8).uint32(message.retentionSeconds);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TableOption {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTableOption();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.retentionSeconds = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TableOption {
     return { retentionSeconds: isSet(object.retentionSeconds) ? Number(object.retentionSeconds) : 0 };
   },
@@ -2526,7 +1513,7 @@ function createBaseCompactTask(): CompactTask {
     taskId: 0,
     targetLevel: 0,
     gcDeleteKeys: false,
-    taskStatus: 0,
+    taskStatus: CompactTask_TaskStatus.PENDING,
     compactionGroupId: 0,
     existingTableIds: [],
     compressionAlgorithm: 0,
@@ -2539,133 +1526,6 @@ function createBaseCompactTask(): CompactTask {
 }
 
 export const CompactTask = {
-  encode(message: CompactTask, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.inputSsts) {
-      InputLevel.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.splits) {
-      KeyRange.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.watermark !== 0) {
-      writer.uint32(24).uint64(message.watermark);
-    }
-    for (const v of message.sortedOutputSsts) {
-      SstableInfo.encode(v!, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.taskId !== 0) {
-      writer.uint32(40).uint64(message.taskId);
-    }
-    if (message.targetLevel !== 0) {
-      writer.uint32(48).uint32(message.targetLevel);
-    }
-    if (message.gcDeleteKeys === true) {
-      writer.uint32(56).bool(message.gcDeleteKeys);
-    }
-    if (message.taskStatus !== 0) {
-      writer.uint32(72).int32(message.taskStatus);
-    }
-    if (message.compactionGroupId !== 0) {
-      writer.uint32(96).uint64(message.compactionGroupId);
-    }
-    writer.uint32(106).fork();
-    for (const v of message.existingTableIds) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.compressionAlgorithm !== 0) {
-      writer.uint32(112).uint32(message.compressionAlgorithm);
-    }
-    if (message.targetFileSize !== 0) {
-      writer.uint32(120).uint64(message.targetFileSize);
-    }
-    if (message.compactionFilterMask !== 0) {
-      writer.uint32(128).uint32(message.compactionFilterMask);
-    }
-    Object.entries(message.tableOptions).forEach(([key, value]) => {
-      CompactTask_TableOptionsEntry.encode({ key: key as any, value }, writer.uint32(138).fork()).ldelim();
-    });
-    if (message.currentEpochTime !== 0) {
-      writer.uint32(144).uint64(message.currentEpochTime);
-    }
-    if (message.targetSubLevelId !== 0) {
-      writer.uint32(152).uint64(message.targetSubLevelId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CompactTask {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCompactTask();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.inputSsts.push(InputLevel.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.splits.push(KeyRange.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.watermark = longToNumber(reader.uint64() as Long);
-          break;
-        case 4:
-          message.sortedOutputSsts.push(SstableInfo.decode(reader, reader.uint32()));
-          break;
-        case 5:
-          message.taskId = longToNumber(reader.uint64() as Long);
-          break;
-        case 6:
-          message.targetLevel = reader.uint32();
-          break;
-        case 7:
-          message.gcDeleteKeys = reader.bool();
-          break;
-        case 9:
-          message.taskStatus = reader.int32() as any;
-          break;
-        case 12:
-          message.compactionGroupId = longToNumber(reader.uint64() as Long);
-          break;
-        case 13:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.existingTableIds.push(reader.uint32());
-            }
-          } else {
-            message.existingTableIds.push(reader.uint32());
-          }
-          break;
-        case 14:
-          message.compressionAlgorithm = reader.uint32();
-          break;
-        case 15:
-          message.targetFileSize = longToNumber(reader.uint64() as Long);
-          break;
-        case 16:
-          message.compactionFilterMask = reader.uint32();
-          break;
-        case 17:
-          const entry17 = CompactTask_TableOptionsEntry.decode(reader, reader.uint32());
-          if (entry17.value !== undefined) {
-            message.tableOptions[entry17.key] = entry17.value;
-          }
-          break;
-        case 18:
-          message.currentEpochTime = longToNumber(reader.uint64() as Long);
-          break;
-        case 19:
-          message.targetSubLevelId = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CompactTask {
     return {
       inputSsts: Array.isArray(object?.inputSsts) ? object.inputSsts.map((e: any) => InputLevel.fromJSON(e)) : [],
@@ -2677,7 +1537,9 @@ export const CompactTask = {
       taskId: isSet(object.taskId) ? Number(object.taskId) : 0,
       targetLevel: isSet(object.targetLevel) ? Number(object.targetLevel) : 0,
       gcDeleteKeys: isSet(object.gcDeleteKeys) ? Boolean(object.gcDeleteKeys) : false,
-      taskStatus: isSet(object.taskStatus) ? compactTask_TaskStatusFromJSON(object.taskStatus) : 0,
+      taskStatus: isSet(object.taskStatus)
+        ? compactTask_TaskStatusFromJSON(object.taskStatus)
+        : CompactTask_TaskStatus.PENDING,
       compactionGroupId: isSet(object.compactionGroupId) ? Number(object.compactionGroupId) : 0,
       existingTableIds: Array.isArray(object?.existingTableIds)
         ? object.existingTableIds.map((e: any) => Number(e))
@@ -2747,7 +1609,7 @@ export const CompactTask = {
     message.taskId = object.taskId ?? 0;
     message.targetLevel = object.targetLevel ?? 0;
     message.gcDeleteKeys = object.gcDeleteKeys ?? false;
-    message.taskStatus = object.taskStatus ?? 0;
+    message.taskStatus = object.taskStatus ?? CompactTask_TaskStatus.PENDING;
     message.compactionGroupId = object.compactionGroupId ?? 0;
     message.existingTableIds = object.existingTableIds?.map((e) => e) || [];
     message.compressionAlgorithm = object.compressionAlgorithm ?? 0;
@@ -2773,37 +1635,6 @@ function createBaseCompactTask_TableOptionsEntry(): CompactTask_TableOptionsEntr
 }
 
 export const CompactTask_TableOptionsEntry = {
-  encode(message: CompactTask_TableOptionsEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      TableOption.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CompactTask_TableOptionsEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCompactTask_TableOptionsEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = TableOption.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CompactTask_TableOptionsEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -2835,37 +1666,6 @@ function createBaseLevelHandler(): LevelHandler {
 }
 
 export const LevelHandler = {
-  encode(message: LevelHandler, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.level !== 0) {
-      writer.uint32(8).uint32(message.level);
-    }
-    for (const v of message.tasks) {
-      LevelHandler_RunningCompactTask.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): LevelHandler {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLevelHandler();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.level = reader.uint32();
-          break;
-        case 3:
-          message.tasks.push(LevelHandler_RunningCompactTask.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): LevelHandler {
     return {
       level: isSet(object.level) ? Number(object.level) : 0,
@@ -2899,58 +1699,6 @@ function createBaseLevelHandler_RunningCompactTask(): LevelHandler_RunningCompac
 }
 
 export const LevelHandler_RunningCompactTask = {
-  encode(message: LevelHandler_RunningCompactTask, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.taskId !== 0) {
-      writer.uint32(8).uint64(message.taskId);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.ssts) {
-      writer.uint64(v);
-    }
-    writer.ldelim();
-    if (message.totalFileSize !== 0) {
-      writer.uint32(24).uint64(message.totalFileSize);
-    }
-    if (message.targetLevel !== 0) {
-      writer.uint32(32).uint32(message.targetLevel);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): LevelHandler_RunningCompactTask {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLevelHandler_RunningCompactTask();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.taskId = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.ssts.push(longToNumber(reader.uint64() as Long));
-            }
-          } else {
-            message.ssts.push(longToNumber(reader.uint64() as Long));
-          }
-          break;
-        case 3:
-          message.totalFileSize = longToNumber(reader.uint64() as Long);
-          break;
-        case 4:
-          message.targetLevel = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): LevelHandler_RunningCompactTask {
     return {
       taskId: isSet(object.taskId) ? Number(object.taskId) : 0,
@@ -2990,37 +1738,6 @@ function createBaseCompactStatus(): CompactStatus {
 }
 
 export const CompactStatus = {
-  encode(message: CompactStatus, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.compactionGroupId !== 0) {
-      writer.uint32(8).uint64(message.compactionGroupId);
-    }
-    for (const v of message.levelHandlers) {
-      LevelHandler.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CompactStatus {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCompactStatus();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.compactionGroupId = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.levelHandlers.push(LevelHandler.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CompactStatus {
     return {
       compactionGroupId: isSet(object.compactionGroupId) ? Number(object.compactionGroupId) : 0,
@@ -3054,61 +1771,6 @@ function createBaseCompactionGroup(): CompactionGroup {
 }
 
 export const CompactionGroup = {
-  encode(message: CompactionGroup, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint64(message.id);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.memberTableIds) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.compactionConfig !== undefined) {
-      CompactionConfig.encode(message.compactionConfig, writer.uint32(26).fork()).ldelim();
-    }
-    Object.entries(message.tableIdToOptions).forEach(([key, value]) => {
-      CompactionGroup_TableIdToOptionsEntry.encode({ key: key as any, value }, writer.uint32(34).fork()).ldelim();
-    });
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CompactionGroup {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCompactionGroup();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.memberTableIds.push(reader.uint32());
-            }
-          } else {
-            message.memberTableIds.push(reader.uint32());
-          }
-          break;
-        case 3:
-          message.compactionConfig = CompactionConfig.decode(reader, reader.uint32());
-          break;
-        case 4:
-          const entry4 = CompactionGroup_TableIdToOptionsEntry.decode(reader, reader.uint32());
-          if (entry4.value !== undefined) {
-            message.tableIdToOptions[entry4.key] = entry4.value;
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CompactionGroup {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -3167,37 +1829,6 @@ function createBaseCompactionGroup_TableIdToOptionsEntry(): CompactionGroup_Tabl
 }
 
 export const CompactionGroup_TableIdToOptionsEntry = {
-  encode(message: CompactionGroup_TableIdToOptionsEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      TableOption.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CompactionGroup_TableIdToOptionsEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCompactionGroup_TableIdToOptionsEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = TableOption.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CompactionGroup_TableIdToOptionsEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -3229,37 +1860,6 @@ function createBaseCompactTaskAssignment(): CompactTaskAssignment {
 }
 
 export const CompactTaskAssignment = {
-  encode(message: CompactTaskAssignment, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.compactTask !== undefined) {
-      CompactTask.encode(message.compactTask, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.contextId !== 0) {
-      writer.uint32(16).uint32(message.contextId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CompactTaskAssignment {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCompactTaskAssignment();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.compactTask = CompactTask.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.contextId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CompactTaskAssignment {
     return {
       compactTask: isSet(object.compactTask) ? CompactTask.fromJSON(object.compactTask) : undefined,
@@ -3290,25 +1890,6 @@ function createBaseGetCompactionTasksRequest(): GetCompactionTasksRequest {
 }
 
 export const GetCompactionTasksRequest = {
-  encode(_: GetCompactionTasksRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetCompactionTasksRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetCompactionTasksRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): GetCompactionTasksRequest {
     return {};
   },
@@ -3329,37 +1910,6 @@ function createBaseGetCompactionTasksResponse(): GetCompactionTasksResponse {
 }
 
 export const GetCompactionTasksResponse = {
-  encode(message: GetCompactionTasksResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.compactTask !== undefined) {
-      CompactTask.encode(message.compactTask, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetCompactionTasksResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetCompactionTasksResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.compactTask = CompactTask.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetCompactionTasksResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -3392,37 +1942,6 @@ function createBaseReportCompactionTasksRequest(): ReportCompactionTasksRequest 
 }
 
 export const ReportCompactionTasksRequest = {
-  encode(message: ReportCompactionTasksRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.contextId !== 0) {
-      writer.uint32(8).uint32(message.contextId);
-    }
-    if (message.compactTask !== undefined) {
-      CompactTask.encode(message.compactTask, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ReportCompactionTasksRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseReportCompactionTasksRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.contextId = reader.uint32();
-          break;
-        case 2:
-          message.compactTask = CompactTask.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ReportCompactionTasksRequest {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
@@ -3453,31 +1972,6 @@ function createBaseReportCompactionTasksResponse(): ReportCompactionTasksRespons
 }
 
 export const ReportCompactionTasksResponse = {
-  encode(message: ReportCompactionTasksResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ReportCompactionTasksResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseReportCompactionTasksResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ReportCompactionTasksResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -3504,37 +1998,6 @@ function createBaseHummockPinnedVersion(): HummockPinnedVersion {
 }
 
 export const HummockPinnedVersion = {
-  encode(message: HummockPinnedVersion, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.contextId !== 0) {
-      writer.uint32(8).uint32(message.contextId);
-    }
-    if (message.minPinnedId !== 0) {
-      writer.uint32(16).uint64(message.minPinnedId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HummockPinnedVersion {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHummockPinnedVersion();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.contextId = reader.uint32();
-          break;
-        case 2:
-          message.minPinnedId = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HummockPinnedVersion {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
@@ -3562,37 +2025,6 @@ function createBaseHummockPinnedSnapshot(): HummockPinnedSnapshot {
 }
 
 export const HummockPinnedSnapshot = {
-  encode(message: HummockPinnedSnapshot, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.contextId !== 0) {
-      writer.uint32(8).uint32(message.contextId);
-    }
-    if (message.minimalPinnedSnapshot !== 0) {
-      writer.uint32(16).uint64(message.minimalPinnedSnapshot);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HummockPinnedSnapshot {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHummockPinnedSnapshot();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.contextId = reader.uint32();
-          break;
-        case 2:
-          message.minimalPinnedSnapshot = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HummockPinnedSnapshot {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
@@ -3621,31 +2053,6 @@ function createBaseGetNewSstIdsRequest(): GetNewSstIdsRequest {
 }
 
 export const GetNewSstIdsRequest = {
-  encode(message: GetNewSstIdsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.number !== 0) {
-      writer.uint32(8).uint32(message.number);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetNewSstIdsRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetNewSstIdsRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.number = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetNewSstIdsRequest {
     return { number: isSet(object.number) ? Number(object.number) : 0 };
   },
@@ -3668,43 +2075,6 @@ function createBaseGetNewSstIdsResponse(): GetNewSstIdsResponse {
 }
 
 export const GetNewSstIdsResponse = {
-  encode(message: GetNewSstIdsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.startId !== 0) {
-      writer.uint32(16).uint64(message.startId);
-    }
-    if (message.endId !== 0) {
-      writer.uint32(24).uint64(message.endId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetNewSstIdsResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetNewSstIdsResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.startId = longToNumber(reader.uint64() as Long);
-          break;
-        case 3:
-          message.endId = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetNewSstIdsResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -3737,37 +2107,6 @@ function createBaseSubscribeCompactTasksRequest(): SubscribeCompactTasksRequest 
 }
 
 export const SubscribeCompactTasksRequest = {
-  encode(message: SubscribeCompactTasksRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.contextId !== 0) {
-      writer.uint32(8).uint32(message.contextId);
-    }
-    if (message.maxConcurrentTaskNumber !== 0) {
-      writer.uint32(16).uint64(message.maxConcurrentTaskNumber);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SubscribeCompactTasksRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSubscribeCompactTasksRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.contextId = reader.uint32();
-          break;
-        case 2:
-          message.maxConcurrentTaskNumber = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SubscribeCompactTasksRequest {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
@@ -3796,55 +2135,6 @@ function createBaseValidationTask(): ValidationTask {
 }
 
 export const ValidationTask = {
-  encode(message: ValidationTask, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.sstIds) {
-      writer.uint64(v);
-    }
-    writer.ldelim();
-    Object.entries(message.sstIdToWorkerId).forEach(([key, value]) => {
-      ValidationTask_SstIdToWorkerIdEntry.encode({ key: key as any, value }, writer.uint32(18).fork()).ldelim();
-    });
-    if (message.epoch !== 0) {
-      writer.uint32(24).uint64(message.epoch);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ValidationTask {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseValidationTask();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.sstIds.push(longToNumber(reader.uint64() as Long));
-            }
-          } else {
-            message.sstIds.push(longToNumber(reader.uint64() as Long));
-          }
-          break;
-        case 2:
-          const entry2 = ValidationTask_SstIdToWorkerIdEntry.decode(reader, reader.uint32());
-          if (entry2.value !== undefined) {
-            message.sstIdToWorkerId[entry2.key] = entry2.value;
-          }
-          break;
-        case 3:
-          message.epoch = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ValidationTask {
     return {
       sstIds: Array.isArray(object?.sstIds) ? object.sstIds.map((e: any) => Number(e)) : [],
@@ -3897,37 +2187,6 @@ function createBaseValidationTask_SstIdToWorkerIdEntry(): ValidationTask_SstIdTo
 }
 
 export const ValidationTask_SstIdToWorkerIdEntry = {
-  encode(message: ValidationTask_SstIdToWorkerIdEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint64(message.key);
-    }
-    if (message.value !== 0) {
-      writer.uint32(16).uint32(message.value);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ValidationTask_SstIdToWorkerIdEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseValidationTask_SstIdToWorkerIdEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.value = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ValidationTask_SstIdToWorkerIdEntry {
     return { key: isSet(object.key) ? Number(object.key) : 0, value: isSet(object.value) ? Number(object.value) : 0 };
   },
@@ -3954,49 +2213,6 @@ function createBaseSubscribeCompactTasksResponse(): SubscribeCompactTasksRespons
 }
 
 export const SubscribeCompactTasksResponse = {
-  encode(message: SubscribeCompactTasksResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.task?.$case === "compactTask") {
-      CompactTask.encode(message.task.compactTask, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.task?.$case === "vacuumTask") {
-      VacuumTask.encode(message.task.vacuumTask, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.task?.$case === "fullScanTask") {
-      FullScanTask.encode(message.task.fullScanTask, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.task?.$case === "validationTask") {
-      ValidationTask.encode(message.task.validationTask, writer.uint32(34).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SubscribeCompactTasksResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSubscribeCompactTasksResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.task = { $case: "compactTask", compactTask: CompactTask.decode(reader, reader.uint32()) };
-          break;
-        case 2:
-          message.task = { $case: "vacuumTask", vacuumTask: VacuumTask.decode(reader, reader.uint32()) };
-          break;
-        case 3:
-          message.task = { $case: "fullScanTask", fullScanTask: FullScanTask.decode(reader, reader.uint32()) };
-          break;
-        case 4:
-          message.task = { $case: "validationTask", validationTask: ValidationTask.decode(reader, reader.uint32()) };
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SubscribeCompactTasksResponse {
     return {
       task: isSet(object.compactTask)
@@ -4067,40 +2283,6 @@ function createBaseVacuumTask(): VacuumTask {
 }
 
 export const VacuumTask = {
-  encode(message: VacuumTask, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.sstableIds) {
-      writer.uint64(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): VacuumTask {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseVacuumTask();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.sstableIds.push(longToNumber(reader.uint64() as Long));
-            }
-          } else {
-            message.sstableIds.push(longToNumber(reader.uint64() as Long));
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): VacuumTask {
     return { sstableIds: Array.isArray(object?.sstableIds) ? object.sstableIds.map((e: any) => Number(e)) : [] };
   },
@@ -4127,31 +2309,6 @@ function createBaseFullScanTask(): FullScanTask {
 }
 
 export const FullScanTask = {
-  encode(message: FullScanTask, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.sstRetentionTimeSec !== 0) {
-      writer.uint32(8).uint64(message.sstRetentionTimeSec);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): FullScanTask {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseFullScanTask();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.sstRetentionTimeSec = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): FullScanTask {
     return { sstRetentionTimeSec: isSet(object.sstRetentionTimeSec) ? Number(object.sstRetentionTimeSec) : 0 };
   },
@@ -4174,31 +2331,6 @@ function createBaseReportVacuumTaskRequest(): ReportVacuumTaskRequest {
 }
 
 export const ReportVacuumTaskRequest = {
-  encode(message: ReportVacuumTaskRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.vacuumTask !== undefined) {
-      VacuumTask.encode(message.vacuumTask, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ReportVacuumTaskRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseReportVacuumTaskRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.vacuumTask = VacuumTask.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ReportVacuumTaskRequest {
     return { vacuumTask: isSet(object.vacuumTask) ? VacuumTask.fromJSON(object.vacuumTask) : undefined };
   },
@@ -4224,31 +2356,6 @@ function createBaseReportVacuumTaskResponse(): ReportVacuumTaskResponse {
 }
 
 export const ReportVacuumTaskResponse = {
-  encode(message: ReportVacuumTaskResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ReportVacuumTaskResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseReportVacuumTaskResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ReportVacuumTaskResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -4273,25 +2380,6 @@ function createBaseGetCompactionGroupsRequest(): GetCompactionGroupsRequest {
 }
 
 export const GetCompactionGroupsRequest = {
-  encode(_: GetCompactionGroupsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetCompactionGroupsRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetCompactionGroupsRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): GetCompactionGroupsRequest {
     return {};
   },
@@ -4312,37 +2400,6 @@ function createBaseGetCompactionGroupsResponse(): GetCompactionGroupsResponse {
 }
 
 export const GetCompactionGroupsResponse = {
-  encode(message: GetCompactionGroupsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.compactionGroups) {
-      CompactionGroup.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetCompactionGroupsResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetCompactionGroupsResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.compactionGroups.push(CompactionGroup.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetCompactionGroupsResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -4378,64 +2435,6 @@ function createBaseTriggerManualCompactionRequest(): TriggerManualCompactionRequ
 }
 
 export const TriggerManualCompactionRequest = {
-  encode(message: TriggerManualCompactionRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.compactionGroupId !== 0) {
-      writer.uint32(8).uint64(message.compactionGroupId);
-    }
-    if (message.keyRange !== undefined) {
-      KeyRange.encode(message.keyRange, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.tableId !== 0) {
-      writer.uint32(24).uint32(message.tableId);
-    }
-    if (message.level !== 0) {
-      writer.uint32(32).uint32(message.level);
-    }
-    writer.uint32(42).fork();
-    for (const v of message.sstIds) {
-      writer.uint64(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TriggerManualCompactionRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTriggerManualCompactionRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.compactionGroupId = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.keyRange = KeyRange.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.tableId = reader.uint32();
-          break;
-        case 4:
-          message.level = reader.uint32();
-          break;
-        case 5:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.sstIds.push(longToNumber(reader.uint64() as Long));
-            }
-          } else {
-            message.sstIds.push(longToNumber(reader.uint64() as Long));
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TriggerManualCompactionRequest {
     return {
       compactionGroupId: isSet(object.compactionGroupId) ? Number(object.compactionGroupId) : 0,
@@ -4480,31 +2479,6 @@ function createBaseTriggerManualCompactionResponse(): TriggerManualCompactionRes
 }
 
 export const TriggerManualCompactionResponse = {
-  encode(message: TriggerManualCompactionResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TriggerManualCompactionResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTriggerManualCompactionResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TriggerManualCompactionResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -4531,40 +2505,6 @@ function createBaseReportFullScanTaskRequest(): ReportFullScanTaskRequest {
 }
 
 export const ReportFullScanTaskRequest = {
-  encode(message: ReportFullScanTaskRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.sstIds) {
-      writer.uint64(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ReportFullScanTaskRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseReportFullScanTaskRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.sstIds.push(longToNumber(reader.uint64() as Long));
-            }
-          } else {
-            message.sstIds.push(longToNumber(reader.uint64() as Long));
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ReportFullScanTaskRequest {
     return { sstIds: Array.isArray(object?.sstIds) ? object.sstIds.map((e: any) => Number(e)) : [] };
   },
@@ -4591,31 +2531,6 @@ function createBaseReportFullScanTaskResponse(): ReportFullScanTaskResponse {
 }
 
 export const ReportFullScanTaskResponse = {
-  encode(message: ReportFullScanTaskResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ReportFullScanTaskResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseReportFullScanTaskResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ReportFullScanTaskResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -4640,31 +2555,6 @@ function createBaseTriggerFullGCRequest(): TriggerFullGCRequest {
 }
 
 export const TriggerFullGCRequest = {
-  encode(message: TriggerFullGCRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.sstRetentionTimeSec !== 0) {
-      writer.uint32(8).uint64(message.sstRetentionTimeSec);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TriggerFullGCRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTriggerFullGCRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.sstRetentionTimeSec = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TriggerFullGCRequest {
     return { sstRetentionTimeSec: isSet(object.sstRetentionTimeSec) ? Number(object.sstRetentionTimeSec) : 0 };
   },
@@ -4687,31 +2577,6 @@ function createBaseTriggerFullGCResponse(): TriggerFullGCResponse {
 }
 
 export const TriggerFullGCResponse = {
-  encode(message: TriggerFullGCResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TriggerFullGCResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTriggerFullGCResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TriggerFullGCResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -4740,7 +2605,7 @@ function createBaseCompactionConfig(): CompactionConfig {
     subLevelMaxCompactionBytes: 0,
     level0TriggerFileNumber: 0,
     level0TierCompactFileNumber: 0,
-    compactionMode: 0,
+    compactionMode: CompactionConfig_CompactionMode.UNSPECIFIED,
     compressionAlgorithm: [],
     targetFileSizeBase: 0,
     compactionFilterMask: 0,
@@ -4749,97 +2614,6 @@ function createBaseCompactionConfig(): CompactionConfig {
 }
 
 export const CompactionConfig = {
-  encode(message: CompactionConfig, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.maxBytesForLevelBase !== 0) {
-      writer.uint32(8).uint64(message.maxBytesForLevelBase);
-    }
-    if (message.maxLevel !== 0) {
-      writer.uint32(16).uint64(message.maxLevel);
-    }
-    if (message.maxBytesForLevelMultiplier !== 0) {
-      writer.uint32(24).uint64(message.maxBytesForLevelMultiplier);
-    }
-    if (message.maxCompactionBytes !== 0) {
-      writer.uint32(32).uint64(message.maxCompactionBytes);
-    }
-    if (message.subLevelMaxCompactionBytes !== 0) {
-      writer.uint32(40).uint64(message.subLevelMaxCompactionBytes);
-    }
-    if (message.level0TriggerFileNumber !== 0) {
-      writer.uint32(48).uint64(message.level0TriggerFileNumber);
-    }
-    if (message.level0TierCompactFileNumber !== 0) {
-      writer.uint32(56).uint64(message.level0TierCompactFileNumber);
-    }
-    if (message.compactionMode !== 0) {
-      writer.uint32(64).int32(message.compactionMode);
-    }
-    for (const v of message.compressionAlgorithm) {
-      writer.uint32(74).string(v!);
-    }
-    if (message.targetFileSizeBase !== 0) {
-      writer.uint32(80).uint64(message.targetFileSizeBase);
-    }
-    if (message.compactionFilterMask !== 0) {
-      writer.uint32(88).uint32(message.compactionFilterMask);
-    }
-    if (message.maxSubCompaction !== 0) {
-      writer.uint32(96).uint32(message.maxSubCompaction);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CompactionConfig {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCompactionConfig();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.maxBytesForLevelBase = longToNumber(reader.uint64() as Long);
-          break;
-        case 2:
-          message.maxLevel = longToNumber(reader.uint64() as Long);
-          break;
-        case 3:
-          message.maxBytesForLevelMultiplier = longToNumber(reader.uint64() as Long);
-          break;
-        case 4:
-          message.maxCompactionBytes = longToNumber(reader.uint64() as Long);
-          break;
-        case 5:
-          message.subLevelMaxCompactionBytes = longToNumber(reader.uint64() as Long);
-          break;
-        case 6:
-          message.level0TriggerFileNumber = longToNumber(reader.uint64() as Long);
-          break;
-        case 7:
-          message.level0TierCompactFileNumber = longToNumber(reader.uint64() as Long);
-          break;
-        case 8:
-          message.compactionMode = reader.int32() as any;
-          break;
-        case 9:
-          message.compressionAlgorithm.push(reader.string());
-          break;
-        case 10:
-          message.targetFileSizeBase = longToNumber(reader.uint64() as Long);
-          break;
-        case 11:
-          message.compactionFilterMask = reader.uint32();
-          break;
-        case 12:
-          message.maxSubCompaction = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CompactionConfig {
     return {
       maxBytesForLevelBase: isSet(object.maxBytesForLevelBase) ? Number(object.maxBytesForLevelBase) : 0,
@@ -4855,7 +2629,9 @@ export const CompactionConfig = {
       level0TierCompactFileNumber: isSet(object.level0TierCompactFileNumber)
         ? Number(object.level0TierCompactFileNumber)
         : 0,
-      compactionMode: isSet(object.compactionMode) ? compactionConfig_CompactionModeFromJSON(object.compactionMode) : 0,
+      compactionMode: isSet(object.compactionMode)
+        ? compactionConfig_CompactionModeFromJSON(object.compactionMode)
+        : CompactionConfig_CompactionMode.UNSPECIFIED,
       compressionAlgorithm: Array.isArray(object?.compressionAlgorithm)
         ? object.compressionAlgorithm.map((e: any) => String(e))
         : [],
@@ -4900,7 +2676,7 @@ export const CompactionConfig = {
     message.subLevelMaxCompactionBytes = object.subLevelMaxCompactionBytes ?? 0;
     message.level0TriggerFileNumber = object.level0TriggerFileNumber ?? 0;
     message.level0TierCompactFileNumber = object.level0TierCompactFileNumber ?? 0;
-    message.compactionMode = object.compactionMode ?? 0;
+    message.compactionMode = object.compactionMode ?? CompactionConfig_CompactionMode.UNSPECIFIED;
     message.compressionAlgorithm = object.compressionAlgorithm?.map((e) => e) || [];
     message.targetFileSizeBase = object.targetFileSizeBase ?? 0;
     message.compactionFilterMask = object.compactionFilterMask ?? 0;
@@ -4964,20 +2740,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isObject(value: any): boolean {
   return typeof value === "object" && value !== null;

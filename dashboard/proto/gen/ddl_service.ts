@@ -1,6 +1,4 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 import { Database, Index, Schema, Sink, Source, Table } from "./catalog";
 import { Status } from "./common";
 import { StreamFragmentGraph } from "./stream_plan";
@@ -162,31 +160,6 @@ function createBaseCreateDatabaseRequest(): CreateDatabaseRequest {
 }
 
 export const CreateDatabaseRequest = {
-  encode(message: CreateDatabaseRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.db !== undefined) {
-      Database.encode(message.db, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateDatabaseRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateDatabaseRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.db = Database.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateDatabaseRequest {
     return { db: isSet(object.db) ? Database.fromJSON(object.db) : undefined };
   },
@@ -209,43 +182,6 @@ function createBaseCreateDatabaseResponse(): CreateDatabaseResponse {
 }
 
 export const CreateDatabaseResponse = {
-  encode(message: CreateDatabaseResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.databaseId !== 0) {
-      writer.uint32(16).uint32(message.databaseId);
-    }
-    if (message.version !== 0) {
-      writer.uint32(24).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateDatabaseResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateDatabaseResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.databaseId = reader.uint32();
-          break;
-        case 3:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateDatabaseResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -278,31 +214,6 @@ function createBaseDropDatabaseRequest(): DropDatabaseRequest {
 }
 
 export const DropDatabaseRequest = {
-  encode(message: DropDatabaseRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.databaseId !== 0) {
-      writer.uint32(8).uint32(message.databaseId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropDatabaseRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropDatabaseRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.databaseId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropDatabaseRequest {
     return { databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0 };
   },
@@ -325,37 +236,6 @@ function createBaseDropDatabaseResponse(): DropDatabaseResponse {
 }
 
 export const DropDatabaseResponse = {
-  encode(message: DropDatabaseResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropDatabaseResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropDatabaseResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropDatabaseResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -385,31 +265,6 @@ function createBaseCreateSchemaRequest(): CreateSchemaRequest {
 }
 
 export const CreateSchemaRequest = {
-  encode(message: CreateSchemaRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.schema !== undefined) {
-      Schema.encode(message.schema, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateSchemaRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateSchemaRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.schema = Schema.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateSchemaRequest {
     return { schema: isSet(object.schema) ? Schema.fromJSON(object.schema) : undefined };
   },
@@ -434,43 +289,6 @@ function createBaseCreateSchemaResponse(): CreateSchemaResponse {
 }
 
 export const CreateSchemaResponse = {
-  encode(message: CreateSchemaResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.schemaId !== 0) {
-      writer.uint32(16).uint32(message.schemaId);
-    }
-    if (message.version !== 0) {
-      writer.uint32(24).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateSchemaResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateSchemaResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.schemaId = reader.uint32();
-          break;
-        case 3:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateSchemaResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -503,31 +321,6 @@ function createBaseDropSchemaRequest(): DropSchemaRequest {
 }
 
 export const DropSchemaRequest = {
-  encode(message: DropSchemaRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.schemaId !== 0) {
-      writer.uint32(8).uint32(message.schemaId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropSchemaRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropSchemaRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.schemaId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropSchemaRequest {
     return { schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0 };
   },
@@ -550,37 +343,6 @@ function createBaseDropSchemaResponse(): DropSchemaResponse {
 }
 
 export const DropSchemaResponse = {
-  encode(message: DropSchemaResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropSchemaResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropSchemaResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropSchemaResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -610,31 +372,6 @@ function createBaseCreateSourceRequest(): CreateSourceRequest {
 }
 
 export const CreateSourceRequest = {
-  encode(message: CreateSourceRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.source !== undefined) {
-      Source.encode(message.source, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateSourceRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateSourceRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.source = Source.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateSourceRequest {
     return { source: isSet(object.source) ? Source.fromJSON(object.source) : undefined };
   },
@@ -659,43 +396,6 @@ function createBaseCreateSourceResponse(): CreateSourceResponse {
 }
 
 export const CreateSourceResponse = {
-  encode(message: CreateSourceResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.sourceId !== 0) {
-      writer.uint32(16).uint32(message.sourceId);
-    }
-    if (message.version !== 0) {
-      writer.uint32(24).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateSourceResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateSourceResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.sourceId = reader.uint32();
-          break;
-        case 3:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateSourceResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -728,31 +428,6 @@ function createBaseDropSourceRequest(): DropSourceRequest {
 }
 
 export const DropSourceRequest = {
-  encode(message: DropSourceRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.sourceId !== 0) {
-      writer.uint32(8).uint32(message.sourceId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropSourceRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropSourceRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.sourceId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropSourceRequest {
     return { sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0 };
   },
@@ -775,37 +450,6 @@ function createBaseDropSourceResponse(): DropSourceResponse {
 }
 
 export const DropSourceResponse = {
-  encode(message: DropSourceResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropSourceResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropSourceResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropSourceResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -835,37 +479,6 @@ function createBaseCreateSinkRequest(): CreateSinkRequest {
 }
 
 export const CreateSinkRequest = {
-  encode(message: CreateSinkRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.sink !== undefined) {
-      Sink.encode(message.sink, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.fragmentGraph !== undefined) {
-      StreamFragmentGraph.encode(message.fragmentGraph, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateSinkRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateSinkRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.sink = Sink.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.fragmentGraph = StreamFragmentGraph.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateSinkRequest {
     return {
       sink: isSet(object.sink) ? Sink.fromJSON(object.sink) : undefined,
@@ -896,43 +509,6 @@ function createBaseCreateSinkResponse(): CreateSinkResponse {
 }
 
 export const CreateSinkResponse = {
-  encode(message: CreateSinkResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.sinkId !== 0) {
-      writer.uint32(16).uint32(message.sinkId);
-    }
-    if (message.version !== 0) {
-      writer.uint32(24).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateSinkResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateSinkResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.sinkId = reader.uint32();
-          break;
-        case 3:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateSinkResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -965,31 +541,6 @@ function createBaseDropSinkRequest(): DropSinkRequest {
 }
 
 export const DropSinkRequest = {
-  encode(message: DropSinkRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.sinkId !== 0) {
-      writer.uint32(8).uint32(message.sinkId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropSinkRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropSinkRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.sinkId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropSinkRequest {
     return { sinkId: isSet(object.sinkId) ? Number(object.sinkId) : 0 };
   },
@@ -1012,37 +563,6 @@ function createBaseDropSinkResponse(): DropSinkResponse {
 }
 
 export const DropSinkResponse = {
-  encode(message: DropSinkResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropSinkResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropSinkResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropSinkResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1072,37 +592,6 @@ function createBaseCreateMaterializedViewRequest(): CreateMaterializedViewReques
 }
 
 export const CreateMaterializedViewRequest = {
-  encode(message: CreateMaterializedViewRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.materializedView !== undefined) {
-      Table.encode(message.materializedView, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.fragmentGraph !== undefined) {
-      StreamFragmentGraph.encode(message.fragmentGraph, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateMaterializedViewRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateMaterializedViewRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.materializedView = Table.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.fragmentGraph = StreamFragmentGraph.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateMaterializedViewRequest {
     return {
       materializedView: isSet(object.materializedView) ? Table.fromJSON(object.materializedView) : undefined,
@@ -1138,43 +627,6 @@ function createBaseCreateMaterializedViewResponse(): CreateMaterializedViewRespo
 }
 
 export const CreateMaterializedViewResponse = {
-  encode(message: CreateMaterializedViewResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.tableId !== 0) {
-      writer.uint32(16).uint32(message.tableId);
-    }
-    if (message.version !== 0) {
-      writer.uint32(24).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateMaterializedViewResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateMaterializedViewResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.tableId = reader.uint32();
-          break;
-        case 3:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateMaterializedViewResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1209,31 +661,6 @@ function createBaseDropMaterializedViewRequest(): DropMaterializedViewRequest {
 }
 
 export const DropMaterializedViewRequest = {
-  encode(message: DropMaterializedViewRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableId !== 0) {
-      writer.uint32(8).uint32(message.tableId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropMaterializedViewRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropMaterializedViewRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropMaterializedViewRequest {
     return { tableId: isSet(object.tableId) ? Number(object.tableId) : 0 };
   },
@@ -1256,37 +683,6 @@ function createBaseDropMaterializedViewResponse(): DropMaterializedViewResponse 
 }
 
 export const DropMaterializedViewResponse = {
-  encode(message: DropMaterializedViewResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropMaterializedViewResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropMaterializedViewResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropMaterializedViewResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1316,43 +712,6 @@ function createBaseCreateMaterializedSourceRequest(): CreateMaterializedSourceRe
 }
 
 export const CreateMaterializedSourceRequest = {
-  encode(message: CreateMaterializedSourceRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.source !== undefined) {
-      Source.encode(message.source, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.materializedView !== undefined) {
-      Table.encode(message.materializedView, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.fragmentGraph !== undefined) {
-      StreamFragmentGraph.encode(message.fragmentGraph, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateMaterializedSourceRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateMaterializedSourceRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.source = Source.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.materializedView = Table.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.fragmentGraph = StreamFragmentGraph.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateMaterializedSourceRequest {
     return {
       source: isSet(object.source) ? Source.fromJSON(object.source) : undefined,
@@ -1393,49 +752,6 @@ function createBaseCreateMaterializedSourceResponse(): CreateMaterializedSourceR
 }
 
 export const CreateMaterializedSourceResponse = {
-  encode(message: CreateMaterializedSourceResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.sourceId !== 0) {
-      writer.uint32(16).uint32(message.sourceId);
-    }
-    if (message.tableId !== 0) {
-      writer.uint32(24).uint32(message.tableId);
-    }
-    if (message.version !== 0) {
-      writer.uint32(32).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateMaterializedSourceResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateMaterializedSourceResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.sourceId = reader.uint32();
-          break;
-        case 3:
-          message.tableId = reader.uint32();
-          break;
-        case 4:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateMaterializedSourceResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1473,37 +789,6 @@ function createBaseDropMaterializedSourceRequest(): DropMaterializedSourceReques
 }
 
 export const DropMaterializedSourceRequest = {
-  encode(message: DropMaterializedSourceRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.sourceId !== 0) {
-      writer.uint32(8).uint32(message.sourceId);
-    }
-    if (message.tableId !== 0) {
-      writer.uint32(16).uint32(message.tableId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropMaterializedSourceRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropMaterializedSourceRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.sourceId = reader.uint32();
-          break;
-        case 2:
-          message.tableId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropMaterializedSourceRequest {
     return {
       sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0,
@@ -1533,37 +818,6 @@ function createBaseDropMaterializedSourceResponse(): DropMaterializedSourceRespo
 }
 
 export const DropMaterializedSourceResponse = {
-  encode(message: DropMaterializedSourceResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropMaterializedSourceResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropMaterializedSourceResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropMaterializedSourceResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1595,25 +849,6 @@ function createBaseRisectlListStateTablesRequest(): RisectlListStateTablesReques
 }
 
 export const RisectlListStateTablesRequest = {
-  encode(_: RisectlListStateTablesRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): RisectlListStateTablesRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseRisectlListStateTablesRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): RisectlListStateTablesRequest {
     return {};
   },
@@ -1634,31 +869,6 @@ function createBaseRisectlListStateTablesResponse(): RisectlListStateTablesRespo
 }
 
 export const RisectlListStateTablesResponse = {
-  encode(message: RisectlListStateTablesResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.tables) {
-      Table.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): RisectlListStateTablesResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseRisectlListStateTablesResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tables.push(Table.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): RisectlListStateTablesResponse {
     return { tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [] };
   },
@@ -1687,43 +897,6 @@ function createBaseCreateIndexRequest(): CreateIndexRequest {
 }
 
 export const CreateIndexRequest = {
-  encode(message: CreateIndexRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.index !== undefined) {
-      Index.encode(message.index, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.indexTable !== undefined) {
-      Table.encode(message.indexTable, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.fragmentGraph !== undefined) {
-      StreamFragmentGraph.encode(message.fragmentGraph, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateIndexRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateIndexRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.index = Index.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.indexTable = Table.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.fragmentGraph = StreamFragmentGraph.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateIndexRequest {
     return {
       index: isSet(object.index) ? Index.fromJSON(object.index) : undefined,
@@ -1760,43 +933,6 @@ function createBaseCreateIndexResponse(): CreateIndexResponse {
 }
 
 export const CreateIndexResponse = {
-  encode(message: CreateIndexResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.indexId !== 0) {
-      writer.uint32(16).uint32(message.indexId);
-    }
-    if (message.version !== 0) {
-      writer.uint32(32).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateIndexResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateIndexResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.indexId = reader.uint32();
-          break;
-        case 4:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateIndexResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1829,31 +965,6 @@ function createBaseDropIndexRequest(): DropIndexRequest {
 }
 
 export const DropIndexRequest = {
-  encode(message: DropIndexRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.indexId !== 0) {
-      writer.uint32(8).uint32(message.indexId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropIndexRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropIndexRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.indexId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropIndexRequest {
     return { indexId: isSet(object.indexId) ? Number(object.indexId) : 0 };
   },
@@ -1876,37 +987,6 @@ function createBaseDropIndexResponse(): DropIndexResponse {
 }
 
 export const DropIndexResponse = {
-  encode(message: DropIndexResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.version !== 0) {
-      writer.uint32(16).uint64(message.version);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DropIndexResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDropIndexResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DropIndexResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1931,25 +1011,6 @@ export const DropIndexResponse = {
   },
 };
 
-declare var self: any | undefined;
-declare var window: any | undefined;
-declare var global: any | undefined;
-var globalThis: any = (() => {
-  if (typeof globalThis !== "undefined") {
-    return globalThis;
-  }
-  if (typeof self !== "undefined") {
-    return self;
-  }
-  if (typeof window !== "undefined") {
-    return window;
-  }
-  if (typeof global !== "undefined") {
-    return global;
-  }
-  throw "Unable to locate global object";
-})();
-
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
 export type DeepPartial<T> = T extends Builtin ? T
@@ -1961,20 +1022,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;

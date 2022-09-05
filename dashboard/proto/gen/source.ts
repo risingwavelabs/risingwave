@@ -1,5 +1,4 @@
 /* eslint-disable */
-import * as _m0 from "protobufjs/minimal";
 
 export const protobufPackage = "source";
 
@@ -22,37 +21,6 @@ function createBaseConnectorSplit(): ConnectorSplit {
 }
 
 export const ConnectorSplit = {
-  encode(message: ConnectorSplit, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.splitType !== "") {
-      writer.uint32(10).string(message.splitType);
-    }
-    if (message.encodedSplit.length !== 0) {
-      writer.uint32(18).bytes(message.encodedSplit);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ConnectorSplit {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseConnectorSplit();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.splitType = reader.string();
-          break;
-        case 2:
-          message.encodedSplit = reader.bytes();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ConnectorSplit {
     return {
       splitType: isSet(object.splitType) ? String(object.splitType) : "",
@@ -83,31 +51,6 @@ function createBaseConnectorSplits(): ConnectorSplits {
 }
 
 export const ConnectorSplits = {
-  encode(message: ConnectorSplits, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.splits) {
-      ConnectorSplit.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ConnectorSplits {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseConnectorSplits();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.splits.push(ConnectorSplit.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ConnectorSplits {
     return { splits: Array.isArray(object?.splits) ? object.splits.map((e: any) => ConnectorSplit.fromJSON(e)) : [] };
   },
@@ -134,37 +77,6 @@ function createBaseSourceActorInfo(): SourceActorInfo {
 }
 
 export const SourceActorInfo = {
-  encode(message: SourceActorInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.actorId !== 0) {
-      writer.uint32(8).uint32(message.actorId);
-    }
-    if (message.splits !== undefined) {
-      ConnectorSplits.encode(message.splits, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SourceActorInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSourceActorInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.actorId = reader.uint32();
-          break;
-        case 2:
-          message.splits = ConnectorSplits.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SourceActorInfo {
     return {
       actorId: isSet(object.actorId) ? Number(object.actorId) : 0,

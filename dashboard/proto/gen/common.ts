@@ -1,18 +1,18 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 
 export const protobufPackage = "common";
 
-export enum WorkerType {
-  UNSPECIFIED = 0,
-  FRONTEND = 1,
-  COMPUTE_NODE = 2,
-  RISE_CTL = 3,
-  COMPACTOR = 4,
-  GENERIC = 100,
-  UNRECOGNIZED = -1,
-}
+export const WorkerType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  FRONTEND: "FRONTEND",
+  COMPUTE_NODE: "COMPUTE_NODE",
+  RISE_CTL: "RISE_CTL",
+  COMPACTOR: "COMPACTOR",
+  GENERIC: "GENERIC",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type WorkerType = typeof WorkerType[keyof typeof WorkerType];
 
 export function workerTypeFromJSON(object: any): WorkerType {
   switch (object) {
@@ -66,12 +66,14 @@ export interface Status {
   message: string;
 }
 
-export enum Status_Code {
-  UNSPECIFIED = 0,
-  OK = 1,
-  UNKNOWN_WORKER = 2,
-  UNRECOGNIZED = -1,
-}
+export const Status_Code = {
+  UNSPECIFIED: "UNSPECIFIED",
+  OK: "OK",
+  UNKNOWN_WORKER: "UNKNOWN_WORKER",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type Status_Code = typeof Status_Code[keyof typeof Status_Code];
 
 export function status_CodeFromJSON(object: any): Status_Code {
   switch (object) {
@@ -129,12 +131,14 @@ export interface WorkerNode {
   parallelUnits: ParallelUnit[];
 }
 
-export enum WorkerNode_State {
-  UNSPECIFIED = 0,
-  STARTING = 1,
-  RUNNING = 2,
-  UNRECOGNIZED = -1,
-}
+export const WorkerNode_State = {
+  UNSPECIFIED: "UNSPECIFIED",
+  STARTING: "STARTING",
+  RUNNING: "RUNNING",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type WorkerNode_State = typeof WorkerNode_State[keyof typeof WorkerNode_State];
 
 export function workerNode_StateFromJSON(object: any): WorkerNode_State {
   switch (object) {
@@ -173,11 +177,13 @@ export interface Buffer {
   body: Uint8Array;
 }
 
-export enum Buffer_CompressionType {
-  UNSPECIFIED = 0,
-  NONE = 1,
-  UNRECOGNIZED = -1,
-}
+export const Buffer_CompressionType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  NONE: "NONE",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type Buffer_CompressionType = typeof Buffer_CompressionType[keyof typeof Buffer_CompressionType];
 
 export function buffer_CompressionTypeFromJSON(object: any): Buffer_CompressionType {
   switch (object) {
@@ -214,44 +220,13 @@ export interface ParallelUnitMapping {
 }
 
 function createBaseStatus(): Status {
-  return { code: 0, message: "" };
+  return { code: Status_Code.UNSPECIFIED, message: "" };
 }
 
 export const Status = {
-  encode(message: Status, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.code !== 0) {
-      writer.uint32(8).int32(message.code);
-    }
-    if (message.message !== "") {
-      writer.uint32(18).string(message.message);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Status {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStatus();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.code = reader.int32() as any;
-          break;
-        case 2:
-          message.message = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Status {
     return {
-      code: isSet(object.code) ? status_CodeFromJSON(object.code) : 0,
+      code: isSet(object.code) ? status_CodeFromJSON(object.code) : Status_Code.UNSPECIFIED,
       message: isSet(object.message) ? String(object.message) : "",
     };
   },
@@ -265,7 +240,7 @@ export const Status = {
 
   fromPartial<I extends Exact<DeepPartial<Status>, I>>(object: I): Status {
     const message = createBaseStatus();
-    message.code = object.code ?? 0;
+    message.code = object.code ?? Status_Code.UNSPECIFIED;
     message.message = object.message ?? "";
     return message;
   },
@@ -276,37 +251,6 @@ function createBaseHostAddress(): HostAddress {
 }
 
 export const HostAddress = {
-  encode(message: HostAddress, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.host !== "") {
-      writer.uint32(10).string(message.host);
-    }
-    if (message.port !== 0) {
-      writer.uint32(16).int32(message.port);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HostAddress {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHostAddress();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.host = reader.string();
-          break;
-        case 2:
-          message.port = reader.int32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HostAddress {
     return { host: isSet(object.host) ? String(object.host) : "", port: isSet(object.port) ? Number(object.port) : 0 };
   },
@@ -331,37 +275,6 @@ function createBaseActorInfo(): ActorInfo {
 }
 
 export const ActorInfo = {
-  encode(message: ActorInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.actorId !== 0) {
-      writer.uint32(8).uint32(message.actorId);
-    }
-    if (message.host !== undefined) {
-      HostAddress.encode(message.host, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ActorInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseActorInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.actorId = reader.uint32();
-          break;
-        case 2:
-          message.host = HostAddress.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ActorInfo {
     return {
       actorId: isSet(object.actorId) ? Number(object.actorId) : 0,
@@ -391,37 +304,6 @@ function createBaseParallelUnit(): ParallelUnit {
 }
 
 export const ParallelUnit = {
-  encode(message: ParallelUnit, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    if (message.workerNodeId !== 0) {
-      writer.uint32(16).uint32(message.workerNodeId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ParallelUnit {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseParallelUnit();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 2:
-          message.workerNodeId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ParallelUnit {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -445,65 +327,22 @@ export const ParallelUnit = {
 };
 
 function createBaseWorkerNode(): WorkerNode {
-  return { id: 0, type: 0, host: undefined, state: 0, parallelUnits: [] };
+  return {
+    id: 0,
+    type: WorkerType.UNSPECIFIED,
+    host: undefined,
+    state: WorkerNode_State.UNSPECIFIED,
+    parallelUnits: [],
+  };
 }
 
 export const WorkerNode = {
-  encode(message: WorkerNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    if (message.type !== 0) {
-      writer.uint32(16).int32(message.type);
-    }
-    if (message.host !== undefined) {
-      HostAddress.encode(message.host, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.state !== 0) {
-      writer.uint32(32).int32(message.state);
-    }
-    for (const v of message.parallelUnits) {
-      ParallelUnit.encode(v!, writer.uint32(42).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): WorkerNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseWorkerNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 2:
-          message.type = reader.int32() as any;
-          break;
-        case 3:
-          message.host = HostAddress.decode(reader, reader.uint32());
-          break;
-        case 4:
-          message.state = reader.int32() as any;
-          break;
-        case 5:
-          message.parallelUnits.push(ParallelUnit.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): WorkerNode {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
-      type: isSet(object.type) ? workerTypeFromJSON(object.type) : 0,
+      type: isSet(object.type) ? workerTypeFromJSON(object.type) : WorkerType.UNSPECIFIED,
       host: isSet(object.host) ? HostAddress.fromJSON(object.host) : undefined,
-      state: isSet(object.state) ? workerNode_StateFromJSON(object.state) : 0,
+      state: isSet(object.state) ? workerNode_StateFromJSON(object.state) : WorkerNode_State.UNSPECIFIED,
       parallelUnits: Array.isArray(object?.parallelUnits)
         ? object.parallelUnits.map((e: any) => ParallelUnit.fromJSON(e))
         : [],
@@ -527,55 +366,26 @@ export const WorkerNode = {
   fromPartial<I extends Exact<DeepPartial<WorkerNode>, I>>(object: I): WorkerNode {
     const message = createBaseWorkerNode();
     message.id = object.id ?? 0;
-    message.type = object.type ?? 0;
+    message.type = object.type ?? WorkerType.UNSPECIFIED;
     message.host = (object.host !== undefined && object.host !== null)
       ? HostAddress.fromPartial(object.host)
       : undefined;
-    message.state = object.state ?? 0;
+    message.state = object.state ?? WorkerNode_State.UNSPECIFIED;
     message.parallelUnits = object.parallelUnits?.map((e) => ParallelUnit.fromPartial(e)) || [];
     return message;
   },
 };
 
 function createBaseBuffer(): Buffer {
-  return { compression: 0, body: new Uint8Array() };
+  return { compression: Buffer_CompressionType.UNSPECIFIED, body: new Uint8Array() };
 }
 
 export const Buffer = {
-  encode(message: Buffer, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.compression !== 0) {
-      writer.uint32(8).int32(message.compression);
-    }
-    if (message.body.length !== 0) {
-      writer.uint32(18).bytes(message.body);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Buffer {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBuffer();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.compression = reader.int32() as any;
-          break;
-        case 2:
-          message.body = reader.bytes();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Buffer {
     return {
-      compression: isSet(object.compression) ? buffer_CompressionTypeFromJSON(object.compression) : 0,
+      compression: isSet(object.compression)
+        ? buffer_CompressionTypeFromJSON(object.compression)
+        : Buffer_CompressionType.UNSPECIFIED,
       body: isSet(object.body) ? bytesFromBase64(object.body) : new Uint8Array(),
     };
   },
@@ -590,7 +400,7 @@ export const Buffer = {
 
   fromPartial<I extends Exact<DeepPartial<Buffer>, I>>(object: I): Buffer {
     const message = createBaseBuffer();
-    message.compression = object.compression ?? 0;
+    message.compression = object.compression ?? Buffer_CompressionType.UNSPECIFIED;
     message.body = object.body ?? new Uint8Array();
     return message;
   },
@@ -601,61 +411,6 @@ function createBaseParallelUnitMapping(): ParallelUnitMapping {
 }
 
 export const ParallelUnitMapping = {
-  encode(message: ParallelUnitMapping, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.fragmentId !== 0) {
-      writer.uint32(8).uint32(message.fragmentId);
-    }
-    writer.uint32(18).fork();
-    for (const v of message.originalIndices) {
-      writer.uint64(v);
-    }
-    writer.ldelim();
-    writer.uint32(26).fork();
-    for (const v of message.data) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ParallelUnitMapping {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseParallelUnitMapping();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.fragmentId = reader.uint32();
-          break;
-        case 2:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.originalIndices.push(longToNumber(reader.uint64() as Long));
-            }
-          } else {
-            message.originalIndices.push(longToNumber(reader.uint64() as Long));
-          }
-          break;
-        case 3:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.data.push(reader.uint32());
-            }
-          } else {
-            message.data.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ParallelUnitMapping {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
@@ -744,20 +499,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;

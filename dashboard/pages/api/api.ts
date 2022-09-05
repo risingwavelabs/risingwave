@@ -15,19 +15,17 @@
  *
  */
 
-
 class Api {
   async get(url: string) {
     try {
-      const res = await fetch(url);
-      const data = await res.json();
-      return data;
+      const res = await fetch(url)
+      const data = await res.json()
+      return data
     } catch (e) {
-      console.error(e);
-      throw Error("Failed to fetch " + url);
+      console.error(e)
+      throw Error("Failed to fetch " + url)
     }
   }
 }
 
-
-export default new Api();
+export default new Api()

@@ -1,4 +1,4 @@
-import { Flex } from "@chakra-ui/react";
+import { Flex } from "@chakra-ui/react"
 
 /*
  * Copyright 2022 Singularity Data
@@ -18,13 +18,11 @@ import { Flex } from "@chakra-ui/react";
  */
 
 function NoData() {
-  return <Flex w="full"
-    alignItems="center"
-    justifyContent="center"
-    h="80vh"
-  >
-    No Data Available
-  </Flex>
+  return (
+    <Flex w="full" alignItems="center" justifyContent="center" h="80vh">
+      No Data Available
+    </Flex>
+  )
 }
 
-export default NoData;
+export default NoData

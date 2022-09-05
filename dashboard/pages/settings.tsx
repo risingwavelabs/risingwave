@@ -15,11 +15,27 @@
  *
  */
 
-import { Box, Text } from "@chakra-ui/react";
-import Title from "../components/Title";
+import { Box, FormControl, FormLabel, Input, VStack } from "@chakra-ui/react"
+import Title from "../components/Title"
 
 export default function Settings() {
-    return (
-        <Box p={3}><Title>Settings</Title></Box>
-    );
+  return (
+    <Box p={3}>
+      <Title>Settings</Title>
+      <VStack spacing={4} w="full">
+        <FormControl>
+          <FormLabel>RisingWave Meta Node HTTP API</FormLabel>
+          <Input value="/api" />
+        </FormControl>
+        <FormControl>
+          <FormLabel>Grafana HTTP API</FormLabel>
+          <Input value="/api" />
+        </FormControl>
+        <FormControl>
+          <FormLabel>Prometheus HTTP API</FormLabel>
+          <Input value="/api" />
+        </FormControl>
+      </VStack>
+    </Box>
+  )
 }

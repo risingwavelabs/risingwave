@@ -14,24 +14,16 @@
  * limitations under the License.
  *
  */
-export function iter(n, step) {
-  for (let i = 0; i < n; ++i) {
-    step(i)
-  }
-}
 
-export function newNumberArray(length) {
-  let rtn = []
-  iter(length, () => {
-    rtn.push(0)
-  })
-  return rtn
-}
+import { Box } from "@chakra-ui/react"
+import NoData from "../components/NoData"
+import Title from "../components/Title"
 
-export function newMatrix(n) {
-  let rtn = []
-  iter(n, () => {
-    rtn.push([])
-  })
-  return rtn
+export default function DataSources() {
+  return (
+    <Box p={3}>
+      <Title>Data Sources</Title>
+      <NoData />
+    </Box>
+  )
 }

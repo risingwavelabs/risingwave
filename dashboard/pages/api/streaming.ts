@@ -14,21 +14,29 @@
  * limitations under the License.
  *
  */
-import { Table } from "../../proto/gen/catalog";
-import { ActorLocation } from "../../proto/gen/meta";
-import { StreamActor } from "../../proto/gen/stream_plan";
+import { Table } from "../../proto/gen/catalog"
+import { ActorLocation } from "../../proto/gen/meta"
+import { StreamActor } from "../../proto/gen/stream_plan"
 import api from "./api"
+import sortBy from "lodash/sortBy"
 
-export async function getActors() {
-    return (await api.get("/api/actors")).map(ActorLocation.fromJSON);
+export async function getActors(): Promise<ActorLocation[]> {
+  return (await api.get("/api/actors")).map(ActorLocation.fromJSON)
 }
 
-export async function getFragments() {
-    return (await api.get("/api/fragments")).map(
-        ([tableId, tableActor]: [any, any]) =>
-            [(tableId as number), StreamActor.fromJSON(tableActor)]);
+export async function getFragments(): Promise<[number, StreamActor]> {
+  let fragmentList = (await api.get("/api/fragments")).map(
+    ([tableId, tableActor]: [any, any]) => [
+      tableId as number,
+      StreamActor.fromJSON(tableActor),
+    ]
+  )
+  fragmentList = sortBy(fragmentList, "id")
+  return fragmentList
 }
 
-export async function getMaterializedViews() {
-    return (await api.get("/api/materialized_views")).map(Table.fromJSON);
+export async function getMaterializedViews(): Promise<Table[]> {
+  let mvList = (await api.get("/api/materialized_views")).map(Table.fromJSON)
+  mvList = sortBy(mvList, "id")
+  return mvList
 }

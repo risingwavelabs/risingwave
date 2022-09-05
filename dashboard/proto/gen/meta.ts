@@ -1,6 +1,4 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 import { Database, Index, Schema, Sink, Source, StreamSourceInfo, Table } from "./catalog";
 import {
   HostAddress,
@@ -48,14 +46,16 @@ export interface TableFragments {
 }
 
 /** Current state of actor */
-export enum TableFragments_ActorState {
-  UNSPECIFIED = 0,
+export const TableFragments_ActorState = {
+  UNSPECIFIED: "UNSPECIFIED",
   /** INACTIVE - Initial state after creation */
-  INACTIVE = 1,
+  INACTIVE: "INACTIVE",
   /** RUNNING - Running normally */
-  RUNNING = 2,
-  UNRECOGNIZED = -1,
-}
+  RUNNING: "RUNNING",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type TableFragments_ActorState = typeof TableFragments_ActorState[keyof typeof TableFragments_ActorState];
 
 export function tableFragments_ActorStateFromJSON(object: any): TableFragments_ActorState {
   switch (object) {
@@ -109,12 +109,17 @@ export interface TableFragments_Fragment {
   stateTableIds: number[];
 }
 
-export enum TableFragments_Fragment_FragmentDistributionType {
-  UNSPECIFIED = 0,
-  SINGLE = 1,
-  HASH = 2,
-  UNRECOGNIZED = -1,
-}
+export const TableFragments_Fragment_FragmentDistributionType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  SINGLE: "SINGLE",
+  HASH: "HASH",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type TableFragments_Fragment_FragmentDistributionType =
+  typeof TableFragments_Fragment_FragmentDistributionType[
+    keyof typeof TableFragments_Fragment_FragmentDistributionType
+  ];
 
 export function tableFragments_Fragment_FragmentDistributionTypeFromJSON(
   object: any,
@@ -281,14 +286,16 @@ export interface SubscribeResponse {
     | { $case: "snapshot"; snapshot: MetaSnapshot };
 }
 
-export enum SubscribeResponse_Operation {
-  UNSPECIFIED = 0,
-  ADD = 1,
-  DELETE = 2,
-  UPDATE = 3,
-  SNAPSHOT = 4,
-  UNRECOGNIZED = -1,
-}
+export const SubscribeResponse_Operation = {
+  UNSPECIFIED: "UNSPECIFIED",
+  ADD: "ADD",
+  DELETE: "DELETE",
+  UPDATE: "UPDATE",
+  SNAPSHOT: "SNAPSHOT",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type SubscribeResponse_Operation = typeof SubscribeResponse_Operation[keyof typeof SubscribeResponse_Operation];
 
 export function subscribeResponse_OperationFromJSON(object: any): SubscribeResponse_Operation {
   switch (object) {
@@ -380,37 +387,6 @@ function createBaseHeartbeatRequest(): HeartbeatRequest {
 }
 
 export const HeartbeatRequest = {
-  encode(message: HeartbeatRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.nodeId !== 0) {
-      writer.uint32(8).uint32(message.nodeId);
-    }
-    for (const v of message.info) {
-      HeartbeatRequest_ExtraInfo.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HeartbeatRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHeartbeatRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.nodeId = reader.uint32();
-          break;
-        case 2:
-          message.info.push(HeartbeatRequest_ExtraInfo.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HeartbeatRequest {
     return {
       nodeId: isSet(object.nodeId) ? Number(object.nodeId) : 0,
@@ -442,31 +418,6 @@ function createBaseHeartbeatRequest_ExtraInfo(): HeartbeatRequest_ExtraInfo {
 }
 
 export const HeartbeatRequest_ExtraInfo = {
-  encode(message: HeartbeatRequest_ExtraInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.info?.$case === "hummockGcWatermark") {
-      writer.uint32(8).uint64(message.info.hummockGcWatermark);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HeartbeatRequest_ExtraInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHeartbeatRequest_ExtraInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.info = { $case: "hummockGcWatermark", hummockGcWatermark: longToNumber(reader.uint64() as Long) };
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HeartbeatRequest_ExtraInfo {
     return {
       info: isSet(object.hummockGcWatermark)
@@ -500,31 +451,6 @@ function createBaseHeartbeatResponse(): HeartbeatResponse {
 }
 
 export const HeartbeatResponse = {
-  encode(message: HeartbeatResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): HeartbeatResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseHeartbeatResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): HeartbeatResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -549,49 +475,6 @@ function createBaseTableFragments(): TableFragments {
 }
 
 export const TableFragments = {
-  encode(message: TableFragments, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableId !== 0) {
-      writer.uint32(8).uint32(message.tableId);
-    }
-    Object.entries(message.fragments).forEach(([key, value]) => {
-      TableFragments_FragmentsEntry.encode({ key: key as any, value }, writer.uint32(18).fork()).ldelim();
-    });
-    Object.entries(message.actorStatus).forEach(([key, value]) => {
-      TableFragments_ActorStatusEntry.encode({ key: key as any, value }, writer.uint32(26).fork()).ldelim();
-    });
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TableFragments {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTableFragments();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableId = reader.uint32();
-          break;
-        case 2:
-          const entry2 = TableFragments_FragmentsEntry.decode(reader, reader.uint32());
-          if (entry2.value !== undefined) {
-            message.fragments[entry2.key] = entry2.value;
-          }
-          break;
-        case 3:
-          const entry3 = TableFragments_ActorStatusEntry.decode(reader, reader.uint32());
-          if (entry3.value !== undefined) {
-            message.actorStatus[entry3.key] = entry3.value;
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TableFragments {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
@@ -656,45 +539,16 @@ export const TableFragments = {
 };
 
 function createBaseTableFragments_ActorStatus(): TableFragments_ActorStatus {
-  return { parallelUnit: undefined, state: 0 };
+  return { parallelUnit: undefined, state: TableFragments_ActorState.UNSPECIFIED };
 }
 
 export const TableFragments_ActorStatus = {
-  encode(message: TableFragments_ActorStatus, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.parallelUnit !== undefined) {
-      ParallelUnit.encode(message.parallelUnit, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.state !== 0) {
-      writer.uint32(16).int32(message.state);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TableFragments_ActorStatus {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTableFragments_ActorStatus();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.parallelUnit = ParallelUnit.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.state = reader.int32() as any;
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TableFragments_ActorStatus {
     return {
       parallelUnit: isSet(object.parallelUnit) ? ParallelUnit.fromJSON(object.parallelUnit) : undefined,
-      state: isSet(object.state) ? tableFragments_ActorStateFromJSON(object.state) : 0,
+      state: isSet(object.state)
+        ? tableFragments_ActorStateFromJSON(object.state)
+        : TableFragments_ActorState.UNSPECIFIED,
     };
   },
 
@@ -711,7 +565,7 @@ export const TableFragments_ActorStatus = {
     message.parallelUnit = (object.parallelUnit !== undefined && object.parallelUnit !== null)
       ? ParallelUnit.fromPartial(object.parallelUnit)
       : undefined;
-    message.state = object.state ?? 0;
+    message.state = object.state ?? TableFragments_ActorState.UNSPECIFIED;
     return message;
   },
 };
@@ -719,8 +573,8 @@ export const TableFragments_ActorStatus = {
 function createBaseTableFragments_Fragment(): TableFragments_Fragment {
   return {
     fragmentId: 0,
-    fragmentType: 0,
-    distributionType: 0,
+    fragmentType: FragmentType.FRAGMENT_UNSPECIFIED,
+    distributionType: TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED,
     actors: [],
     vnodeMapping: undefined,
     stateTableIds: [],
@@ -728,78 +582,18 @@ function createBaseTableFragments_Fragment(): TableFragments_Fragment {
 }
 
 export const TableFragments_Fragment = {
-  encode(message: TableFragments_Fragment, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.fragmentId !== 0) {
-      writer.uint32(8).uint32(message.fragmentId);
-    }
-    if (message.fragmentType !== 0) {
-      writer.uint32(16).int32(message.fragmentType);
-    }
-    if (message.distributionType !== 0) {
-      writer.uint32(24).int32(message.distributionType);
-    }
-    for (const v of message.actors) {
-      StreamActor.encode(v!, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.vnodeMapping !== undefined) {
-      ParallelUnitMapping.encode(message.vnodeMapping, writer.uint32(42).fork()).ldelim();
-    }
-    writer.uint32(50).fork();
-    for (const v of message.stateTableIds) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TableFragments_Fragment {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTableFragments_Fragment();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.fragmentId = reader.uint32();
-          break;
-        case 2:
-          message.fragmentType = reader.int32() as any;
-          break;
-        case 3:
-          message.distributionType = reader.int32() as any;
-          break;
-        case 4:
-          message.actors.push(StreamActor.decode(reader, reader.uint32()));
-          break;
-        case 5:
-          message.vnodeMapping = ParallelUnitMapping.decode(reader, reader.uint32());
-          break;
-        case 6:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.stateTableIds.push(reader.uint32());
-            }
-          } else {
-            message.stateTableIds.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TableFragments_Fragment {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      fragmentType: isSet(object.fragmentType) ? fragmentTypeFromJSON(object.fragmentType) : 0,
+      fragmentType: isSet(object.fragmentType)
+        ? fragmentTypeFromJSON(object.fragmentType)
+        : FragmentType.FRAGMENT_UNSPECIFIED,
       distributionType: isSet(object.distributionType)
         ? tableFragments_Fragment_FragmentDistributionTypeFromJSON(object.distributionType)
-        : 0,
-      actors: Array.isArray(object?.actors) ? object.actors.map((e: any) => StreamActor.fromJSON(e)) : [],
+        : TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED,
+      actors: Array.isArray(object?.actors)
+        ? object.actors.map((e: any) => StreamActor.fromJSON(e))
+        : [],
       vnodeMapping: isSet(object.vnodeMapping) ? ParallelUnitMapping.fromJSON(object.vnodeMapping) : undefined,
       stateTableIds: Array.isArray(object?.stateTableIds) ? object.stateTableIds.map((e: any) => Number(e)) : [],
     };
@@ -829,8 +623,8 @@ export const TableFragments_Fragment = {
   fromPartial<I extends Exact<DeepPartial<TableFragments_Fragment>, I>>(object: I): TableFragments_Fragment {
     const message = createBaseTableFragments_Fragment();
     message.fragmentId = object.fragmentId ?? 0;
-    message.fragmentType = object.fragmentType ?? 0;
-    message.distributionType = object.distributionType ?? 0;
+    message.fragmentType = object.fragmentType ?? FragmentType.FRAGMENT_UNSPECIFIED;
+    message.distributionType = object.distributionType ?? TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED;
     message.actors = object.actors?.map((e) => StreamActor.fromPartial(e)) || [];
     message.vnodeMapping = (object.vnodeMapping !== undefined && object.vnodeMapping !== null)
       ? ParallelUnitMapping.fromPartial(object.vnodeMapping)
@@ -845,37 +639,6 @@ function createBaseTableFragments_FragmentsEntry(): TableFragments_FragmentsEntr
 }
 
 export const TableFragments_FragmentsEntry = {
-  encode(message: TableFragments_FragmentsEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      TableFragments_Fragment.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TableFragments_FragmentsEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTableFragments_FragmentsEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = TableFragments_Fragment.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TableFragments_FragmentsEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -908,37 +671,6 @@ function createBaseTableFragments_ActorStatusEntry(): TableFragments_ActorStatus
 }
 
 export const TableFragments_ActorStatusEntry = {
-  encode(message: TableFragments_ActorStatusEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      TableFragments_ActorStatus.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TableFragments_ActorStatusEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTableFragments_ActorStatusEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = TableFragments_ActorStatus.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TableFragments_ActorStatusEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -971,37 +703,6 @@ function createBaseActorLocation(): ActorLocation {
 }
 
 export const ActorLocation = {
-  encode(message: ActorLocation, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.node !== undefined) {
-      WorkerNode.encode(message.node, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.actors) {
-      StreamActor.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ActorLocation {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseActorLocation();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.node = WorkerNode.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.actors.push(StreamActor.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ActorLocation {
     return {
       node: isSet(object.node) ? WorkerNode.fromJSON(object.node) : undefined,
@@ -1035,25 +736,6 @@ function createBaseFlushRequest(): FlushRequest {
 }
 
 export const FlushRequest = {
-  encode(_: FlushRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): FlushRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseFlushRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): FlushRequest {
     return {};
   },
@@ -1074,37 +756,6 @@ function createBaseFlushResponse(): FlushResponse {
 }
 
 export const FlushResponse = {
-  encode(message: FlushResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.snapshot !== undefined) {
-      HummockSnapshot.encode(message.snapshot, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): FlushResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseFlushResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.snapshot = HummockSnapshot.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): FlushResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1137,40 +788,6 @@ function createBaseListTableFragmentsRequest(): ListTableFragmentsRequest {
 }
 
 export const ListTableFragmentsRequest = {
-  encode(message: ListTableFragmentsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    writer.uint32(10).fork();
-    for (const v of message.tableIds) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListTableFragmentsRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListTableFragmentsRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.tableIds.push(reader.uint32());
-            }
-          } else {
-            message.tableIds.push(reader.uint32());
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ListTableFragmentsRequest {
     return { tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [] };
   },
@@ -1197,35 +814,6 @@ function createBaseListTableFragmentsResponse(): ListTableFragmentsResponse {
 }
 
 export const ListTableFragmentsResponse = {
-  encode(message: ListTableFragmentsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    Object.entries(message.tableFragments).forEach(([key, value]) => {
-      ListTableFragmentsResponse_TableFragmentsEntry.encode({ key: key as any, value }, writer.uint32(10).fork())
-        .ldelim();
-    });
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListTableFragmentsResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListTableFragmentsResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          const entry1 = ListTableFragmentsResponse_TableFragmentsEntry.decode(reader, reader.uint32());
-          if (entry1.value !== undefined) {
-            message.tableFragments[entry1.key] = entry1.value;
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ListTableFragmentsResponse {
     return {
       tableFragments: isObject(object.tableFragments)
@@ -1270,43 +858,6 @@ function createBaseListTableFragmentsResponse_ActorInfo(): ListTableFragmentsRes
 }
 
 export const ListTableFragmentsResponse_ActorInfo = {
-  encode(message: ListTableFragmentsResponse_ActorInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    if (message.node !== undefined) {
-      StreamNode.encode(message.node, writer.uint32(18).fork()).ldelim();
-    }
-    for (const v of message.dispatcher) {
-      Dispatcher.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListTableFragmentsResponse_ActorInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListTableFragmentsResponse_ActorInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 2:
-          message.node = StreamNode.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.dispatcher.push(Dispatcher.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ListTableFragmentsResponse_ActorInfo {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -1345,37 +896,6 @@ function createBaseListTableFragmentsResponse_FragmentInfo(): ListTableFragments
 }
 
 export const ListTableFragmentsResponse_FragmentInfo = {
-  encode(message: ListTableFragmentsResponse_FragmentInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.id !== 0) {
-      writer.uint32(8).uint32(message.id);
-    }
-    for (const v of message.actors) {
-      ListTableFragmentsResponse_ActorInfo.encode(v!, writer.uint32(34).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListTableFragmentsResponse_FragmentInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListTableFragmentsResponse_FragmentInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.id = reader.uint32();
-          break;
-        case 4:
-          message.actors.push(ListTableFragmentsResponse_ActorInfo.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ListTableFragmentsResponse_FragmentInfo {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
@@ -1411,31 +931,6 @@ function createBaseListTableFragmentsResponse_TableFragmentInfo(): ListTableFrag
 }
 
 export const ListTableFragmentsResponse_TableFragmentInfo = {
-  encode(message: ListTableFragmentsResponse_TableFragmentInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.fragments) {
-      ListTableFragmentsResponse_FragmentInfo.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListTableFragmentsResponse_TableFragmentInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListTableFragmentsResponse_TableFragmentInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.fragments.push(ListTableFragmentsResponse_FragmentInfo.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ListTableFragmentsResponse_TableFragmentInfo {
     return {
       fragments: Array.isArray(object?.fragments)
@@ -1468,40 +963,6 @@ function createBaseListTableFragmentsResponse_TableFragmentsEntry(): ListTableFr
 }
 
 export const ListTableFragmentsResponse_TableFragmentsEntry = {
-  encode(
-    message: ListTableFragmentsResponse_TableFragmentsEntry,
-    writer: _m0.Writer = _m0.Writer.create(),
-  ): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      ListTableFragmentsResponse_TableFragmentInfo.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListTableFragmentsResponse_TableFragmentsEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListTableFragmentsResponse_TableFragmentsEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = ListTableFragmentsResponse_TableFragmentInfo.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ListTableFragmentsResponse_TableFragmentsEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -1530,50 +991,13 @@ export const ListTableFragmentsResponse_TableFragmentsEntry = {
 };
 
 function createBaseAddWorkerNodeRequest(): AddWorkerNodeRequest {
-  return { workerType: 0, host: undefined, workerNodeParallelism: 0 };
+  return { workerType: WorkerType.UNSPECIFIED, host: undefined, workerNodeParallelism: 0 };
 }
 
 export const AddWorkerNodeRequest = {
-  encode(message: AddWorkerNodeRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.workerType !== 0) {
-      writer.uint32(8).int32(message.workerType);
-    }
-    if (message.host !== undefined) {
-      HostAddress.encode(message.host, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.workerNodeParallelism !== 0) {
-      writer.uint32(24).uint64(message.workerNodeParallelism);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AddWorkerNodeRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAddWorkerNodeRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.workerType = reader.int32() as any;
-          break;
-        case 2:
-          message.host = HostAddress.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.workerNodeParallelism = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AddWorkerNodeRequest {
     return {
-      workerType: isSet(object.workerType) ? workerTypeFromJSON(object.workerType) : 0,
+      workerType: isSet(object.workerType) ? workerTypeFromJSON(object.workerType) : WorkerType.UNSPECIFIED,
       host: isSet(object.host) ? HostAddress.fromJSON(object.host) : undefined,
       workerNodeParallelism: isSet(object.workerNodeParallelism) ? Number(object.workerNodeParallelism) : 0,
     };
@@ -1590,7 +1014,7 @@ export const AddWorkerNodeRequest = {
 
   fromPartial<I extends Exact<DeepPartial<AddWorkerNodeRequest>, I>>(object: I): AddWorkerNodeRequest {
     const message = createBaseAddWorkerNodeRequest();
-    message.workerType = object.workerType ?? 0;
+    message.workerType = object.workerType ?? WorkerType.UNSPECIFIED;
     message.host = (object.host !== undefined && object.host !== null)
       ? HostAddress.fromPartial(object.host)
       : undefined;
@@ -1604,37 +1028,6 @@ function createBaseAddWorkerNodeResponse(): AddWorkerNodeResponse {
 }
 
 export const AddWorkerNodeResponse = {
-  encode(message: AddWorkerNodeResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.node !== undefined) {
-      WorkerNode.encode(message.node, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AddWorkerNodeResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAddWorkerNodeResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.node = WorkerNode.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AddWorkerNodeResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1666,31 +1059,6 @@ function createBaseActivateWorkerNodeRequest(): ActivateWorkerNodeRequest {
 }
 
 export const ActivateWorkerNodeRequest = {
-  encode(message: ActivateWorkerNodeRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.host !== undefined) {
-      HostAddress.encode(message.host, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ActivateWorkerNodeRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseActivateWorkerNodeRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.host = HostAddress.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ActivateWorkerNodeRequest {
     return { host: isSet(object.host) ? HostAddress.fromJSON(object.host) : undefined };
   },
@@ -1715,31 +1083,6 @@ function createBaseActivateWorkerNodeResponse(): ActivateWorkerNodeResponse {
 }
 
 export const ActivateWorkerNodeResponse = {
-  encode(message: ActivateWorkerNodeResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ActivateWorkerNodeResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseActivateWorkerNodeResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ActivateWorkerNodeResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -1764,31 +1107,6 @@ function createBaseDeleteWorkerNodeRequest(): DeleteWorkerNodeRequest {
 }
 
 export const DeleteWorkerNodeRequest = {
-  encode(message: DeleteWorkerNodeRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.host !== undefined) {
-      HostAddress.encode(message.host, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DeleteWorkerNodeRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDeleteWorkerNodeRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.host = HostAddress.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DeleteWorkerNodeRequest {
     return { host: isSet(object.host) ? HostAddress.fromJSON(object.host) : undefined };
   },
@@ -1813,31 +1131,6 @@ function createBaseDeleteWorkerNodeResponse(): DeleteWorkerNodeResponse {
 }
 
 export const DeleteWorkerNodeResponse = {
-  encode(message: DeleteWorkerNodeResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): DeleteWorkerNodeResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDeleteWorkerNodeResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): DeleteWorkerNodeResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -1858,44 +1151,13 @@ export const DeleteWorkerNodeResponse = {
 };
 
 function createBaseListAllNodesRequest(): ListAllNodesRequest {
-  return { workerType: 0, includeStartingNodes: false };
+  return { workerType: WorkerType.UNSPECIFIED, includeStartingNodes: false };
 }
 
 export const ListAllNodesRequest = {
-  encode(message: ListAllNodesRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.workerType !== 0) {
-      writer.uint32(8).int32(message.workerType);
-    }
-    if (message.includeStartingNodes === true) {
-      writer.uint32(16).bool(message.includeStartingNodes);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListAllNodesRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListAllNodesRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.workerType = reader.int32() as any;
-          break;
-        case 2:
-          message.includeStartingNodes = reader.bool();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ListAllNodesRequest {
     return {
-      workerType: isSet(object.workerType) ? workerTypeFromJSON(object.workerType) : 0,
+      workerType: isSet(object.workerType) ? workerTypeFromJSON(object.workerType) : WorkerType.UNSPECIFIED,
       includeStartingNodes: isSet(object.includeStartingNodes) ? Boolean(object.includeStartingNodes) : false,
     };
   },
@@ -1909,7 +1171,7 @@ export const ListAllNodesRequest = {
 
   fromPartial<I extends Exact<DeepPartial<ListAllNodesRequest>, I>>(object: I): ListAllNodesRequest {
     const message = createBaseListAllNodesRequest();
-    message.workerType = object.workerType ?? 0;
+    message.workerType = object.workerType ?? WorkerType.UNSPECIFIED;
     message.includeStartingNodes = object.includeStartingNodes ?? false;
     return message;
   },
@@ -1920,37 +1182,6 @@ function createBaseListAllNodesResponse(): ListAllNodesResponse {
 }
 
 export const ListAllNodesResponse = {
-  encode(message: ListAllNodesResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.nodes) {
-      WorkerNode.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListAllNodesResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListAllNodesResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.nodes.push(WorkerNode.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ListAllNodesResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -1980,44 +1211,13 @@ export const ListAllNodesResponse = {
 };
 
 function createBaseSubscribeRequest(): SubscribeRequest {
-  return { workerType: 0, host: undefined };
+  return { workerType: WorkerType.UNSPECIFIED, host: undefined };
 }
 
 export const SubscribeRequest = {
-  encode(message: SubscribeRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.workerType !== 0) {
-      writer.uint32(8).int32(message.workerType);
-    }
-    if (message.host !== undefined) {
-      HostAddress.encode(message.host, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SubscribeRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSubscribeRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.workerType = reader.int32() as any;
-          break;
-        case 2:
-          message.host = HostAddress.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SubscribeRequest {
     return {
-      workerType: isSet(object.workerType) ? workerTypeFromJSON(object.workerType) : 0,
+      workerType: isSet(object.workerType) ? workerTypeFromJSON(object.workerType) : WorkerType.UNSPECIFIED,
       host: isSet(object.host) ? HostAddress.fromJSON(object.host) : undefined,
     };
   },
@@ -2031,7 +1231,7 @@ export const SubscribeRequest = {
 
   fromPartial<I extends Exact<DeepPartial<SubscribeRequest>, I>>(object: I): SubscribeRequest {
     const message = createBaseSubscribeRequest();
-    message.workerType = object.workerType ?? 0;
+    message.workerType = object.workerType ?? WorkerType.UNSPECIFIED;
     message.host = (object.host !== undefined && object.host !== null)
       ? HostAddress.fromPartial(object.host)
       : undefined;
@@ -2056,91 +1256,6 @@ function createBaseMetaSnapshot(): MetaSnapshot {
 }
 
 export const MetaSnapshot = {
-  encode(message: MetaSnapshot, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.nodes) {
-      WorkerNode.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.databases) {
-      Database.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    for (const v of message.schemas) {
-      Schema.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    for (const v of message.sources) {
-      Source.encode(v!, writer.uint32(34).fork()).ldelim();
-    }
-    for (const v of message.sinks) {
-      Sink.encode(v!, writer.uint32(42).fork()).ldelim();
-    }
-    for (const v of message.tables) {
-      Table.encode(v!, writer.uint32(50).fork()).ldelim();
-    }
-    for (const v of message.indexes) {
-      Index.encode(v!, writer.uint32(58).fork()).ldelim();
-    }
-    for (const v of message.users) {
-      UserInfo.encode(v!, writer.uint32(66).fork()).ldelim();
-    }
-    if (message.hummockVersion !== undefined) {
-      HummockVersion.encode(message.hummockVersion, writer.uint32(74).fork()).ldelim();
-    }
-    for (const v of message.parallelUnitMappings) {
-      ParallelUnitMapping.encode(v!, writer.uint32(82).fork()).ldelim();
-    }
-    if (message.hummockSnapshot !== undefined) {
-      HummockSnapshot.encode(message.hummockSnapshot, writer.uint32(90).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): MetaSnapshot {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseMetaSnapshot();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.nodes.push(WorkerNode.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.databases.push(Database.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.schemas.push(Schema.decode(reader, reader.uint32()));
-          break;
-        case 4:
-          message.sources.push(Source.decode(reader, reader.uint32()));
-          break;
-        case 5:
-          message.sinks.push(Sink.decode(reader, reader.uint32()));
-          break;
-        case 6:
-          message.tables.push(Table.decode(reader, reader.uint32()));
-          break;
-        case 7:
-          message.indexes.push(Index.decode(reader, reader.uint32()));
-          break;
-        case 8:
-          message.users.push(UserInfo.decode(reader, reader.uint32()));
-          break;
-        case 9:
-          message.hummockVersion = HummockVersion.decode(reader, reader.uint32());
-          break;
-        case 10:
-          message.parallelUnitMappings.push(ParallelUnitMapping.decode(reader, reader.uint32()));
-          break;
-        case 11:
-          message.hummockSnapshot = HummockSnapshot.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): MetaSnapshot {
     return {
       nodes: Array.isArray(object?.nodes) ? object.nodes.map((e: any) => WorkerNode.fromJSON(e)) : [],
@@ -2235,129 +1350,16 @@ export const MetaSnapshot = {
 };
 
 function createBaseSubscribeResponse(): SubscribeResponse {
-  return { status: undefined, operation: 0, version: 0, info: undefined };
+  return { status: undefined, operation: SubscribeResponse_Operation.UNSPECIFIED, version: 0, info: undefined };
 }
 
 export const SubscribeResponse = {
-  encode(message: SubscribeResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.operation !== 0) {
-      writer.uint32(16).int32(message.operation);
-    }
-    if (message.version !== 0) {
-      writer.uint32(24).uint64(message.version);
-    }
-    if (message.info?.$case === "node") {
-      WorkerNode.encode(message.info.node, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.info?.$case === "database") {
-      Database.encode(message.info.database, writer.uint32(42).fork()).ldelim();
-    }
-    if (message.info?.$case === "schema") {
-      Schema.encode(message.info.schema, writer.uint32(50).fork()).ldelim();
-    }
-    if (message.info?.$case === "table") {
-      Table.encode(message.info.table, writer.uint32(58).fork()).ldelim();
-    }
-    if (message.info?.$case === "source") {
-      Source.encode(message.info.source, writer.uint32(66).fork()).ldelim();
-    }
-    if (message.info?.$case === "sink") {
-      Sink.encode(message.info.sink, writer.uint32(74).fork()).ldelim();
-    }
-    if (message.info?.$case === "index") {
-      Index.encode(message.info.index, writer.uint32(82).fork()).ldelim();
-    }
-    if (message.info?.$case === "user") {
-      UserInfo.encode(message.info.user, writer.uint32(90).fork()).ldelim();
-    }
-    if (message.info?.$case === "hummockSnapshot") {
-      HummockSnapshot.encode(message.info.hummockSnapshot, writer.uint32(98).fork()).ldelim();
-    }
-    if (message.info?.$case === "parallelUnitMapping") {
-      ParallelUnitMapping.encode(message.info.parallelUnitMapping, writer.uint32(106).fork()).ldelim();
-    }
-    if (message.info?.$case === "hummockVersionDeltas") {
-      HummockVersionDeltas.encode(message.info.hummockVersionDeltas, writer.uint32(114).fork()).ldelim();
-    }
-    if (message.info?.$case === "snapshot") {
-      MetaSnapshot.encode(message.info.snapshot, writer.uint32(162).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): SubscribeResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSubscribeResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.operation = reader.int32() as any;
-          break;
-        case 3:
-          message.version = longToNumber(reader.uint64() as Long);
-          break;
-        case 4:
-          message.info = { $case: "node", node: WorkerNode.decode(reader, reader.uint32()) };
-          break;
-        case 5:
-          message.info = { $case: "database", database: Database.decode(reader, reader.uint32()) };
-          break;
-        case 6:
-          message.info = { $case: "schema", schema: Schema.decode(reader, reader.uint32()) };
-          break;
-        case 7:
-          message.info = { $case: "table", table: Table.decode(reader, reader.uint32()) };
-          break;
-        case 8:
-          message.info = { $case: "source", source: Source.decode(reader, reader.uint32()) };
-          break;
-        case 9:
-          message.info = { $case: "sink", sink: Sink.decode(reader, reader.uint32()) };
-          break;
-        case 10:
-          message.info = { $case: "index", index: Index.decode(reader, reader.uint32()) };
-          break;
-        case 11:
-          message.info = { $case: "user", user: UserInfo.decode(reader, reader.uint32()) };
-          break;
-        case 12:
-          message.info = { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.decode(reader, reader.uint32()) };
-          break;
-        case 13:
-          message.info = {
-            $case: "parallelUnitMapping",
-            parallelUnitMapping: ParallelUnitMapping.decode(reader, reader.uint32()),
-          };
-          break;
-        case 14:
-          message.info = {
-            $case: "hummockVersionDeltas",
-            hummockVersionDeltas: HummockVersionDeltas.decode(reader, reader.uint32()),
-          };
-          break;
-        case 20:
-          message.info = { $case: "snapshot", snapshot: MetaSnapshot.decode(reader, reader.uint32()) };
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): SubscribeResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
-      operation: isSet(object.operation) ? subscribeResponse_OperationFromJSON(object.operation) : 0,
+      operation: isSet(object.operation)
+        ? subscribeResponse_OperationFromJSON(object.operation)
+        : SubscribeResponse_Operation.UNSPECIFIED,
       version: isSet(object.version) ? Number(object.version) : 0,
       info: isSet(object.node)
         ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
@@ -2431,7 +1433,7 @@ export const SubscribeResponse = {
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
-    message.operation = object.operation ?? 0;
+    message.operation = object.operation ?? SubscribeResponse_Operation.UNSPECIFIED;
     message.version = object.version ?? 0;
     if (object.info?.$case === "node" && object.info?.node !== undefined && object.info?.node !== null) {
       message.info = { $case: "node", node: WorkerNode.fromPartial(object.info.node) };
@@ -2499,37 +1501,6 @@ function createBaseMetaLeaderInfo(): MetaLeaderInfo {
 }
 
 export const MetaLeaderInfo = {
-  encode(message: MetaLeaderInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.nodeAddress !== "") {
-      writer.uint32(10).string(message.nodeAddress);
-    }
-    if (message.leaseId !== 0) {
-      writer.uint32(16).uint64(message.leaseId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): MetaLeaderInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseMetaLeaderInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.nodeAddress = reader.string();
-          break;
-        case 2:
-          message.leaseId = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): MetaLeaderInfo {
     return {
       nodeAddress: isSet(object.nodeAddress) ? String(object.nodeAddress) : "",
@@ -2557,43 +1528,6 @@ function createBaseMetaLeaseInfo(): MetaLeaseInfo {
 }
 
 export const MetaLeaseInfo = {
-  encode(message: MetaLeaseInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.leader !== undefined) {
-      MetaLeaderInfo.encode(message.leader, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.leaseRegisterTime !== 0) {
-      writer.uint32(16).uint64(message.leaseRegisterTime);
-    }
-    if (message.leaseExpireTime !== 0) {
-      writer.uint32(24).uint64(message.leaseExpireTime);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): MetaLeaseInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseMetaLeaseInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.leader = MetaLeaderInfo.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.leaseRegisterTime = longToNumber(reader.uint64() as Long);
-          break;
-        case 3:
-          message.leaseExpireTime = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): MetaLeaseInfo {
     return {
       leader: isSet(object.leader) ? MetaLeaderInfo.fromJSON(object.leader) : undefined,
@@ -2626,25 +1560,6 @@ function createBasePauseRequest(): PauseRequest {
 }
 
 export const PauseRequest = {
-  encode(_: PauseRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): PauseRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePauseRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): PauseRequest {
     return {};
   },
@@ -2665,25 +1580,6 @@ function createBasePauseResponse(): PauseResponse {
 }
 
 export const PauseResponse = {
-  encode(_: PauseResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): PauseResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePauseResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): PauseResponse {
     return {};
   },
@@ -2704,25 +1600,6 @@ function createBaseResumeRequest(): ResumeRequest {
 }
 
 export const ResumeRequest = {
-  encode(_: ResumeRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ResumeRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseResumeRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): ResumeRequest {
     return {};
   },
@@ -2743,25 +1620,6 @@ function createBaseResumeResponse(): ResumeResponse {
 }
 
 export const ResumeResponse = {
-  encode(_: ResumeResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ResumeResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseResumeResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): ResumeResponse {
     return {};
   },
@@ -2782,25 +1640,6 @@ function createBaseGetClusterInfoRequest(): GetClusterInfoRequest {
 }
 
 export const GetClusterInfoRequest = {
-  encode(_: GetClusterInfoRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetClusterInfoRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetClusterInfoRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(_: any): GetClusterInfoRequest {
     return {};
   },
@@ -2821,56 +1660,6 @@ function createBaseGetClusterInfoResponse(): GetClusterInfoResponse {
 }
 
 export const GetClusterInfoResponse = {
-  encode(message: GetClusterInfoResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.workerNodes) {
-      WorkerNode.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    for (const v of message.tableFragments) {
-      TableFragments.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    Object.entries(message.actorSplits).forEach(([key, value]) => {
-      GetClusterInfoResponse_ActorSplitsEntry.encode({ key: key as any, value }, writer.uint32(26).fork()).ldelim();
-    });
-    Object.entries(message.streamSourceInfos).forEach(([key, value]) => {
-      GetClusterInfoResponse_StreamSourceInfosEntry.encode({ key: key as any, value }, writer.uint32(34).fork())
-        .ldelim();
-    });
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetClusterInfoResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetClusterInfoResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.workerNodes.push(WorkerNode.decode(reader, reader.uint32()));
-          break;
-        case 2:
-          message.tableFragments.push(TableFragments.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          const entry3 = GetClusterInfoResponse_ActorSplitsEntry.decode(reader, reader.uint32());
-          if (entry3.value !== undefined) {
-            message.actorSplits[entry3.key] = entry3.value;
-          }
-          break;
-        case 4:
-          const entry4 = GetClusterInfoResponse_StreamSourceInfosEntry.decode(reader, reader.uint32());
-          if (entry4.value !== undefined) {
-            message.streamSourceInfos[entry4.key] = entry4.value;
-          }
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetClusterInfoResponse {
     return {
       workerNodes: Array.isArray(object?.workerNodes) ? object.workerNodes.map((e: any) => WorkerNode.fromJSON(e)) : [],
@@ -2949,37 +1738,6 @@ function createBaseGetClusterInfoResponse_ActorSplitsEntry(): GetClusterInfoResp
 }
 
 export const GetClusterInfoResponse_ActorSplitsEntry = {
-  encode(message: GetClusterInfoResponse_ActorSplitsEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      ConnectorSplits.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetClusterInfoResponse_ActorSplitsEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetClusterInfoResponse_ActorSplitsEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = ConnectorSplits.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetClusterInfoResponse_ActorSplitsEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -3011,37 +1769,6 @@ function createBaseGetClusterInfoResponse_StreamSourceInfosEntry(): GetClusterIn
 }
 
 export const GetClusterInfoResponse_StreamSourceInfosEntry = {
-  encode(message: GetClusterInfoResponse_StreamSourceInfosEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.key !== 0) {
-      writer.uint32(8).uint32(message.key);
-    }
-    if (message.value !== undefined) {
-      StreamSourceInfo.encode(message.value, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetClusterInfoResponse_StreamSourceInfosEntry {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetClusterInfoResponse_StreamSourceInfosEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.key = reader.uint32();
-          break;
-        case 2:
-          message.value = StreamSourceInfo.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetClusterInfoResponse_StreamSourceInfosEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
@@ -3068,25 +1795,6 @@ export const GetClusterInfoResponse_StreamSourceInfosEntry = {
   },
 };
 
-declare var self: any | undefined;
-declare var window: any | undefined;
-declare var global: any | undefined;
-var globalThis: any = (() => {
-  if (typeof globalThis !== "undefined") {
-    return globalThis;
-  }
-  if (typeof self !== "undefined") {
-    return self;
-  }
-  if (typeof window !== "undefined") {
-    return window;
-  }
-  if (typeof global !== "undefined") {
-    return global;
-  }
-  throw "Unable to locate global object";
-})();
-
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
 export type DeepPartial<T> = T extends Builtin ? T
@@ -3098,20 +1806,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isObject(value: any): boolean {
   return typeof value === "object" && value !== null;

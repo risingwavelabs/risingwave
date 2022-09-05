@@ -14,34 +14,35 @@
  * limitations under the License.
  *
  */
-import '../styles/global.css'
-import 'bootstrap-icons/font/bootstrap-icons.css'
+import "bootstrap-icons/font/bootstrap-icons.css"
+import "../styles/global.css"
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/router';
-import type { AppProps } from 'next/app'
-import { ChakraProvider, Spinner } from '@chakra-ui/react'
-import Layout from '../components/Layout';
-import SpinnerOverlay from '../components/SpinnerOverlay';
+import { ChakraProvider } from "@chakra-ui/react"
+import type { AppProps } from "next/app"
+import { useRouter } from "next/router"
+import { useEffect, useState } from "react"
+import Layout from "../components/Layout"
+import SpinnerOverlay from "../components/SpinnerOverlay"
 
 // The entry point of the website. It is used to define some global variables.
 function App({ Component, pageProps }: AppProps) {
-
-  const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter()
+  const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
-    router.events.on("routeChangeStart", () => setIsLoading(true));
-    router.events.on('routeChangeComplete', () => setIsLoading(false));
-    router.events.on('routeChangeError', () => setIsLoading(false));
+    router.events.on("routeChangeStart", () => setIsLoading(true))
+    router.events.on("routeChangeComplete", () => setIsLoading(false))
+    router.events.on("routeChangeError", () => setIsLoading(false))
   }, [])
 
-  return <ChakraProvider>
-    <Layout>
-      <Component {...pageProps} />
-      {isLoading && <SpinnerOverlay />}
-    </Layout>
-  </ChakraProvider>
+  return (
+    <ChakraProvider>
+      <Layout>
+        <Component {...pageProps} />
+        {isLoading && <SpinnerOverlay />}
+      </Layout>
+    </ChakraProvider>
+  )
 }
 
 export default App

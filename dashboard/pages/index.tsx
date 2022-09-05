@@ -15,10 +15,12 @@
  *
  */
 
-import { Box, Text } from "@chakra-ui/react";
+import { Box, Text } from "@chakra-ui/react"
 
 export default function Home() {
   return (
-    <Box p={3}><Text>Home</Text></Box>
-  );
+    <Box p={3}>
+      <Text>Home</Text>
+    </Box>
+  )
 }

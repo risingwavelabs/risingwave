@@ -19,12 +19,12 @@ module.exports = () => {
     return [
       {
         source: "/api/:path*",
-        destination: "http://localhost:3000/:path*",
+        destination: "http://localhost:32333/:path*",
       },
-    ];
-  };
+    ]
+  }
   return {
     rewrites,
-    trailingSlash: true
-  };
-};
+    trailingSlash: true,
+  }
+}

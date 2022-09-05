@@ -1,25 +1,26 @@
 /* eslint-disable */
-import * as _m0 from "protobufjs/minimal";
 import { DataType } from "./data";
 
 export const protobufPackage = "plan_common";
 
-export enum JoinType {
+export const JoinType = {
   /**
    * UNSPECIFIED - Note that it comes from Calcite's JoinRelType.
    * DO NOT HAVE direction for SEMI and ANTI now.
    */
-  UNSPECIFIED = 0,
-  INNER = 1,
-  LEFT_OUTER = 2,
-  RIGHT_OUTER = 3,
-  FULL_OUTER = 4,
-  LEFT_SEMI = 5,
-  LEFT_ANTI = 6,
-  RIGHT_SEMI = 7,
-  RIGHT_ANTI = 8,
-  UNRECOGNIZED = -1,
-}
+  UNSPECIFIED: "UNSPECIFIED",
+  INNER: "INNER",
+  LEFT_OUTER: "LEFT_OUTER",
+  RIGHT_OUTER: "RIGHT_OUTER",
+  FULL_OUTER: "FULL_OUTER",
+  LEFT_SEMI: "LEFT_SEMI",
+  LEFT_ANTI: "LEFT_ANTI",
+  RIGHT_SEMI: "RIGHT_SEMI",
+  RIGHT_ANTI: "RIGHT_ANTI",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type JoinType = typeof JoinType[keyof typeof JoinType];
 
 export function joinTypeFromJSON(object: any): JoinType {
   switch (object) {
@@ -83,12 +84,14 @@ export function joinTypeToJSON(object: JoinType): string {
   }
 }
 
-export enum OrderType {
-  ORDER_UNSPECIFIED = 0,
-  ASCENDING = 1,
-  DESCENDING = 2,
-  UNRECOGNIZED = -1,
-}
+export const OrderType = {
+  ORDER_UNSPECIFIED: "ORDER_UNSPECIFIED",
+  ASCENDING: "ASCENDING",
+  DESCENDING: "DESCENDING",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type OrderType = typeof OrderType[keyof typeof OrderType];
 
 export function orderTypeFromJSON(object: any): OrderType {
   switch (object) {
@@ -122,14 +125,16 @@ export function orderTypeToJSON(object: OrderType): string {
   }
 }
 
-export enum RowFormatType {
-  ROW_UNSPECIFIED = 0,
-  JSON = 1,
-  PROTOBUF = 2,
-  DEBEZIUM_JSON = 3,
-  AVRO = 4,
-  UNRECOGNIZED = -1,
-}
+export const RowFormatType = {
+  ROW_UNSPECIFIED: "ROW_UNSPECIFIED",
+  JSON: "JSON",
+  PROTOBUF: "PROTOBUF",
+  DEBEZIUM_JSON: "DEBEZIUM_JSON",
+  AVRO: "AVRO",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type RowFormatType = typeof RowFormatType[keyof typeof RowFormatType];
 
 export function rowFormatTypeFromJSON(object: any): RowFormatType {
   switch (object) {
@@ -219,37 +224,6 @@ function createBaseField(): Field {
 }
 
 export const Field = {
-  encode(message: Field, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.dataType !== undefined) {
-      DataType.encode(message.dataType, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.name !== "") {
-      writer.uint32(18).string(message.name);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): Field {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseField();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.dataType = DataType.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.name = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): Field {
     return {
       dataType: isSet(object.dataType) ? DataType.fromJSON(object.dataType) : undefined,
@@ -279,55 +253,6 @@ function createBaseColumnDesc(): ColumnDesc {
 }
 
 export const ColumnDesc = {
-  encode(message: ColumnDesc, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.columnType !== undefined) {
-      DataType.encode(message.columnType, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.columnId !== 0) {
-      writer.uint32(16).int32(message.columnId);
-    }
-    if (message.name !== "") {
-      writer.uint32(26).string(message.name);
-    }
-    for (const v of message.fieldDescs) {
-      ColumnDesc.encode(v!, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.typeName !== "") {
-      writer.uint32(42).string(message.typeName);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ColumnDesc {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseColumnDesc();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.columnType = DataType.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.columnId = reader.int32();
-          break;
-        case 3:
-          message.name = reader.string();
-          break;
-        case 4:
-          message.fieldDescs.push(ColumnDesc.decode(reader, reader.uint32()));
-          break;
-        case 5:
-          message.typeName = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ColumnDesc {
     return {
       columnType: isSet(object.columnType) ? DataType.fromJSON(object.columnType) : undefined,
@@ -371,37 +296,6 @@ function createBaseColumnCatalog(): ColumnCatalog {
 }
 
 export const ColumnCatalog = {
-  encode(message: ColumnCatalog, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.columnDesc !== undefined) {
-      ColumnDesc.encode(message.columnDesc, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.isHidden === true) {
-      writer.uint32(16).bool(message.isHidden);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ColumnCatalog {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseColumnCatalog();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.columnDesc = ColumnDesc.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.isHidden = reader.bool();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ColumnCatalog {
     return {
       columnDesc: isSet(object.columnDesc) ? ColumnDesc.fromJSON(object.columnDesc) : undefined,
@@ -432,64 +326,6 @@ function createBaseStorageTableDesc(): StorageTableDesc {
 }
 
 export const StorageTableDesc = {
-  encode(message: StorageTableDesc, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.tableId !== 0) {
-      writer.uint32(8).uint32(message.tableId);
-    }
-    for (const v of message.columns) {
-      ColumnDesc.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    for (const v of message.orderKey) {
-      ColumnOrder.encode(v!, writer.uint32(26).fork()).ldelim();
-    }
-    writer.uint32(34).fork();
-    for (const v of message.distKeyIndices) {
-      writer.uint32(v);
-    }
-    writer.ldelim();
-    if (message.retentionSeconds !== 0) {
-      writer.uint32(40).uint32(message.retentionSeconds);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StorageTableDesc {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStorageTableDesc();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.tableId = reader.uint32();
-          break;
-        case 2:
-          message.columns.push(ColumnDesc.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.orderKey.push(ColumnOrder.decode(reader, reader.uint32()));
-          break;
-        case 4:
-          if ((tag & 7) === 2) {
-            const end2 = reader.uint32() + reader.pos;
-            while (reader.pos < end2) {
-              message.distKeyIndices.push(reader.uint32());
-            }
-          } else {
-            message.distKeyIndices.push(reader.uint32());
-          }
-          break;
-        case 5:
-          message.retentionSeconds = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StorageTableDesc {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
@@ -534,44 +370,13 @@ export const StorageTableDesc = {
 };
 
 function createBaseColumnOrder(): ColumnOrder {
-  return { orderType: 0, index: 0 };
+  return { orderType: OrderType.ORDER_UNSPECIFIED, index: 0 };
 }
 
 export const ColumnOrder = {
-  encode(message: ColumnOrder, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.orderType !== 0) {
-      writer.uint32(8).int32(message.orderType);
-    }
-    if (message.index !== 0) {
-      writer.uint32(16).uint32(message.index);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ColumnOrder {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseColumnOrder();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.orderType = reader.int32() as any;
-          break;
-        case 2:
-          message.index = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ColumnOrder {
     return {
-      orderType: isSet(object.orderType) ? orderTypeFromJSON(object.orderType) : 0,
+      orderType: isSet(object.orderType) ? orderTypeFromJSON(object.orderType) : OrderType.ORDER_UNSPECIFIED,
       index: isSet(object.index) ? Number(object.index) : 0,
     };
   },
@@ -585,7 +390,7 @@ export const ColumnOrder = {
 
   fromPartial<I extends Exact<DeepPartial<ColumnOrder>, I>>(object: I): ColumnOrder {
     const message = createBaseColumnOrder();
-    message.orderType = object.orderType ?? 0;
+    message.orderType = object.orderType ?? OrderType.ORDER_UNSPECIFIED;
     message.index = object.index ?? 0;
     return message;
   },

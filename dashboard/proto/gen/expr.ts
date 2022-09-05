@@ -1,5 +1,4 @@
 /* eslint-disable */
-import * as _m0 from "protobufjs/minimal";
 import { DataType } from "./data";
 import { OrderType, orderTypeFromJSON, orderTypeToJSON } from "./plan_common";
 
@@ -14,101 +13,103 @@ export interface ExprNode {
   };
 }
 
-export enum ExprNode_Type {
-  UNSPECIFIED = 0,
-  INPUT_REF = 1,
-  CONSTANT_VALUE = 2,
+export const ExprNode_Type = {
+  UNSPECIFIED: "UNSPECIFIED",
+  INPUT_REF: "INPUT_REF",
+  CONSTANT_VALUE: "CONSTANT_VALUE",
   /** ADD - arithmetics operators */
-  ADD = 3,
-  SUBTRACT = 4,
-  MULTIPLY = 5,
-  DIVIDE = 6,
-  MODULUS = 7,
+  ADD: "ADD",
+  SUBTRACT: "SUBTRACT",
+  MULTIPLY: "MULTIPLY",
+  DIVIDE: "DIVIDE",
+  MODULUS: "MODULUS",
   /** EQUAL - comparison operators */
-  EQUAL = 8,
-  NOT_EQUAL = 9,
-  LESS_THAN = 10,
-  LESS_THAN_OR_EQUAL = 11,
-  GREATER_THAN = 12,
-  GREATER_THAN_OR_EQUAL = 13,
+  EQUAL: "EQUAL",
+  NOT_EQUAL: "NOT_EQUAL",
+  LESS_THAN: "LESS_THAN",
+  LESS_THAN_OR_EQUAL: "LESS_THAN_OR_EQUAL",
+  GREATER_THAN: "GREATER_THAN",
+  GREATER_THAN_OR_EQUAL: "GREATER_THAN_OR_EQUAL",
   /** AND - logical operators */
-  AND = 21,
-  OR = 22,
-  NOT = 23,
-  IN = 24,
+  AND: "AND",
+  OR: "OR",
+  NOT: "NOT",
+  IN: "IN",
   /** BITWISE_AND - bitwise operators */
-  BITWISE_AND = 31,
-  BITWISE_OR = 32,
-  BITWISE_XOR = 33,
-  BITWISE_NOT = 34,
-  BITWISE_SHIFT_LEFT = 35,
-  BITWISE_SHIFT_RIGHT = 36,
+  BITWISE_AND: "BITWISE_AND",
+  BITWISE_OR: "BITWISE_OR",
+  BITWISE_XOR: "BITWISE_XOR",
+  BITWISE_NOT: "BITWISE_NOT",
+  BITWISE_SHIFT_LEFT: "BITWISE_SHIFT_LEFT",
+  BITWISE_SHIFT_RIGHT: "BITWISE_SHIFT_RIGHT",
   /** EXTRACT - date functions */
-  EXTRACT = 101,
-  TUMBLE_START = 103,
+  EXTRACT: "EXTRACT",
+  TUMBLE_START: "TUMBLE_START",
   /** CAST - other functions */
-  CAST = 201,
-  SUBSTR = 202,
-  LENGTH = 203,
-  LIKE = 204,
-  UPPER = 205,
-  LOWER = 206,
-  TRIM = 207,
-  REPLACE = 208,
-  POSITION = 209,
-  LTRIM = 210,
-  RTRIM = 211,
-  CASE = 212,
+  CAST: "CAST",
+  SUBSTR: "SUBSTR",
+  LENGTH: "LENGTH",
+  LIKE: "LIKE",
+  UPPER: "UPPER",
+  LOWER: "LOWER",
+  TRIM: "TRIM",
+  REPLACE: "REPLACE",
+  POSITION: "POSITION",
+  LTRIM: "LTRIM",
+  RTRIM: "RTRIM",
+  CASE: "CASE",
   /** ROUND_DIGIT - ROUND(numeric, integer) -> numeric */
-  ROUND_DIGIT = 213,
+  ROUND_DIGIT: "ROUND_DIGIT",
   /**
    * ROUND - ROUND(numeric) -> numeric
    * ROUND(double precision) -> double precision
    */
-  ROUND = 214,
-  ASCII = 215,
-  TRANSLATE = 216,
-  COALESCE = 217,
-  CONCAT_WS = 218,
-  ABS = 219,
-  SPLIT_PART = 220,
-  CEIL = 221,
-  FLOOR = 222,
-  TO_CHAR = 223,
-  MD5 = 224,
-  CHAR_LENGTH = 225,
-  REPEAT = 226,
-  CONCAT_OP = 227,
+  ROUND: "ROUND",
+  ASCII: "ASCII",
+  TRANSLATE: "TRANSLATE",
+  COALESCE: "COALESCE",
+  CONCAT_WS: "CONCAT_WS",
+  ABS: "ABS",
+  SPLIT_PART: "SPLIT_PART",
+  CEIL: "CEIL",
+  FLOOR: "FLOOR",
+  TO_CHAR: "TO_CHAR",
+  MD5: "MD5",
+  CHAR_LENGTH: "CHAR_LENGTH",
+  REPEAT: "REPEAT",
+  CONCAT_OP: "CONCAT_OP",
   /** BOOL_OUT - BOOL_OUT is different from CAST-bool-to-varchar in PostgreSQL. */
-  BOOL_OUT = 228,
-  OCTET_LENGTH = 229,
-  BIT_LENGTH = 230,
-  OVERLAY = 231,
-  REGEXP_MATCH = 232,
+  BOOL_OUT: "BOOL_OUT",
+  OCTET_LENGTH: "OCTET_LENGTH",
+  BIT_LENGTH: "BIT_LENGTH",
+  OVERLAY: "OVERLAY",
+  REGEXP_MATCH: "REGEXP_MATCH",
   /** IS_TRUE - Boolean comparison */
-  IS_TRUE = 301,
-  IS_NOT_TRUE = 302,
-  IS_FALSE = 303,
-  IS_NOT_FALSE = 304,
-  IS_NULL = 305,
-  IS_NOT_NULL = 306,
-  IS_DISTINCT_FROM = 307,
-  IS_NOT_DISTINCT_FROM = 308,
+  IS_TRUE: "IS_TRUE",
+  IS_NOT_TRUE: "IS_NOT_TRUE",
+  IS_FALSE: "IS_FALSE",
+  IS_NOT_FALSE: "IS_NOT_FALSE",
+  IS_NULL: "IS_NULL",
+  IS_NOT_NULL: "IS_NOT_NULL",
+  IS_DISTINCT_FROM: "IS_DISTINCT_FROM",
+  IS_NOT_DISTINCT_FROM: "IS_NOT_DISTINCT_FROM",
   /** NEG - Unary operators */
-  NEG = 401,
+  NEG: "NEG",
   /** FIELD - Nested selection operators */
-  FIELD = 501,
+  FIELD: "FIELD",
   /** ARRAY - Array expression. */
-  ARRAY = 521,
-  ARRAY_ACCESS = 522,
-  ROW = 523,
+  ARRAY: "ARRAY",
+  ARRAY_ACCESS: "ARRAY_ACCESS",
+  ROW: "ROW",
   /** SEARCH - Search operator and Search ARGument */
-  SEARCH = 998,
-  SARG = 999,
+  SEARCH: "SEARCH",
+  SARG: "SARG",
   /** VNODE - Internal functions */
-  VNODE = 1101,
-  UNRECOGNIZED = -1,
-}
+  VNODE: "VNODE",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type ExprNode_Type = typeof ExprNode_Type[keyof typeof ExprNode_Type];
 
 export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
   switch (object) {
@@ -503,13 +504,15 @@ export interface TableFunction {
   returnType: DataType | undefined;
 }
 
-export enum TableFunction_Type {
-  UNSPECIFIED = 0,
-  GENERATE = 1,
-  UNNEST = 2,
-  REGEXP_MATCHES = 3,
-  UNRECOGNIZED = -1,
-}
+export const TableFunction_Type = {
+  UNSPECIFIED: "UNSPECIFIED",
+  GENERATE: "GENERATE",
+  UNNEST: "UNNEST",
+  REGEXP_MATCHES: "REGEXP_MATCHES",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type TableFunction_Type = typeof TableFunction_Type[keyof typeof TableFunction_Type];
 
 export function tableFunction_TypeFromJSON(object: any): TableFunction_Type {
   switch (object) {
@@ -618,19 +621,21 @@ export interface AggCall {
   filter: ExprNode | undefined;
 }
 
-export enum AggCall_Type {
-  UNSPECIFIED = 0,
-  SUM = 1,
-  MIN = 2,
-  MAX = 3,
-  COUNT = 4,
-  AVG = 5,
-  STRING_AGG = 6,
-  SINGLE_VALUE = 7,
-  APPROX_COUNT_DISTINCT = 8,
-  ARRAY_AGG = 9,
-  UNRECOGNIZED = -1,
-}
+export const AggCall_Type = {
+  UNSPECIFIED: "UNSPECIFIED",
+  SUM: "SUM",
+  MIN: "MIN",
+  MAX: "MAX",
+  COUNT: "COUNT",
+  AVG: "AVG",
+  STRING_AGG: "STRING_AGG",
+  SINGLE_VALUE: "SINGLE_VALUE",
+  APPROX_COUNT_DISTINCT: "APPROX_COUNT_DISTINCT",
+  ARRAY_AGG: "ARRAY_AGG",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type AggCall_Type = typeof AggCall_Type[keyof typeof AggCall_Type];
 
 export function aggCall_TypeFromJSON(object: any): AggCall_Type {
   switch (object) {
@@ -712,62 +717,13 @@ export interface AggCall_OrderByField {
 }
 
 function createBaseExprNode(): ExprNode {
-  return { exprType: 0, returnType: undefined, rexNode: undefined };
+  return { exprType: ExprNode_Type.UNSPECIFIED, returnType: undefined, rexNode: undefined };
 }
 
 export const ExprNode = {
-  encode(message: ExprNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.exprType !== 0) {
-      writer.uint32(8).int32(message.exprType);
-    }
-    if (message.returnType !== undefined) {
-      DataType.encode(message.returnType, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.rexNode?.$case === "inputRef") {
-      InputRefExpr.encode(message.rexNode.inputRef, writer.uint32(34).fork()).ldelim();
-    }
-    if (message.rexNode?.$case === "constant") {
-      ConstantValue.encode(message.rexNode.constant, writer.uint32(42).fork()).ldelim();
-    }
-    if (message.rexNode?.$case === "funcCall") {
-      FunctionCall.encode(message.rexNode.funcCall, writer.uint32(50).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExprNode {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExprNode();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.exprType = reader.int32() as any;
-          break;
-        case 3:
-          message.returnType = DataType.decode(reader, reader.uint32());
-          break;
-        case 4:
-          message.rexNode = { $case: "inputRef", inputRef: InputRefExpr.decode(reader, reader.uint32()) };
-          break;
-        case 5:
-          message.rexNode = { $case: "constant", constant: ConstantValue.decode(reader, reader.uint32()) };
-          break;
-        case 6:
-          message.rexNode = { $case: "funcCall", funcCall: FunctionCall.decode(reader, reader.uint32()) };
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExprNode {
     return {
-      exprType: isSet(object.exprType) ? exprNode_TypeFromJSON(object.exprType) : 0,
+      exprType: isSet(object.exprType) ? exprNode_TypeFromJSON(object.exprType) : ExprNode_Type.UNSPECIFIED,
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       rexNode: isSet(object.inputRef)
         ? { $case: "inputRef", inputRef: InputRefExpr.fromJSON(object.inputRef) }
@@ -795,7 +751,7 @@ export const ExprNode = {
 
   fromPartial<I extends Exact<DeepPartial<ExprNode>, I>>(object: I): ExprNode {
     const message = createBaseExprNode();
-    message.exprType = object.exprType ?? 0;
+    message.exprType = object.exprType ?? ExprNode_Type.UNSPECIFIED;
     message.returnType = (object.returnType !== undefined && object.returnType !== null)
       ? DataType.fromPartial(object.returnType)
       : undefined;
@@ -825,51 +781,18 @@ export const ExprNode = {
 };
 
 function createBaseTableFunction(): TableFunction {
-  return { functionType: 0, args: [], returnType: undefined };
+  return { functionType: TableFunction_Type.UNSPECIFIED, args: [], returnType: undefined };
 }
 
 export const TableFunction = {
-  encode(message: TableFunction, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.functionType !== 0) {
-      writer.uint32(8).int32(message.functionType);
-    }
-    for (const v of message.args) {
-      ExprNode.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.returnType !== undefined) {
-      DataType.encode(message.returnType, writer.uint32(26).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TableFunction {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTableFunction();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.functionType = reader.int32() as any;
-          break;
-        case 2:
-          message.args.push(ExprNode.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.returnType = DataType.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TableFunction {
     return {
-      functionType: isSet(object.functionType) ? tableFunction_TypeFromJSON(object.functionType) : 0,
-      args: Array.isArray(object?.args) ? object.args.map((e: any) => ExprNode.fromJSON(e)) : [],
+      functionType: isSet(object.functionType)
+        ? tableFunction_TypeFromJSON(object.functionType)
+        : TableFunction_Type.UNSPECIFIED,
+      args: Array.isArray(object?.args)
+        ? object.args.map((e: any) => ExprNode.fromJSON(e))
+        : [],
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
     };
   },
@@ -889,7 +812,7 @@ export const TableFunction = {
 
   fromPartial<I extends Exact<DeepPartial<TableFunction>, I>>(object: I): TableFunction {
     const message = createBaseTableFunction();
-    message.functionType = object.functionType ?? 0;
+    message.functionType = object.functionType ?? TableFunction_Type.UNSPECIFIED;
     message.args = object.args?.map((e) => ExprNode.fromPartial(e)) || [];
     message.returnType = (object.returnType !== undefined && object.returnType !== null)
       ? DataType.fromPartial(object.returnType)
@@ -903,31 +826,6 @@ function createBaseInputRefExpr(): InputRefExpr {
 }
 
 export const InputRefExpr = {
-  encode(message: InputRefExpr, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.columnIdx !== 0) {
-      writer.uint32(8).int32(message.columnIdx);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): InputRefExpr {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseInputRefExpr();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.columnIdx = reader.int32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): InputRefExpr {
     return { columnIdx: isSet(object.columnIdx) ? Number(object.columnIdx) : 0 };
   },
@@ -950,37 +848,6 @@ function createBaseProjectSetSelectItem(): ProjectSetSelectItem {
 }
 
 export const ProjectSetSelectItem = {
-  encode(message: ProjectSetSelectItem, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.selectItem?.$case === "expr") {
-      ExprNode.encode(message.selectItem.expr, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.selectItem?.$case === "tableFunction") {
-      TableFunction.encode(message.selectItem.tableFunction, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ProjectSetSelectItem {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseProjectSetSelectItem();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.selectItem = { $case: "expr", expr: ExprNode.decode(reader, reader.uint32()) };
-          break;
-        case 2:
-          message.selectItem = { $case: "tableFunction", tableFunction: TableFunction.decode(reader, reader.uint32()) };
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ProjectSetSelectItem {
     return {
       selectItem: isSet(object.expr)
@@ -1027,31 +894,6 @@ function createBaseConstantValue(): ConstantValue {
 }
 
 export const ConstantValue = {
-  encode(message: ConstantValue, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.body.length !== 0) {
-      writer.uint32(10).bytes(message.body);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ConstantValue {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseConstantValue();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.body = reader.bytes();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ConstantValue {
     return { body: isSet(object.body) ? bytesFromBase64(object.body) : new Uint8Array() };
   },
@@ -1075,31 +917,6 @@ function createBaseStructValue(): StructValue {
 }
 
 export const StructValue = {
-  encode(message: StructValue, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.fields) {
-      writer.uint32(10).bytes(v!);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): StructValue {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStructValue();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.fields.push(reader.bytes());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): StructValue {
     return { fields: Array.isArray(object?.fields) ? object.fields.map((e: any) => bytesFromBase64(e)) : [] };
   },
@@ -1126,31 +943,6 @@ function createBaseListValue(): ListValue {
 }
 
 export const ListValue = {
-  encode(message: ListValue, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.fields) {
-      writer.uint32(10).bytes(v!);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListValue {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListValue();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.fields.push(reader.bytes());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ListValue {
     return { fields: Array.isArray(object?.fields) ? object.fields.map((e: any) => bytesFromBase64(e)) : [] };
   },
@@ -1177,31 +969,6 @@ function createBaseFunctionCall(): FunctionCall {
 }
 
 export const FunctionCall = {
-  encode(message: FunctionCall, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.children) {
-      ExprNode.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): FunctionCall {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseFunctionCall();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.children.push(ExprNode.decode(reader, reader.uint32()));
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): FunctionCall {
     return { children: Array.isArray(object?.children) ? object.children.map((e: any) => ExprNode.fromJSON(e)) : [] };
   },
@@ -1224,68 +991,20 @@ export const FunctionCall = {
 };
 
 function createBaseAggCall(): AggCall {
-  return { type: 0, args: [], returnType: undefined, distinct: false, orderByFields: [], filter: undefined };
+  return {
+    type: AggCall_Type.UNSPECIFIED,
+    args: [],
+    returnType: undefined,
+    distinct: false,
+    orderByFields: [],
+    filter: undefined,
+  };
 }
 
 export const AggCall = {
-  encode(message: AggCall, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.type !== 0) {
-      writer.uint32(8).int32(message.type);
-    }
-    for (const v of message.args) {
-      AggCall_Arg.encode(v!, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.returnType !== undefined) {
-      DataType.encode(message.returnType, writer.uint32(26).fork()).ldelim();
-    }
-    if (message.distinct === true) {
-      writer.uint32(32).bool(message.distinct);
-    }
-    for (const v of message.orderByFields) {
-      AggCall_OrderByField.encode(v!, writer.uint32(42).fork()).ldelim();
-    }
-    if (message.filter !== undefined) {
-      ExprNode.encode(message.filter, writer.uint32(50).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AggCall {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAggCall();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.type = reader.int32() as any;
-          break;
-        case 2:
-          message.args.push(AggCall_Arg.decode(reader, reader.uint32()));
-          break;
-        case 3:
-          message.returnType = DataType.decode(reader, reader.uint32());
-          break;
-        case 4:
-          message.distinct = reader.bool();
-          break;
-        case 5:
-          message.orderByFields.push(AggCall_OrderByField.decode(reader, reader.uint32()));
-          break;
-        case 6:
-          message.filter = ExprNode.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AggCall {
     return {
-      type: isSet(object.type) ? aggCall_TypeFromJSON(object.type) : 0,
+      type: isSet(object.type) ? aggCall_TypeFromJSON(object.type) : AggCall_Type.UNSPECIFIED,
       args: Array.isArray(object?.args) ? object.args.map((e: any) => AggCall_Arg.fromJSON(e)) : [],
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       distinct: isSet(object.distinct) ? Boolean(object.distinct) : false,
@@ -1318,7 +1037,7 @@ export const AggCall = {
 
   fromPartial<I extends Exact<DeepPartial<AggCall>, I>>(object: I): AggCall {
     const message = createBaseAggCall();
-    message.type = object.type ?? 0;
+    message.type = object.type ?? AggCall_Type.UNSPECIFIED;
     message.args = object.args?.map((e) => AggCall_Arg.fromPartial(e)) || [];
     message.returnType = (object.returnType !== undefined && object.returnType !== null)
       ? DataType.fromPartial(object.returnType)
@@ -1337,37 +1056,6 @@ function createBaseAggCall_Arg(): AggCall_Arg {
 }
 
 export const AggCall_Arg = {
-  encode(message: AggCall_Arg, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.input !== undefined) {
-      InputRefExpr.encode(message.input, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.type !== undefined) {
-      DataType.encode(message.type, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AggCall_Arg {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAggCall_Arg();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.input = InputRefExpr.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.type = DataType.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AggCall_Arg {
     return {
       input: isSet(object.input) ? InputRefExpr.fromJSON(object.input) : undefined,
@@ -1393,58 +1081,15 @@ export const AggCall_Arg = {
 };
 
 function createBaseAggCall_OrderByField(): AggCall_OrderByField {
-  return { input: undefined, type: undefined, direction: 0, nullsFirst: false };
+  return { input: undefined, type: undefined, direction: OrderType.ORDER_UNSPECIFIED, nullsFirst: false };
 }
 
 export const AggCall_OrderByField = {
-  encode(message: AggCall_OrderByField, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.input !== undefined) {
-      InputRefExpr.encode(message.input, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.type !== undefined) {
-      DataType.encode(message.type, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.direction !== 0) {
-      writer.uint32(24).int32(message.direction);
-    }
-    if (message.nullsFirst === true) {
-      writer.uint32(32).bool(message.nullsFirst);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AggCall_OrderByField {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAggCall_OrderByField();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.input = InputRefExpr.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.type = DataType.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.direction = reader.int32() as any;
-          break;
-        case 4:
-          message.nullsFirst = reader.bool();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AggCall_OrderByField {
     return {
       input: isSet(object.input) ? InputRefExpr.fromJSON(object.input) : undefined,
       type: isSet(object.type) ? DataType.fromJSON(object.type) : undefined,
-      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : 0,
+      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : OrderType.ORDER_UNSPECIFIED,
       nullsFirst: isSet(object.nullsFirst) ? Boolean(object.nullsFirst) : false,
     };
   },
@@ -1464,7 +1109,7 @@ export const AggCall_OrderByField = {
       ? InputRefExpr.fromPartial(object.input)
       : undefined;
     message.type = (object.type !== undefined && object.type !== null) ? DataType.fromPartial(object.type) : undefined;
-    message.direction = object.direction ?? 0;
+    message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
     message.nullsFirst = object.nullsFirst ?? false;
     return message;
   },

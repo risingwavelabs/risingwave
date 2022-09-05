@@ -14,15 +14,15 @@
  * limitations under the License.
  *
  */
-import { WorkerNode } from "../../proto/gen/common";
-import api from "./api";
+import { WorkerNode } from "../../proto/gen/common"
+import api from "./api"
 
 export async function getClusterInfoFrontend() {
-  const res = (await api.get("/api/clusters/1")).map(WorkerNode.fromJSON);
-  return res;
+  const res = (await api.get("/api/clusters/1")).map(WorkerNode.fromJSON)
+  return res
 }
 
 export async function getClusterInfoComputeNode() {
-  const res = (await api.get("/api/clusters/2")).map(WorkerNode.fromJSON);
-  return res;
+  const res = (await api.get("/api/clusters/2")).map(WorkerNode.fromJSON)
+  return res
 }

@@ -1,6 +1,4 @@
 /* eslint-disable */
-import * as Long from "long";
-import * as _m0 from "protobufjs/minimal";
 import { PlanFragment, TaskId as TaskId1, TaskOutputId } from "./batch_plan";
 import { Status } from "./common";
 import { DataChunk } from "./data";
@@ -20,16 +18,18 @@ export interface TaskInfo {
   taskStatus: TaskInfo_TaskStatus;
 }
 
-export enum TaskInfo_TaskStatus {
+export const TaskInfo_TaskStatus = {
   /** UNSPECIFIED - Note: Requirement of proto3: first enum must be 0. */
-  UNSPECIFIED = 0,
-  PENDING = 2,
-  RUNNING = 3,
-  FINISHED = 6,
-  FAILED = 7,
-  ABORTED = 8,
-  UNRECOGNIZED = -1,
-}
+  UNSPECIFIED: "UNSPECIFIED",
+  PENDING: "PENDING",
+  RUNNING: "RUNNING",
+  FINISHED: "FINISHED",
+  FAILED: "FAILED",
+  ABORTED: "ABORTED",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type TaskInfo_TaskStatus = typeof TaskInfo_TaskStatus[keyof typeof TaskInfo_TaskStatus];
 
 export function taskInfo_TaskStatusFromJSON(object: any): TaskInfo_TaskStatus {
   switch (object) {
@@ -132,43 +132,6 @@ function createBaseTaskId(): TaskId {
 }
 
 export const TaskId = {
-  encode(message: TaskId, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.queryId !== "") {
-      writer.uint32(10).string(message.queryId);
-    }
-    if (message.stageId !== 0) {
-      writer.uint32(16).uint32(message.stageId);
-    }
-    if (message.taskId !== 0) {
-      writer.uint32(24).uint32(message.taskId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TaskId {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTaskId();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.queryId = reader.string();
-          break;
-        case 2:
-          message.stageId = reader.uint32();
-          break;
-        case 3:
-          message.taskId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TaskId {
     return {
       queryId: isSet(object.queryId) ? String(object.queryId) : "",
@@ -195,45 +158,16 @@ export const TaskId = {
 };
 
 function createBaseTaskInfo(): TaskInfo {
-  return { taskId: undefined, taskStatus: 0 };
+  return { taskId: undefined, taskStatus: TaskInfo_TaskStatus.UNSPECIFIED };
 }
 
 export const TaskInfo = {
-  encode(message: TaskInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.taskId !== undefined) {
-      TaskId1.encode(message.taskId, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.taskStatus !== 0) {
-      writer.uint32(16).int32(message.taskStatus);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TaskInfo {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTaskInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.taskId = TaskId1.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.taskStatus = reader.int32() as any;
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TaskInfo {
     return {
       taskId: isSet(object.taskId) ? TaskId1.fromJSON(object.taskId) : undefined,
-      taskStatus: isSet(object.taskStatus) ? taskInfo_TaskStatusFromJSON(object.taskStatus) : 0,
+      taskStatus: isSet(object.taskStatus)
+        ? taskInfo_TaskStatusFromJSON(object.taskStatus)
+        : TaskInfo_TaskStatus.UNSPECIFIED,
     };
   },
 
@@ -249,7 +183,7 @@ export const TaskInfo = {
     message.taskId = (object.taskId !== undefined && object.taskId !== null)
       ? TaskId1.fromPartial(object.taskId)
       : undefined;
-    message.taskStatus = object.taskStatus ?? 0;
+    message.taskStatus = object.taskStatus ?? TaskInfo_TaskStatus.UNSPECIFIED;
     return message;
   },
 };
@@ -259,43 +193,6 @@ function createBaseCreateTaskRequest(): CreateTaskRequest {
 }
 
 export const CreateTaskRequest = {
-  encode(message: CreateTaskRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.taskId !== undefined) {
-      TaskId1.encode(message.taskId, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.plan !== undefined) {
-      PlanFragment.encode(message.plan, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.epoch !== 0) {
-      writer.uint32(24).uint64(message.epoch);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): CreateTaskRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateTaskRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.taskId = TaskId1.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.plan = PlanFragment.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.epoch = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): CreateTaskRequest {
     return {
       taskId: isSet(object.taskId) ? TaskId1.fromJSON(object.taskId) : undefined,
@@ -330,31 +227,6 @@ function createBaseAbortTaskRequest(): AbortTaskRequest {
 }
 
 export const AbortTaskRequest = {
-  encode(message: AbortTaskRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.taskId !== undefined) {
-      TaskId1.encode(message.taskId, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AbortTaskRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAbortTaskRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.taskId = TaskId1.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AbortTaskRequest {
     return { taskId: isSet(object.taskId) ? TaskId1.fromJSON(object.taskId) : undefined };
   },
@@ -379,31 +251,6 @@ function createBaseAbortTaskResponse(): AbortTaskResponse {
 }
 
 export const AbortTaskResponse = {
-  encode(message: AbortTaskResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AbortTaskResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAbortTaskResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): AbortTaskResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
@@ -428,31 +275,6 @@ function createBaseGetTaskInfoRequest(): GetTaskInfoRequest {
 }
 
 export const GetTaskInfoRequest = {
-  encode(message: GetTaskInfoRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.taskId !== undefined) {
-      TaskId1.encode(message.taskId, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetTaskInfoRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetTaskInfoRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.taskId = TaskId1.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetTaskInfoRequest {
     return { taskId: isSet(object.taskId) ? TaskId1.fromJSON(object.taskId) : undefined };
   },
@@ -477,37 +299,6 @@ function createBaseTaskInfoResponse(): TaskInfoResponse {
 }
 
 export const TaskInfoResponse = {
-  encode(message: TaskInfoResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.taskInfo !== undefined) {
-      TaskInfo.encode(message.taskInfo, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): TaskInfoResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTaskInfoResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.taskInfo = TaskInfo.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): TaskInfoResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -539,37 +330,6 @@ function createBaseGetDataResponse(): GetDataResponse {
 }
 
 export const GetDataResponse = {
-  encode(message: GetDataResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.status !== undefined) {
-      Status.encode(message.status, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.recordBatch !== undefined) {
-      DataChunk.encode(message.recordBatch, writer.uint32(18).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetDataResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetDataResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.status = Status.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.recordBatch = DataChunk.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetDataResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
@@ -602,49 +362,6 @@ function createBaseGetStreamRequest(): GetStreamRequest {
 }
 
 export const GetStreamRequest = {
-  encode(message: GetStreamRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.upActorId !== 0) {
-      writer.uint32(8).uint32(message.upActorId);
-    }
-    if (message.downActorId !== 0) {
-      writer.uint32(16).uint32(message.downActorId);
-    }
-    if (message.upFragmentId !== 0) {
-      writer.uint32(24).uint32(message.upFragmentId);
-    }
-    if (message.downFragmentId !== 0) {
-      writer.uint32(32).uint32(message.downFragmentId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetStreamRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetStreamRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.upActorId = reader.uint32();
-          break;
-        case 2:
-          message.downActorId = reader.uint32();
-          break;
-        case 3:
-          message.upFragmentId = reader.uint32();
-          break;
-        case 4:
-          message.downFragmentId = reader.uint32();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetStreamRequest {
     return {
       upActorId: isSet(object.upActorId) ? Number(object.upActorId) : 0,
@@ -678,43 +395,6 @@ function createBaseExecuteRequest(): ExecuteRequest {
 }
 
 export const ExecuteRequest = {
-  encode(message: ExecuteRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.taskId !== undefined) {
-      TaskId1.encode(message.taskId, writer.uint32(10).fork()).ldelim();
-    }
-    if (message.plan !== undefined) {
-      PlanFragment.encode(message.plan, writer.uint32(18).fork()).ldelim();
-    }
-    if (message.epoch !== 0) {
-      writer.uint32(24).uint64(message.epoch);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): ExecuteRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseExecuteRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.taskId = TaskId1.decode(reader, reader.uint32());
-          break;
-        case 2:
-          message.plan = PlanFragment.decode(reader, reader.uint32());
-          break;
-        case 3:
-          message.epoch = longToNumber(reader.uint64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): ExecuteRequest {
     return {
       taskId: isSet(object.taskId) ? TaskId1.fromJSON(object.taskId) : undefined,
@@ -749,31 +429,6 @@ function createBaseGetDataRequest(): GetDataRequest {
 }
 
 export const GetDataRequest = {
-  encode(message: GetDataRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.taskOutputId !== undefined) {
-      TaskOutputId.encode(message.taskOutputId, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetDataRequest {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetDataRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.taskOutputId = TaskOutputId.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetDataRequest {
     return { taskOutputId: isSet(object.taskOutputId) ? TaskOutputId.fromJSON(object.taskOutputId) : undefined };
   },
@@ -799,31 +454,6 @@ function createBaseGetStreamResponse(): GetStreamResponse {
 }
 
 export const GetStreamResponse = {
-  encode(message: GetStreamResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.message !== undefined) {
-      StreamMessage.encode(message.message, writer.uint32(10).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetStreamResponse {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetStreamResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          message.message = StreamMessage.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
-      }
-    }
-    return message;
-  },
-
   fromJSON(object: any): GetStreamResponse {
     return { message: isSet(object.message) ? StreamMessage.fromJSON(object.message) : undefined };
   },
@@ -844,25 +474,6 @@ export const GetStreamResponse = {
   },
 };
 
-declare var self: any | undefined;
-declare var window: any | undefined;
-declare var global: any | undefined;
-var globalThis: any = (() => {
-  if (typeof globalThis !== "undefined") {
-    return globalThis;
-  }
-  if (typeof self !== "undefined") {
-    return self;
-  }
-  if (typeof window !== "undefined") {
-    return window;
-  }
-  if (typeof global !== "undefined") {
-    return global;
-  }
-  throw "Unable to locate global object";
-})();
-
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
 export type DeepPartial<T> = T extends Builtin ? T
@@ -874,20 +485,6 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
-
-function longToNumber(long: Long): number {
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  return long.toNumber();
-}
-
-// If you get a compile-error about 'Constructor<Long> and ... have no overlap',
-// add '--ts_proto_opt=esModuleInterop=true' as a flag when calling 'protoc'.
-if (_m0.util.Long !== Long) {
-  _m0.util.Long = Long as any;
-  _m0.configure();
-}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;
