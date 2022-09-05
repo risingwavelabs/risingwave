@@ -61,6 +61,8 @@ mod meta_client;
 pub mod test_utils;
 mod user;
 
+mod monitor;
+
 use std::ffi::OsString;
 use std::iter;
 use std::sync::Arc;
