@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::StreamExt;
 use futures_async_stream::for_await;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
+use tokio::sync::oneshot;
 
 use crate::binder::Binder;
 use crate::handler::privilege::{check_privileges, resolve_privileges};
@@ -36,12 +38,23 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
 
     // TODO: support dml in local mode
     // Currently dml always runs in distributed mode.
-    let (data_stream, pg_descs) = crate::handler::query::distribute_execute(context, bound).await?;
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let (data_stream, pg_descs) =
+        crate::handler::query::distribute_execute(context, bound, shutdown_tx).await?;
 
+    let mut data_stream = data_stream.take_until(shutdown_rx);
     let mut rows = vec![];
     #[for_await]
-    for chunk in data_stream {
+    for chunk in &mut data_stream {
         rows.extend(to_pg_rows(chunk?, false));
+    }
+
+    // Check whether error happen, if yes, returned.
+    let execution_ret = data_stream.take_result();
+    if let Some(ret) = execution_ret {
+        return Err(ret
+            .expect("The shutdown message receiver should not fail")
+            .into());
     }
 
     let rows_count = match stmt_type {

@@ -18,8 +18,9 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::RequiredDist;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Streaming local simple agg.
 ///
@@ -75,8 +76,8 @@ impl PlanTreeNodeUnary for StreamLocalSimpleAgg {
 }
 impl_plan_tree_node_for_unary! { StreamLocalSimpleAgg }
 
-impl ToStreamProst for StreamLocalSimpleAgg {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamLocalSimpleAgg {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         ProstStreamNode::LocalSimpleAgg(SimpleAggNode {
             agg_calls: self
