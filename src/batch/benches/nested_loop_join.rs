@@ -14,6 +14,8 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
+use paste::paste;
+use risingwave_batch::bench_join;
 use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
 use risingwave_common::catalog::schema_test_utils::field_n;
@@ -33,6 +35,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 fn create_nested_loop_join_executor(
     join_type: JoinType,
+    _with_cond: bool,
     left_chunk_size: usize,
     left_chunk_num: usize,
     right_chunk_size: usize,
@@ -142,18 +145,9 @@ fn create_nested_loop_join_executor(
     ))
 }
 
-async fn execute_nested_loop_join_executor(executor: BoxedExecutor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
-    }
-}
-
 fn bench_nested_loop_join(c: &mut Criterion) {
-    const LEFT_SIZE: usize = 2 * 1024;
-    const RIGHT_SIZE: usize = 2 * 1024;
-    let rt = Runtime::new().unwrap();
-    for join_type in &[
+    let with_conds = vec![false];
+    let join_types = vec![
         JoinType::Inner,
         JoinType::LeftOuter,
         JoinType::LeftSemi,
@@ -161,36 +155,10 @@ fn bench_nested_loop_join(c: &mut Criterion) {
         JoinType::RightOuter,
         JoinType::RightSemi,
         JoinType::RightAnti,
-        JoinType::FullOuter,
-    ] {
-        for chunk_size in &[32, 128, 512, 1024] {
-            c.bench_with_input(
-                BenchmarkId::new(
-                    "NestedLoopJoinExecutor",
-                    format!("{}({:?})", chunk_size, join_type),
-                ),
-                chunk_size,
-                |b, &chunk_size| {
-                    let left_chunk_num = LEFT_SIZE / chunk_size;
-                    let right_chunk_num = RIGHT_SIZE / chunk_size;
-                    b.to_async(&rt).iter_batched(
-                        || {
-                            create_nested_loop_join_executor(
-                                *join_type,
-                                chunk_size,
-                                left_chunk_num,
-                                chunk_size,
-                                right_chunk_num,
-                            )
-                        },
-                        |e| execute_nested_loop_join_executor(e),
-                        BatchSize::SmallInput,
-                    );
-                },
-            );
-        }
-    }
+    ];
+    bench_nested_loop_join_internal(c, with_conds, join_types);
 }
 
+bench_join!("NestedLoopJoin");
 criterion_group!(benches, bench_nested_loop_join);
 criterion_main!(benches);
