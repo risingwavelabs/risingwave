@@ -14,6 +14,7 @@
  * limitations under the License.
  *
  */
+
 module.exports = () => {
   const rewrites = () => {
     return [

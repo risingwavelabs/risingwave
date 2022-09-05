@@ -1,5 +1,3 @@
-import { Flex } from "@chakra-ui/react"
-
 /*
  * Copyright 2022 Singularity Data
  *
@@ -16,6 +14,8 @@ import { Flex } from "@chakra-ui/react"
  * limitations under the License.
  *
  */
+
+import { Flex } from "@chakra-ui/react"
 
 function NoData() {
   return (
