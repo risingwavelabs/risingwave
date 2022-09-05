@@ -216,6 +216,7 @@ mod batch_project_set;
 mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
+mod batch_sort_agg;
 mod batch_table_function;
 mod batch_topn;
 mod batch_union;
@@ -278,6 +279,7 @@ pub use batch_project_set::BatchProjectSet;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
+pub use batch_sort_agg::BatchSortAgg;
 pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
@@ -363,6 +365,7 @@ macro_rules! for_all_plan_nodes {
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
+            , { Batch, SortAgg }
             , { Batch, Project }
             , { Batch, Filter }
             , { Batch, Insert }
@@ -444,6 +447,7 @@ macro_rules! for_batch_plan_nodes {
             [$($x),*]
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
+            , { Batch, SortAgg }
             , { Batch, Project }
             , { Batch, Filter }
             , { Batch, SeqScan }

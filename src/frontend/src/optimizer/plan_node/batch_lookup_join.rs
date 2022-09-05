@@ -176,6 +176,7 @@ impl ToBatchProst for BatchLookupJoin {
                 .map(|&x| x as u32)
                 .collect(),
             worker_nodes: vec![], // To be filled in at local.rs
+            null_safe: self.eq_join_predicate.null_safes(),
         })
     }
 }
