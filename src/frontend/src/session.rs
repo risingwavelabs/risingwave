@@ -24,7 +24,7 @@ use parking_lot::{RwLock, RwLockReadGuard};
 use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use rand::RngCore;
 #[cfg(test)]
 use risingwave_common::catalog::{
@@ -44,7 +44,7 @@ use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
@@ -197,10 +197,13 @@ pub struct FrontendEnv {
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
 
+    /// Each session is identified by (process_id,
+    /// secret_key). When Cancel Request received, find corresponding session and cancel all
+    /// running queries.
     sessions_map: SessionMapRef,
 }
 
-/// TODO: Remove when Session is closed.
+/// TODO: Find a way to delete session from map when session is closed.
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
@@ -430,6 +433,9 @@ pub struct SessionImpl {
     /// Shutdown channels map
     /// FIXME: Use weak key hash map to remove query id if query ends.
     shutdown_receivers_map: Arc<Mutex<HashMap<QueryId, Option<Sender<()>>>>>,
+
+    /// Identified by process_id, secret_key. Corresponds to SessionManager.
+    id: (i32, i32),
 }
 
 impl SessionImpl {
@@ -437,6 +443,7 @@ impl SessionImpl {
         env: FrontendEnv,
         auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
+        id: (i32, i32),
     ) -> Self {
         Self {
             env,
@@ -444,6 +451,7 @@ impl SessionImpl {
             user_authenticator,
             config_map: RwLock::new(Default::default()),
             shutdown_receivers_map: Arc::new(Mutex::new(HashMap::new())),
+            id,
         }
     }
 
@@ -459,6 +467,8 @@ impl SessionImpl {
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
             shutdown_receivers_map: Default::default(),
+            // Mock session use non-sense id.
+            id: (0, 0),
         }
     }
 
@@ -491,37 +501,24 @@ impl SessionImpl {
     }
 
     pub fn insert_query_shutdown_sender(&self, query_id: QueryId, shutdown_tx: Sender<()>) {
-        println!("Insert channel for query id {:?}", query_id);
         let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
         write_guard.insert(query_id, Some(shutdown_tx));
     }
 
     // TODO: Support cancel query's in current session. This needs to store query ID in session.
     pub fn cancel_running_queries(&self) {
-        {
-            let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
-            println!(
-                "Start to cancel running queries, map len {}",
-                write_guard.len()
-            );
-            for (query_id, sender) in &mut *write_guard {
-                if let Some(sender_swap) = mem::take(sender) {
-                    sender_swap.send(()).unwrap();
-                    info!("Cancel query_id {:?} in query manager", query_id);
-                }
+        let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
+        for (query_id, sender) in &mut *write_guard {
+            if let Some(sender_swap) = mem::take(sender) {
+                sender_swap.send(()).unwrap();
+                info!("Cancel query_id {:?} in query manager", query_id);
             }
-            write_guard.clear();
-            println!("Cancel running queries done, map len {}", write_guard.len());
         }
+        write_guard.clear();
     }
 
-    pub fn delete_corresponding_query(&self, query_id: &QueryId) {
-        {
-            let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
-            if write_guard.remove(query_id).is_none() {
-                warn!("query_id has already been canceled");
-            }
-        }
+    pub fn session_id(&self) -> SessionId {
+        self.id
     }
 }
 
@@ -599,7 +596,11 @@ impl SessionManager for SessionManagerImpl {
                 }
             };
 
-            Ok(SessionImpl::new(
+            // Assign a session id and insert into sessions map (for cancel request).
+            let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
+            // Use a trivial strategy: process_id and secret_key are equal.
+            let id = (secret_key, secret_key);
+            let session_impl: Arc<SessionImpl> = SessionImpl::new(
                 self.env.clone(),
                 Arc::new(AuthContext::new(
                     database.to_string(),
@@ -607,8 +608,12 @@ impl SessionManager for SessionManagerImpl {
                     user.id,
                 )),
                 user_authenticator,
+                id,
             )
-            .into())
+            .into();
+            self.insert_session(session_impl.clone());
+
+            Ok(session_impl)
         } else {
             Err(Box::new(Error::new(
                 ErrorKind::InvalidInput,
@@ -617,15 +622,7 @@ impl SessionManager for SessionManagerImpl {
         }
     }
 
-    fn insert_session(&self, session: Arc<Self::Session>) -> (i32, i32) {
-        let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
-        // Now we adopt a simple strategy: The secret key and process id are equal.
-        let id = (secret_key, secret_key);
-        let mut write_guard = self.env.sessions_map.lock().unwrap();
-        write_guard.insert(id, session);
-        id
-    }
-
+    /// Used when cancel request happened, returned corresponding session ref.
     fn connect_for_cancel(
         &self,
         process_id: i32,
@@ -650,6 +647,11 @@ impl SessionManagerImpl {
             _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
             number: AtomicI32::new(0),
         })
+    }
+
+    fn insert_session(&self, session: Arc<SessionImpl>) {
+        let mut write_guard = self.env.sessions_map.lock().unwrap();
+        write_guard.insert(session.id(), session);
     }
 }
 
@@ -757,8 +759,19 @@ impl Session for SessionImpl {
         &self.user_authenticator
     }
 
-    fn cancel_query(&self) {
-        self.cancel_running_queries()
+    fn cancel_running_queries(&self) {
+        let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
+        for (query_id, sender) in &mut *write_guard {
+            if let Some(sender_swap) = mem::take(sender) {
+                sender_swap.send(()).unwrap();
+                info!("Cancel query_id {:?} in query manager", query_id);
+            }
+        }
+        write_guard.clear();
+    }
+
+    fn id(&self) -> SessionId {
+        self.id
     }
 }
 

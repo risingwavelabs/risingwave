@@ -80,10 +80,6 @@ impl SessionManager for LocalFrontend {
     ) -> PsqlResult<Arc<Self::Session>> {
         todo!()
     }
-
-    fn insert_session(&self, _session: Arc<Self::Session>) -> (i32, i32) {
-        todo!()
-    }
 }
 
 impl LocalFrontend {
@@ -160,6 +156,8 @@ impl LocalFrontend {
                 DEFAULT_SUPER_USER_ID,
             )),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
 
@@ -173,6 +171,8 @@ impl LocalFrontend {
             self.env.clone(),
             Arc::new(AuthContext::new(database, user_name, user_id)),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
 }

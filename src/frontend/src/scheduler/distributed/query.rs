@@ -138,10 +138,13 @@ impl QueryExecution {
     }
 
     /// Start execution of this query.
+    /// Note the two shutdown channel sender and receivers are not dual.
+    /// One is used for propagate error to `QueryResultFetcher`, one is used for listening on
+    /// ctrl-c.
     pub async fn start(
         &self,
         shutdown_tx: Sender<SchedulerError>,
-        shutdown_rx: oneshot::Receiver<()>,
+        shutdown_rx_for_cancel: oneshot::Receiver<()>,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
@@ -165,7 +168,7 @@ impl QueryExecution {
                 };
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run(shutdown_tx, shutdown_rx).await });
+                tokio::spawn(async move { runner.run(shutdown_tx, shutdown_rx_for_cancel).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -193,7 +196,11 @@ impl QueryExecution {
 }
 
 impl QueryRunner {
-    async fn run(mut self, shutdown_tx: tokio::sync::oneshot::Sender<SchedulerError>, shutdown_rx: oneshot::Receiver<u8>) {
+    async fn run(
+        mut self,
+        shutdown_tx: tokio::sync::oneshot::Sender<SchedulerError>,
+        shutdown_rx_for_cancel: oneshot::Receiver<()>,
+    ) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -207,13 +214,12 @@ impl QueryRunner {
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
 
         // Schedule other stages after leaf stages are all scheduled.
-        let mut shutdown_rx = shutdown_rx;
+        let mut shutdown_rx = shutdown_rx_for_cancel;
         loop {
             tokio::select! {
                 _ = &mut shutdown_rx => {
 
-                    self.handle_cancel_or_failed_stage(SchedulerError::QueryCancelError).await;
-                    println!("Break from loop");
+                    self.handle_cancel_or_failed_stage(shutdown_tx, SchedulerError::QueryCancelError).await;
                     break;
                 }
 
@@ -258,7 +264,7 @@ impl QueryRunner {
                                     self.query.query_id, id, reason
                                 );
 
-                                self.handle_cancel_or_failed_stage(reason).await;
+                                self.handle_cancel_or_failed_stage(shutdown_tx, reason).await;
                                 // self.stage_executions.clear();
                                 // One stage failed, not necessary to execute schedule stages.
                                 break;
@@ -320,7 +326,13 @@ impl QueryRunner {
         true
     }
 
-    async fn handle_cancel_or_failed_stage(mut self, reason: SchedulerError) {
+    /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
+    /// result fetcher.
+    async fn handle_cancel_or_failed_stage(
+        mut self,
+        shutdown_tx: Sender<SchedulerError>,
+        reason: SchedulerError,
+    ) {
         // Consume sender here and send error to root stage.
         let root_stage_sender = mem::take(&mut self.root_stage_sender);
         // It's possible we receive stage failed event message multi times and the
@@ -333,14 +345,14 @@ impl QueryRunner {
                     "Root stage failure event for {:?} sent.",
                     self.query.query_id
                 );
+            }
+        } else {
+            // If root stage has been taken, then use channel to send error to
+            // `QueryResultFetcher`. This may happen if some execution error received
+            // after we have scheduled are events.
 
-                // If root stage has been taken, then use channel to send error to
-                // `QueryResultFetcher`. This may happen if some execution error received
-                // after we have scheduled are events.
-
-                if shutdown_tx.send(reason).is_err() {
-                    warn!("Sending error to query result fetcher fail!");
-                }
+            if shutdown_tx.send(reason).is_err() {
+                warn!("Sending error to query result fetcher fail!");
             }
         }
 
@@ -349,9 +361,6 @@ impl QueryRunner {
             // The stop is return immediately so no need to spawn tasks.
             stage_execution.stop().await;
         }
-        // self.stage_executions.clear();
-        // One stage failed, not necessary to execute schedule stages.
-        // break;
     }
 }
 
@@ -403,7 +412,10 @@ mod tests {
         // Channel just used to pass compiler.
         let (shutdown_tx, _shutdown_rx) = oneshot::channel::<SchedulerError>();
         let (_shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-        assert!(query_execution.start(shutdown_tx, shutdown_rx).await.is_err());
+        assert!(query_execution
+            .start(shutdown_tx, shutdown_rx)
+            .await
+            .is_err());
     }
 
     async fn create_query() -> Query {

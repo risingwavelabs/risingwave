@@ -66,7 +66,6 @@ impl FeStartupMessage {
         config.chunks(2).for_each(|chunk| {
             map.insert(chunk[0].to_string(), chunk[1].to_string());
         });
-        println!("read start up succesfully");
         Ok(FeStartupMessage { config: map })
     }
 }
@@ -264,7 +263,6 @@ impl FeCloseMessage {
 impl FeMessage {
     /// Read one message from the stream.
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
-        println!("Start to read normal message1");
         let val = stream.read_u8().await?;
         let len = stream.read_i32().await?;
 
@@ -274,7 +272,6 @@ impl FeMessage {
             stream.read_exact(&mut payload).await?;
         }
         let sql_bytes = Bytes::from(payload);
-        println!("Start to read normal message {:?}", val);
         match val {
             b'Q' => Ok(FeMessage::Query(FeQueryMessage { sql_bytes })),
             b'P' => FeParseMessage::parse(sql_bytes),
@@ -297,7 +294,6 @@ impl FeStartupMessage {
     /// Read startup message from the stream.
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
         let len = stream.read_i32().await?;
-        println!("can not read lenth?");
         let protocol_num = stream.read_i32().await?;
         let payload_len = len - 8;
         let mut payload = vec![0; payload_len as usize];

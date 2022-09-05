@@ -24,15 +24,13 @@ use crate::pg_protocol::PgProtocol;
 use crate::pg_response::PgResponse;
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
-
+pub type SessionId = (i32, i32);
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
     fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
-
-    fn insert_session(&self, session: Arc<Self::Session>) -> (i32, i32);
 
     fn connect_for_cancel(
         &self,
@@ -59,7 +57,9 @@ pub trait Session: Send + Sync {
         sql: &str,
     ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
     fn user_authenticator(&self) -> &UserAuthenticator;
-    fn cancel_query(&self);
+    fn cancel_running_queries(&self);
+
+    fn id(&self) -> SessionId;
 }
 
 #[derive(Debug, Clone)]
@@ -125,7 +125,7 @@ mod tests {
     use crate::error::PsqlResult;
     use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, StatementType};
-    use crate::pg_server::{pg_serve, Session, SessionManager, UserAuthenticator};
+    use crate::pg_server::{pg_serve, Session, SessionId, SessionManager, UserAuthenticator};
     use crate::types::Row;
 
     struct MockSessionManager {}
@@ -139,10 +139,6 @@ mod tests {
             _user_name: &str,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))
-        }
-
-        fn insert_session(&self, _session: Arc<Self::Session>) -> (i32, i32) {
-            todo!()
         }
 
         fn connect_for_cancel(
@@ -204,8 +200,12 @@ mod tests {
             ])
         }
 
-        fn cancel_query(&self) {
-            todo!()
+        fn cancel_running_queries(&self) {
+            unreachable!("Do not expect mock session to cancel running queries");
+        }
+
+        fn id(&self) -> SessionId {
+            (0, 0)
         }
     }
 

@@ -32,9 +32,11 @@ pub enum SchedulerError {
     #[error("Empty workers found")]
     EmptyWorkerNodes,
 
+    /// FIXME: include task error msg in this error.
     #[error("Task fail")]
     TaskExecutionError,
 
+    /// Used when receive cancel request (ctrl-c) from user.
     #[error("Canceled by user")]
     QueryCancelError,
 

@@ -23,8 +23,8 @@ use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 // use futures_async_stream::try_stream;
-use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, info};
+use tokio::sync::oneshot;
+use tracing::debug;
 
 // use async_stream::try_stream;
 // use futures::stream;
@@ -54,9 +54,6 @@ pub struct QueryManager {
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
-    // Send cancel request to query when receive ctrl-c.
-    // shutdown_receivers_map: Arc<Mutex<HashMap<QueryId, Option<oneshot::Sender<u8>>>>>,
-    // batch_queries: Arc<Mutex<WeakHashSet<Weak<Query>, >>>
 }
 
 type QueryManagerRef = Arc<QueryManager>;
@@ -78,7 +75,7 @@ impl QueryManager {
 
     pub async fn schedule(
         &self,
-        _context: ExecutionContextRef,
+        context: ExecutionContextRef,
         query: Query,
         shutdown_tx: oneshot::Sender<SchedulerError>,
     ) -> SchedulerResult<impl DataChunkStream> {
@@ -99,13 +96,19 @@ impl QueryManager {
         );
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
-        let (_shutdown_tx, shutdown_rx) = oneshot::channel();
+        let (shutdown_tx_for_cancel, shutdown_rx_for_cancel) = oneshot::channel();
+
         // Insert shutdown channel into channel map so able to cancel it outside.
+        // TODO: Find a way to delete it when query ends.
         {
-            let session_ctx = _context.session.clone();
-            session_ctx.insert_query_shutdown_sender(query_id.clone(), _shutdown_tx);
+            let session_ctx = context.session.clone();
+            session_ctx.insert_query_shutdown_sender(query_id.clone(), shutdown_tx_for_cancel);
         }
-        let query_result_fetcher = match query_execution.start(shutdown_tx, shutdown_rx).await {
+
+        let query_result_fetcher = match query_execution
+            .start(shutdown_tx, shutdown_rx_for_cancel)
+            .await
+        {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager

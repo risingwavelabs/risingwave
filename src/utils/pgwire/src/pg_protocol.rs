@@ -220,9 +220,10 @@ where
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
 
                 // Cancel request need this for identify and verification. According to postgres
-                // doc, it should only happen after receive AuthenticationOk.
-                let id = self.session_mgr.insert_session(session.clone());
-                self.stream.write_no_flush(&BeMessage::BackendKeyData(id))?;
+                // doc, it should be written to buffer after receive AuthenticationOk.
+                // let id = self.session_mgr.insert_session(session.clone());
+                self.stream
+                    .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
 
                 self.stream
                     .write_parameter_status_msg_no_flush()
@@ -275,7 +276,7 @@ where
         self.session = Some(session);
         // TODO: Abort running query in `QueryManager`.
         let session = self.session.clone().unwrap();
-        session.cancel_query();
+        session.cancel_running_queries();
         self.session = None;
         self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         Ok(())
