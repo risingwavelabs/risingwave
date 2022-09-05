@@ -18,6 +18,7 @@ use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use fixedbitset::FixedBitSet;
 use futures::future::try_join;
 use futures_async_stream::for_await;
 use itertools::Itertools;
@@ -221,6 +222,8 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     inner: JoinHashMapInner<K>,
     /// Data types of the join key columns
     join_key_data_types: Vec<DataType>,
+    /// Null safe bitmap for each join pair
+    null_matched: FixedBitSet,
     /// Current epoch
     current_epoch: u64,
     /// State table
@@ -252,7 +255,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         degree_all_data_types: Vec<DataType>,
         degree_table: StateTable<S>,
         degree_pk_indices: Vec<usize>,
-
+        null_matched: FixedBitSet,
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
         side: &'static str,
@@ -283,6 +286,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             current_epoch: 0,
             state,
             degree_state,
+            null_matched,
             alloc,
             metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
@@ -415,8 +419,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a key
-    pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
-        if let Some(entry) = self.inner.get_mut(join_key) {
+    pub fn insert(&mut self, key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
+        if let Some(entry) = self.inner.get_mut(key) {
             entry.insert(pk, value.encode()?);
         }
 
@@ -428,8 +432,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a key
-    pub fn delete(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
-        if let Some(entry) = self.inner.get_mut(join_key) {
+    pub fn delete(&mut self, key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
+        if let Some(entry) = self.inner.get_mut(key) {
             entry.remove(pk);
         }
 
@@ -482,6 +486,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.iter()
             .map(|(k, v)| k.estimated_size() + v.estimated_size())
             .sum()
+    }
+
+    pub fn null_matched(&self) -> &FixedBitSet {
+        &self.null_matched
     }
 }
 
