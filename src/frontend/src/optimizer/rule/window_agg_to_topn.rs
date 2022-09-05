@@ -21,6 +21,7 @@ use crate::optimizer::plan_node::{
     LogicalFilter, LogicalProject, LogicalTopN, PlanTreeNodeUnary, PlanWindowFunction,
 };
 use crate::optimizer::property::{FieldOrder, Order};
+use crate::planner::LIMIT_ALL_COUNT;
 use crate::PlanRef;
 
 /// Transforms the following pattern to group `TopN`
@@ -97,18 +98,18 @@ impl Rule for WindowAggToTopNRule {
             let v = *v.as_int64();
             // Note: rank functions start from 1
             match cmp {
-                ExprType::LessThanOrEqual => (v.max(0), 0),
-                ExprType::LessThan => ((v - 1).max(0), 0),
-                ExprType::GreaterThan => (0, v.max(0)),
-                ExprType::GreaterThanOrEqual => (0, (v - 1).max(0)),
+                ExprType::LessThanOrEqual => (v.max(0) as usize, 0),
+                ExprType::LessThan => ((v - 1).max(0) as usize, 0),
+                ExprType::GreaterThan => (LIMIT_ALL_COUNT, v.max(0) as usize),
+                ExprType::GreaterThanOrEqual => (LIMIT_ALL_COUNT, (v - 1).max(0) as usize),
                 _ => unreachable!(),
             }
         };
 
         let topn = LogicalTopN::with_group(
             input,
-            limit as usize,
-            offset as usize,
+            limit,
+            offset,
             Order {
                 field_order: order_by
                     .iter()

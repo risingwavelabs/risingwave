@@ -86,24 +86,67 @@
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
-    where rank<3;
+    where rank<3 AND x>y;
   logical_plan: |
     LogicalProject { exprs: [t.x, t.y] }
-      LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
+      LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) AND (t.x > t.y) }
         LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
           LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
             LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [t.x, t.y] }
-      LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
-        LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+    LogicalFilter { predicate: (t.x > t.y) }
+      LogicalProject { exprs: [t.x, t.y] }
+        LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
+          LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamExchange { dist: HashShard(t._row_id) }
-        StreamProject { exprs: [t.x, t.y, t._row_id] }
-          StreamGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
-            StreamExchange { dist: HashShard(t.y) }
-              StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+        StreamFilter { predicate: (t.x > t.y) }
+          StreamProject { exprs: [t.x, t.y, t._row_id] }
+            StreamGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
+              StreamExchange { dist: HashShard(t.y) }
+                StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Group TopN in batch mode
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank<=3;
+  optimized_logical_plan: |
+    LogicalProject { exprs: [t.x, t.y] }
+      LogicalTopN { order: "[t.x ASC]", limit: 3, offset: 0, group_key: [1] }
+        LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank>3;
+  optimized_logical_plan: |
+    LogicalProject { exprs: [t.x, t.y] }
+      LogicalTopN { order: "[t.x ASC]", limit: 9223372036854775807, offset: 3, group_key: [1] }
+        LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  stream_error: 'Invalid input syntax: OFFSET without LIMIT in streaming mode'
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank>=3;
+  optimized_logical_plan: |
+    LogicalProject { exprs: [t.x, t.y] }
+      LogicalTopN { order: "[t.x ASC]", limit: 9223372036854775807, offset: 2, group_key: [1] }
+        LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 3 <= rank AND rank <= 5;
+    -- complex rank range is not supported yet
+  optimizer_error: |
+    internal error: WindowAgg can not be transformed. Plan:
+    LogicalProject { exprs: [t.x, t.y] }
+      LogicalFilter { predicate: (3:Int32 <= ROW_NUMBER) AND (ROW_NUMBER <= 5:Int32) }
+        LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
+          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
+            LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }

@@ -369,7 +369,7 @@ impl ToStream for LogicalTopN {
     fn to_stream(&self) -> Result<PlanRef> {
         if self.offset() != 0 && self.limit == LIMIT_ALL_COUNT {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "OFFSET without LIMI in streaming mode".to_string(),
+                "OFFSET without LIMIT in streaming mode".to_string(),
             )));
         }
         Ok(if !self.group_key.is_empty() {
