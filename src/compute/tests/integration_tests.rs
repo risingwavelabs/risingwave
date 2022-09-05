@@ -21,7 +21,6 @@ use bytes::Bytes;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanType,
@@ -230,7 +229,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqExecutor2".to_string(),
-        Arc::new(BatchMetrics::for_test()),
+        None,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -292,7 +291,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::for_test()),
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -364,7 +363,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::for_test()),
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -437,7 +436,7 @@ async fn test_row_seq_scan() -> Result<()> {
         )],
         1,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::for_test()),
+        None,
     ));
 
     assert_eq!(executor.schema().fields().len(), 3);
