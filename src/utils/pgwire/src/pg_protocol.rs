@@ -26,7 +26,11 @@ use tracing::log::trace;
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
-use crate::pg_message::{BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage, FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage, FePasswordMessage, FeStartupMessage};
+use crate::pg_message::{
+    BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
+    FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
+    FePasswordMessage, FeStartupMessage,
+};
 use crate::pg_response::PgResponse;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 
@@ -108,6 +112,7 @@ where
                 match e {
                     PsqlError::SslError(io_err) | PsqlError::IoError(io_err) => {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
+                            tracing::error!("{}", error_msg);
                             return true;
                         }
                     }
@@ -121,6 +126,7 @@ where
 
                     PsqlError::ReadMsgError(io_err) => {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
+                            tracing::error!("{}", error_msg);
                             return true;
                         }
                         self.stream
@@ -148,8 +154,6 @@ where
                     PsqlError::CancelMsg(_) => {
                         todo!("Support processing cancel query")
                     }
-
-
                 }
                 self.stream.flush_for_error().await;
                 tracing::error!("{}", error_msg);
@@ -214,6 +218,12 @@ where
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationOk)
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
+
+                // Cancel request need this for identify and verification. According to postgres
+                // doc, it should only happen after receive AuthenticationOk.
+                let id = self.session_mgr.insert_session(session.clone());
+                self.stream.write_no_flush(&BeMessage::BackendKeyData(id))?;
+
                 self.stream
                     .write_parameter_status_msg_no_flush()
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
@@ -232,10 +242,6 @@ where
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
             }
         }
-        // Cancel request need this for identify and verification.
-        let id = (0, 0);
-        self.stream.write_no_flush(&BeMessage::BackendKeyData(id))?;
-        self.session_mgr.insert_session(id.0, id.1, session.clone());
         self.session = Some(session);
         self.state = PgProtocolState::Regular;
         Ok(())

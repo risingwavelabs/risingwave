@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::mem;
-use std::sync::{Arc};
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
@@ -210,70 +210,69 @@ impl QueryRunner {
         let mut shutdown_rx = shutdown_rx;
         loop {
             tokio::select! {
-            _ = &mut shutdown_rx => {
+                _ = &mut shutdown_rx => {
 
-                self.handle_cancel_or_failed_stage(SchedulerError::QueryCancelError).await;
-                println!("Break from loop");
-                break;
-            }
+                    self.handle_cancel_or_failed_stage(SchedulerError::QueryCancelError).await;
+                    println!("Break from loop");
+                    break;
+                }
 
-            msg = self.msg_receiver.recv() => {
-                if let Some(msg_inner) = msg {
-                    match msg_inner {
-                        Stage(Scheduled(stage_id)) => {
-                            tracing::trace!(
-                                "Query stage {:?}-{:?} scheduled.",
-                                self.query.query_id,
-                                stage_id
-                            );
-                            self.scheduled_stages_count += 1;
-                            stages_with_table_scan.remove(&stage_id);
-                            if stages_with_table_scan.is_empty() {
-                                // We can be sure here that all the Hummock iterators have been created,
-                                // thus they all successfully pinned a HummockVersion.
-                                // So we can now unpin their epoch.
-                                tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
-                                self.hummock_snapshot_manager
-                                    .unpin_snapshot(self.epoch, self.query.query_id())
-                                    .await;
-                            }
+                msg = self.msg_receiver.recv() => {
+                    if let Some(msg_inner) = msg {
+                        match msg_inner {
+                            Stage(Scheduled(stage_id)) => {
+                                tracing::trace!(
+                                    "Query stage {:?}-{:?} scheduled.",
+                                    self.query.query_id,
+                                    stage_id
+                                );
+                                self.scheduled_stages_count += 1;
+                                stages_with_table_scan.remove(&stage_id);
+                                if stages_with_table_scan.is_empty() {
+                                    // We can be sure here that all the Hummock iterators have been created,
+                                    // thus they all successfully pinned a HummockVersion.
+                                    // So we can now unpin their epoch.
+                                    tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
+                                    self.hummock_snapshot_manager
+                                        .unpin_snapshot(self.epoch, self.query.query_id())
+                                        .await;
+                                }
 
-                            if self.scheduled_stages_count == self.stage_executions.len() {
-                                // Now all stages have been scheduled, send root stage info.
-                                self.send_root_stage_info().await;
-                            } else {
-                                for parent in self.query.get_parents(&stage_id) {
-                                    if self.all_children_scheduled(parent).await
-                                        // Do not schedule same stage twice.
-                                        && self.stage_executions[parent].is_pending().await
-                                    {
-                                        self.stage_executions[parent].start().await;
+                                if self.scheduled_stages_count == self.stage_executions.len() {
+                                    // Now all stages have been scheduled, send root stage info.
+                                    self.send_root_stage_info().await;
+                                } else {
+                                    for parent in self.query.get_parents(&stage_id) {
+                                        if self.all_children_scheduled(parent).await
+                                            // Do not schedule same stage twice.
+                                            && self.stage_executions[parent].is_pending().await
+                                        {
+                                            self.stage_executions[parent].start().await;
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Stage(StageEvent::Failed { id, reason }) => {
-                            error!(
-                                "Query stage {:?}-{:?} failed: {:?}.",
-                                self.query.query_id, id, reason
-                            );
+                            Stage(StageEvent::Failed { id, reason }) => {
+                                error!(
+                                    "Query stage {:?}-{:?} failed: {:?}.",
+                                    self.query.query_id, id, reason
+                                );
 
-                            self.handle_cancel_or_failed_stage(reason).await;
-                            // self.stage_executions.clear();
-                            // One stage failed, not necessary to execute schedule stages.
-                            break;
+                                self.handle_cancel_or_failed_stage(reason).await;
+                                // self.stage_executions.clear();
+                                // One stage failed, not necessary to execute schedule stages.
+                                break;
+                            }
+                            rest => {
+                                unimplemented!("unsupported message \"{:?}\" for QueryRunner.run", rest);
+                            }
                         }
-                        rest => {
-                            unimplemented!("unsupported message \"{:?}\" for QueryRunner.run", rest);
-                        }
+                    } else {
+                        break;
                     }
-                } else {
-                    break;
                 }
             }
         }
-        }
-
     }
 
     #[expect(clippy::unused_async)]

@@ -20,8 +20,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-
 use parking_lot::{RwLock, RwLockReadGuard};
+use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
@@ -34,7 +34,7 @@ use risingwave_common::config::load_config;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{ObserverManager};
+use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -45,7 +45,6 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
-use pgwire::error::{PsqlError, PsqlResult};
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
@@ -57,6 +56,7 @@ use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::FrontendObserverNode;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
+use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::user::user_authentication::md5_hash_with_salt;
@@ -65,7 +65,6 @@ use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterIm
 use crate::user::UserId;
 use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts};
-use crate::scheduler::plan_fragmenter::QueryId;
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
@@ -201,6 +200,7 @@ pub struct FrontendEnv {
     sessions_map: SessionMapRef,
 }
 
+/// TODO: Remove when Session is closed.
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
@@ -243,7 +243,7 @@ impl FrontendEnv {
             hummock_snapshot_manager,
             server_addr,
             client_pool,
-            sessions_map: Arc::new(Mutex::new(HashMap::new()))
+            sessions_map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -338,7 +338,7 @@ impl FrontendEnv {
                 hummock_snapshot_manager,
                 server_addr: frontend_address,
                 client_pool,
-                sessions_map: Arc::new(Mutex::new(HashMap::new()))
+                sessions_map: Arc::new(Mutex::new(HashMap::new())),
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -428,7 +428,8 @@ pub struct SessionImpl {
     config_map: RwLock<ConfigMap>,
 
     /// Shutdown channels map
-    shutdown_receivers_map: Arc<Mutex<HashMap<QueryId, Option<Sender<()>>>>>
+    /// FIXME: Use weak key hash map to remove query id if query ends.
+    shutdown_receivers_map: Arc<Mutex<HashMap<QueryId, Option<Sender<()>>>>>,
 }
 
 impl SessionImpl {
@@ -442,7 +443,7 @@ impl SessionImpl {
             auth_context,
             user_authenticator,
             config_map: RwLock::new(Default::default()),
-            shutdown_receivers_map: Arc::new(Mutex::new(HashMap::new()))
+            shutdown_receivers_map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -499,7 +500,10 @@ impl SessionImpl {
     pub fn cancel_running_queries(&self) {
         {
             let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
-            println!("Start to cancel running queries, map len {}", write_guard.len());
+            println!(
+                "Start to cancel running queries, map len {}",
+                write_guard.len()
+            );
             for (query_id, sender) in &mut *write_guard {
                 if let Some(sender_swap) = mem::take(sender) {
                     sender_swap.send(()).unwrap();
@@ -510,7 +514,6 @@ impl SessionImpl {
             println!("Cancel running queries done, map len {}", write_guard.len());
         }
     }
-
 
     pub fn delete_corresponding_query(&self, query_id: &QueryId) {
         {
@@ -527,6 +530,7 @@ pub struct SessionManagerImpl {
     _observer_join_handle: JoinHandle<()>,
     _heartbeat_join_handle: JoinHandle<()>,
     _heartbeat_shutdown_sender: Sender<()>,
+    number: AtomicI32,
 }
 
 impl SessionManager for SessionManagerImpl {
@@ -613,14 +617,25 @@ impl SessionManager for SessionManagerImpl {
         }
     }
 
-    fn insert_session(&self, process_id: i32, secret_key: i32, session: Arc<Self::Session>) {
+    fn insert_session(&self, session: Arc<Self::Session>) -> (i32, i32) {
+        let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
+        // Now we adopt a simple strategy: The secret key and process id are equal.
+        let id = (secret_key, secret_key);
         let mut write_guard = self.env.sessions_map.lock().unwrap();
-        write_guard.insert((process_id, secret_key), session);
+        write_guard.insert(id, session);
+        id
     }
 
-    fn connect_for_cancel(&self, process_id: i32, secret_key: i32) -> PsqlResult<Arc<Self::Session>> {
+    fn connect_for_cancel(
+        &self,
+        process_id: i32,
+        secret_key: i32,
+    ) -> PsqlResult<Arc<Self::Session>> {
         let write_guard = self.env.sessions_map.lock().unwrap();
-        write_guard.get(&(process_id, secret_key)).cloned().ok_or(PsqlError::CancelNotFound)
+        write_guard
+            .get(&(process_id, secret_key))
+            .cloned()
+            .ok_or(PsqlError::CancelNotFound)
     }
 }
 
@@ -633,6 +648,7 @@ impl SessionManagerImpl {
             _observer_join_handle: join_handle,
             _heartbeat_join_handle: heartbeat_join_handle,
             _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
+            number: AtomicI32::new(0),
         })
     }
 }

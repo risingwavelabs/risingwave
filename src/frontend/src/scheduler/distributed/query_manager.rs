@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
-
 use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::TaskOutputId;
@@ -33,7 +30,7 @@ use tracing::{debug, error, info};
 // use futures::stream;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
-use crate::scheduler::plan_fragmenter::{Query, QueryId};
+use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
     DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError,
@@ -57,9 +54,9 @@ pub struct QueryManager {
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
-
-    /// Send cancel request to query when receive ctrl-c.
-    shutdown_receivers_map: Arc<Mutex<HashMap<QueryId, Option<oneshot::Sender<u8>>>>>,
+    // Send cancel request to query when receive ctrl-c.
+    // shutdown_receivers_map: Arc<Mutex<HashMap<QueryId, Option<oneshot::Sender<u8>>>>>,
+    // batch_queries: Arc<Mutex<WeakHashSet<Weak<Query>, >>>
 }
 
 type QueryManagerRef = Arc<QueryManager>;
@@ -76,7 +73,6 @@ impl QueryManager {
             hummock_snapshot_manager,
             compute_client_pool,
             catalog_reader,
-            shutdown_receivers_map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -121,7 +117,6 @@ impl QueryManager {
 
         Ok(query_result_fetcher.run())
     }
-
 }
 
 impl QueryResultFetcher {

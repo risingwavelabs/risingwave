@@ -17,8 +17,8 @@ use std::result::Result;
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
-use crate::error::PsqlResult;
 
+use crate::error::PsqlResult;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::PgProtocol;
 use crate::pg_response::PgResponse;
@@ -32,9 +32,13 @@ pub trait SessionManager: Send + Sync + 'static {
 
     fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
 
-    fn insert_session(&self, process_id: i32, secret_key: i32, session: Arc<Self::Session>);
+    fn insert_session(&self, session: Arc<Self::Session>) -> (i32, i32);
 
-    fn connect_for_cancel(&self, process_id: i32, secret_key: i32) -> PsqlResult<Arc<Self::Session>>;
+    fn connect_for_cancel(
+        &self,
+        process_id: i32,
+        secret_key: i32,
+    ) -> PsqlResult<Arc<Self::Session>>;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -117,8 +121,8 @@ mod tests {
     use bytes::Bytes;
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
-    use crate::error::PsqlResult;
 
+    use crate::error::PsqlResult;
     use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, StatementType};
     use crate::pg_server::{pg_serve, Session, SessionManager, UserAuthenticator};
@@ -137,11 +141,15 @@ mod tests {
             Ok(Arc::new(MockSession {}))
         }
 
-        fn insert_session(&self, _process_id: i32, _secret_key: i32, _session: Arc<Self::Session>) {
+        fn insert_session(&self, _session: Arc<Self::Session>) -> (i32, i32) {
             todo!()
         }
 
-        fn connect_for_cancel(&self, _process_id: i32, _secret_key: i32) -> PsqlResult<Arc<Self::Session>> {
+        fn connect_for_cancel(
+            &self,
+            _process_id: i32,
+            _secret_key: i32,
+        ) -> PsqlResult<Arc<Self::Session>> {
             todo!()
         }
     }

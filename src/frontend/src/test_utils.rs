@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use pgwire::error::PsqlResult;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
@@ -40,7 +41,6 @@ use risingwave_rpc_client::error::Result as RpcResult;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tempfile::{Builder, NamedTempFile};
-use pgwire::error::PsqlResult;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogWriter;
@@ -73,11 +73,15 @@ impl SessionManager for LocalFrontend {
         Ok(self.session_ref())
     }
 
-    fn connect_for_cancel(&self, _process_id: i32, _secret_key: i32) -> PsqlResult<Arc<Self::Session>> {
+    fn connect_for_cancel(
+        &self,
+        _process_id: i32,
+        _secret_key: i32,
+    ) -> PsqlResult<Arc<Self::Session>> {
         todo!()
     }
 
-    fn insert_session(&self, _process_id: i32, _secret_key: i32, _session: Arc<Self::Session>) {
+    fn insert_session(&self, _session: Arc<Self::Session>) -> (i32, i32) {
         todo!()
     }
 }
