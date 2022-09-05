@@ -66,6 +66,10 @@ pub struct Args {
     #[clap(short, long)]
     jobs: Option<usize>,
 
+    /// The probability of etcd request timeout.
+    #[clap(long, default_value = "0.0")]
+    etcd_timeout_rate: f32,
+
     /// Randomly kill the meta node after each query.
     ///
     /// Currently only available when `-j` is not set.
@@ -117,7 +121,7 @@ async fn main() {
         .init(|| async {
             let addr = "0.0.0.0:2388".parse().unwrap();
             etcd_client::SimServer::builder()
-                .timeout_rate(0.01)
+                .timeout_rate(args.etcd_timeout_rate)
                 .serve(addr)
                 .await
                 .unwrap();
