@@ -18,7 +18,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
 use super::{LogicalSource, PlanBase, StreamNode};
-use crate::catalog::TableId;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -67,7 +66,7 @@ impl fmt::Display for StreamSource {
 }
 
 impl StreamNode for StreamSource {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Source(SourceNode {
             source_id: self.logical.source_catalog.id,
             column_ids: self
@@ -78,7 +77,7 @@ impl StreamNode for StreamSource {
                 .map(|c| c.column_id().into())
                 .collect(),
             source_type: self.logical.source_catalog.source_type as i32,
-            state_table_id: TableId::placeholder().table_id,
+            state_table_id: state.gen_table_id(),
         })
     }
 }
