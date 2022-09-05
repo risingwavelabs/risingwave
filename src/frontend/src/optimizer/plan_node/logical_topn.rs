@@ -374,8 +374,8 @@ impl ToStream for LogicalTopN {
         }
         Ok(if !self.group_key.is_empty() {
             let input = self.input().to_stream()?;
-            // FIXME: use proper distribution.
-            let input = RequiredDist::single().enforce_if_not_satisfies(input, &Order::any())?;
+            let input = RequiredDist::hash_shard(self.group_key())
+                .enforce_if_not_satisfies(input, &Order::any())?;
             let logical = self.clone_with_input(input);
             StreamGroupTopN::new(logical).into()
         } else {

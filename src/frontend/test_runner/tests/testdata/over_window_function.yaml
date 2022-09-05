@@ -99,10 +99,11 @@
         LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
-      StreamProject { exprs: [t.x, t.y, t._row_id] }
-        StreamGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
-          StreamExchange { dist: Single }
-            StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+      StreamExchange { dist: HashShard(t._row_id) }
+        StreamProject { exprs: [t.x, t.y, t._row_id] }
+          StreamGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
+            StreamExchange { dist: HashShard(t.y) }
+              StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Group TopN in batch mode
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847

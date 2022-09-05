@@ -613,10 +613,11 @@
             LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id(hidden)], pk_columns: [bid._row_id] }
-      StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
-        StreamGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
-          StreamExchange { dist: Single }
-            StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+      StreamExchange { dist: HashShard(bid._row_id) }
+        StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+          StreamGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
+            StreamExchange { dist: HashShard(bid.bidder, bid.auction) }
+              StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
   batch_error: |-
     Feature is not yet implemented: Group TopN in batch mode
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
