@@ -24,7 +24,7 @@ use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Ex
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug, Copy, Clone)]
-pub enum Operation {
+enum Operation {
     ConcatArray,
     AppendArray,
     PrependArray,
@@ -52,7 +52,7 @@ impl std::fmt::Debug for ArrayConcatExpression {
 }
 
 impl ArrayConcatExpression {
-    pub fn new(
+    fn new(
         return_type: DataType,
         left: BoxedExpression,
         right: BoxedExpression,
