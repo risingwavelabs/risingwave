@@ -205,6 +205,12 @@ pub fn create_streaming_agg_state(
                         decimal,
                         StreamingSumAgg::<DecimalArray, DecimalArray>
                     ),
+                    (
+                        Sum,
+                        interval,
+                        interval,
+                        StreamingSumAgg::<IntervalArray, IntervalArray>
+                    ),
                     // Min
                     (Min, int16, int16, StreamingMinAgg::<I16Array>),
                     (Min, int32, int32, StreamingMinAgg::<I32Array>),
@@ -212,6 +218,7 @@ pub fn create_streaming_agg_state(
                     (Min, decimal, decimal, StreamingMinAgg::<DecimalArray>),
                     (Min, float32, float32, StreamingMinAgg::<F32Array>),
                     (Min, float64, float64, StreamingMinAgg::<F64Array>),
+                    (Min, interval, interval, StreamingMinAgg::<IntervalArray>),
                     // Max
                     (Max, int16, int16, StreamingMaxAgg::<I16Array>),
                     (Max, int32, int32, StreamingMaxAgg::<I32Array>),
@@ -219,6 +226,8 @@ pub fn create_streaming_agg_state(
                     (Max, decimal, decimal, StreamingMaxAgg::<DecimalArray>),
                     (Max, float32, float32, StreamingMaxAgg::<F32Array>),
                     (Max, float64, float64, StreamingMaxAgg::<F64Array>),
+                    (Max, interval, interval, StreamingMaxAgg::<IntervalArray>),
+                    // SingleValue
                     (
                         SingleValue,
                         int16,
