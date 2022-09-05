@@ -35,6 +35,9 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
+// Memcomparable row.
+type CacheKey = Vec<u8>;
+
 /// Generic managed agg state for min/max.
 /// It maintains a top N cache internally, using `HashSet`, and the sort key
 /// is composed of (agg input value, upstream pk).
@@ -66,7 +69,7 @@ pub struct GenericExtremeState<S: StateStore> {
     /// Cache for the top N elements in the state. Note that the cache
     /// won't store group_key so the column indices should be offsetted
     /// by group_key.len(), which is handled by `state_row_to_cache_row`.
-    cache: Cache<Datum>,
+    cache: Cache<CacheKey, Datum>,
 
     /// Whether the cache is synced to state table. The cache is synced iff:
     /// - the cache is empty and `total_count` is 0, or
@@ -154,13 +157,14 @@ impl<S: StateStore> GenericExtremeState<S> {
         }
     }
 
-    fn state_row_to_cache_entry(&self, state_row: &Row) -> (OrderedRow, Datum) {
-        let cache_key = OrderedRow::new(
+    fn state_row_to_cache_entry(&self, state_row: &Row) -> StreamExecutorResult<(Vec<u8>, Datum)> {
+        let ordered_row = OrderedRow::new(
             state_row.by_indices(&self.state_table_order_col_indices),
             &self.state_table_order_types,
         );
+        let cache_key = ordered_row.serialize()?;
         let cache_data = state_row[self.state_table_agg_col_idx].clone();
-        (cache_key, cache_data)
+        Ok((cache_key, cache_data))
     }
 
     /// Apply a chunk of data to the state.
@@ -177,7 +181,12 @@ impl<S: StateStore> GenericExtremeState<S> {
             .iter()
             .enumerate()
             .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
-            .filter(|(i, _)| columns[self.upstream_agg_col_idx].datum_at(*i).is_some())
+            .filter(|(i, _)| {
+                columns[self.upstream_agg_col_idx]
+                    .null_bitmap()
+                    .is_set(*i)
+                    .unwrap()
+            })
         {
             let state_row = Row::new(
                 self.state_table_col_mapping
@@ -186,8 +195,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                     .map(|col_idx| columns[*col_idx].datum_at(i))
                     .collect(),
             );
-            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
-
+            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row)?;
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     if self.cache_synced
@@ -242,7 +250,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             #[for_await]
             for state_row in all_data_iter.take(self.cache.capacity()) {
                 let state_row = state_row?;
-                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref());
+                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref())?;
                 self.cache.insert(cache_key, cache_data);
             }
             self.cache_synced = true;
