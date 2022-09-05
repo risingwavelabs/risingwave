@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(backtrace)]
 #![feature(generic_associated_types)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
+#![feature(let_chains)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 
 extern crate core;
 

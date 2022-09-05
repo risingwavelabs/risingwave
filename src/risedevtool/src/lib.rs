@@ -15,6 +15,7 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(exit_status_error)]
 #![feature(let_else)]
+#![feature(let_chains)]
 #![feature(lint_reasons)]
 
 mod config;

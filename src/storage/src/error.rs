@@ -55,11 +55,12 @@ impl From<StorageError> for RwError {
 
 impl std::fmt::Debug for StorageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::backtrace::Backtrace;
         use std::error::Error;
 
         write!(f, "{}", self)?;
         writeln!(f)?;
-        if let Some(backtrace) = self.backtrace() {
+        if let Some(backtrace) = (&self as &dyn Error).request_ref::<Backtrace>() {
             // Since we forward all backtraces from source, `self.backtrace()` is the backtrace of
             // inner error.
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;

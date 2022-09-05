@@ -230,7 +230,9 @@ impl Debug for RwError {
             "{}\n{}",
             self.inner,
             // Use inner error's backtrace by default, otherwise use the generated one in `From`.
-            self.inner.backtrace().unwrap_or(&*self.backtrace)
+            (&self.inner as &dyn std::error::Error)
+                .request_ref::<Backtrace>()
+                .unwrap_or(&*self.backtrace)
         )
     }
 }

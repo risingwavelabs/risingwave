@@ -25,7 +25,6 @@
 #![deny(unused_must_use)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(allocator_api)]
-#![feature(backtrace)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
@@ -36,6 +35,7 @@
 #![feature(generic_associated_types)]
 #![feature(hash_drain_filter)]
 #![feature(let_else)]
+#![feature(let_chains)]
 #![feature(lint_reasons)]
 #![feature(map_first_last)]
 #![feature(proc_macro_hygiene)]
@@ -50,6 +50,8 @@
 #![feature(assert_matches)]
 #![feature(is_sorted)]
 #![feature(btree_drain_filter)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 
 pub mod hummock;
 pub mod keyspace;

@@ -30,7 +30,6 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
-#![feature(backtrace)]
 #![feature(fn_traits)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
@@ -39,6 +38,9 @@
 #![feature(lint_reasons)]
 #![feature(generators)]
 #![feature(map_try_insert)]
+#![feature(let_chains)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 
 #[macro_use]
 pub mod error;
