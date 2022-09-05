@@ -30,32 +30,17 @@ pub struct Query {
     /// ORDER BY
     pub order_by: Vec<OrderByExpr>,
     /// `LIMIT { <N> | ALL }`
-    pub limit: Option<Expr>,
+    pub limit: Option<String>,
     /// `OFFSET <N> [ { ROW | ROWS } ]`
-    pub offset: Option<Offset>,
+    ///
+    /// `ROW` and `ROWS` are noise words that don't influence the effect of the clause.
+    /// They are provided for ANSI compatibility.
+    pub offset: Option<String>,
     /// `FETCH { FIRST | NEXT } <N> [ PERCENT ] { ROW | ROWS } | { ONLY | WITH TIES }`
+    ///
+    /// `ROW` and `ROWS` as well as `FIRST` and `NEXT` are noise words that don't influence the
+    /// effect of the clause. They are provided for ANSI compatibility.
     pub fetch: Option<Fetch>,
-}
-
-impl Query {
-    pub fn get_limit_value(&self) -> Option<usize> {
-        match self.limit {
-            Some(Expr::Value(Value::Number(ref limit))) => limit.parse().ok(),
-            Some(_) => unreachable!(),
-            _ => None,
-        }
-    }
-
-    pub fn get_offset_value(&self) -> Option<usize> {
-        match self.offset {
-            Some(Offset {
-                value: Expr::Value(Value::Number(ref offset)),
-                ..
-            }) => offset.parse().ok(),
-            Some(_) => unreachable!(),
-            _ => None,
-        }
-    }
 }
 
 impl fmt::Display for Query {
@@ -71,7 +56,7 @@ impl fmt::Display for Query {
             write!(f, " LIMIT {}", limit)?;
         }
         if let Some(ref offset) = self.offset {
-            write!(f, " {}", offset)?;
+            write!(f, " OFFSET {}", offset)?;
         }
         if let Some(ref fetch) = self.fetch {
             write!(f, " {}", fetch)?;
@@ -507,51 +492,16 @@ impl fmt::Display for OrderByExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Offset {
-    pub value: Expr,
-    pub rows: OffsetRows,
-}
-
-impl fmt::Display for Offset {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "OFFSET {}{}", self.value, self.rows)
-    }
-}
-
-/// Stores the keyword after `OFFSET <number>`
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum OffsetRows {
-    /// Omitting ROW/ROWS is non-standard MySQL quirk.
-    None,
-    Row,
-    Rows,
-}
-
-impl fmt::Display for OffsetRows {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            OffsetRows::None => Ok(()),
-            OffsetRows::Row => write!(f, " ROW"),
-            OffsetRows::Rows => write!(f, " ROWS"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Fetch {
     pub with_ties: bool,
-    pub percent: bool,
-    pub quantity: Option<Expr>,
+    pub quantity: Option<String>,
 }
 
 impl fmt::Display for Fetch {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let extension = if self.with_ties { "WITH TIES" } else { "ONLY" };
         if let Some(ref quantity) = self.quantity {
-            let percent = if self.percent { " PERCENT" } else { "" };
-            write!(f, "FETCH FIRST {}{} ROWS {}", quantity, percent, extension)
+            write!(f, "FETCH FIRST {} ROWS {}", quantity, extension)
         } else {
             write!(f, "FETCH FIRST ROWS {}", extension)
         }

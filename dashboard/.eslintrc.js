@@ -14,14 +14,18 @@
  * limitations under the License.
  *
  */
-import api from "./api";
 
-export async function getClusterInfoFrontend(){
-  const res = await api.get("/api/clusters/1");
-  return res;
-}
-
-export async function getClusterInfoComputeNode(){
-  const res = await api.get("/api/clusters/2");
-  return res;
+module.exports = {
+  env: {
+    browser: true,
+    es2021: true,
+  },
+  extends: ["plugin:react/recommended", "standard-with-typescript"],
+  overrides: [],
+  parserOptions: {
+    ecmaVersion: "latest",
+    sourceType: "module",
+  },
+  plugins: ["react"],
+  rules: {},
 }

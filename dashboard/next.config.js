@@ -14,6 +14,18 @@
  * limitations under the License.
  *
  */
-module.exports = {
-  trailingSlash: true,
+
+module.exports = () => {
+  const rewrites = () => {
+    return [
+      {
+        source: "/api/:path*",
+        destination: "http://localhost:32333/:path*",
+      },
+    ]
+  }
+  return {
+    rewrites,
+    trailingSlash: true,
+  }
 }
