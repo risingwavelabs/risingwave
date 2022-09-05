@@ -14,12 +14,15 @@
  * limitations under the License.
  *
  */
-export default function NoData() {
+
+import { Flex } from "@chakra-ui/react"
+
+function NoData() {
   return (
-    <>
-      <div>
-        <span style={{ fontWeight: "lighter" }}>No data presented.</span>
-      </div>
-    </>
+    <Flex w="full" alignItems="center" justifyContent="center" h="80vh">
+      No Data Available
+    </Flex>
   )
 }
+
+export default NoData

@@ -21,14 +21,19 @@ use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
+// use futures_async_stream::try_stream;
+use tokio::sync::oneshot;
 use tracing::debug;
 
+// use async_stream::try_stream;
+// use futures::stream;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult,
+    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError,
+    SchedulerResult,
 };
 
 pub struct QueryResultFetcher {
@@ -69,6 +74,7 @@ impl QueryManager {
         &self,
         _context: ExecutionContextRef,
         query: Query,
+        shutdown_tx: oneshot::Sender<SchedulerError>,
     ) -> SchedulerResult<impl DataChunkStream> {
         let query_id = query.query_id().clone();
         let epoch = self
@@ -86,7 +92,8 @@ impl QueryManager {
             self.catalog_reader.clone(),
         );
 
-        let query_result_fetcher = match query_execution.start().await {
+        // Create a oneshot channel for QueryResultFetcher to get failed event.
+        let query_result_fetcher = match query_execution.start(shutdown_tx).await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager

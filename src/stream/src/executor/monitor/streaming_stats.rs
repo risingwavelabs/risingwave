@@ -50,6 +50,7 @@ pub struct StreamingMetrics {
     pub join_barrier_align_duration: HistogramVec,
     pub join_cached_entries: GenericGaugeVec<AtomicI64>,
     pub join_cached_rows: GenericGaugeVec<AtomicI64>,
+    pub join_cached_estimated_size: GenericGaugeVec<AtomicI64>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -272,6 +273,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let join_cached_estimated_size = register_int_gauge_vec_with_registry!(
+            "stream_join_cached_estimated_size",
+            "Estimated size of all cached entries in streaming join operators",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -321,6 +330,7 @@ impl StreamingMetrics {
             join_barrier_align_duration,
             join_cached_entries,
             join_cached_rows,
+            join_cached_estimated_size,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,
