@@ -36,10 +36,7 @@ const VALUE: &[u8] = &[0; 400];
 const SAMPLE_COUNT: usize = 10;
 const ESTIMATED_MEASUREMENT_TIME: Duration = Duration::from_secs(60);
 
-fn get_builder_options(
-    capacity_mb: usize,
-    enable_sst_streaming_upload: bool,
-) -> SstableBuilderOptions {
+fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {
     SstableBuilderOptions {
         capacity: capacity_mb * 1024 * 1024,
         block_capacity: 1024 * 1024,
@@ -47,7 +44,6 @@ fn get_builder_options(
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
-        enable_sst_streaming_upload,
     }
 }
 
@@ -112,7 +108,7 @@ fn bench_builder(
             b.to_async(&runtime).iter(|| {
                 build_tables(get_builder(
                     sstable_store.clone(),
-                    get_builder_options(capacity_mb, true),
+                    get_builder_options(capacity_mb),
                 ))
             })
         });
@@ -121,7 +117,7 @@ fn bench_builder(
             b.to_async(&runtime).iter(|| {
                 build_tables(get_builder(
                     sstable_store.clone(),
-                    get_builder_options(capacity_mb, false),
+                    get_builder_options(capacity_mb),
                 ))
             })
         });

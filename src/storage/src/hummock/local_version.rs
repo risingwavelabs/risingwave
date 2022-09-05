@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ops::{Deref, RangeBounds};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
@@ -44,7 +44,10 @@ pub struct LocalVersion {
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
-    pub sync_uncommitted_data: Vec<(Vec<HummockEpoch>, SyncUncommittedData)>,
+    /// We need to save data in reverse order of epoch,
+    /// because we will traverse `sync_uncommitted_data` in the forward direction and return the
+    /// key when we find it
+    pub sync_uncommitted_data: VecDeque<(Vec<HummockEpoch>, SyncUncommittedData)>,
     max_sync_epoch: u64,
 }
 
@@ -170,26 +173,27 @@ impl LocalVersion {
 
     pub fn add_sync_state(
         &mut self,
-        sync_epoch: Vec<HummockEpoch>,
+        sync_epochs: Vec<HummockEpoch>,
         sync_uncommitted_data: SyncUncommittedData,
     ) {
+        assert!(sync_epochs.iter().rev().is_sorted());
         let node = self
             .sync_uncommitted_data
             .iter_mut()
-            .find(|(epoch, _)| epoch == &sync_epoch);
+            .find(|(epochs, _)| epochs == &sync_epochs);
         match &node {
             None => {
                 assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
-                if let Some(last) = self.sync_uncommitted_data.last() {
+                if let Some(front) = self.sync_uncommitted_data.front() {
                     assert!(
-                        last.0.first().lt(&sync_epoch.first()),
-                        "last epoch:{:?} >= sync epoch:{:?}",
-                        last,
-                        sync_epoch
+                        front.0.first().lt(&sync_epochs.last()),
+                        "front epoch:{:?} >= sync epoch:{:?}",
+                        front,
+                        sync_epochs
                     );
                 }
                 self.sync_uncommitted_data
-                    .push((sync_epoch, sync_uncommitted_data));
+                    .push_front((sync_epochs, sync_uncommitted_data));
                 return;
             }
             Some((_, SyncUncommittedData::Syncing(_))) => {
@@ -199,7 +203,7 @@ impl LocalVersion {
                 panic!("sync over, can't modify uncommitted sst state");
             }
         }
-        *node.unwrap() = (sync_epoch, sync_uncommitted_data);
+        *node.unwrap() = (sync_epochs, sync_uncommitted_data);
     }
 
     pub fn iter_shared_buffer(&self) -> impl Iterator<Item = (&HummockEpoch, &SharedBuffer)> {
@@ -333,8 +337,8 @@ impl LocalVersion {
                         .sync_uncommitted_data
                         .iter()
                         .filter(|&node| {
-                            node.0.first().le(&Some(&read_epoch))
-                                && node.0.first().ge(&Some(&smallest_uncommitted_epoch))
+                            node.0.last().le(&Some(&read_epoch))
+                                && node.0.last().ge(&Some(&smallest_uncommitted_epoch))
                         })
                         .map(|(_, value)| value.get_overlap_data(key_range, read_epoch))
                         .collect();
@@ -379,31 +383,38 @@ impl LocalVersion {
         &mut self,
         max_committed_epoch: HummockEpoch,
     ) -> Vec<(Vec<HummockEpoch>, Vec<LocalSstableInfo>)> {
-        self
-            .sync_uncommitted_data
-            .drain_filter(|(epoch, data)| {
-                let min_epoch = *epoch.first().expect("epoch list should not be empty");
-                let max_epoch = *epoch.last().expect("epoch list should not be empty");
-                assert!(
-                    max_epoch <= max_committed_epoch
-                        || min_epoch > max_committed_epoch,
-                    "new_max_committed_epoch {} lays within max_epoch {} and min_epoch {} of data {:?}",
-                    max_committed_epoch,
-                    max_epoch,
-                    min_epoch,
-                    data,
-                );
-                max_epoch <= max_committed_epoch
-            })
-            .map(|(epoch, data)| {
-                (epoch, match data {
-                    SyncUncommittedData::Syncing(_) => {
-                        unreachable!("an epoch is synced while some data of it is not synced yet")
-                    }
-                    SyncUncommittedData::Synced(ssts) => ssts,
+        match self.sync_uncommitted_data.iter().position(|(epoch, data)| {
+            let min_epoch = *epoch.last().expect("epoch list should not be empty");
+            let max_epoch = *epoch.first().expect("epoch list should not be empty");
+            assert!(
+                max_epoch <= max_committed_epoch || min_epoch > max_committed_epoch,
+                "new_max_committed_epoch {} lays within max_epoch {} and min_epoch {} of data {:?}",
+                max_committed_epoch,
+                max_epoch,
+                min_epoch,
+                data,
+            );
+            max_epoch <= max_committed_epoch
+        }) {
+            Some(index) => self
+                .sync_uncommitted_data
+                .drain(index..)
+                .map(|(epoch, data)| {
+                    (
+                        epoch,
+                        match data {
+                            SyncUncommittedData::Syncing(_) => {
+                                unreachable!(
+                                    "an epoch is synced while some data of it is not synced yet"
+                                )
+                            }
+                            SyncUncommittedData::Synced(ssts) => ssts,
+                        },
+                    )
                 })
-            })
-            .collect_vec()
+                .collect_vec(),
+            None => vec![],
+        }
     }
 
     fn apply_version_delta_local_related(

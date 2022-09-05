@@ -299,6 +299,13 @@ fn assign_local_table_id_to_stream_node(
             }
         }
 
+        NodeBody::AppendOnlyTopN(append_only_top_n_node) => {
+            if let Some(table) = &mut append_only_top_n_node.table {
+                table.id = state.gen_table_id();
+            } else {
+                panic!("Append only TopN node's table shouldn't be None");
+            }
+        }
         NodeBody::TopN(top_n_node) => {
             if let Some(table) = &mut top_n_node.table {
                 table.id = state.gen_table_id();
@@ -313,11 +320,6 @@ fn assign_local_table_id_to_stream_node(
             } else {
                 panic!("GroupTopNNode's table shouldn't be None");
             }
-        }
-
-        NodeBody::AppendOnlyTopN(append_only_top_n_node) => {
-            append_only_top_n_node.table_id_l = state.gen_table_id();
-            append_only_top_n_node.table_id_h = state.gen_table_id();
         }
 
         NodeBody::DynamicFilter(dynamic_filter_node) => {
@@ -544,18 +546,24 @@ mod tests {
         {
             // test AppendOnlyTopN Type
             let mut stream_node = StreamNode {
-                node_body: Some(NodeBody::AppendOnlyTopN(AppendOnlyTopNNode {
+                node_body: Some(NodeBody::AppendOnlyTopN(TopNNode {
+                    table: Some(Table {
+                        id: 0,
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 })),
                 ..Default::default()
             };
             assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
-
             if let NodeBody::AppendOnlyTopN(append_only_top_n_node) =
                 stream_node.node_body.as_ref().unwrap()
             {
-                expect_table_id += 2;
-                assert_eq!(expect_table_id, append_only_top_n_node.table_id_h);
+                expect_table_id += 1;
+                assert_eq!(
+                    expect_table_id,
+                    append_only_top_n_node.table.as_ref().unwrap().id
+                );
             }
         }
     }
