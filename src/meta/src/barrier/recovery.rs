@@ -121,13 +121,11 @@ where
                 Command::checkpoint(),
             ));
 
-            let command_ctx_clone = command_ctx.clone();
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            if let Err(err) = self.inject_barrier(command_ctx_clone, tx).await {
-                error!("inject_barrier failed: {}", err);
-                return Err(err);
-            }
-            match rx.recv().await.unwrap() {
+            let (barrier_complete_tx, mut barrier_complete_rx) =
+                tokio::sync::mpsc::unbounded_channel();
+            self.inject_barrier_and_collect(command_ctx.clone(), barrier_complete_tx)
+                .await;
+            match barrier_complete_rx.recv().await.unwrap() {
                 (_, Ok(response)) => {
                     if let Err(err) = command_ctx.post_collect().await {
                         error!("post_collect failed: {}", err);
