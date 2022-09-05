@@ -1981,9 +1981,9 @@ impl Parser {
         }
     }
 
-    pub fn parse_number_value(&mut self) -> Result<Value, ParserError> {
+    pub fn parse_number_value(&mut self) -> Result<String, ParserError> {
         match self.parse_value()? {
-            v @ Value::Number(_, _) => Ok(v),
+            Value::Number(v, _) => Ok(v),
             _ => {
                 self.prev_token();
                 self.expected("literal number", self.peek_token())
@@ -2451,7 +2451,16 @@ impl Parser {
             };
 
             let fetch = if self.parse_keyword(Keyword::FETCH) {
-                Some(self.parse_fetch()?)
+                if limit.is_some() {
+                    return parser_err!("Cannot specify both LIMIT and FETCH".to_string());
+                }
+                let fetch = self.parse_fetch()?;
+                if fetch.with_ties && order_by.is_empty() {
+                    return parser_err!(
+                        "WITH TIES cannot be specified without ORDER BY clause".to_string()
+                    );
+                }
+                Some(fetch)
             } else {
                 None
             };
@@ -3230,40 +3239,33 @@ impl Parser {
     }
 
     /// Parse a LIMIT clause
-    pub fn parse_limit(&mut self) -> Result<Option<Expr>, ParserError> {
+    pub fn parse_limit(&mut self) -> Result<Option<String>, ParserError> {
         if self.parse_keyword(Keyword::ALL) {
             Ok(None)
         } else {
-            Ok(Some(Expr::Value(self.parse_number_value()?)))
+            Ok(Some(self.parse_number_value()?))
         }
     }
 
     /// Parse an OFFSET clause
-    pub fn parse_offset(&mut self) -> Result<Offset, ParserError> {
-        let value = Expr::Value(self.parse_number_value()?);
-        let rows = if self.parse_keyword(Keyword::ROW) {
-            OffsetRows::Row
-        } else if self.parse_keyword(Keyword::ROWS) {
-            OffsetRows::Rows
-        } else {
-            OffsetRows::None
-        };
-        Ok(Offset { value, rows })
+    pub fn parse_offset(&mut self) -> Result<String, ParserError> {
+        let value = self.parse_number_value()?;
+        _ = self.parse_one_of_keywords(&[Keyword::ROW, Keyword::ROWS]);
+        Ok(value)
     }
 
     /// Parse a FETCH clause
     pub fn parse_fetch(&mut self) -> Result<Fetch, ParserError> {
         self.expect_one_of_keywords(&[Keyword::FIRST, Keyword::NEXT])?;
-        let (quantity, percent) = if self
+        let quantity = if self
             .parse_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])
             .is_some()
         {
-            (None, false)
+            None
         } else {
-            let quantity = Expr::Value(self.parse_value()?);
-            let percent = self.parse_keyword(Keyword::PERCENT);
+            let quantity = self.parse_number_value()?;
             self.expect_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])?;
-            (Some(quantity), percent)
+            Some(quantity)
         };
         let with_ties = if self.parse_keyword(Keyword::ONLY) {
             false
@@ -3274,7 +3276,6 @@ impl Parser {
         };
         Ok(Fetch {
             with_ties,
-            percent,
             quantity,
         })
     }

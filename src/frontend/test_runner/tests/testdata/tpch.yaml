@@ -268,7 +268,7 @@
                     BatchHashAgg { group_key: [part.p_partkey], aggs: [min(partsupp.ps_supplycost)] }
                       BatchHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost] }
                         BatchExchange { order: [], dist: HashShard(part.p_partkey) }
-                          BatchHashAgg { group_key: [part.p_partkey], aggs: [] }
+                          BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
                             BatchScan { table: part, columns: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                         BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
                           BatchHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost] }
@@ -1817,7 +1817,7 @@
                     BatchHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
                       BatchHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity] }
                         BatchExchange { order: [], dist: HashShard(part.p_partkey) }
-                          BatchHashAgg { group_key: [part.p_partkey], aggs: [] }
+                          BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
                             BatchScan { table: part, columns: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                         BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
                           BatchFilter { predicate: IsNotNull(lineitem.l_partkey) }
@@ -2149,7 +2149,7 @@
                     BatchHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [sum(lineitem.l_quantity)] }
                       BatchHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM lineitem.l_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity] }
                         BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                          BatchHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
+                          BatchSortAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
                             BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                         BatchExchange { order: [], dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                           BatchProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity] }
