@@ -1,0 +1,134 @@
+query T
+select array_cat(array[66], array[123]);
+----
+{66,123}
+
+query T
+select array_cat(array[66], null::int[]);
+----
+{66}
+
+query T
+select array_cat(null::int[], array[123]);
+----
+{123}
+
+query T
+select array_cat(array[array[66]], array[233]);
+----
+{{66},{233}}
+
+query T
+select array_cat(array[array[66]], null::int[]);
+----
+{{66}}
+
+query T
+select array_cat(null::int[][], array[233]);
+----
+{{233}}
+
+query T
+select array_cat(null::int[][], null::int[]);
+----
+NULL
+
+query T
+select array_append(array[66], 123);
+----
+{66,123}
+
+query T
+select array_append(array[66], null::int);
+----
+{66,NULL}
+
+query T
+select array_append(null::int[], 233);
+----
+{233}
+
+query T
+select array_append(null::int[], null::int);
+----
+{NULL}
+
+query T
+select array_cat(array[233], array[array[66]]);
+----
+{{233},{66}}
+
+query T
+select array_cat(null::int[], array[array[66]]);
+----
+{{66}}
+
+query T
+select array_cat(array[233], null::int[][]);
+----
+{{233}}
+
+query T
+select array_cat(null::int[], null::int[][]);
+----
+NULL
+
+query T
+select array_prepend(123, array[66]);
+----
+{123,66}
+
+query T
+select array_prepend(null::int, array[66]);
+----
+{NULL,66}
+
+query T
+select array_prepend(233, null::int[]);
+----
+{233}
+
+query T
+select array_prepend(null::int, null::int[]);
+----
+{NULL}
+
+query T
+select array[1,2,3] || array[4,5,6];
+----
+{1,2,3,4,5,6}
+
+query T
+select array[1,2,3] || 4;
+----
+{1,2,3,4}
+
+query T
+select 6 || array[7,8];
+----
+{6,7,8}
+
+query T
+select array[array[1,2]] || array[array[3,4]];
+----
+{{1,2},{3,4}}
+
+query T
+select array[array[1,2]] || array[3,4];
+----
+{{1,2},{3,4}}
+
+query T
+select array[1,2] || array[array[3,4]];
+----
+{{1,2},{3,4}}
+
+query T
+select '123'::varchar || array['abc'];
+----
+{123,abc}
+
+query T
+select array['abc'] || '123'::varchar;
+----
+{abc,123}

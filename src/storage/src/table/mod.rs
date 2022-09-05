@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// pub mod storage_table;
 pub mod batch_table;
 pub mod streaming_table;
 
@@ -23,12 +22,14 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 
 use crate::error::StorageResult;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
+
+type DataTypes = Arc<[DataType]>;
 
 /// Represents the distribution for a specific table instance.
 #[derive(Debug)]
