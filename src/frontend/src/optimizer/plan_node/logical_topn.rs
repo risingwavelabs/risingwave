@@ -94,6 +94,10 @@ impl LogicalTopN {
         &self.order
     }
 
+    pub fn group_key(&self) -> &[usize] {
+        &self.group_key
+    }
+
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         let input = self.input();
@@ -211,15 +215,13 @@ impl LogicalTopN {
         );
         let vnode_col_idx = exprs.len() - 1;
         let project = StreamProject::new(LogicalProject::new(stream_input, exprs.clone()));
-        let local_top_n = StreamGroupTopN::new(
-            LogicalTopN::new(
-                project.into(),
-                self.limit + self.offset,
-                0,
-                self.order.clone(),
-            ),
+        let local_top_n = StreamGroupTopN::new(LogicalTopN::with_group(
+            project.into(),
+            self.limit + self.offset,
+            0,
+            self.order.clone(),
             vec![vnode_col_idx],
-        );
+        ));
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;
         let global_top_n = StreamTopN::new(LogicalTopN::new(
@@ -375,7 +377,7 @@ impl ToStream for LogicalTopN {
             // FIXME: use proper distribution.
             let input = RequiredDist::single().enforce_if_not_satisfies(input, &Order::any())?;
             let logical = self.clone_with_input(input);
-            StreamGroupTopN::new(logical, self.group_key.clone()).into()
+            StreamGroupTopN::new(logical).into()
         } else {
             self.gen_dist_stream_top_n_plan(self.input.to_stream()?)?
         })
