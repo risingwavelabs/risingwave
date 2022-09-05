@@ -27,6 +27,7 @@ use risingwave_object_store::object::{
 use tokio::task::JoinHandle;
 use zstd::zstd_safe::WriteBuf;
 
+use super::compactor::TaskProgressTracker;
 use super::utils::MemoryTracker;
 use super::{
     Block, BlockCache, BlockMeta, Sstable, SstableBuilderOptions, SstableMeta, SstableWriter,
@@ -398,17 +399,36 @@ impl SstableStore {
         sst_id: HummockSstableId,
         policy: CachePolicy,
         options: SstableWriterOptions,
+        task_progress_tracker: Option<TaskProgressTracker>,
     ) -> HummockResult<BoxedSstableWriter> {
         match &options.mode {
-            SstableWriteMode::Batch => Ok(Box::new(BatchUploadWriter::new(
-                sst_id, self, policy, options,
-            ))),
+            SstableWriteMode::Batch => {
+                let writer = BatchUploadWriter::new(
+                    sst_id, self, policy, options,
+                );
+                if let Some(tracker) = task_progress_tracker {
+                    Ok(Box::new(TrackedProgressUploadWriter {
+                        writer, 
+                        task_progress_tracker: tracker
+                    }))
+                } else {
+                    Ok(Box::new(writer))
+                }
+            },
             SstableWriteMode::Streaming => {
                 let data_path = self.get_sst_data_path(sst_id);
                 let uploader = self.store.streaming_upload(&data_path).await?;
-                Ok(Box::new(StreamingUploadWriter::new(
+                let writer = StreamingUploadWriter::new(
                     sst_id, self, policy, uploader, options,
-                )))
+                );
+                if let Some(tracker) = task_progress_tracker {
+                    Ok(Box::new(TrackedProgressUploadWriter {
+                        writer, 
+                        task_progress_tracker: tracker
+                    }))
+                } else {
+                    Ok(Box::new(writer))
+                }
             }
         }
     }
@@ -572,6 +592,32 @@ impl SstableWriter for BatchUploadWriter {
         self.buf.len()
     }
 }
+
+/// This tracks the blocks written to the upload writer.
+/// It does not track the completion of SST upload, which is tracked separately.
+pub struct TrackedProgressUploadWriter<W: SstableWriter> {
+    writer: W,
+    task_progress_tracker: TaskProgressTracker,
+}
+
+impl<W: SstableWriter> SstableWriter for TrackedProgressUploadWriter<W> {
+    type Output = W::Output;
+
+    fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
+        self.writer.write_block(block, meta)?;
+        self.task_progress_tracker.inc_ssts_sealed();
+        Ok(())
+    }
+
+    fn finish(mut self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output> {
+        W::finish(Box::new(self.writer), size_footer)
+    }
+
+    fn data_len(&self) -> usize {
+        self.writer.data_len()
+    }  
+}
+
 
 pub struct StreamingUploadWriter {
     sst_id: HummockSstableId,

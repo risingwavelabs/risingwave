@@ -136,7 +136,7 @@ pub async fn put_sst(
 ) -> HummockResult<()> {
     let mut writer = sstable_store
         .clone()
-        .create_sst_writer(sst_id, CachePolicy::NotFill, options)
+        .create_sst_writer(sst_id, CachePolicy::NotFill, options, None)
         .await?;
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
@@ -163,7 +163,7 @@ pub async fn gen_test_sstable_inner(
     };
     let writer = sstable_store
         .clone()
-        .create_sst_writer(sst_id, policy, writer_opts)
+        .create_sst_writer(sst_id, policy, writer_opts, None)
         .await
         .unwrap();
     let mut b = SstableBuilder::new_for_test(sst_id, writer, opts);

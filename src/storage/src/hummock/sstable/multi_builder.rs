@@ -20,7 +20,6 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use tokio::task::JoinHandle;
 
-use crate::hummock::compactor::TaskProgressTracker;
 use super::SstableMeta;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
@@ -62,8 +61,6 @@ where
 
     /// Statistics.
     pub stats: Arc<StateStoreMetrics>,
-
-    task_progress: Option<TaskProgressTracker>,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -71,13 +68,12 @@ where
     F: TableBuilderFactory,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(builder_factory: F, stats: Arc<StateStoreMetrics>, task_progress: Option<TaskProgressTracker>) -> Self {
+    pub fn new(builder_factory: F, stats: Arc<StateStoreMetrics>) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
             stats,
-            task_progress,
         }
     }
 
@@ -87,7 +83,6 @@ where
             sst_outputs: Vec::new(),
             current_builder: None,
             stats: Arc::new(StateStoreMetrics::unused()),
-            task_progress: None,
         }
     }
 
@@ -220,7 +215,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
         let writer = self
             .sstable_store
             .clone()
-            .create_sst_writer(id, self.policy, writer_options)
+            .create_sst_writer(id, self.policy, writer_options, None)
             .await?;
         let builder = SstableBuilder::new_for_test(id, writer, self.options.clone());
 

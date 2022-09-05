@@ -79,6 +79,7 @@ pub struct RemoteBuilderFactory {
     policy: CachePolicy,
     remote_rpc_cost: Arc<AtomicU64>,
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+    task_progress_tracker: Option<TaskProgressTracker>,
 }
 
 #[async_trait::async_trait]
@@ -103,7 +104,7 @@ impl TableBuilderFactory for RemoteBuilderFactory {
         let writer = self
             .sstable_store
             .clone()
-            .create_sst_writer(table_id, self.policy, writer_options)
+            .create_sst_writer(table_id, self.policy, writer_options, self.task_progress_tracker.clone())
             .await?;
         let builder = SstableBuilder::new(
             table_id,
@@ -253,7 +254,8 @@ impl Compactor {
             tokio::select! {
                 _ = &mut shutdown_rx => {
                     tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
-                    return false;
+                    task_status = TaskStatus::Failed;
+                    break;
                 }
                 future_result = buffered.next() => {
                     match future_result {
@@ -619,7 +621,7 @@ impl Compactor {
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        progress_tracker: Option<TaskProgressTracker>,
+        task_progress_tracker: Option<TaskProgressTracker>,
     ) -> HummockResult<Vec<SstableInfo>> {
         let get_id_time = Arc::new(AtomicU64::new(0));
         let mut options = self.options.clone();
@@ -639,12 +641,12 @@ impl Compactor {
             policy: self.task_config.cache_policy,
             remote_rpc_cost: get_id_time.clone(),
             filter_key_extractor,
+            task_progress_tracker: task_progress_tracker.clone(),
         };
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder =
-            CapacitySplitTableBuilder::new(builder_factory, self.context.stats.clone(), 
-            progress_tracker);
+            CapacitySplitTableBuilder::new(builder_factory, self.context.stats.clone());
 
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
@@ -695,12 +697,17 @@ impl Compactor {
 
             // Upload metadata.
             let sstable_store_cloned = self.context.sstable_store.clone();
-            let upload_join_handle = async move {
+            let tracker_cloned = task_progress_tracker.clone();
+            let upload_join_handle  = async move {
                 let upload_data_result = upload_join_handle.await;
                 upload_data_result.map_err(|e| {
                     HummockError::other(format!("fail to upload sst data: {:?}", e))
                 })??;
-                sstable_store_cloned.put_sst_meta(sst_id, meta).await
+                let ret = sstable_store_cloned.put_sst_meta(sst_id, meta).await;
+                if let Some(tracker) = tracker_cloned {
+                    tracker.inc_ssts_uploaded();
+                }
+                ret
             };
             upload_join_handles.push(upload_join_handle);
 
