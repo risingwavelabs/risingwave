@@ -14,13 +14,11 @@ use std::time::Duration;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use prometheus::core::{AtomicF64, AtomicU64, Collector, GenericCounterVec, GenericGauge};
-use prometheus::{
-    exponential_buckets, histogram_opts, opts, register_gauge_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
-};
+use prometheus::core::{AtomicF64, Collector, GenericGauge};
+use prometheus::{opts, register_gauge_with_registry, Registry};
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::error::BatchError;
 use crate::task::TaskId;
 
 // When execution is done, it need to call clear_record() in BatchTaskMetrics.
@@ -44,7 +42,7 @@ impl BatchTaskMetricsManager {
             tokio::sync::mpsc::unbounded_channel::<Box<dyn Collector>>();
         let deletor_registry = registry.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            let mut interval = tokio::time::interval(Duration::from_secs(180));
             let mut delete_cache: Vec<Box<dyn Collector>> = Vec::new();
             let mut connect = true;
             while connect {
@@ -104,7 +102,6 @@ macro_rules! for_each_task_metric {
         $macro! {
             [$($x),*],
 
-            { exchange_recv_row_number, GenericCounterVec<AtomicU64> },
             { task_first_poll_delay, GenericGauge<AtomicF64> },
             { task_fast_poll_duration, GenericGauge<AtomicF64> },
             { task_idle_duration, GenericGauge<AtomicF64> },
@@ -119,6 +116,8 @@ macro_rules! def_task_metrics {
     ([$struct:ident], $( { $metric:ident, $type:ty }, )*) => {
         #[derive(Clone)]
         pub struct $struct {
+            labels: HashMap<String, String>,
+            registry: Registry,
             sender: Option<UnboundedSender<Box<dyn Collector>>>,
             $( pub $metric: $type, )*
         }
@@ -153,17 +152,6 @@ impl BatchTaskMetrics {
             ("stage_id".to_string(), id.stage_id.to_string()),
             ("task_id".to_string(), id.task_id.to_string()),
         ]);
-
-        let exchange_recv_row_number = register_int_counter_vec_with_registry!(
-            opts!(
-                "batch_exchange_recv_row_number",
-                "Total number of row that have been received from upstream source",
-            )
-            .const_labels(const_labels.clone()),
-            &["source_stage_id", "source_task_id"],
-            registry
-        )
-        .unwrap();
 
         let task_first_poll_delay = register_gauge_with_registry!(
             opts!(
@@ -218,14 +206,15 @@ impl BatchTaskMetrics {
                 "batch_task_slow_poll_duration",
                 "The total duration (s) of slow polls.",
             )
-            .const_labels(const_labels),
+            .const_labels(const_labels.clone()),
             registry,
         )
         .unwrap();
 
         Self {
+            labels: const_labels,
+            registry,
             sender,
-            exchange_recv_row_number,
             task_first_poll_delay,
             task_fast_poll_duration,
             task_idle_duration,
@@ -245,28 +234,38 @@ impl BatchTaskMetrics {
     pub fn for_test() -> Self {
         Self::new(prometheus::Registry::new(), TaskId::default(), None)
     }
-}
 
-pub struct BatchMetrics {
-    pub row_seq_scan_next_duration: Histogram,
-}
+    /// Following functions are used to custom executor level metrics.
+    // Each task execution has its own label:
+    // QueryID, StageId, TaskId
+    pub fn task_labels(&self) -> HashMap<String, String> {
+        self.labels.clone()
+    }
 
-impl BatchMetrics {
-    pub fn new(registry: Registry) -> Self {
-        let opts = histogram_opts!(
-            "batch_row_seq_scan_next_duration",
-            "Time spent deserializing into a row in cell based table.",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
-        );
-        let row_seq_scan_next_duration = register_histogram_with_registry!(opts, registry).unwrap();
+    pub fn register(&self, c: Box<dyn Collector>) -> Result<(), BatchError> {
+        self.registry.register(c)?;
+        Ok(())
+    }
 
-        Self {
-            row_seq_scan_next_duration,
+    pub fn unregister(&self, c: Box<dyn Collector>) {
+        if let Some(sender) = self.sender.as_ref() {
+            if sender.send(c).is_err() {
+                error!("Failed to send delete record to delete queue");
+            }
         }
+    }
+}
+
+pub struct BatchMetrics {}
+
+#[allow(clippy::new_without_default)]
+impl BatchMetrics {
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// Create a new `BatchMetrics` instance used in tests or other places.
     pub fn for_test() -> Self {
-        Self::new(prometheus::Registry::new())
+        Self::new()
     }
 }
