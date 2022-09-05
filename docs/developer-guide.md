@@ -159,10 +159,10 @@ You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config 
 
 ### Configure system variables
 
-You can configure or override system variables in `src/config/risingwave.toml`.
-Not all the variables are explicitly set in this file.
 You can check `src/common/src/config.rs` to see all the configurable variables. 
-If additional variables are needed, edit `src/config/risingwave.toml` to include them [in the corresponding section].
+If additional variables are needed, 
+include them in the correct sections (such as `[server]` or `[storage]`) in `src/config/risingwave.toml`.
+
 
 ### Start the playground with RiseDev
 
