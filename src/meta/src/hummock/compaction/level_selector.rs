@@ -710,6 +710,7 @@ pub mod tests {
         }
     }
 
+    /// tests `DynamicLevelSelector::manual_pick_compaction`
     #[test]
     fn test_manual_compaction_picker() {
         let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
