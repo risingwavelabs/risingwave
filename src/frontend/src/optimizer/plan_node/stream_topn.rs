@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, FieldOrder};
+use crate::optimizer::property::Distribution;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
@@ -71,33 +71,18 @@ impl_plan_tree_node_for_unary! { StreamTopN }
 impl ToStreamProst for StreamTopN {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
+        let topn_node = TopNNode {
+            limit: self.logical.limit() as u64,
+            offset: self.logical.offset() as u64,
+            table: Some(
+                self.logical
+                    .infer_internal_table_catalog(None)
+                    .to_state_table_prost(),
+            ),
+        };
         if self.input().append_only() {
-            let column_orders = self
-                .logical
-                .topn_order()
-                .field_order
-                .iter()
-                .map(FieldOrder::to_protobuf)
-                .collect();
-
-            let node = AppendOnlyTopNNode {
-                column_orders,
-                limit: self.logical.limit() as u64,
-                offset: self.logical.offset() as u64,
-                distribution_key: vec![], // TODO: seems unnecessary
-                ..Default::default()
-            };
-            ProstStreamNode::AppendOnlyTopN(node)
+            ProstStreamNode::AppendOnlyTopN(topn_node)
         } else {
-            let topn_node = TopNNode {
-                limit: self.logical.limit() as u64,
-                offset: self.logical.offset() as u64,
-                table: Some(
-                    self.logical
-                        .infer_internal_table_catalog(None)
-                        .to_state_table_prost(),
-                ),
-            };
             ProstStreamNode::TopN(topn_node)
         }
     }
