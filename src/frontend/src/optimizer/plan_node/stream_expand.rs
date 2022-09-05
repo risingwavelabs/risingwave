@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ExpandNode;
 
-use super::{LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -72,7 +72,7 @@ impl PlanTreeNodeUnary for StreamExpand {
 
 impl_plan_tree_node_for_unary! { StreamExpand }
 
-impl ToStreamProst for StreamExpand {
+impl StreamNode for StreamExpand {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Expand(ExpandNode {
             column_subsets: self

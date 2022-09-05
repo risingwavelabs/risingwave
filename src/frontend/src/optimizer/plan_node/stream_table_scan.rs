@@ -21,7 +21,7 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, StreamNode};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
@@ -132,7 +132,7 @@ impl fmt::Display for StreamTableScan {
     }
 }
 
-impl ToStreamProst for StreamTableScan {
+impl StreamNode for StreamTableScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }

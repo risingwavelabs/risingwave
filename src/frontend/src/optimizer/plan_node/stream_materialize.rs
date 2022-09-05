@@ -23,7 +23,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::FragmentId;
@@ -248,7 +248,7 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 
 impl_plan_tree_node_for_unary! { StreamMaterialize }
 
-impl ToStreamProst for StreamMaterialize {
+impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 

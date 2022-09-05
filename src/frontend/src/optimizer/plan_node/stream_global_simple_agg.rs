@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::PlanAggCallDisplay;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -82,7 +82,7 @@ impl PlanTreeNodeUnary for StreamGlobalSimpleAgg {
 }
 impl_plan_tree_node_for_unary! { StreamGlobalSimpleAgg }
 
-impl ToStreamProst for StreamGlobalSimpleAgg {
+impl StreamNode for StreamGlobalSimpleAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let (internal_tables, column_mappings) = self.logical.infer_internal_table_catalog(None);

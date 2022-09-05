@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNodeId, StreamNode};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
@@ -107,7 +107,7 @@ impl fmt::Display for StreamIndexScan {
     }
 }
 
-impl ToStreamProst for StreamIndexScan {
+impl StreamNode for StreamIndexScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         unreachable!("stream index scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }

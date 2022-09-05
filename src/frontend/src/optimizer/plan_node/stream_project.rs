@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
-use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::Expr;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -72,7 +72,7 @@ impl PlanTreeNodeUnary for StreamProject {
 }
 impl_plan_tree_node_for_unary! {StreamProject}
 
-impl ToStreamProst for StreamProject {
+impl StreamNode for StreamProject {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Project(ProjectNode {
             select_list: self

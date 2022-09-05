@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -69,7 +69,7 @@ impl PlanTreeNodeUnary for StreamTopN {
 
 impl_plan_tree_node_for_unary! { StreamTopN }
 
-impl ToStreamProst for StreamTopN {
+impl StreamNode for StreamTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let topn_node = TopNNode {

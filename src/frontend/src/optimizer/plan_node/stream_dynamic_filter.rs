@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::DynamicFilterNode;
 use super::utils::TableCatalogBuilder;
 use crate::catalog::TableCatalog;
 use crate::expr::Expr;
-use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, ToStreamProst};
+use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{Condition, ConditionDisplay};
@@ -93,7 +93,7 @@ impl PlanTreeNodeBinary for StreamDynamicFilter {
 
 impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 
-impl ToStreamProst for StreamDynamicFilter {
+impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         let condition = self
             .predicate

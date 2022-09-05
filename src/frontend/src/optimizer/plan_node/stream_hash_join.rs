@@ -25,7 +25,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::utils::TableCatalogBuilder;
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode};
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -193,7 +193,7 @@ impl PlanTreeNodeBinary for StreamHashJoin {
 
 impl_plan_tree_node_for_binary! { StreamHashJoin }
 
-impl ToStreamProst for StreamHashJoin {
+impl StreamNode for StreamHashJoin {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         let left_key_indices = self.eq_join_predicate.left_eq_indexes();
         let right_key_indices = self.eq_join_predicate.right_eq_indexes();

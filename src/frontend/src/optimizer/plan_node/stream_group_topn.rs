@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, OrderDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
@@ -54,7 +54,7 @@ impl StreamGroupTopN {
     }
 }
 
-impl ToStreamProst for StreamGroupTopN {
+impl StreamNode for StreamGroupTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let group_key = self.group_key.iter().map(|idx| *idx as u32).collect();

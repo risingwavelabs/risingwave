@@ -18,7 +18,7 @@ use std::fmt;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanBase, PlanRef, ToStreamProst};
+use super::{PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -78,7 +78,7 @@ impl fmt::Display for StreamSink {
     }
 }
 
-impl ToStreamProst for StreamSink {
+impl StreamNode for StreamSink {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
