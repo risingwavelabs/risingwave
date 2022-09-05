@@ -83,13 +83,12 @@ impl AvroParser {
     pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
         if let Schema::Record { fields, .. } = &self.schema {
             let mut index = 0;
-            let x = fields
+            Ok(fields
                 .iter()
                 .map(|field| {
                     Self::avro_field_to_column_desc(&field.name, &field.schema, &mut index)
                 })
-                .collect::<Result<Vec<_>>>()?;
-            Ok(x)
+                .collect::<Result<Vec<_>>>()?)
         } else {
             Err(RwError::from(InternalError(
                 "schema invalid, record required".into(),
