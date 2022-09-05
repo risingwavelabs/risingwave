@@ -106,14 +106,15 @@ impl ArrayConcatExpression {
     /// Examples:
     /// - `select array_cat(array[array[66]], array[233]);` => `[[66], [233]]`
     /// - `select array_cat(array[array[66]], null::int[]);` => `[[66]]` ignore NULL, same as PG
-    /// - `select array_cat(null::int[][], array[233]);` => `null` different from PG
+    /// - `select array_cat(null::int[][], array[233]);` => `[[233]]` different from PG
     /// - `select array_cat(null::int[][], null::int[]);` => `null` same as PG
     fn append_array(left: DatumRef, right: DatumRef) -> Datum {
         match (left, right) {
-            (None, _) => None,
-            (left @ Some(ScalarRefImpl::List(_)), None) => {
-                left.map(ScalarRefImpl::into_scalar_impl)
+            (None, None) => None,
+            (None, right) => {
+                Some(ListValue::new(vec![right.map(ScalarRefImpl::into_scalar_impl)]).into())
             }
+            (left, None) => left.map(ScalarRefImpl::into_scalar_impl),
             (Some(ScalarRefImpl::List(left)), right) => Some(
                 ListValue::new(
                     left.values_ref()
@@ -165,14 +166,15 @@ impl ArrayConcatExpression {
     /// Examples:
     /// - `select array_cat(array[233], array[array[66]]);` => `[[233], [66]]`
     /// - `select array_cat(null::int[], array[array[66]]);` => `[[66]]` ignore NULL, same as PG
-    /// - `select array_cat(array[233], null::int[][]);` => `null` different from PG
+    /// - `select array_cat(array[233], null::int[][]);` => `[[233]]` different from PG
     /// - `select array_cat(null::int[], null::int[][]);` => `null` same as PG
     fn prepend_array(left: DatumRef, right: DatumRef) -> Datum {
         match (left, right) {
-            (_, None) => None,
-            (None, right @ Some(ScalarRefImpl::List(_))) => {
-                right.map(ScalarRefImpl::into_scalar_impl)
+            (None, None) => None,
+            (left, None) => {
+                Some(ListValue::new(vec![left.map(ScalarRefImpl::into_scalar_impl)]).into())
             }
+            (None, right) => right.map(ScalarRefImpl::into_scalar_impl),
             (left, Some(ScalarRefImpl::List(right))) => Some(
                 ListValue::new(
                     std::iter::once(left)
