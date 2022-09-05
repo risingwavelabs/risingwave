@@ -282,7 +282,7 @@ impl<S: StateStore> StorageTable<S> {
             .get(
                 &serialized_pk,
                 self.dist_key_indices == key_indices,
-                read_options.clone(),
+                read_options,
             )
             .await?
         {
