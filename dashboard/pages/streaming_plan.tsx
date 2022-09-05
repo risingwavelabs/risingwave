@@ -29,7 +29,7 @@ import { Dag, dagStratify } from "d3-dag"
 import Head from "next/head"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
-import DependencyGraph from "../components/DepdencyGraph"
+import DependencyGraph from "../components/DependencyGraph"
 import Title from "../components/Title"
 import { TableFragments } from "../proto/gen/meta"
 import { getFragments, getMaterializedViews } from "./api/streaming"
@@ -121,7 +121,7 @@ export default function Streaming() {
         }
       }
     }
-    return () => {}
+    return () => { }
   }, [router, router.query.id, mvList])
 
   const fragmentDependency = fragmentDependencyCallback()

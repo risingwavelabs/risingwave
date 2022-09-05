@@ -25,7 +25,7 @@ export default function Home() {
   return (
     <Fragment>
       <Head>
-        <title>RisingWave Dashbaord</title>
+        <title>RisingWave Dashboard</title>
       </Head>
       <Flex
         w={`calc(100vw - ${NAVBAR_WIDTH})`}
