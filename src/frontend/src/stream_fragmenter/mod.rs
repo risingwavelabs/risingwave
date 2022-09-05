@@ -286,13 +286,12 @@ fn assign_local_table_id_to_stream_node(
             node.state_table_id = state.gen_table_id();
         }
 
-
         NodeBody::GlobalSimpleAgg(node) => {
             for table in &mut node.internal_tables {
                 table.id = state.gen_table_id();
             }
         }
-                
+
         // Rewrite hash agg. One agg call -> one table id.
         NodeBody::HashAgg(hash_agg_node) => {
             for table in &mut hash_agg_node.internal_tables {
@@ -306,7 +305,7 @@ fn assign_local_table_id_to_stream_node(
             } else {
                 panic!("Append only TopN node's table shouldn't be None");
             }
-       }
+        }
         NodeBody::TopN(top_n_node) => {
             if let Some(table) = &mut top_n_node.table {
                 table.id = state.gen_table_id();
@@ -556,7 +555,7 @@ mod tests {
                 })),
                 ..Default::default()
             };
-            StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
+            assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
             if let NodeBody::AppendOnlyTopN(append_only_top_n_node) =
                 stream_node.node_body.as_ref().unwrap()
             {
