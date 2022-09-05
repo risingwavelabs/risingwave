@@ -601,7 +601,7 @@ impl<W: SstableWriter> SstableWriter for TrackedProgressUploadWriter<W> {
 
     fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
         self.writer.write_block(block, meta)?;
-        self.task_progress_tracker.inc_ssts_sealed();
+        self.task_progress_tracker.inc_blocks_completed();
         Ok(())
     }
 

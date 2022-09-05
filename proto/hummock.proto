@@ -274,7 +274,7 @@ message GetNewSstIdsResponse {
 // or `num_ssts_sealed`/`num_ssts_uploaded` do not increase for a timeout.
 message CompactTaskProgress {
   uint64 task_id = 1;
-  uint32 num_ssts_sealed = 2;
+  uint32 num_blocks_completed = 2;
   uint32 num_ssts_uploaded = 3;
 }
 
