@@ -1133,7 +1133,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     use crate::hummock::HummockManager;
     let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 1;
+    let sst_num = 2;
 
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id, 100);
