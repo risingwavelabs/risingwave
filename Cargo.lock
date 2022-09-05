@@ -2664,9 +2664,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40e4398f1d2f5270123f69add29a12312afe3f5b5b701174faa075e388d40354"
+checksum = "69239c86b096ba429e109d5e36c3e639d19d36e0d0a8c3df1e168b72a5008770"
 dependencies = [
  "ahash",
  "async-channel",
@@ -2691,13 +2691,15 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "724691207c1c45ef747b7629d5f2ccc32fea555ef939623b12c5e16188aa9169"
+checksum = "54cc5db0885f71b5e8eb71ec1002b94bf5b8f5b1011c4d709b23a1fd3b5c01d8"
 dependencies = [
  "etcd-client",
+ "http",
  "madsim",
  "spin 0.9.4",
+ "tonic",
  "tracing",
 ]
 
