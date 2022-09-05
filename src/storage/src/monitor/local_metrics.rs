@@ -58,7 +58,7 @@ impl StoreLocalStatistic {
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
         if other.added.fetch_or(true, Ordering::Relaxed) || other.reported.load(Ordering::Relaxed) {
-            panic!("double added\n{:#?}", other);
+            tracing::error!("double added\n{:#?}", other);
         }
     }
 
@@ -122,7 +122,7 @@ impl StoreLocalStatistic {
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
         if self.reported.fetch_or(true, Ordering::Relaxed) || self.added.load(Ordering::Relaxed) {
-            panic!("double reported\n{:#?}", self);
+            tracing::error!("double reported\n{:#?}", self);
         }
     }
 
@@ -152,7 +152,7 @@ impl Drop for StoreLocalStatistic {
             && !self.added.load(Ordering::Relaxed)
             && self.need_report()
         {
-            panic!("local stats lost!\n{:#?}", self);
+            tracing::error!("local stats lost!\n{:#?}", self);
         }
     }
 }
