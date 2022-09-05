@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
+use std::fmt::Display;
+
+use itertools::Itertools;
 
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::property::Direction;
@@ -27,7 +29,7 @@ pub struct OrderByExpr {
     pub nulls_first: bool,
 }
 
-impl Debug for OrderByExpr {
+impl Display for OrderByExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.expr)?;
         if self.direction == Direction::Desc {
@@ -46,14 +48,9 @@ pub struct OrderBy {
     pub sort_exprs: Vec<OrderByExpr>,
 }
 
-impl Debug for OrderBy {
+impl Display for OrderBy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut builder = f.debug_tuple("ORDER BY");
-        self.sort_exprs.iter().for_each(|child| {
-            builder.field(child);
-        });
-        builder.finish()?;
-        Ok(())
+        write!(f, "ORDER BY {}", self.sort_exprs.iter().format(", "))
     }
 }
 

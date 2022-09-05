@@ -115,7 +115,7 @@ impl std::fmt::Debug for WindowFunction {
                 .field("return_type", &self.return_type)
                 .field("args", &self.args)
                 .field("partition_by", &self.partition_by)
-                .field("order_by", &self.order_by)
+                .field("order_by", &format_args!("{}", self.order_by))
                 .finish()
         } else {
             write!(f, "{}() OVER(", self.function_type.name())?;
@@ -130,11 +130,7 @@ impl std::fmt::Debug for WindowFunction {
                 )?;
             }
             if !self.order_by.sort_exprs.is_empty() {
-                write!(
-                    f,
-                    "{delim}ORDER BY {:?}",
-                    self.order_by.sort_exprs.iter().format(", ")
-                )?;
+                write!(f, "{delim}{}", self.order_by)?;
             }
             f.write_str(")")?;
 
