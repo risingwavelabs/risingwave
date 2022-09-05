@@ -522,6 +522,8 @@ async fn test_context_id_validation() {
         .unwrap();
 }
 
+// This is a non-deterministic test depending on the use of timeouts
+#[cfg(madsim)]
 #[tokio::test]
 async fn test_context_id_invalidation() {
     use crate::hummock::subscribe_cluster_membership_change;
@@ -1070,16 +1072,20 @@ async fn test_hummock_compaction_task_heartbeat() {
         .await
         .unwrap();
 
-    // send heartbeats to the task immediately
-    let req = CompactTaskProgress {
-        task_id: compact_task.task_id,
-        num_ssts_sealed: 1,
-        num_ssts_uploaded: 1,
-    };
-    compactor_manager.update_task_heartbeats(context_id, &vec![req]);
+    for i in 0..10 {
+        // send heartbeats to the task over 2.5 seconds
+        let req = CompactTaskProgress {
+            task_id: compact_task.task_id,
+            num_ssts_sealed: i + 1,
+            num_ssts_uploaded: 0,
+        };
+        compactor_manager.update_task_heartbeats(context_id, &vec![req]);
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
 
     // Cancel the task immediately and succeed.
     compact_task.set_task_status(TaskStatus::Failed);
+
     assert!(hummock_manager
         .report_compact_task(context_id, &compact_task)
         .await
@@ -1127,7 +1133,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     use crate::hummock::HummockManager;
     let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2;
+    let sst_num = 1;
 
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id, 100);
