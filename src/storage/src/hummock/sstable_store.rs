@@ -302,16 +302,20 @@ impl SstableStore {
     }
 
     pub fn get_sst_meta_path(&self, sst_id: HummockSstableId) -> String {
-        let mut ret = format!("{}/{}.meta", self.path, sst_id);
-        if !is_remote_sst_id(sst_id) {
+        let is_remote = is_remote_sst_id(sst_id);
+        let obj_prefix = self.store.get_object_prefix(sst_id, is_remote);
+        let mut ret = format!("{}/{}{}.meta", self.path, obj_prefix, sst_id);
+        if !is_remote {
             ret = get_local_path(&ret);
         }
         ret
     }
 
     pub fn get_sst_data_path(&self, sst_id: HummockSstableId) -> String {
-        let mut ret = format!("{}/{}.data", self.path, sst_id);
-        if !is_remote_sst_id(sst_id) {
+        let is_remote = is_remote_sst_id(sst_id);
+        let obj_prefix = self.store.get_object_prefix(sst_id, is_remote);
+        let mut ret = format!("{}/{}{}.data", self.path, obj_prefix, sst_id);
+        if !is_remote {
             ret = get_local_path(&ret);
         }
         ret

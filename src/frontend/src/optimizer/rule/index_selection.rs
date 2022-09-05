@@ -197,7 +197,7 @@ impl IndexSelectionRule {
             .iter()
             .zip_eq(index.primary_table.order_key.iter())
             .map(|(x, y)| {
-                Self::create_equal_expr(
+                Self::create_null_safe_equal_expr(
                     x.index,
                     index.index_table.columns[x.index].data_type().clone(),
                     y.index + index.index_item.len(),
@@ -275,7 +275,7 @@ impl IndexSelectionRule {
             .iter()
             .enumerate()
             .map(|(x, y)| {
-                Self::create_equal_expr(
+                Self::create_null_safe_equal_expr(
                     x,
                     schema.fields[x].data_type.clone(),
                     y.column_idx + index_access_len,
@@ -600,14 +600,14 @@ impl IndexSelectionRule {
         table_scan_io_estimator.estimate(scan.predicate())
     }
 
-    fn create_equal_expr(
+    fn create_null_safe_equal_expr(
         left: usize,
         left_data_type: DataType,
         right: usize,
         right_data_type: DataType,
     ) -> ExprImpl {
         ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
-            ExprType::Equal,
+            ExprType::IsNotDistinctFrom,
             vec![
                 ExprImpl::InputRef(Box::new(InputRef::new(left, left_data_type))),
                 ExprImpl::InputRef(Box::new(InputRef::new(right, right_data_type))),
@@ -830,6 +830,10 @@ impl ExprVisitor<IndexCost> for TableScanIoEstimator<'_> {
             }
         }
     }
+
+    fn merge(a: IndexCost, b: IndexCost) -> IndexCost {
+        a.add(&b)
+    }
 }
 
 #[derive(Default)]
@@ -838,6 +842,8 @@ struct ExprInputRefFinder {
 }
 
 impl ExprVisitor<()> for ExprInputRefFinder {
+    fn merge(_: (), _: ()) {}
+
     fn visit_input_ref(&mut self, input_ref: &InputRef) {
         self.input_ref_index_set.insert(input_ref.index);
     }

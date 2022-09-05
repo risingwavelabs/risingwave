@@ -15,6 +15,7 @@
 mod agg;
 pub mod build_expr_from_prost;
 pub mod data_types;
+mod expr_array_concat;
 mod expr_binary_bytes;
 pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
@@ -46,6 +47,7 @@ use risingwave_pb::expr::ExprNode;
 
 use super::Result;
 use crate::expr::build_expr_from_prost::*;
+use crate::expr::expr_array_concat::ArrayConcatExpression;
 use crate::expr::expr_case::CaseExpression;
 use crate::expr::expr_coalesce::CoalesceExpression;
 use crate::expr::expr_concat_ws::ConcatWsExpression;
@@ -133,6 +135,12 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
         Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
         RegexpMatch => RegexpMatchExpression::try_from(prost).map(Expression::boxed),
+        ArrayCat | ArrayAppend | ArrayPrepend => {
+            // Now we implement these three functions as a single expression for the
+            // sake of simplicity. If performance matters at some time, we can split
+            // the implementation to improve performance.
+            ArrayConcatExpression::try_from(prost).map(Expression::boxed)
+        }
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
