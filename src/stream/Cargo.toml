@@ -21,6 +21,7 @@ farmhash = "1"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
+hashbrown = "0.11.2"
 hyper = "0.14"
 iter-chunks = "0.1"
 itertools = "0.10"
