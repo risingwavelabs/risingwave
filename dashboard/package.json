@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@chakra-ui/react": "^2.3.1",
+    "@emotion/react": "^11.10.4",
+    "@emotion/styled": "^11.10.4",
     "@types/d3": "^7.4.0",
     "@types/lodash": "^4.14.184",
     "bootstrap-icons": "^1.9.1",

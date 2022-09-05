@@ -158,6 +158,7 @@ export default function Streaming() {
               <DependencyGraph
                 svgWidth={SIDEBAR_WIDTH}
                 mvDependency={fragmentDependency}
+                onSelectedIdChange={(id) => setSelectedFragmentId(parseInt(id))}
                 selectedId={selectedFragmentId?.toString()}
               />
             )}
