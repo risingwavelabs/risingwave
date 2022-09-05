@@ -18,7 +18,7 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use function_name::named;
 use itertools::Itertools;
@@ -1375,7 +1375,7 @@ where
     }
 
     pub async fn trigger_manual_compaction(
-        &self,
+        self: &Arc<Self>,
         compaction_group: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<()> {
@@ -1421,7 +1421,6 @@ where
         };
 
         let mut is_failed = false;
-        let mut need_cancel_task = false;
         if let Err(e) = self
             .assign_compaction_task(&compact_task, compactor.context_id())
             .await
@@ -1440,7 +1439,6 @@ where
                 .await
             {
                 is_failed = true;
-                need_cancel_task = true;
                 tracing::warn!(
                     "Failed to send task {} to {}. {:#?}",
                     compact_task.task_id,
@@ -1450,14 +1448,20 @@ where
             }
         }
 
-        if need_cancel_task {
-            if let Err(e) = self.cancel_compact_task(&mut compact_task).await {
-                tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
-                // TODO #3677: handle cancellation via compaction heartbeat after #4496
-            }
-        }
-
         if is_failed {
+            let hummock_manager = self.clone();
+            tokio::spawn(async move {
+                while let Err(e) = hummock_manager.cancel_compact_task(&mut compact_task).await {
+                    tracing::error!(
+                        "Failed to cancel task {}, will retry. {:#?}",
+                        compact_task.task_id,
+                        e
+                    );
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                }
+                tracing::info!("Cancelled task {}", compact_task.task_id);
+            });
+
             return Err(Error::InternalError(anyhow::anyhow!(
                 "Failed to trigger_manual_compaction"
             )));
