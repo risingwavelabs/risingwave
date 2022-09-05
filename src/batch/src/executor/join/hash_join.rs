@@ -26,7 +26,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{
-    calc_hash_key_kind, HashKey, HashKeyDispatcher, JoinHashKey, PrecomputedBuildHasher,
+    calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
 };
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -120,7 +120,7 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
 ///
 /// This can be seen as an implicit linked list. For convenience, we use `RowIdIter` to iterate all
 /// build side row ids with the given key.
-type JoinHashMap<K> = HashMap<JoinHashKey<K>, RowId, PrecomputedBuildHasher>;
+type JoinHashMap<K> = HashMap<K, RowId, PrecomputedBuildHasher>;
 
 struct RowIdIter<'a> {
     current_row_id: Option<RowId>,
@@ -155,7 +155,6 @@ struct EquiJoinParams<K> {
     build_data_types: Vec<DataType>,
     full_data_types: Vec<DataType>,
     hash_map: JoinHashMap<K>,
-    null_matched: Arc<FixedBitSet>,
     next_build_row_with_same_key: ChunkedData<Option<RowId>>,
 }
 
@@ -204,22 +203,24 @@ impl<K: HashKey> HashJoinExecutor<K> {
             JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
         let mut next_build_row_with_same_key =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-        let null_matched: Arc<FixedBitSet> = {
+        let null_matched = {
             let mut null_matched = FixedBitSet::with_capacity(self.null_matched.len());
             for (idx, col_null_matched) in self.null_matched.into_iter().enumerate() {
                 null_matched.set(idx, col_null_matched);
             }
-            null_matched.into()
+            null_matched
         };
 
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
-            let build_keys =
-                JoinHashKey::build(&self.build_key_idxs, build_chunk, null_matched.clone())?;
+            let build_keys = K::build(&self.build_key_idxs, build_chunk)?;
 
             for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
-                let row_id = RowId::new(build_chunk_id, build_row_id);
-                next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
+                // Only insert key to hash map if it is consistent with the null safe restriction.
+                if build_key.null_bitmap().is_subset(&null_matched) {
+                    let row_id = RowId::new(build_chunk_id, build_row_id);
+                    next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
+                }
             }
         }
 
@@ -231,7 +232,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
         };
 
@@ -297,7 +297,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_side,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -306,8 +305,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
@@ -352,7 +350,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -361,8 +358,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     for build_row_id in
@@ -406,7 +402,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -421,8 +416,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 non_equi_state.found_matched = false;
                 non_equi_state
@@ -479,7 +473,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             probe_data_types,
             probe_key_idxs,
             hash_map,
-            null_matched,
             ..
         }: EquiJoinParams<K>,
     ) {
@@ -487,8 +480,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 if !ANTI_JOIN {
                     if hash_map.get(probe_key).is_some() {
@@ -522,7 +514,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_side,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -534,8 +525,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 non_equi_state
                     .first_output_row_id
@@ -581,7 +571,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_side,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -594,8 +583,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
@@ -654,7 +642,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_side,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -666,8 +653,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
@@ -706,7 +692,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_side,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -723,8 +708,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
@@ -773,7 +757,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_side,
             build_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -785,8 +768,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for probe_key in &probe_keys {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
@@ -814,7 +796,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -832,8 +813,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
@@ -883,7 +863,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -895,8 +874,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     for build_row_id in
@@ -947,7 +925,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
-            null_matched,
             next_build_row_with_same_key,
             ..
         }: EquiJoinParams<K>,
@@ -969,8 +946,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys =
-                JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched.clone())?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 left_non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {

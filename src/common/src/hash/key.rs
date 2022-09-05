@@ -17,7 +17,6 @@ use std::default::Default;
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
-use std::sync::Arc;
 
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
@@ -152,91 +151,6 @@ pub trait HashKey:
     }
 
     fn null_bitmap(&self) -> &FixedBitSet;
-}
-
-/// A wrapper over `HashKey` to support null-safe, i.e., 'IS NOT DISTINCT FROM' semantics. This
-/// should be used in batch/stream hash join executors.
-///
-/// For example, given `null_matched = [false, true]`, we should match the first column by equal
-/// semantics (null != null) and the second column by null-safe semantics (null == null).
-///
-/// | left | right | matched |
-/// | --- | --- | --- |
-/// | (1, null) | (1, null) | true |
-/// | (null, 1) | (null, 1) | false |
-/// | (null, null) | (null, null) | false |
-#[derive(Clone)]
-pub struct JoinHashKey<K> {
-    key: K,
-    null_matched: Arc<FixedBitSet>,
-}
-
-impl<K: HashKey> JoinHashKey<K> {
-    pub fn build(
-        column_idxes: &[usize],
-        data_chunk: &DataChunk,
-        null_matched: Arc<FixedBitSet>,
-    ) -> ArrayResult<Vec<Self>> {
-        let hash_codes = data_chunk.get_hash_values(column_idxes, CRC32FastBuilder)?;
-        Ok(Self::build_from_hash_code(
-            column_idxes,
-            data_chunk,
-            hash_codes,
-            null_matched,
-        ))
-    }
-
-    fn build_from_hash_code(
-        column_idxes: &[usize],
-        data_chunk: &DataChunk,
-        hash_codes: Vec<HashCode>,
-        null_matched: Arc<FixedBitSet>,
-    ) -> Vec<Self> {
-        let mut serializers: Vec<K::S> = hash_codes.into_iter().map(K::S::from_hash_code).collect();
-
-        for column_idx in column_idxes {
-            data_chunk
-                .column_at(*column_idx)
-                .array_ref()
-                .serialize_to_hash_key(&mut serializers[..]);
-        }
-
-        serializers
-            .into_iter()
-            .map(|ser| Self {
-                key: ser.into_hash_key(),
-                null_matched: null_matched.clone(),
-            })
-            .collect()
-    }
-
-    pub fn key(&self) -> &K {
-        &self.key
-    }
-
-    pub fn null_matched(&self) -> &Arc<FixedBitSet> {
-        &self.null_matched
-    }
-}
-
-impl<K: HashKey> EstimateSize for JoinHashKey<K> {
-    fn estimated_heap_size(&self) -> usize {
-        self.key.estimated_heap_size() + std::mem::size_of::<Arc<FixedBitSet>>()
-    }
-}
-
-impl<K: HashKey> PartialEq for JoinHashKey<K> {
-    fn eq(&self, other: &Self) -> bool {
-        self.key == other.key && self.key.null_bitmap().is_subset(&self.null_matched)
-    }
-}
-
-impl<K: HashKey> Eq for JoinHashKey<K> {}
-
-impl<K: HashKey> Hash for JoinHashKey<K> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.key.hash(state)
-    }
 }
 
 /// Designed for hash keys with at most `N` serialized bytes.
