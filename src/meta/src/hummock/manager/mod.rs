@@ -224,15 +224,17 @@ where
                         return;
                     }
                 }
+                // TODO: add metrics to track expired tasks
                 for (context_id, mut task) in compactor_manager.get_expired_tasks() {
+                    tracing::info!("Task with task_id {} with context_id {context_id} has expired due to lack of visible progress", task.task_id);
                     if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                        // Forcefully cancel the task so that it terminates early on the compactor
+                        // node.
                         let _ = compactor.cancel_task(task.task_id).await;
+                        tracing::info!("CancelTask operation for task_id {} has been sent to node with context_id {context_id}", task.task_id);
                     }
 
-                    // Change task status to failed
-                    task.task_status = false;
-
-                    if let Err(e) = hummock_manager.report_compact_task(context_id, &task).await {
+                    if let Err(e) = hummock_manager.cancel_compact_task(&mut task).await {
                         tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
                             until we can successfully report its status. {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
                     }
@@ -972,9 +974,10 @@ where
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
 
-        // A task heartbeat is removed IFF a task report has an associated context_id
-        // and its task_status has been committed.
-        if let Some(context_id) = context_id {
+        // A task heartbeat is removed IFF we report the task status of a task and it still has a
+        // valid assignment, OR we remove the node context from our list of nodes, in which
+        // case the associated heartbeats are forcefully purged.
+        if let Some(context_id) = assignee_context_id {
             self.compactor_manager
                 .remove_task_heartbeat(context_id, compact_task.task_id);
         }

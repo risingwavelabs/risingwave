@@ -194,6 +194,7 @@ where
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
+    // TODO: convert this into a stream.
     async fn report_compaction_task_progress(
         &self,
         request: Request<ReportCompactionTaskProgressRequest>,

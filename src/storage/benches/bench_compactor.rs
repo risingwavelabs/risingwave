@@ -76,7 +76,7 @@ pub async fn put_sst(
 ) {
     let mut writer = sstable_store
         .clone()
-        .create_sst_writer(sst_id, policy, options)
+        .create_sst_writer(sst_id, policy, options, None)
         .await
         .unwrap();
     for block_meta in &meta.block_metas {

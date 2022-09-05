@@ -499,7 +499,39 @@ async fn test_release_context_resource() {
 
 #[tokio::test]
 async fn test_context_id_validation() {
-    let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let invalid_context_id = HummockContextId::MAX;
+    let context_id = worker_node.id;
+
+    // Invalid context id is rejected.
+    let error = hummock_manager
+        .pin_version(invalid_context_id, u64::MAX)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::InvalidContext(_)));
+
+    // Valid context id is accepted.
+    hummock_manager
+        .pin_version(context_id, u64::MAX)
+        .await
+        .unwrap();
+    // Pin multiple times is OK.
+    hummock_manager
+        .pin_version(context_id, u64::MAX)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_context_id_invalidation() {
+    use crate::hummock::subscribe_cluster_membership_change;
+    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (member_join, member_shutdown) = subscribe_cluster_membership_change(
+        hummock_manager.clone(),
+        hummock_manager.compactor_manager_ref_for_test(),
+        env.notification_manager_ref(),
+    )
+    .await;
     let invalid_context_id = HummockContextId::MAX;
     let context_id = worker_node.id;
 
@@ -521,11 +553,33 @@ async fn test_context_id_validation() {
         .await
         .unwrap();
 
-    // Remove the node from cluster will invalidate context id.
+    // Remove the node from cluster will invalidate context id by clearing
+    // the invalidated pinned versions.
     cluster_manager
         .delete_worker_node(worker_node.host.unwrap())
         .await
         .unwrap();
+
+    // Notification of local subscribers and resultant deletion of worker node from
+    // the Hummock manager needs time to complete. This test can run for a maximum of 10 seconds.
+    // (in practice, this usually suceeds on first try)
+    let mut success = false;
+    for _ in 0..40 {
+        if hummock_manager
+            .pin_version(context_id, u64::MAX)
+            .await
+            .is_err()
+        {
+            success = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    member_shutdown.send(()).unwrap();
+    member_join.await.unwrap();
+    if !success {
+        panic!("context_id did not get invalidated")
+    }
 }
 
 #[tokio::test]
@@ -1025,7 +1079,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     compactor_manager.update_task_heartbeats(context_id, &vec![req]);
 
     // Cancel the task immediately and succeed.
-    compact_task.task_status = false;
+    compact_task.set_task_status(TaskStatus::Failed);
     assert!(hummock_manager
         .report_compact_task(context_id, &compact_task)
         .await
@@ -1054,11 +1108,104 @@ async fn test_hummock_compaction_task_heartbeat() {
     tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
 
     // Cancel the task after heartbeat has triggered and fail.
-    compact_task.task_status = false;
+    compact_task.set_task_status(TaskStatus::Failed);
     assert!(!hummock_manager
         .report_compact_task(context_id, &compact_task)
         .await
         .unwrap());
+    shutdown_tx.send(()).unwrap();
+    join_handle.await.unwrap();
+}
+
+// This is a non-deterministic test
+#[cfg(madsim)]
+#[tokio::test]
+async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
+    use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+    use risingwave_pb::hummock::CompactTaskProgress;
+
+    use crate::hummock::HummockManager;
+    let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let sst_num = 2;
+
+    let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+    let _tx = compactor_manager.add_compactor(context_id, 100);
+    let (join_handle, shutdown_tx) =
+        HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
+
+    // No compaction task available.
+    let task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap();
+    assert_eq!(task, None);
+
+    // Add some sstables and commit.
+    let epoch: u64 = 1;
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &original_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&original_tables),
+    )
+    .await
+    .unwrap();
+
+    // Get a compaction task.
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        compact_task
+            .get_input_ssts()
+            .first()
+            .unwrap()
+            .get_level_idx(),
+        0
+    );
+    assert_eq!(compact_task.get_task_id(), 2);
+    // send task
+    compactor_manager
+        .random_compactor()
+        .unwrap()
+        .send_task(Task::CompactTask(compact_task.clone()))
+        .await
+        .unwrap();
+
+    // send heartbeats to the task immediately
+    let req = CompactTaskProgress {
+        task_id: compact_task.task_id,
+        num_ssts_sealed: 1,
+        num_ssts_uploaded: 1,
+    };
+    compactor_manager.update_task_heartbeats(context_id, &vec![req.clone()]);
+
+    // Removing the node from cluster will invalidate context id.
+    cluster_manager
+        .delete_worker_node(worker_node.host.unwrap())
+        .await
+        .unwrap();
+    hummock_manager
+        .release_contexts([context_id])
+        .await
+        .unwrap();
+
+    // Check that no heartbeats exist for the relevant context.
+    assert!(!compactor_manager.purge_heartbeats_for_context(worker_node.id));
+
     shutdown_tx.send(()).unwrap();
     join_handle.await.unwrap();
 }

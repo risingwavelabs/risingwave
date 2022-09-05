@@ -403,28 +403,24 @@ impl SstableStore {
     ) -> HummockResult<BoxedSstableWriter> {
         match &options.mode {
             SstableWriteMode::Batch => {
-                let writer = BatchUploadWriter::new(
-                    sst_id, self, policy, options,
-                );
+                let writer = BatchUploadWriter::new(sst_id, self, policy, options);
                 if let Some(tracker) = task_progress_tracker {
                     Ok(Box::new(TrackedProgressUploadWriter {
-                        writer, 
-                        task_progress_tracker: tracker
+                        writer,
+                        task_progress_tracker: tracker,
                     }))
                 } else {
                     Ok(Box::new(writer))
                 }
-            },
+            }
             SstableWriteMode::Streaming => {
                 let data_path = self.get_sst_data_path(sst_id);
                 let uploader = self.store.streaming_upload(&data_path).await?;
-                let writer = StreamingUploadWriter::new(
-                    sst_id, self, policy, uploader, options,
-                );
+                let writer = StreamingUploadWriter::new(sst_id, self, policy, uploader, options);
                 if let Some(tracker) = task_progress_tracker {
                     Ok(Box::new(TrackedProgressUploadWriter {
-                        writer, 
-                        task_progress_tracker: tracker
+                        writer,
+                        task_progress_tracker: tracker,
                     }))
                 } else {
                     Ok(Box::new(writer))
@@ -609,15 +605,14 @@ impl<W: SstableWriter> SstableWriter for TrackedProgressUploadWriter<W> {
         Ok(())
     }
 
-    fn finish(mut self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output> {
+    fn finish(self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output> {
         W::finish(Box::new(self.writer), size_footer)
     }
 
     fn data_len(&self) -> usize {
         self.writer.data_len()
-    }  
+    }
 }
-
 
 pub struct StreamingUploadWriter {
     sst_id: HummockSstableId,

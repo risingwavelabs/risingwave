@@ -104,7 +104,12 @@ impl TableBuilderFactory for RemoteBuilderFactory {
         let writer = self
             .sstable_store
             .clone()
-            .create_sst_writer(table_id, self.policy, writer_options, self.task_progress_tracker.clone())
+            .create_sst_writer(
+                table_id,
+                self.policy,
+                writer_options,
+                self.task_progress_tracker.clone(),
+            )
             .await?;
         let builder = SstableBuilder::new(
             table_id,
@@ -698,7 +703,7 @@ impl Compactor {
             // Upload metadata.
             let sstable_store_cloned = self.context.sstable_store.clone();
             let tracker_cloned = task_progress_tracker.clone();
-            let upload_join_handle  = async move {
+            let upload_join_handle = async move {
                 let upload_data_result = upload_join_handle.await;
                 upload_data_result.map_err(|e| {
                     HummockError::other(format!("fail to upload sst data: {:?}", e))

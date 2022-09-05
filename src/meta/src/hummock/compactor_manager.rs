@@ -224,9 +224,16 @@ impl CompactorManager {
         let mut guard = self.inner.write();
         guard.compactors.retain(|c| *c != context_id);
         guard.compactor_map.remove(&context_id);
-        // Any existing task from the heartbeats table that has not been externally
-        // cancelled will be eventually purged
+        // To remove the heartbeats, they need to be forcefully purged,
+        // which is only safe when the context has been completely removed from meta.
         tracing::info!("Removed compactor session {}", context_id);
+    }
+
+    /// Forcefully purging the heartbeats for a task is only safe when the
+    /// context has been completely removed from meta.
+    /// Returns true if there were remanining heartbeats for the task.
+    pub fn purge_heartbeats_for_context(&self, context_id: HummockContextId) -> bool {
+        self.task_heartbeats.write().remove(&context_id).is_some()
     }
 
     pub fn get_compactor(&self, context_id: u32) -> Option<Arc<Compactor>> {
