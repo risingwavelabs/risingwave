@@ -4,8 +4,13 @@ header:
     copyright-owner: Singularity Data
 
   paths:
-    - 'src/**/*.rs'
-    - 'dashboard/**/*.js'
-    - 'src/**/*.html'
+    - "src/**/*.rs"
+    - "dashboard/**/*.js"
+    - "dashboard/**/*.ts"
+    - "src/**/*.html"
+
+  paths-ignore:
+    - "**/gen/**"
+    - "**/*.d.ts"
 
   comment: on-failure
