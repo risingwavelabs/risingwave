@@ -596,40 +596,17 @@ impl Compactor {
         let mut upload_join_handles = vec![];
 
         for SplitTableOutput {
-            sst_id,
-            meta,
-            upload_join_handle,
             bloom_filter_size,
-            table_ids,
+            sst_info,
+            upload_join_handle,
         } in split_table_outputs
         {
-            let sst_info = SstableInfo {
-                id: sst_id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: meta.smallest_key.clone(),
-                    right: meta.largest_key.clone(),
-                    inf: false,
-                }),
-                file_size: meta.estimated_size as u64,
-                table_ids,
-            };
-
             // Bloom filter occuppy per thousand keys.
             self.context
                 .filter_key_extractor_manager
                 .update_bloom_filter_avg_size(sst_info.file_size as usize, bloom_filter_size);
             let sst_size = sst_info.file_size;
             ssts.push(sst_info);
-
-            // Upload metadata.
-            let sstable_store_cloned = self.context.sstable_store.clone();
-            let upload_join_handle = async move {
-                let upload_data_result = upload_join_handle.await;
-                upload_data_result.map_err(|e| {
-                    HummockError::other(format!("fail to upload sst data: {:?}", e))
-                })??;
-                sstable_store_cloned.put_sst_meta(sst_id, meta).await
-            };
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
@@ -642,7 +619,9 @@ impl Compactor {
             }
         }
 
-        try_join_all(upload_join_handles).await?;
+        try_join_all(upload_join_handles)
+            .await
+            .map_err(|e| HummockError::other(format!("fail to upload sst data: {:?}", e)))?;
 
         self.context
             .stats
