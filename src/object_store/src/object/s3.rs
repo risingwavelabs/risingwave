@@ -18,7 +18,7 @@ use std::sync::Arc;
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
-use aws_smithy_types::retry::{RetryConfig, RetryConfigBuilder};
+use aws_smithy_types::retry::RetryConfig;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream;
