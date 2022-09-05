@@ -491,11 +491,8 @@ pub mod tests {
             // target_level == 0, None
             assert!(picker.pick_compaction(&levels, &levels_handler).is_none());
 
-            let picker = ManualCompactionPicker::new(
-                Arc::new(RangeOverlapStrategy::default()),
-                option,
-                1,
-            );
+            let picker =
+                ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 1);
             // target_level > 0, pick_l0_to_base_level
             let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
             result.add_pending_task(1, &mut levels_handler);
@@ -537,5 +534,39 @@ pub mod tests {
                 clean_task_state(&mut levels_handler[1]);
             }
         }
+    }
+
+    #[test]
+    fn test_manual_compaction_picker_l0_empty() {
+        let l0 = generate_l0_with_overlap(vec![]);
+        let levels = vec![Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping as i32,
+            table_infos: vec![],
+            total_file_size: 0,
+            sub_level_id: 0,
+        }];
+        let levels = Levels {
+            levels,
+            l0: Some(l0),
+        };
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let option = ManualCompactionOption {
+            sst_ids: vec![1],
+            level: 0,
+            key_range: KeyRange {
+                left: vec![],
+                right: vec![],
+                inf: true,
+            },
+            internal_table_id: HashSet::default(),
+        };
+        let picker = ManualCompactionPicker::new(
+            Arc::new(RangeOverlapStrategy::default()),
+            option.clone(),
+            0,
+        );
+        let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
+        assert_eq!(result.input_levels.len(), 0);
     }
 }
