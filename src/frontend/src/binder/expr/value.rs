@@ -24,7 +24,7 @@ use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Lite
 impl Binder {
     pub fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
-            Value::Number(s, b) => self.bind_number(s, b),
+            Value::Number(s) => self.bind_number(s),
             Value::SingleQuotedString(s) => self.bind_string(s),
             Value::Boolean(b) => self.bind_bool(b),
             // Both null and string literal will be treated as `unknown` during type inference.
@@ -50,7 +50,7 @@ impl Binder {
         Ok(Literal::new(Some(ScalarImpl::Bool(b)), DataType::Boolean))
     }
 
-    fn bind_number(&mut self, s: String, _b: bool) -> Result<Literal> {
+    fn bind_number(&mut self, s: String) -> Result<Literal> {
         let (data, data_type) = if let Ok(int_32) = s.parse::<i32>() {
             (Some(ScalarImpl::Int32(int_32)), DataType::Int32)
         } else if let Ok(int_64) = s.parse::<i64>() {
@@ -184,7 +184,7 @@ mod tests {
         ];
 
         for i in 0..values.len() {
-            let value = Value::Number(String::from(values[i]), false);
+            let value = Value::Number(String::from(values[i]));
             let res = binder.bind_value(value).unwrap();
             let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);
