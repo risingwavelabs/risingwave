@@ -241,7 +241,7 @@
 - sql: |
     create table t (v1 int);
     select coalesce() from t;
-  binder_error: 'Bind error: Function `Coalesce` takes at least 1 arguments (0 given)'
+  binder_error: 'Bind error: Function `coalesce` takes at least 1 arguments (0 given)'
 - sql: |
     create table t (v1 int);
     select coalesce(1,true) from t;
@@ -271,7 +271,7 @@
 - sql: |
     create table t (v1 int);
     select concat_ws() from t;
-  binder_error: 'Bind error: Function `ConcatWs` takes at least 2 arguments (0 given)'
+  binder_error: 'Bind error: Function `concat_ws` takes at least 2 arguments (0 given)'
 - sql: |
     create table t (v1 varchar, v2 int, v3 float);
     select concat(v1, v2, v3, 1) as expr from t;

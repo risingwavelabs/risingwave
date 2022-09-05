@@ -273,5 +273,5 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
         }
     }
 
-    internal_table_catalog_builder.build(dist_keys, append_only)
+    internal_table_catalog_builder.build(dist_keys, append_only, None)
 }

@@ -14,16 +14,15 @@
  * limitations under the License.
  *
  */
-import api from "./api"
 
-export async function getActors(){
-  return (await api.get("/api/actors"));
+export function IconServer() {
+  return <i className="bi bi-server"></i>
 }
 
-export async function getFragments(){
-  return await api.get("/api/fragments");
+export function IconArrowRightCircle() {
+  return <i className="bi bi-arrow-right-circle"></i>
 }
 
-export async function getMaterializedViews(){
-  return await api.get("/api/materialized_views");
+export function IconArrowRightCircleFill() {
+  return <i className="bi bi-arrow-right-circle-fill"></i>
 }
