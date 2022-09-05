@@ -37,7 +37,7 @@ use crate::expr::{
     Literal, OrderBy,
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
-use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
+use crate::optimizer::plan_node::{gen_filter_and_pushdown, BatchSortAgg, LogicalProject};
 use crate::optimizer::property::{
     Direction, Distribution, FunctionalDependencySet, Order, RequiredDist,
 };
@@ -1257,6 +1257,23 @@ impl ToBatch for LogicalAgg {
         let new_logical = self.clone_with_input(new_input);
         if self.group_key().is_empty() {
             Ok(BatchSimpleAgg::new(new_logical).into())
+        } else if self.group_key().iter().all(|group_by_idx| {
+            new_logical
+                .input()
+                .order()
+                .field_order
+                .iter()
+                .any(|field_order| field_order.index == *group_by_idx)
+                && new_logical
+                    .input()
+                    .schema()
+                    .fields()
+                    .get(*group_by_idx)
+                    .unwrap()
+                    .data_type
+                    == DataType::Int32
+        }) {
+            Ok(BatchSortAgg::new(new_logical).into())
         } else {
             Ok(BatchHashAgg::new(new_logical).into())
         }

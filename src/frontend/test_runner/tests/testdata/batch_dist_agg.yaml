@@ -144,12 +144,12 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [max(tk.v)] }
-        BatchHashAgg { group_key: [tk.k], aggs: [max(tk.v)] }
+        BatchSortAgg { group_key: [tk.k], aggs: [max(tk.v)] }
           BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
   batch_local_plan: |
     BatchProject { exprs: [max(tk.v)] }
-      BatchHashAgg { group_key: [tk.k], aggs: [max(tk.v)] }
-        BatchExchange { order: [], dist: Single }
+      BatchSortAgg { group_key: [tk.k], aggs: [max(tk.v)] }
+        BatchExchange { order: [tk.k ASC], dist: Single }
           BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
 - id: extreme_on_S_by_k
   before:
