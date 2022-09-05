@@ -141,7 +141,7 @@ impl LogicalTopN {
                 order_cols.insert(*idx);
             }
         });
-        internal_table_catalog_builder.build(vec![], self.base.append_only)
+        internal_table_catalog_builder.build(vec![], self.base.append_only, None)
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
