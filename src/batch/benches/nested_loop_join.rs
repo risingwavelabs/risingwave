@@ -16,9 +16,8 @@ use criterion::{black_box, criterion_group, criterion_main, BatchSize, Benchmark
 use futures::StreamExt;
 use paste::paste;
 use risingwave_batch::bench_join;
-use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
+use risingwave_batch::executor::bench_utils::create_input;
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
-use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
@@ -41,14 +40,8 @@ fn create_nested_loop_join_executor(
     right_chunk_size: usize,
     right_chunk_num: usize,
 ) -> BoxedExecutor {
-    let left_input = gen_data(left_chunk_size, left_chunk_num, &[DataType::Int64]);
-    let right_input = gen_data(right_chunk_size, right_chunk_num, &[DataType::Int64]);
-
-    let mut left_child = Box::new(MockExecutor::new(field_n::<1>(DataType::Int64)));
-    left_input.into_iter().for_each(|c| left_child.add(c));
-
-    let mut right_child = Box::new(MockExecutor::new(field_n::<1>(DataType::Int64)));
-    right_input.into_iter().for_each(|c| right_child.add(c));
+    let left_input = create_input(&[DataType::Int64], left_chunk_size, left_chunk_num);
+    let right_input = create_input(&[DataType::Int64], right_chunk_size, right_chunk_num);
 
     // Expression: $1 % 2 == $2 % 3
     let join_expr = {
@@ -139,8 +132,8 @@ fn create_nested_loop_join_executor(
         build_from_prost(&join_expr).unwrap(),
         join_type,
         output_indices,
-        left_child,
-        right_child,
+        left_input,
+        right_input,
         "NestedLoopJoinExecutor".into(),
     ))
 }

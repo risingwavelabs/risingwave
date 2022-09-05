@@ -14,9 +14,8 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
-use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
+use risingwave_batch::executor::bench_utils::create_input;
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
-use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
@@ -32,10 +31,7 @@ use tokio::runtime::Runtime;
 static GLOBAL: Jemalloc = Jemalloc;
 
 fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor {
-    let input_data = gen_data(chunk_size, chunk_num, &[DataType::Int64]);
-
-    let mut mock_executor = MockExecutor::new(field_n::<1>(DataType::Int64));
-    input_data.into_iter().for_each(|c| mock_executor.add(c));
+    let input = create_input(&[DataType::Int64], chunk_size, chunk_num);
 
     // Expression: $1 % 2 == 0
     let expr = {
@@ -97,7 +93,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
 
     Box::new(FilterExecutor::new(
         build_from_prost(&expr).unwrap(),
-        Box::new(mock_executor),
+        input,
         "FilterBenchmark".to_string(),
     ))
 }
@@ -112,7 +108,7 @@ async fn execute_filter_executor(executor: BoxedExecutor) {
 fn bench_filter(c: &mut Criterion) {
     const TOTAL_SIZE: usize = 1024 * 1024usize;
     let rt = Runtime::new().unwrap();
-    for chunk_size in &[32usize, 128, 512, 1024, 2048, 4096] {
+    for chunk_size in &[32, 128, 512, 1024, 2048, 4096] {
         c.bench_with_input(
             BenchmarkId::new("FilterExecutor", chunk_size),
             chunk_size,

@@ -1,3 +1,9 @@
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
+
+use super::test_utils::{gen_data, MockExecutor};
+use super::BoxedExecutor;
+
 #[macro_export]
 macro_rules! bench_join {
     // TODO: change the type of $join.
@@ -49,4 +55,22 @@ macro_rules! bench_join {
             }
         }
     };
+}
+
+pub fn create_input(
+    input_types: &[DataType],
+    chunk_size: usize,
+    chunk_num: usize,
+) -> BoxedExecutor {
+    let mut input = MockExecutor::new(Schema {
+        fields: input_types
+            .iter()
+            .map(Clone::clone)
+            .map(Field::unnamed)
+            .collect(),
+    });
+    for c in gen_data(chunk_size, chunk_num, input_types) {
+        input.add(c);
+    }
+    Box::new(input)
 }

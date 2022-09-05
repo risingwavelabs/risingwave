@@ -15,8 +15,8 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
-use risingwave_batch::executor::{BoxedExecutor, Executor, HashAggExecutor};
+use risingwave_batch::executor::bench_utils::create_input;
+use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash;
 use risingwave_common::types::DataType;
@@ -55,7 +55,6 @@ fn create_agg_call(
 }
 
 fn create_hash_agg_executor(
-    input_types: &[DataType],
     group_key_columns: Vec<usize>,
     agg_kind: AggKind,
     arg_columns: Vec<usize>,
@@ -63,18 +62,12 @@ fn create_hash_agg_executor(
     chunk_size: usize,
     chunk_num: usize,
 ) -> BoxedExecutor {
-    let input_data = gen_data(chunk_size, chunk_num, input_types);
-
-    let mut child = MockExecutor::new(Schema {
-        fields: input_types
-            .iter()
-            .map(Clone::clone)
-            .map(Field::unnamed)
-            .collect(),
-    });
-    input_data.into_iter().for_each(|c| child.add(c));
-
-    let input_schema = child.schema();
+    let input = create_input(
+        &[DataType::Int32, DataType::Int64, DataType::Varchar],
+        chunk_size,
+        chunk_num,
+    );
+    let input_schema = input.schema();
 
     let agg_calls = vec![create_agg_call(
         input_schema,
@@ -107,7 +100,7 @@ fn create_hash_agg_executor(
         group_key_columns,
         group_key_types,
         schema,
-        Box::new(child),
+        input,
         "HashAggExecutor".to_string(),
     ))
 }
@@ -122,8 +115,6 @@ async fn execute_hash_agg_executor(executor: BoxedExecutor) {
 fn bench_hash_agg(c: &mut Criterion) {
     const SIZE: usize = 1024 * 1024;
     let rt = Runtime::new().unwrap();
-
-    const INPUT_TYPES: &[DataType] = &[DataType::Int32, DataType::Int64, DataType::Varchar];
 
     let bench_variants = [
         // (group by, agg, args, return type)
@@ -150,7 +141,6 @@ fn bench_hash_agg(c: &mut Criterion) {
                     b.to_async(&rt).iter_batched(
                         || {
                             create_hash_agg_executor(
-                                INPUT_TYPES,
                                 group_key_columns.clone(),
                                 agg_kind,
                                 arg_columns.clone(),
