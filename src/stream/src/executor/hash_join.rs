@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, Row, RowRef, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::{HashKey, JoinHashKey};
+use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -455,12 +455,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .map(|&idx| original_schema[idx].clone())
             .collect();
 
-        let null_matched: Arc<FixedBitSet> = {
+        let null_matched: FixedBitSet = {
             let mut null_matched = FixedBitSet::with_capacity(null_safe.len());
             for (idx, col_null_matched) in null_safe.into_iter().enumerate() {
                 null_matched.set(idx, col_null_matched);
             }
-            null_matched.into()
+            null_matched
         };
         Self {
             ctx: ctx.clone(),
@@ -633,17 +633,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     /// the data the hash table and match the coming
     /// data chunk with the executor state
     async fn hash_eq_match<'a>(
-        join_hash_key: &JoinHashKey<K>,
+        key: &K,
         ht: &mut JoinHashMap<K, S>,
     ) -> StreamExecutorResult<Option<HashValueType>> {
-        if !join_hash_key
-            .key()
-            .null_bitmap()
-            .is_subset(join_hash_key.null_matched())
-        {
+        if !key.null_bitmap().is_subset(ht.null_matched()) {
             Ok(None)
         } else {
-            ht.remove_state(join_hash_key).await.map(Some)
+            ht.remove_state(key).await.map(Some)
         }
     }
 
@@ -718,11 +714,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             Ok(cond_match)
         };
 
-        let keys = JoinHashKey::build(
-            &side_update.key_indices,
-            chunk.data_chunk(),
-            side_match.ht.null_matched().clone(),
-        )?;
+        let keys = K::build(&side_update.key_indices, chunk.data_chunk())?;
         for ((op, row), key) in chunk.rows().zip_eq(keys.iter()) {
             let value = row.to_owned_row();
             let pk = row.row_by_indices(&side_update.pk_indices);

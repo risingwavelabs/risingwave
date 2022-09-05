@@ -26,7 +26,7 @@ use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
 use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::hash::{HashKey, JoinHashKey, PrecomputedBuildHasher};
+use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -155,12 +155,8 @@ type PkType = Row;
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = JoinEntryState;
 
-type JoinHashMapInner<K> = EvictableHashMap<
-    JoinHashKey<K>,
-    HashValueType,
-    PrecomputedBuildHasher,
-    SharedStatsAlloc<Global>,
->;
+type JoinHashMapInner<K> =
+    EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
@@ -211,7 +207,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Data types of all columns
     col_data_types: Vec<DataType>,
     /// Null safe bitmap for each join pair
-    null_matched: Arc<FixedBitSet>,
+    null_matched: FixedBitSet,
     /// Indices of the primary keys
     pk_indices: Vec<usize>,
     /// Current epoch
@@ -230,7 +226,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
         data_types: Vec<DataType>,
-        null_matched: Arc<FixedBitSet>,
+        null_matched: FixedBitSet,
         state_table: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
@@ -313,17 +309,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
     /// WARNING: This will NOT remove anything from remote storage.
-    pub async fn remove_state<'a>(
-        &mut self,
-        join_hash_key: &JoinHashKey<K>,
-    ) -> StreamExecutorResult<HashValueType> {
-        let state = self.inner.pop(join_hash_key);
+    pub async fn remove_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
+        let state = self.inner.pop(key);
         self.metrics.total_lookup_count += 1;
         Ok(match state {
             Some(state) => state,
             None => {
                 self.metrics.lookup_miss_count += 1;
-                self.fetch_cached_state(join_hash_key.key()).await?
+                self.fetch_cached_state(key).await?
             }
         })
     }
@@ -357,13 +350,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a key
-    pub fn insert(
-        &mut self,
-        join_hash_key: &JoinHashKey<K>,
-        pk: Row,
-        value: JoinRow,
-    ) -> StreamExecutorResult<()> {
-        if let Some(entry) = self.inner.get_mut(join_hash_key) {
+    pub fn insert(&mut self, key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
+        if let Some(entry) = self.inner.get_mut(key) {
             entry.insert(pk, value.encode()?);
         }
 
@@ -373,13 +361,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a key
-    pub fn delete(
-        &mut self,
-        join_hash_key: &JoinHashKey<K>,
-        pk: Row,
-        value: JoinRow,
-    ) -> StreamExecutorResult<()> {
-        if let Some(entry) = self.inner.get_mut(join_hash_key) {
+    pub fn delete(&mut self, key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
+        if let Some(entry) = self.inner.get_mut(key) {
             entry.remove(pk);
         }
 
@@ -389,8 +372,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a [`JoinEntryState`]
-    pub fn insert_state(&mut self, join_hash_key: &JoinHashKey<K>, state: JoinEntryState) {
-        self.inner.put(join_hash_key.clone(), state);
+    pub fn insert_state(&mut self, key: &K, state: JoinEntryState) {
+        self.inner.put(key.clone(), state);
     }
 
     pub fn inc_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
@@ -428,7 +411,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .sum()
     }
 
-    pub fn null_matched(&self) -> &Arc<FixedBitSet> {
+    pub fn null_matched(&self) -> &FixedBitSet {
         &self.null_matched
     }
 }
