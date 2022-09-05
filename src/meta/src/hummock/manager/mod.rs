@@ -1486,7 +1486,7 @@ where
         assignment_ref.get(&task_id).cloned()
     }
 
-    pub fn compaction_group_manager_ref_for_test(&self) -> CompactionGroupManagerRef<S> {
+    pub fn compaction_group_manager(&self) -> CompactionGroupManagerRef<S> {
         self.compaction_group_manager.clone()
     }
 

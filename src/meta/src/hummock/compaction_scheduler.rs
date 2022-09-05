@@ -98,6 +98,8 @@ where
         self.hummock_manager
             .set_compaction_scheduler(request_channel.clone());
         tracing::info!("Start compaction scheduler.");
+        let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(60));
+        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         'compaction_trigger: loop {
             let compaction_group: CompactionGroupId = tokio::select! {
                 compaction_group = request_rx.recv() => {
@@ -107,6 +109,13 @@ where
                             break 'compaction_trigger;
                         }
                     }
+                },
+                _ = min_trigger_interval.tick() => {
+                    // Periodically trigger compaction for all compaction groups.
+                    for cg in self.hummock_manager.compaction_group_manager().compaction_groups().await {
+                        request_channel.try_send(cg.group_id());
+                    }
+                    continue 'compaction_trigger;
                 },
                 // Shutdown compactor
                 _ = &mut shutdown_rx => {
