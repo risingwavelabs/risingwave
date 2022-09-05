@@ -4998,6 +4998,7 @@ dependencies = [
  "either",
  "enum-as-inner",
  "farmhash",
+ "fixedbitset",
  "futures",
  "futures-async-stream",
  "hyper",

@@ -16,13 +16,14 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
+use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, Row, RowRef, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::HashKey;
+use risingwave_common::hash::{HashKey, JoinHashKey};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -384,6 +385,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         input_r: BoxedExecutor,
         params_l: JoinParams,
         params_r: JoinParams,
+        null_safe: Vec<bool>,
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
         executor_id: u64,
@@ -452,6 +454,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .iter()
             .map(|&idx| original_schema[idx].clone())
             .collect();
+
+        let null_matched: Arc<FixedBitSet> = {
+            let mut null_matched = FixedBitSet::with_capacity(null_safe.len());
+            for (idx, col_null_matched) in null_safe.into_iter().enumerate() {
+                null_matched.set(idx, col_null_matched);
+            }
+            null_matched.into()
+        };
         Self {
             ctx: ctx.clone(),
             input_l: Some(input_l),
@@ -464,6 +474,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_l.clone(),
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
+                    null_matched.clone(),
                     state_table_l,
                     metrics.clone(),
                     ctx.id,
@@ -480,6 +491,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_r.clone(),
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
+                    null_matched,
                     state_table_r,
                     metrics.clone(),
                     ctx.id,
@@ -624,10 +636,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     /// the data the hash table and match the coming
     /// data chunk with the executor state
     async fn hash_eq_match<'a>(
-        key: &K,
+        key: &JoinHashKey<K>,
         ht: &mut JoinHashMap<K, S>,
     ) -> StreamExecutorResult<Option<HashValueType>> {
-        if key.has_null() {
+        if !key.key().null_bitmap().is_subset(key.null_matched()) {
             Ok(None)
         } else {
             ht.remove_state(key).await
@@ -706,7 +718,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             Ok(cond_match)
         };
 
-        let keys = K::build(&side_update.key_indices, &data_chunk)?;
+        let keys = JoinHashKey::build(
+            &side_update.key_indices,
+            &data_chunk,
+            side_match.ht.null_matched().clone(),
+        )?;
         for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
             let key = &keys[idx];
             let value = row.to_owned_row();
@@ -915,6 +931,7 @@ mod tests {
             Box::new(source_r),
             params_l,
             params_r,
+            vec![false],
             vec![1],
             (0..schema_len).into_iter().collect_vec(),
             1,
@@ -969,6 +986,7 @@ mod tests {
             Box::new(source_r),
             params_l,
             params_r,
+            vec![false],
             vec![1],
             (0..schema_len).into_iter().collect_vec(),
             1,

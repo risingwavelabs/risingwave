@@ -17,6 +17,7 @@ use std::default::Default;
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
+use std::sync::Arc;
 
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
@@ -161,16 +162,17 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
 /// | (1, null) | (1, null) | true |
 /// | (null, 1) | (null, 1) | false |
 /// | (null, null) | (null, null) | false |
-pub struct JoinHashKey<'a, K> {
+#[derive(Clone)]
+pub struct JoinHashKey<K> {
     key: K,
-    null_matched: &'a FixedBitSet,
+    null_matched: Arc<FixedBitSet>,
 }
 
-impl<'a, K: HashKey> JoinHashKey<'a, K> {
+impl<K: HashKey> JoinHashKey<K> {
     pub fn build(
         column_idxes: &[usize],
         data_chunk: &DataChunk,
-        null_matched: &'a FixedBitSet,
+        null_matched: Arc<FixedBitSet>,
     ) -> ArrayResult<Vec<Self>> {
         let hash_codes = data_chunk.get_hash_values(column_idxes, CRC32FastBuilder)?;
         Ok(Self::build_from_hash_code(
@@ -185,7 +187,7 @@ impl<'a, K: HashKey> JoinHashKey<'a, K> {
         column_idxes: &[usize],
         data_chunk: &DataChunk,
         hash_codes: Vec<HashCode>,
-        null_matched: &'a FixedBitSet,
+        null_matched: Arc<FixedBitSet>,
     ) -> Vec<Self> {
         let mut serializers: Vec<K::S> = hash_codes.into_iter().map(K::S::from_hash_code).collect();
 
@@ -200,21 +202,29 @@ impl<'a, K: HashKey> JoinHashKey<'a, K> {
             .into_iter()
             .map(|ser| Self {
                 key: ser.into_hash_key(),
-                null_matched,
+                null_matched: null_matched.clone(),
             })
             .collect()
     }
-}
 
-impl<'a, K: HashKey> PartialEq for JoinHashKey<'a, K> {
-    fn eq(&self, other: &Self) -> bool {
-        self.key == other.key && self.key.null_bitmap().is_subset(self.null_matched)
+    pub fn key(&self) -> &K {
+        &self.key
+    }
+
+    pub fn null_matched(&self) -> &Arc<FixedBitSet> {
+        &self.null_matched
     }
 }
 
-impl<'a, K: HashKey> Eq for JoinHashKey<'a, K> {}
+impl<K: HashKey> PartialEq for JoinHashKey<K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key && self.key.null_bitmap().is_subset(&self.null_matched)
+    }
+}
 
-impl<'a, K: HashKey> Hash for JoinHashKey<'a, K> {
+impl<K: HashKey> Eq for JoinHashKey<K> {}
+
+impl<K: HashKey> Hash for JoinHashKey<K> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.key.hash(state)
     }
