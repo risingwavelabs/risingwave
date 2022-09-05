@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Cte, Expr, OrderByExpr, Query, Value, With};
+use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
 
 use crate::binder::{Binder, BoundSetExpr};
 use crate::expr::{CorrelatedId, Depth, ExprImpl};
@@ -109,13 +109,46 @@ impl Binder {
     }
 
     /// Bind a [`Query`] using the current [`BindContext`](super::BindContext).
-    pub(super) fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
-        let limit = query.get_limit_value();
-        let offset = query.get_offset_value();
-        if let Some(with) = query.with {
+    pub(super) fn bind_query_inner(
+        &mut self,
+        Query {
+            with,
+            body,
+            order_by,
+            limit,
+            offset,
+            fetch,
+        }: Query,
+    ) -> Result<BoundQuery> {
+        let limit = match (limit, fetch) {
+            (None, None) => None,
+            (
+                None,
+                Some(Fetch {
+                    with_ties,
+                    quantity,
+                }),
+            ) => {
+                if with_ties {
+                    return Err(ErrorCode::NotImplemented(
+                        "WITH TIES is not supported".to_string(),
+                        None.into(),
+                    )
+                    .into());
+                }
+                match quantity {
+                    Some(v) => Some(parse_usize(v)?),
+                    None => Some(1),
+                }
+            }
+            (Some(limit), None) => Some(parse_usize(limit)?),
+            (Some(_), Some(_)) => unreachable!(), // parse error
+        };
+        let offset = offset.map(parse_usize).transpose()?;
+        if let Some(with) = with {
             self.bind_with(with)?;
         }
-        let body = self.bind_set_expr(query.body)?;
+        let body = self.bind_set_expr(body)?;
         let mut name_to_index = HashMap::new();
         body.schema()
             .fields()
@@ -132,8 +165,7 @@ impl Binder {
             });
         let mut extra_order_exprs = vec![];
         let visible_output_num = body.schema().len();
-        let order = query
-            .order_by
+        let order = order_by
             .into_iter()
             .map(|order_by_expr| {
                 self.bind_order_by_expr_in_query(
@@ -222,4 +254,9 @@ impl Binder {
             Ok(())
         }
     }
+}
+
+fn parse_usize(s: String) -> Result<usize> {
+    s.parse::<usize>()
+        .map_err(|e| ErrorCode::InvalidInputSyntax(e.to_string()).into())
 }

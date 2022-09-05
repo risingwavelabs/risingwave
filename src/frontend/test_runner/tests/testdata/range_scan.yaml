@@ -67,8 +67,7 @@
     SELECT * FROM orders_count_by_user WHERE user_id IS NULL
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: IsNull(orders_count_by_user.user_id) }
-        BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+      BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id IS NULL], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
@@ -296,3 +295,44 @@
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: ((orders_count_by_user.user_id > 1:Int32) OR (orders_count_by_user.user_id < 10:Int32)) }
         BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1 or user_id is null
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(1) OR orders_count_by_user.user_id IS NULL], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1 and user_id is null
+  batch_plan: |
+    BatchValues { rows: [] }
+- before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1 or (user_id is null and date = 1111)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(1) OR orders_count_by_user.user_id IS NULL, orders_count_by_user.date = Int32(1111)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1 or (user_id = 2 and date is null)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(1) OR orders_count_by_user.user_id = Int64(2), orders_count_by_user.date IS NULL], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1 or (user_id is null and date is null)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(1) OR orders_count_by_user.user_id IS NULL, orders_count_by_user.date IS NULL], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id is null or (user_id is null and date is null)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id IS NULL], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }

@@ -14,14 +14,18 @@
  * limitations under the License.
  *
  */
-import React from 'react';
 
-export default function Home() {
-  return (
-    <>
-      <div >
-        Welcome
-      </div>
-    </>
-  );
+class Api {
+  async get(url: string) {
+    try {
+      const res = await fetch(url)
+      const data = await res.json()
+      return data
+    } catch (e) {
+      console.error(e)
+      throw Error("Failed to fetch " + url)
+    }
+  }
 }
+
+export default new Api()

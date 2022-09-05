@@ -109,7 +109,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [max(ak1.v)] }
-        BatchHashAgg { group_key: [ak1.k1], aggs: [max(ak1.v)] }
+        BatchSortAgg { group_key: [ak1.k1], aggs: [max(ak1.v)] }
           BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
   stream_plan: |
     StreamMaterialize { columns: [max_v, ak1.k1(hidden)], pk_columns: [ak1.k1] }
@@ -126,8 +126,8 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [max(ak1k2.v)] }
-        BatchHashAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v)] }
-          BatchExchange { order: [], dist: HashShard(ak1k2.k1) }
+        BatchSortAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v)] }
+          BatchExchange { order: [ak1k2.k1 ASC], dist: HashShard(ak1k2.k1) }
             BatchScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [max_v, ak1k2.k1(hidden)], pk_columns: [ak1k2.k1] }
@@ -145,8 +145,8 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [max(ak1k2.v)] }
-        BatchHashAgg { group_key: [ak1k2.k2], aggs: [max(ak1k2.v)] }
-          BatchExchange { order: [], dist: HashShard(ak1k2.k2) }
+        BatchSortAgg { group_key: [ak1k2.k2], aggs: [max(ak1k2.v)] }
+          BatchExchange { order: [ak1k2.k2 ASC], dist: HashShard(ak1k2.k2) }
             BatchScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [max_v, ak1k2.k2(hidden)], pk_columns: [ak1k2.k2] }
@@ -164,7 +164,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [sum(ak1k2.v)] }
-        BatchHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v)] }
+        BatchSortAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v)] }
           BatchScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
   stream_plan: |
     StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], pk_columns: [ak1k2.k1, ak1k2.k2] }

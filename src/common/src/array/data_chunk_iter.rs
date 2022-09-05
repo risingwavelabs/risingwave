@@ -20,6 +20,7 @@ use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
+use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, ToOwnedDatum};
 use crate::util::value_encoding;
@@ -300,6 +301,13 @@ impl Row {
     /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
     pub fn by_indices(&self, indices: &[usize]) -> Row {
         Row(indices.iter().map(|&idx| self.0[idx].clone()).collect_vec())
+    }
+}
+
+impl EstimateSize for Row {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
+        self.0.capacity() * std::mem::size_of::<Datum>()
     }
 }
 
