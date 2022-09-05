@@ -18,7 +18,7 @@ risedev:
 
     - use: meta-node
       enable-dashboard-v2: false
-      unsafe-disable-recovery: true
+      unsafe-disable-recovery: false
     - use: compute-node
     - use: frontend
 

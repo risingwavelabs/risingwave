@@ -245,53 +245,60 @@ impl<S: StateStore> SourceExecutor<S> {
             .stack_trace("source_recv_first_barrier")
             .await
             .unwrap();
-        let epoch = barrier.epoch.prev;
+        let epoch = barrier.epoch.curr;
+
+        println!("init barrier {:?}", barrier);
 
         if let Some(mutation) = barrier.mutation.as_ref() {
-            if let Mutation::Add { splits, .. } = mutation.as_ref() {
-                if let Some(splits) = splits.get(&self.ctx.id) {
-                    self.stream_source_splits = splits.clone();
-                    for split_impl in &mut self.stream_source_splits {
-                        if let Some(recover_state) = self
-                            .split_state_store
-                            .try_recover_from_state_store(split_impl.id(), epoch)
-                            .await?
-                        {
-                            *split_impl = recover_state;
-                        }
-                    }
-
-                    // save source_id -> [split_id] to state store
-                    self.split_state_store
-                        .save_split_assignment(splits, epoch)
-                        .await?;
-                }
-            }
-        } else {
-            self.stream_source_splits =
-                match self.split_state_store.load_split_assignment(epoch).await? {
-                    None => vec![],
-                    Some(assignments) => {
-                        let mut mock_state = Vec::with_capacity(assignments.len());
-                        for split_id in assignments {
-                            let split_id = Arc::new(split_id);
+            match mutation.as_ref() {
+                Mutation::Add { splits, .. } => {
+                    if let Some(vec_split_impl) = splits.get(&self.ctx.id) {
+                        self.stream_source_splits = vec_split_impl.clone();
+                        for split_impl in &mut self.stream_source_splits {
                             if let Some(recover_state) = self
                                 .split_state_store
-                                .try_recover_from_state_store(split_id.clone(), epoch)
+                                .try_recover_from_state_store(split_impl.id(), epoch)
                                 .await?
                             {
-                                mock_state.push(recover_state);
-                            } else {
-                                tracing::warn!(
+                                *split_impl = recover_state;
+                            }
+                        }
+                        // save source_id -> [split_id] to state store
+                        self.split_state_store
+                            .save_split_assignment(&self.stream_source_splits, epoch)
+                            .await?;
+                    } else {
+                        self.stream_source_splits =
+                            match self.split_state_store.load_split_assignment(epoch).await? {
+                                None => vec![],
+                                Some(assignments) => {
+                                    let mut recover_states = Vec::with_capacity(assignments.len());
+                                    for split_id in assignments {
+                                        let split_id = Arc::new(split_id);
+                                        if let Some(recover_state) = self
+                                            .split_state_store
+                                            .try_recover_from_state_store(split_id.clone(), epoch)
+                                            .await?
+                                        {
+                                            recover_states.push(recover_state);
+                                        } else {
+                                            tracing::warn!(
                                     "load no split info for source_id {}, split_id: {}, skipping",
                                     self.source_id,
                                     split_id
                                 );
+                                        }
+                                    }
+                                    recover_states
+                                }
                             }
-                        }
-                        mock_state
                     }
-                };
+                }
+                Mutation::Update { .. } => {
+                    todo!()
+                }
+                _ => unreachable!(),
+            }
         }
 
         let boot_state = self.stream_source_splits.clone();

@@ -24,7 +24,6 @@ use risingwave_storage::{Keyspace, StateStore};
 use serde_json::json;
 use tracing::error;
 
-use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
 const ASSIGN_SPLIT_KEY: &str = "AssignSplit";
@@ -150,8 +149,7 @@ impl<S: StateStore> SourceStateHandler<S> {
                     retention_seconds: None,
                 },
             )
-            .await
-            .map_err(StreamExecutorError::from)?
+            .await?
         {
             None => {
                 tracing::info!(

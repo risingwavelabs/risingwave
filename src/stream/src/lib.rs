@@ -49,7 +49,6 @@
 
 #[macro_use]
 extern crate tracing;
-extern crate core;
 
 mod common;
 pub mod executor;
