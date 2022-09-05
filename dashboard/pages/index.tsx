@@ -16,32 +16,40 @@
  */
 
 import { Flex, HStack, Image, Text, VStack } from "@chakra-ui/react"
+import Head from "next/head"
+import { Fragment } from "react"
 import { NAVBAR_WIDTH } from "../components/Layout"
+import Title from "../components/Title"
 
 export default function Home() {
   return (
-    <Flex
-      w={`calc(100vw - ${NAVBAR_WIDTH})`}
-      alignItems="center"
-      justifyContent="center"
-      position="fixed"
-      top={0}
-      bottom={0}
-    >
-      <VStack spacing={3}>
-        <HStack spacing={2}>
-          <Flex flexDirection="column" width="md" alignItems="end">
-            <Image boxSize="sm" src="/risingwave.svg" />
-          </Flex>
-          <VStack alignItems="start" width="md">
-            <Text fontSize="xl">Welcome to</Text>
-            <Text fontSize="2xl">
-              <b>RisingWave</b> Dashboard
-            </Text>
-          </VStack>
-        </HStack>
-        <Text>Click the sidebar to continue.</Text>
-      </VStack>
-    </Flex>
+    <Fragment>
+      <Head>
+        <title>RisingWave Dashbaord</title>
+      </Head>
+      <Flex
+        w={`calc(100vw - ${NAVBAR_WIDTH})`}
+        alignItems="center"
+        justifyContent="center"
+        position="fixed"
+        top={0}
+        bottom={0}
+      >
+        <VStack spacing={3}>
+          <HStack spacing={2}>
+            <Flex flexDirection="column" width="md" alignItems="end">
+              <Image boxSize="sm" src="/risingwave.svg" alt="RisingWave Logo" />
+            </Flex>
+            <VStack alignItems="start" width="md">
+              <Text fontSize="2xl">Welcome to</Text>
+              <Text fontSize="3xl">
+                <b>RisingWave</b> Dashboard
+              </Text>
+            </VStack>
+          </HStack>
+          <Title>Click the sidebar to continue.</Title>
+        </VStack>
+      </Flex>
+    </Fragment>
   )
 }

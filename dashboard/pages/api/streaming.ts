@@ -16,33 +16,33 @@
  */
 import sortBy from "lodash/sortBy"
 import { Source, Table } from "../../proto/gen/catalog"
-import { ActorLocation } from "../../proto/gen/meta"
-import { StreamActor } from "../../proto/gen/stream_plan"
+import { ActorLocation, TableFragments } from "../../proto/gen/meta"
 import api from "./api"
 
 export async function getActors(): Promise<ActorLocation[]> {
   return (await api.get("/api/actors")).map(ActorLocation.fromJSON)
 }
 
-export async function getFragments(): Promise<[number, StreamActor]> {
-  let fragmentList = (await api.get("/api/fragments")).map(
-    ([tableId, tableActor]: [any, any]) => [
-      tableId as number,
-      StreamActor.fromJSON(tableActor),
-    ]
+export async function getFragments(): Promise<TableFragments[]> {
+  let fragmentList: TableFragments[] = (await api.get("/api/fragments2")).map(
+    TableFragments.fromJSON
   )
-  fragmentList = sortBy(fragmentList, "id")
+  fragmentList = sortBy(fragmentList, (x) => x.tableId)
   return fragmentList
 }
 
 export async function getMaterializedViews(): Promise<Table[]> {
-  let mvList = (await api.get("/api/materialized_views")).map(Table.fromJSON)
-  mvList = sortBy(mvList, "id")
+  let mvList: Table[] = (await api.get("/api/materialized_views")).map(
+    Table.fromJSON
+  )
+  mvList = sortBy(mvList, (x) => x.id)
   return mvList
 }
 
 export async function getDataSources(): Promise<Source[]> {
-  let sourceList = (await api.get("/api/sources")).map(Source.fromJSON)
-  sourceList = sortBy(sourceList, "id")
+  let sourceList: Source[] = (await api.get("/api/sources")).map(
+    Source.fromJSON
+  )
+  sourceList = sortBy(sourceList, (x) => x.id)
   return sourceList
 }

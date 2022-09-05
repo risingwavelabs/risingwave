@@ -25,22 +25,56 @@ import {
   useToast,
   VStack,
 } from "@chakra-ui/react"
-import { useEffect, useState } from "react"
+import { Dag, dagStratify } from "d3-dag"
+import Head from "next/head"
+import { useRouter } from "next/router"
+import { Fragment, useCallback, useEffect, useState } from "react"
+import DependencyGraph from "../components/DepdencyGraph"
 import Title from "../components/Title"
-import { Table } from "../proto/gen/catalog"
-import { ActorLocation } from "../proto/gen/meta"
-import { getActors, getMaterializedViews } from "./api/streaming"
+import { TableFragments } from "../proto/gen/meta"
+import { getFragments, getMaterializedViews } from "./api/streaming"
 
-export default function Streaming() {
+function buildFragmentDependencyAsEdges(fragments: TableFragments): Dag {
+  const edges = []
+  const actorToFragmentMapping = new Map<number, number>()
+  for (const fragmentId in fragments.fragments) {
+    const fragment = fragments.fragments[fragmentId]
+    for (const actor of fragment.actors) {
+      actorToFragmentMapping.set(actor.actorId, actor.fragmentId)
+    }
+  }
+  for (const id in fragments.fragments) {
+    const fragment = fragments.fragments[id]
+    const parentIds = new Set<number>()
+    for (const actor of fragment.actors) {
+      for (const upstreamActorId of actor.upstreamActorId) {
+        const upstreamFragmentId = actorToFragmentMapping.get(upstreamActorId)
+        if (upstreamFragmentId) {
+          parentIds.add(upstreamFragmentId)
+        }
+      }
+    }
+    edges.push({
+      id: fragment.fragmentId.toString(),
+      name: `Fragment ${fragment.fragmentId}`,
+      parentIds: Array.from(parentIds).map((x) => x.toString()),
+    })
+  }
+  return dagStratify()(edges)
+}
+
+const SIDEBAR_WIDTH = 200
+
+function useFetch<T>(fetchFn: () => Promise<T>) {
+  const [response, setResponse] = useState<T>()
   const toast = useToast()
-  const [actorProtoList, setActorProtoList] = useState<ActorLocation[]>([])
-  const [mvList, setMvList] = useState<Table[]>([])
 
   useEffect(() => {
-    async function doFetch() {
+    const fetchData = async () => {
       try {
-        setActorProtoList(await getActors())
-        setMvList(await getMaterializedViews())
+        const abortController = new AbortController()
+        const res = await fetchFn()
+        setResponse(res)
       } catch (e: any) {
         toast({
           title: "Error Occurred",
@@ -52,29 +86,81 @@ export default function Streaming() {
         console.error(e)
       }
     }
-    doFetch()
-    return () => {}
-  }, [])
+    fetchData()
+  }, [toast, fetchFn])
 
-  return (
+  return { response }
+}
+
+export default function Streaming() {
+  const { response: mvList } = useFetch(getMaterializedViews)
+  const { response: fragmentList } = useFetch(getFragments)
+
+  const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
+
+  const router = useRouter()
+
+  const fragmentDependencyCallback = useCallback(() => {
+    if (fragmentList) {
+      if (router.query.id) {
+        const mvId = parseInt(router.query.id as string)
+        const fragment = fragmentList.find((x) => x.tableId === mvId)
+        if (fragment) {
+          return buildFragmentDependencyAsEdges(fragment)
+        }
+      }
+    }
+    return undefined
+  }, [fragmentList, router.query.id])
+
+  useEffect(() => {
+    if (mvList) {
+      if (!router.query.id) {
+        if (mvList.length > 0) {
+          router.replace(`?id=${mvList[0].id}`)
+        }
+      }
+    }
+    return () => {}
+  }, [router, router.query.id, mvList])
+
+  const fragmentDependency = fragmentDependencyCallback()
+
+  const retVal = (
     <Flex p={3} height="100vh" flexDirection="column">
       <Title>Streaming Plan</Title>
-      <Flex flexDirection="row" height="100%" flex="1">
-        <VStack width="xs" mr={3} spacing={3} alignItems="flex-start">
+      <Flex flexDirection="row" height="100%" width="full">
+        <VStack
+          mr={3}
+          spacing={3}
+          alignItems="flex-start"
+          width={SIDEBAR_WIDTH}
+        >
           <FormControl>
             <FormLabel>Materialized View</FormLabel>
-            <Select>
-              {mvList
-                .filter((mv) => !mv.name.startsWith("__"))
-                .map((mv) => (
-                  <option value={mv.name} key={mv.name}>
-                    ({mv.id}) {mv.name}
-                  </option>
-                ))}
+            <Select
+              value={router.query.id}
+              onChange={(event) => router.replace(`?id=${event.target.value}`)}
+            >
+              {mvList &&
+                mvList
+                  .filter((mv) => !mv.name.startsWith("__"))
+                  .map((mv) => (
+                    <option value={mv.id} key={mv.name}>
+                      ({mv.id}) {mv.name}
+                    </option>
+                  ))}
             </Select>
           </FormControl>
           <Box>
             <Text fontWeight="semibold">Plan</Text>
+            {fragmentDependency && (
+              <DependencyGraph
+                svgWidth={SIDEBAR_WIDTH}
+                mvDependency={fragmentDependency}
+                selectedId={selectedFragmentId?.toString()}
+              />
+            )}
           </Box>
         </VStack>
         <Box flex={1} height="full" ml={3}>
@@ -82,5 +168,14 @@ export default function Streaming() {
         </Box>
       </Flex>
     </Flex>
+  )
+
+  return (
+    <Fragment>
+      <Head>
+        <title>Streaming Fragments</title>
+      </Head>
+      {retVal}
+    </Fragment>
   )
 }
