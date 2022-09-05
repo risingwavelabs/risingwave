@@ -13,16 +13,19 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::{BTreeMap, BTreeSet};
-use std::ops::RangeBounds;
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::ops::{Deref, RangeBounds};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    add_new_sub_level, summarize_level_deltas, HummockLevelsExt, HummockVersionExt,
+    LevelDeltasSummary,
+};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo};
-use risingwave_pb::hummock::{HummockVersion, Level};
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
@@ -30,17 +33,21 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     KeyIndexSharedBufferBatch, OrderSortedUncommittedData, UncommittedData,
 };
-use crate::hummock::utils::{filter_single_sst, range_overlap};
+use crate::hummock::utils::{check_subset_preserve_order, filter_single_sst, range_overlap};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LocalVersion {
     replicated_batches: BTreeMap<HummockEpoch, KeyIndexSharedBufferBatch>,
     shared_buffer: BTreeMap<HummockEpoch, SharedBuffer>,
-    pinned_version: Arc<PinnedVersion>,
+    pinned_version: PinnedVersion,
+    local_related_version: PinnedVersion,
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
-    pub sync_uncommitted_data: Vec<(Vec<HummockEpoch>, SyncUncommittedData)>,
+    /// We need to save data in reverse order of epoch,
+    /// because we will traverse `sync_uncommitted_data` in the forward direction and return the
+    /// key when we find it
+    pub sync_uncommitted_data: VecDeque<(Vec<HummockEpoch>, SyncUncommittedData)>,
     max_sync_epoch: u64,
 }
 
@@ -100,17 +107,22 @@ impl LocalVersion {
     ) -> Self {
         let mut version_ids_in_use = BTreeSet::new();
         version_ids_in_use.insert(version.id);
+        let local_related_version = version.clone();
+        let pinned_version = PinnedVersion::new(version, unpin_worker_tx);
+        let local_related_version =
+            pinned_version.new_local_related_pin_version(local_related_version);
         Self {
             replicated_batches: BTreeMap::default(),
             shared_buffer: BTreeMap::default(),
-            pinned_version: Arc::new(PinnedVersion::new(version, unpin_worker_tx)),
+            pinned_version,
+            local_related_version,
             version_ids_in_use,
             sync_uncommitted_data: Default::default(),
             max_sync_epoch: 0,
         }
     }
 
-    pub fn pinned_version(&self) -> &Arc<PinnedVersion> {
+    pub fn pinned_version(&self) -> &PinnedVersion {
         &self.pinned_version
     }
 
@@ -161,26 +173,27 @@ impl LocalVersion {
 
     pub fn add_sync_state(
         &mut self,
-        sync_epoch: Vec<HummockEpoch>,
+        sync_epochs: Vec<HummockEpoch>,
         sync_uncommitted_data: SyncUncommittedData,
     ) {
+        assert!(sync_epochs.iter().rev().is_sorted());
         let node = self
             .sync_uncommitted_data
             .iter_mut()
-            .find(|(epoch, _)| epoch == &sync_epoch);
+            .find(|(epochs, _)| epochs == &sync_epochs);
         match &node {
             None => {
                 assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
-                if let Some(last) = self.sync_uncommitted_data.last() {
+                if let Some(front) = self.sync_uncommitted_data.front() {
                     assert!(
-                        last.0.first().lt(&sync_epoch.first()),
-                        "last epoch:{:?} >= sync epoch:{:?}",
-                        last,
-                        sync_epoch
+                        front.0.first().lt(&sync_epochs.last()),
+                        "front epoch:{:?} >= sync epoch:{:?}",
+                        front,
+                        sync_epochs
                     );
                 }
                 self.sync_uncommitted_data
-                    .push((sync_epoch, sync_uncommitted_data));
+                    .push_front((sync_epochs, sync_uncommitted_data));
                 return;
             }
             Some((_, SyncUncommittedData::Syncing(_))) => {
@@ -190,7 +203,7 @@ impl LocalVersion {
                 panic!("sync over, can't modify uncommitted sst state");
             }
         }
-        *node.unwrap() = (sync_epoch, sync_uncommitted_data);
+        *node.unwrap() = (sync_epochs, sync_uncommitted_data);
     }
 
     pub fn iter_shared_buffer(&self) -> impl Iterator<Item = (&HummockEpoch, &SharedBuffer)> {
@@ -214,38 +227,64 @@ impl LocalVersion {
     }
 
     /// Returns epochs cleaned from shared buffer.
-    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) -> Vec<HummockEpoch> {
-        // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
-        let mut cleaned_epoch = vec![];
-        if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
-            for (epochs, _) in &self.sync_uncommitted_data {
-                for epoch in epochs {
-                    if *epoch <= new_pinned_version.max_committed_epoch {
-                        cleaned_epoch.push(*epoch);
-                    }
-                }
-            }
-
+    pub fn set_pinned_version(
+        &mut self,
+        new_pinned_version: HummockVersion,
+        version_deltas: Option<Vec<HummockVersionDelta>>,
+    ) -> Vec<HummockEpoch> {
+        let new_max_committed_epoch = new_pinned_version.max_committed_epoch;
+        if self.pinned_version.max_committed_epoch() < new_max_committed_epoch {
             self.replicated_batches
                 .retain(|epoch, _| *epoch > new_pinned_version.max_committed_epoch);
             assert!(self
                 .shared_buffer
                 .iter()
                 .all(|(epoch, _)| *epoch > new_pinned_version.max_committed_epoch));
-            self.sync_uncommitted_data.retain(|(epoch, _)| {
-                epoch
-                    .last()
-                    .gt(&Some(&new_pinned_version.max_committed_epoch))
-            });
         }
 
         self.version_ids_in_use.insert(new_pinned_version.id);
 
+        let new_pinned_version = self.pinned_version.new_pin_version(new_pinned_version);
+
+        let cleaned_epoch =
+            match version_deltas {
+                Some(version_deltas) => {
+                    let mut new_local_related_version = self.local_related_version.version();
+                    let mut clean_epochs = Vec::new();
+                    for delta in version_deltas {
+                        assert_eq!(new_local_related_version.id, delta.prev_id);
+                        clean_epochs.extend(self.apply_version_delta_local_related(
+                            &mut new_local_related_version,
+                            &delta,
+                        ));
+                    }
+                    assert_eq!(
+                        clean_epochs.len(),
+                        clean_epochs.iter().sorted().dedup().count(),
+                        "some epochs are clean in two version delta: {:?}",
+                        clean_epochs
+                    );
+                    self.local_related_version =
+                        new_pinned_version.new_local_related_pin_version(new_local_related_version);
+                    clean_epochs
+                }
+                None => {
+                    let cleaned_epochs = self
+                        .clear_committed_data(new_max_committed_epoch)
+                        .into_iter()
+                        .flat_map(|(epochs, _)| epochs.into_iter())
+                        .sorted()
+                        .dedup()
+                        .collect_vec();
+                    self.local_related_version = new_pinned_version
+                        .new_local_related_pin_version(new_pinned_version.version());
+                    cleaned_epochs
+                }
+            };
+
         // update pinned version
-        self.pinned_version = Arc::new(PinnedVersion {
-            version: new_pinned_version,
-            unpin_worker_tx: self.pinned_version.unpin_worker_tx.clone(),
-        });
+        self.pinned_version = new_pinned_version;
+
         cleaned_epoch
     }
 
@@ -298,8 +337,8 @@ impl LocalVersion {
                         .sync_uncommitted_data
                         .iter()
                         .filter(|&node| {
-                            node.0.first().le(&Some(&read_epoch))
-                                && node.0.first().ge(&Some(&smallest_uncommitted_epoch))
+                            node.0.last().le(&Some(&read_epoch))
+                                && node.0.last().ge(&Some(&smallest_uncommitted_epoch))
                         })
                         .map(|(_, value)| value.get_overlap_data(key_range, read_epoch))
                         .collect();
@@ -339,28 +378,188 @@ impl LocalVersion {
         self.replicated_batches.clear();
         cleaned_epoch
     }
-}
 
-#[derive(Debug)]
-pub struct PinnedVersion {
-    version: HummockVersion,
-    unpin_worker_tx: UnboundedSender<HummockVersionId>,
-}
+    pub fn clear_committed_data(
+        &mut self,
+        max_committed_epoch: HummockEpoch,
+    ) -> Vec<(Vec<HummockEpoch>, Vec<LocalSstableInfo>)> {
+        match self.sync_uncommitted_data.iter().position(|(epoch, data)| {
+            let min_epoch = *epoch.last().expect("epoch list should not be empty");
+            let max_epoch = *epoch.first().expect("epoch list should not be empty");
+            assert!(
+                max_epoch <= max_committed_epoch || min_epoch > max_committed_epoch,
+                "new_max_committed_epoch {} lays within max_epoch {} and min_epoch {} of data {:?}",
+                max_committed_epoch,
+                max_epoch,
+                min_epoch,
+                data,
+            );
+            max_epoch <= max_committed_epoch
+        }) {
+            Some(index) => self
+                .sync_uncommitted_data
+                .drain(index..)
+                .map(|(epoch, data)| {
+                    (
+                        epoch,
+                        match data {
+                            SyncUncommittedData::Syncing(_) => {
+                                unreachable!(
+                                    "an epoch is synced while some data of it is not synced yet"
+                                )
+                            }
+                            SyncUncommittedData::Synced(ssts) => ssts,
+                        },
+                    )
+                })
+                .collect_vec(),
+            None => vec![],
+        }
+    }
 
-impl Drop for PinnedVersion {
-    fn drop(&mut self) {
-        self.unpin_worker_tx.send(self.version.id).ok();
+    fn apply_version_delta_local_related(
+        &mut self,
+        version: &mut HummockVersion,
+        version_delta: &HummockVersionDelta,
+    ) -> Vec<HummockEpoch> {
+        assert!(version.max_committed_epoch <= version_delta.max_committed_epoch);
+        let (clean_epochs, mut compaction_group_synced_ssts) =
+            if version.max_committed_epoch < version_delta.max_committed_epoch {
+                let (clean_epochs, synced_ssts) = self
+                    .clear_committed_data(version_delta.max_committed_epoch)
+                    .into_iter()
+                    .fold(
+                        (Vec::new(), Vec::new()),
+                        |(mut clean_epochs, mut synced_ssts), (epochs, ssts)| {
+                            clean_epochs.extend(epochs);
+                            synced_ssts.extend(ssts);
+                            (clean_epochs, synced_ssts)
+                        },
+                    );
+                let clean_epochs = clean_epochs.into_iter().sorted().dedup().collect();
+                let mut compaction_group_ssts: HashMap<_, Vec<_>> = HashMap::new();
+                for (compaction_group_id, sst) in synced_ssts {
+                    compaction_group_ssts
+                        .entry(compaction_group_id)
+                        .or_default()
+                        .push(sst);
+                }
+                (clean_epochs, Some(compaction_group_ssts))
+            } else {
+                (Vec::new(), None)
+            };
+
+        for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
+            let levels = version
+                .levels
+                .get_mut(compaction_group_id)
+                .expect("compaction group id should exist");
+
+            let summary = summarize_level_deltas(level_deltas);
+
+            match &mut compaction_group_synced_ssts {
+                Some(compaction_group_ssts) => {
+                    // The version delta is generated from a `commit_epoch` call.
+                    let LevelDeltasSummary {
+                        delete_sst_levels,
+                        delete_sst_ids_set,
+                        insert_sst_level_id,
+                        insert_sub_level_id,
+                        insert_table_infos,
+                    } = summary;
+                    assert!(
+                        delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty(),
+                        "there should not be any sst deleted in a commit_epoch call. Epoch: {}",
+                        version_delta.max_committed_epoch
+                    );
+                    assert_eq!(
+                        0, insert_sst_level_id,
+                        "an commit_epoch call should always insert sst into L0, but not insert to {}",
+                        insert_sst_level_id
+                    );
+                    if let Some(ssts) = compaction_group_ssts.remove(compaction_group_id) {
+                        assert!(
+                            check_subset_preserve_order(
+                                ssts.iter().map(|info| info.id),
+                                insert_table_infos.iter().map(|info| info.id)
+                            ),
+                            "order of local synced ssts is not preserved in the global inserted sst. local ssts: {:?}, global: {:?}",
+                            ssts.iter().map(|info| info.id).collect_vec(),
+                            insert_table_infos.iter().map(|info| info.id).collect_vec()
+                        );
+                        add_new_sub_level(levels.l0.as_mut().unwrap(), insert_sub_level_id, ssts);
+                    }
+                }
+                None => {
+                    // The version delta is generated from a compaction
+                    levels.apply_compact_ssts(summary, true);
+                }
+            }
+        }
+        version.id = version_delta.id;
+        version.max_committed_epoch = version_delta.max_committed_epoch;
+        version.max_current_epoch = version_delta.max_current_epoch;
+        version.safe_epoch = version_delta.safe_epoch;
+
+        clean_epochs
     }
 }
 
+struct PinnedVersionGuard {
+    version_id: HummockVersionId,
+    unpin_worker_tx: UnboundedSender<HummockVersionId>,
+}
+
+impl Drop for PinnedVersionGuard {
+    fn drop(&mut self) {
+        self.unpin_worker_tx.send(self.version_id).ok();
+    }
+}
+
+#[derive(Clone)]
+pub struct PinnedVersion {
+    version: Arc<HummockVersion>,
+    guard: Arc<PinnedVersionGuard>,
+}
+
 impl PinnedVersion {
-    fn new(
-        version: HummockVersion,
-        unpin_worker_tx: UnboundedSender<HummockVersionId>,
-    ) -> PinnedVersion {
+    fn new(version: HummockVersion, unpin_worker_tx: UnboundedSender<HummockVersionId>) -> Self {
+        let version_id = version.id;
         PinnedVersion {
-            version,
-            unpin_worker_tx,
+            version: Arc::new(version),
+            guard: Arc::new(PinnedVersionGuard {
+                version_id,
+                unpin_worker_tx,
+            }),
+        }
+    }
+
+    fn new_pin_version(&self, version: HummockVersion) -> Self {
+        assert!(
+            version.id > self.version.id,
+            "pinning a older version {}. Current is {}",
+            version.id,
+            self.version.id
+        );
+        let version_id = version.id;
+        PinnedVersion {
+            version: Arc::new(version),
+            guard: Arc::new(PinnedVersionGuard {
+                version_id,
+                unpin_worker_tx: self.guard.unpin_worker_tx.clone(),
+            }),
+        }
+    }
+
+    fn new_local_related_pin_version(&self, version: HummockVersion) -> Self {
+        assert_eq!(
+            self.version.id, version.id,
+            "local related version {} to pin not equal to current version id {}",
+            version.id, self.version.id
+        );
+        PinnedVersion {
+            version: Arc::new(version),
+            guard: self.guard.clone(),
         }
     }
 
@@ -397,7 +596,7 @@ impl PinnedVersion {
 
     /// ret value can't be used as `HummockVersion`. it must be modified with delta
     pub fn version(&self) -> HummockVersion {
-        self.version.clone()
+        self.version.deref().clone()
     }
 }
 
@@ -406,6 +605,6 @@ pub struct ReadVersion {
     pub replicated_batches: Vec<Vec<SharedBufferBatch>>,
     // The shared buffers are sorted by epoch descendingly
     pub shared_buffer_data: Vec<OrderSortedUncommittedData>,
-    pub pinned_version: Arc<PinnedVersion>,
+    pub pinned_version: PinnedVersion,
     pub sync_uncommitted_data: Vec<OrderSortedUncommittedData>,
 }

@@ -17,4 +17,6 @@
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 
+extern crate core;
+
 pub mod object;

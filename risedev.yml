@@ -378,6 +378,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
     - use: zookeeper
@@ -392,6 +393,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
     - use: redis

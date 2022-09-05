@@ -102,9 +102,9 @@ impl LogicalTopN {
             .finish()
     }
 
-    pub fn infer_internal_table_catalog(&self) -> TableCatalog {
+    // `group_key` only be set when inferring group topN's state table catalog.
+    pub fn infer_internal_table_catalog(&self, group_key: Option<&[usize]>) -> TableCatalog {
         let schema = &self.base.schema;
-        let dist_keys = self.base.dist.dist_column_indices().to_vec();
         let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
@@ -115,10 +115,24 @@ impl LogicalTopN {
         });
         let mut order_cols = HashSet::new();
 
+        if let Some(group_key) = group_key {
+            // Here we want the state table to store the states in the order we want, fisrtly in
+            // ascending order by the columns specified by the group key, then by the columns
+            // specified by `order`. If we do that, when the later group topN operator
+            // does a prefix scannimg with the group key, we can fetch the data in the
+            // desired order.
+            group_key.iter().for_each(|idx| {
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
+                order_cols.insert(*idx);
+            });
+        }
+
         field_order.iter().for_each(|field_order| {
-            internal_table_catalog_builder
-                .add_order_column(field_order.index, OrderType::from(field_order.direct));
-            order_cols.insert(field_order.index);
+            if !order_cols.contains(&field_order.index) {
+                internal_table_catalog_builder
+                    .add_order_column(field_order.index, OrderType::from(field_order.direct));
+                order_cols.insert(field_order.index);
+            }
         });
 
         pk_indices.iter().for_each(|idx| {
@@ -127,7 +141,7 @@ impl LogicalTopN {
                 order_cols.insert(*idx);
             }
         });
-        internal_table_catalog_builder.build(dist_keys, self.base.append_only)
+        internal_table_catalog_builder.build(vec![], self.base.append_only, None)
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
@@ -148,7 +162,7 @@ impl LogicalTopN {
         match input_dist {
             Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
             Distribution::Broadcast => Err(RwError::from(ErrorCode::NotImplemented(
-                "top n not support Broadcast".to_string(),
+                "topN does not support Broadcast".to_string(),
                 None.into(),
             ))),
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
@@ -183,11 +197,13 @@ impl LogicalTopN {
         let vnode_col_idx = exprs.len() - 1;
         let project = StreamProject::new(LogicalProject::new(stream_input, exprs.clone()));
         let local_top_n = StreamGroupTopN::new(
-            project.into(),
+            LogicalTopN::new(
+                project.into(),
+                self.limit + self.offset,
+                0,
+                self.order.clone(),
+            ),
             vec![vnode_col_idx],
-            self.limit + self.offset,
-            0,
-            self.order.clone(),
         );
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;

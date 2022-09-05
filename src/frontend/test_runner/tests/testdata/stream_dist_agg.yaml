@@ -297,7 +297,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [max(tk.v)] }
-        BatchHashAgg { group_key: [tk.k], aggs: [max(tk.v)] }
+        BatchSortAgg { group_key: [tk.k], aggs: [max(tk.v)] }
           BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
   stream_plan: |
     StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
@@ -356,7 +356,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [sum(tk.v)] }
-        BatchHashAgg { group_key: [tk.k], aggs: [sum(tk.v)] }
+        BatchSortAgg { group_key: [tk.k], aggs: [sum(tk.v)] }
           BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
   stream_plan: |
     StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
@@ -415,7 +415,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [count(tk.v)] }
-        BatchHashAgg { group_key: [tk.k], aggs: [count(tk.v)] }
+        BatchSortAgg { group_key: [tk.k], aggs: [count(tk.v)] }
           BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
   stream_plan: |
     StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
@@ -476,7 +476,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
-        BatchHashAgg { group_key: [tk.k], aggs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
+        BatchSortAgg { group_key: [tk.k], aggs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
           BatchProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o] }
             BatchScan { table: tk, columns: [tk.k, tk.o, tk.s], distribution: UpstreamHashShard(tk.k) }
   stream_plan: |

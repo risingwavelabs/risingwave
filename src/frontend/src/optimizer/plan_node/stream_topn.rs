@@ -94,7 +94,7 @@ impl ToStreamProst for StreamTopN {
                 offset: self.logical.offset() as u64,
                 table: Some(
                     self.logical
-                        .infer_internal_table_catalog()
+                        .infer_internal_table_catalog(None)
                         .to_internal_table_prost(),
                 ),
             };

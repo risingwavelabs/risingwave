@@ -304,7 +304,7 @@ fn infer_internal_and_degree_table_catalog(
     }
 
     (
-        internal_table_catalog_builder.build(internal_table_dist_keys, append_only),
-        degree_table_catalog_builder.build(degree_table_dist_keys, append_only),
+        internal_table_catalog_builder.build(internal_table_dist_keys, append_only, None),
+        degree_table_catalog_builder.build(degree_table_dist_keys, append_only, None),
     )
 }

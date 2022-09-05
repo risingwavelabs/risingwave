@@ -378,7 +378,7 @@ impl ApplyJoinRule {
             .iter()
             .enumerate()
             .map(|(i, field)| {
-                Self::create_equal_expr(
+                Self::create_null_safe_equal_expr(
                     i,
                     field.data_type.clone(),
                     i + join_left_len + apply_left_len,
@@ -551,15 +551,15 @@ impl ApplyJoinRule {
         }
     }
 
-    fn create_equal_expr(
+    fn create_null_safe_equal_expr(
         left: usize,
         left_data_type: DataType,
         right: usize,
         right_data_type: DataType,
     ) -> ExprImpl {
-        // TODO: use is not distinct from instead of equal
+        // use null-safe equal
         ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
-            ExprType::Equal,
+            ExprType::IsNotDistinctFrom,
             vec![
                 ExprImpl::InputRef(Box::new(InputRef::new(left, left_data_type))),
                 ExprImpl::InputRef(Box::new(InputRef::new(right, right_data_type))),

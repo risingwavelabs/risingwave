@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_pb::hummock::{CompactTask, LevelType};
@@ -25,8 +26,9 @@ use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
-use crate::hummock::utils::can_concat;
-use crate::hummock::{CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions};
+use crate::hummock::{
+    CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions, DEFAULT_ENTRY_SIZE,
+};
 
 #[derive(Clone)]
 pub struct CompactorRunner {
@@ -39,6 +41,12 @@ pub struct CompactorRunner {
 impl CompactorRunner {
     pub fn new(split_index: usize, context: &CompactorContext, task: CompactTask) -> Self {
         let max_target_file_size = context.context.options.sstable_size_mb as usize * (1 << 20);
+        let total_file_size = task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table| table.file_size)
+            .sum::<u64>();
         let mut options: SstableBuilderOptions = context.context.options.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
@@ -46,6 +54,16 @@ impl CompactorRunner {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
+        if options.compression_algorithm == CompressionAlgorithm::None {
+            options.capacity = std::cmp::min(options.capacity, total_file_size as usize);
+        }
+        options.estimate_bloom_filter_capacity = context
+            .context
+            .filter_key_extractor_manager
+            .estimate_bloom_filter_size(options.capacity);
+        if options.estimate_bloom_filter_capacity == 0 {
+            options.estimate_bloom_filter_capacity = options.capacity / DEFAULT_ENTRY_SIZE;
+        }
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
             right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
@@ -76,7 +94,7 @@ impl CompactorRunner {
         let iter = self.build_sst_iter()?;
         let ssts = self
             .compactor
-            .compact_key_range_impl(iter, compaction_filter, filter_key_extractor)
+            .compact_key_range(iter, compaction_filter, filter_key_extractor)
             .await?;
         Ok((self.split_index, ssts))
     }
