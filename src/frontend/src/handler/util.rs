@@ -107,7 +107,7 @@ pub fn handle_with_properties(
         .into_iter()
         .map(|x| match x.value {
             Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
-            Value::Number(n, _) => Ok((x.name.real_value(), n)),
+            Value::Number(n) => Ok((x.name.real_value(), n)),
             Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
             _ => Err(RwError::from(ProtocolError(format!(
                 "{} with properties only support single quoted string value",

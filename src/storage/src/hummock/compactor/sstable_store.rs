@@ -44,7 +44,7 @@ impl SstableBlocks {
         let idx = self.offset_index;
         let next_offset = self.offset + self.block_size[idx - self.start_index].0;
         let capacity = self.block_size[idx - self.start_index].1;
-        let block = match Block::decode(&self.block_data[self.offset..next_offset], capacity) {
+        let block = match Block::decode(self.block_data.slice(self.offset..next_offset), capacity) {
             Ok(block) => Box::new(block),
             Err(_) => return None,
         };
