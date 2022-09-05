@@ -30,7 +30,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match typ {
             T::Int64 => Expr::Value(Value::Number(
                 self.gen_int(i64::MIN as isize, i64::MAX as isize),
-                false,
             )),
             T::Int32 => Expr::TypedString {
                 data_type: DataType::Int(None),
@@ -45,7 +44,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     .map(|_| self.rng.sample(Alphanumeric) as char)
                     .collect(),
             )),
-            T::Decimal => Expr::Value(Value::Number(self.gen_float(), false)),
+            T::Decimal => Expr::Value(Value::Number(self.gen_float())),
             T::Float64 => Expr::TypedString {
                 data_type: DataType::Float(None),
                 value: self.gen_float(),
