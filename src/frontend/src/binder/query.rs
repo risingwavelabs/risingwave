@@ -20,7 +20,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Cte, Expr, OrderByExpr, Query, Value, With};
 
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::{CorrelatedId, ExprImpl};
+use crate::expr::{CorrelatedId, Depth, ExprImpl};
 use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
@@ -85,11 +85,12 @@ impl BoundQuery {
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
         self.body
-            .collect_correlated_indices_by_depth_and_assign_id(correlated_id)
+            .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
     }
 }
 
@@ -135,7 +136,7 @@ impl Binder {
             .order_by
             .into_iter()
             .map(|order_by_expr| {
-                self.bind_order_by_expr(
+                self.bind_order_by_expr_in_query(
                     order_by_expr,
                     &name_to_index,
                     &mut extra_order_exprs,
@@ -152,18 +153,39 @@ impl Binder {
         })
     }
 
-    fn bind_order_by_expr(
+    /// Bind an `ORDER BY` expression in a [`Query`], which can be either:
+    /// * an output-column name
+    /// * index of an output column
+    /// * an arbitrary expression
+    ///
+    /// # Arguments
+    ///
+    /// * `name_to_index` - visible output column name -> index. Ambiguous (duplicate) output names
+    ///   are marked with `usize::MAX`.
+    /// * `visible_output_num` - the number of all visible output columns, including duplicates.
+    fn bind_order_by_expr_in_query(
         &mut self,
-        order_by_expr: OrderByExpr,
+        OrderByExpr {
+            expr,
+            asc,
+            nulls_first,
+        }: OrderByExpr,
         name_to_index: &HashMap<String, usize>,
         extra_order_exprs: &mut Vec<ExprImpl>,
         visible_output_num: usize,
     ) -> Result<FieldOrder> {
-        let direct = match order_by_expr.asc {
+        if nulls_first.is_some() {
+            return Err(ErrorCode::NotImplemented(
+                "NULLS FIRST or NULLS LAST".to_string(),
+                4743.into(),
+            )
+            .into());
+        }
+        let direct = match asc {
             None | Some(true) => Direction::Asc,
             Some(false) => Direction::Desc,
         };
-        let index = match order_by_expr.expr {
+        let index = match expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => match *index != usize::MAX {
                 true => *index,
                 false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.value)).into()),

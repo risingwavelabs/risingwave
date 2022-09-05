@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::ops::Bound::{self, *};
-use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -26,7 +25,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BackwardSstableIterator, HummockResult};
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::StoreLocalStatistic;
 
 /// [`BackwardUserIterator`] can be used by user directly.
 pub struct BackwardUserIterator {
@@ -59,7 +58,10 @@ pub struct BackwardUserIterator {
     min_epoch: HummockEpoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Option<Arc<PinnedVersion>>,
+    _version: Option<PinnedVersion>,
+
+    /// Store scan statistic
+    stats: StoreLocalStatistic,
 }
 
 impl BackwardUserIterator {
@@ -82,7 +84,7 @@ impl BackwardUserIterator {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> Self {
         Self {
             iterator,
@@ -94,6 +96,7 @@ impl BackwardUserIterator {
             last_delete: true,
             read_epoch,
             min_epoch,
+            stats: StoreLocalStatistic::default(),
             _version: version,
         }
     }
@@ -167,6 +170,7 @@ impl BackwardUserIterator {
                         // We remark that we don't check `out_of_range` here as the other two cases
                         // covered all situation. 2(a)
                         self.just_met_new_key = true;
+                        self.stats.processed_key_count += 1;
                         return Ok(());
                     } else {
                         // 2(b)
@@ -178,6 +182,8 @@ impl BackwardUserIterator {
                             break;
                         }
                     }
+                } else {
+                    self.stats.skip_key_count += 1;
                 }
                 // TODO: Since the real world workload may follow power law or 20/80 rule, or
                 // whatever name. We may directly seek to the next key if we have
@@ -272,6 +278,7 @@ impl BackwardUserIterator {
     }
 
     pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
         self.iterator.collect_local_statistic(stats);
     }
 }
@@ -284,11 +291,10 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator {
         iterator_iter: impl IntoIterator<
             Item = UserIteratorPayloadType<Backward, BackwardSstableIterator>,
         >,
-        _stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> DirectedUserIterator {
         let iterator = UnorderedMergeIteratorInner::new(iterator_iter);
         DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(

@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery, TableFunction,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
+    TableFunction, WindowFunction,
 };
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
@@ -29,6 +30,7 @@ pub trait ExprRewriter {
             ExprImpl::Subquery(inner) => self.rewrite_subquery(*inner),
             ExprImpl::CorrelatedInputRef(inner) => self.rewrite_correlated_input_ref(*inner),
             ExprImpl::TableFunction(inner) => self.rewrite_table_function(*inner),
+            ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -77,6 +79,27 @@ pub trait ExprRewriter {
             args,
             return_type,
             function_type,
+        }
+        .into()
+    }
+    fn rewrite_window_function(&mut self, window_func: WindowFunction) -> ExprImpl {
+        let WindowFunction {
+            args,
+            return_type,
+            function_type,
+            partition_by,
+            order_by,
+        } = window_func;
+        let args = args
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        WindowFunction {
+            args,
+            return_type,
+            function_type,
+            partition_by,
+            order_by,
         }
         .into()
     }

@@ -15,15 +15,20 @@
 use std::collections::HashMap;
 
 use itertools::{iproduct, Itertools as _};
+use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{cast_ok_base, CastContext, DataTypeName};
+use super::{align_types, cast_ok_base, CastContext, DataTypeName};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
-pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
+pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<DataType> {
+    if let Some(res) = infer_type_for_special(func_type, inputs).transpose() {
+        return res;
+    }
+
     let actuals = inputs
         .iter()
         .map(|e| match e.is_unknown() {
@@ -32,7 +37,8 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
         })
         .collect_vec();
     let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &actuals)?;
-    let inputs = inputs
+    let inputs_owned = std::mem::take(inputs);
+    *inputs = inputs_owned
         .into_iter()
         .zip_eq(&sig.inputs_type)
         .map(|(expr, t)| {
@@ -42,8 +48,107 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
             Ok(expr)
         })
         .try_collect()?;
-    let ret_type = sig.ret_type.into();
-    Ok((inputs, ret_type))
+    Ok(sig.ret_type.into())
+}
+
+macro_rules! ensure_arity {
+    ($func:literal, $lower:literal <= | $inputs:ident | <= $upper:literal) => {
+        if !($lower <= $inputs.len() && $inputs.len() <= $upper) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes {} to {} arguments ({} given)",
+                $func,
+                $lower,
+                $upper,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+    ($func:literal, $lower:literal <= | $inputs:ident |) => {
+        if !($lower <= $inputs.len()) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes at least {} arguments ({} given)",
+                $func,
+                $lower,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+}
+
+/// Special exprs that cannot be handled by [`infer_type_name`] and [`FuncSigMap`] are handled here.
+/// These include variadic functions, list and struct type, as well as non-implicit cast.
+///
+/// We should aim for enhancing the general inferring framework and reduce the special cases here.
+fn infer_type_for_special(
+    func_type: ExprType,
+    inputs: &mut Vec<ExprImpl>,
+) -> Result<Option<DataType>> {
+    match func_type {
+        ExprType::Case => {
+            let len = inputs.len();
+            align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
+                // `Case` organize `inputs` as (cond, res) pairs with a possible `else` res at
+                // the end. So we align exprs at odd indices as well as the last one when length
+                // is odd.
+                match i.is_odd() || len.is_odd() && i == len - 1 {
+                    true => Some(e),
+                    false => None,
+                }
+            }))
+            .map(Some)
+        }
+        ExprType::In => {
+            align_types(inputs.iter_mut())?;
+            Ok(Some(DataType::Boolean))
+        }
+        ExprType::Coalesce => {
+            ensure_arity!("coalesce", 1 <= | inputs |);
+            align_types(inputs.iter_mut()).map(Some)
+        }
+        ExprType::ConcatWs => {
+            ensure_arity!("concat_ws", 2 <= | inputs |);
+            let inputs_owned = std::mem::take(inputs);
+            *inputs = inputs_owned
+                .into_iter()
+                .enumerate()
+                .map(|(i, input)| match i {
+                    // 0-th arg must be string
+                    0 => input.cast_implicit(DataType::Varchar),
+                    // subsequent can be any type, using the output format
+                    _ => input.cast_output(),
+                })
+                .try_collect()?;
+            Ok(Some(DataType::Varchar))
+        }
+        ExprType::ConcatOp => {
+            let inputs_owned = std::mem::take(inputs);
+            *inputs = inputs_owned
+                .into_iter()
+                .map(|input| input.cast_explicit(DataType::Varchar))
+                .try_collect()?;
+            Ok(Some(DataType::Varchar))
+        }
+        ExprType::RegexpMatch => {
+            ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
+            if inputs.len() == 3 {
+                return Err(ErrorCode::NotImplemented(
+                    "flag in regexp_match".to_string(),
+                    4545.into(),
+                )
+                .into());
+            }
+            Ok(Some(DataType::List {
+                datatype: Box::new(DataType::Varchar),
+            }))
+        }
+        ExprType::Vnode => {
+            ensure_arity!("vnode", 1 <= | inputs |);
+            Ok(Some(DataType::Int16))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// From all available functions in `sig_map`, find and return the best matching `FuncSign` for the
@@ -466,6 +571,7 @@ fn build_type_derive_map() -> FuncSigMap {
         E::GreaterThan,
         E::GreaterThanOrEqual,
         E::IsDistinctFrom,
+        E::IsNotDistinctFrom,
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);
@@ -614,7 +720,7 @@ mod tests {
     use super::*;
 
     fn infer_type_v0(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
-        let inputs = inputs_type
+        let mut inputs = inputs_type
             .into_iter()
             .map(|t| {
                 crate::expr::Literal::new(
@@ -633,8 +739,7 @@ mod tests {
                 .into()
             })
             .collect();
-        let (_, ret) = infer_type(func_type, inputs)?;
-        Ok(ret)
+        infer_type(func_type, &mut inputs)
     }
 
     fn test_simple_infer_type(

@@ -122,7 +122,9 @@
     /* should complain about nested agg call */
     create table t(v1 int, v2 int);
     select avg(sum(v1 + v2)) from t group by v1 + v2;
-  planner_error: 'Invalid input syntax: Aggregation calls should not be nested'
+  planner_error: |-
+    Feature is not yet implemented: aggregate function inside aggregation calls
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     /* test logical_agg with complex select expression */
     create table t(v1 int, v2 int);
@@ -184,6 +186,29 @@
       BatchHashAgg { group_key: [t.v1], aggs: [count] }
         BatchExchange { order: [], dist: HashShard(t.v1) }
           BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+- sql: |
+    /* Use BatchSortAgg, when input provides order */
+    create table t(v1 int, v2 int);
+    create materialized view mv as select * from t order by v1 desc;
+    select max(v2) from mv group by v1;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [max(mv.v2)] }
+        BatchSortAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
+          BatchExchange { order: [mv.v1 DESC], dist: HashShard(mv.v1) }
+            BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
+- sql: |
+    /* Use BatchSortAgg, when output requires order */
+    create table t(v1 int, v2 int);
+    select max(v2) from t group by v1 order by v1 desc;
+  batch_plan: |
+    BatchProject { exprs: [max(t.v2)] }
+      BatchExchange { order: [t.v1 DESC], dist: Single }
+        BatchSort { order: [t.v1 DESC] }
+          BatchProject { exprs: [max(t.v2), t.v1] }
+            BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+              BatchExchange { order: [], dist: HashShard(t.v1) }
+                BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
     create table t (v1 real);
     select count(*) from t;
@@ -507,13 +532,16 @@
     /* filter clause + subquery */
     create table t(a int, b int);
     select avg(a) FILTER (WHERE 0 < (select max(a) from t)) AS avga from t;
-  binder_error: 'Invalid input syntax: subquery in filter clause is not supported'
+  binder_error: |-
+    Feature is not yet implemented: subquery in filter clause
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     /* aggregation in filter clause */
     create table t(a int, b int);
     select avg(a) FILTER (WHERE a < avg(b)) AS avga from t;
-  binder_error: 'Invalid input syntax: aggregation function in filter clause is not
-    supported'
+  binder_error: |-
+    Feature is not yet implemented: aggregation function in filter clause
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     /* filter clause + non-boolean function */
     create table t(a int, b int);
@@ -624,7 +652,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [count] }
-        BatchHashAgg { group_key: [i.x], aggs: [count] }
+        BatchSortAgg { group_key: [i.x], aggs: [count] }
           BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |
     StreamMaterialize { columns: [cnt, i.x(hidden)], pk_columns: [i.x] }
@@ -634,26 +662,147 @@
 - sql: |
     /* distinct aggregates only have one distinct argument doesn't need expand */
     create table t(x int, y int);
-    select count(x), min(distinct y), max(distinct y) from t;
+    select count(x), sum(distinct y), sum(distinct y) from t;
   optimized_logical_plan: |
-    LogicalProject { exprs: [Coalesce(sum(count(t.x)), 0:Int64), min(t.y), max(t.y)] }
-      LogicalAgg { aggs: [sum(count(t.x)), min(t.y), max(t.y)] }
+    LogicalProject { exprs: [Coalesce(sum(count(t.x)), 0:Int64), sum(t.y), sum(t.y)] }
+      LogicalAgg { aggs: [sum(count(t.x)), sum(t.y), sum(t.y)] }
         LogicalAgg { group_key: [t.y, t.y], aggs: [count(t.x)] }
           LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
-    select count(y), min(distinct y) from t;
+    select count(y), sum(distinct y) from t;
   optimized_logical_plan: |
-    LogicalProject { exprs: [Coalesce(sum(count(t.y)), 0:Int64), min(t.y)] }
-      LogicalAgg { aggs: [sum(count(t.y)), min(t.y)] }
+    LogicalProject { exprs: [Coalesce(sum(count(t.y)), 0:Int64), sum(t.y)] }
+      LogicalAgg { aggs: [sum(count(t.y)), sum(t.y)] }
         LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
           LogicalScan { table: t, columns: [t.y] }
 - sql: |
     create table t(x int, y int);
-    select count(distinct x), min(distinct y) from t;
+    select count(distinct x), sum(distinct y) from t;
   optimized_logical_plan: |
-    LogicalAgg { aggs: [count(t.x) filter((flag = 0:Int64)), min(t.y) filter((flag = 1:Int64))] }
+    LogicalAgg { aggs: [count(t.x) filter((flag = 0:Int64)), sum(t.y) filter((flag = 1:Int64))] }
       LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
         LogicalProject { exprs: [t.x, t.y, flag] }
           LogicalExpand { column_subsets: [[t.x], [t.y]] }
             LogicalScan { table: t, columns: [t.x, t.y] }
+- sql: |
+    create table t(x varchar, y int);
+    select string_agg(x, ','), count(distinct y) from t;
+  planner_error: |-
+    Feature is not yet implemented: Non-distinct string_agg can't appear with distinct aggregates
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* remove unnecessary distinct for max and min */
+    create table t(x int, y int);
+    select max(distinct x), min(distinct y) from t;
+  optimized_logical_plan: |
+    LogicalAgg { aggs: [max(t.x), min(t.y)] }
+      LogicalScan { table: t, columns: [t.x, t.y] }
+- sql: |
+    /* agg filter: subquery */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1) filter (where (select true)) from a;
+  binder_error: |-
+    Feature is not yet implemented: subquery in filter clause
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg filter: agg */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    select 1 from a having exists(
+      select count(b1) filter (where min(a1) < 3) from b
+    );
+  binder_error: |-
+    Feature is not yet implemented: aggregation function in filter clause
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg filter: table function */
+    /* This case is NOT valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1) filter (where unnest(array[1]) < 1) from a;
+  binder_error: |-
+    Feature is not yet implemented: table function in filter clause
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg order by: subquery */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select string_agg('', '' order by (select true)) from a;
+  planner_error: |-
+    Feature is not yet implemented: subquery inside aggregation calls order by
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg order by: agg */
+    create table a (a1 int, a2 int);
+    create table sb (b1 varchar, b2 varchar);
+    select 1 from a having exists(
+      select string_agg(b1, '' order by min(a1)) from sb -- valid in PostgreSQL
+      -- select string_agg('', '' order by min(a1)) from sb -- NOT valid in PostgreSQL
+    );
+  planner_error: |-
+    Feature is not yet implemented: aggregate function inside aggregation calls order by
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg order by: table function */
+    /* This case is NOT valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select string_agg('', '' order by unnest(array[1])) from a;
+  planner_error: |-
+    Feature is not yet implemented: table function inside aggregation calls order by
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg input: subquery */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1 + (select 1)) from a;
+  planner_error: |-
+    Feature is not yet implemented: subquery inside aggregation calls
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg input: agg */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    select 1 from a having exists(
+      select count(b1 + min(a1)) from b
+    );
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
+- sql: |
+    /* agg input: table function */
+    /* This case is NOT valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1 + unnest(array[1])) from a;
+  planner_error: |-
+    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
+- sql: |
+    /* group by: subquery */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1) from a group by (select true);
+  planner_error: |-
+    Feature is not yet implemented: subquery inside GROUP BY
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* group by: agg */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    select 1 from a having exists(
+      select count(b1) from b group by min(a1)
+    );
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
+- sql: |
+    /* group by: table function */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1) from a group by unnest(array[1]);
+  planner_error: |-
+    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814

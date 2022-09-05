@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp;
 use std::sync::Arc;
 
-use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
+use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
 use fail::fail_point;
@@ -39,6 +40,8 @@ const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
 const S3_PART_SIZE: usize = 16 * 1024 * 1024;
 // TODO: we should do some benchmark to determine the proper part size for MinIO
 const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
+/// The number of S3 bucket prefixes
+const S3_NUM_PREFIXES: u32 = 256;
 
 /// S3 multipart upload handle.
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
@@ -259,6 +262,10 @@ impl StreamingUploader for S3StreamingUploader {
         }
         Ok(())
     }
+
+    fn get_memory_usage(&self) -> u64 {
+        (self.part_size + MIN_PART_SIZE) as u64
+    }
 }
 
 fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
@@ -266,6 +273,7 @@ fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
 }
 
 /// Object store with S3 backend
+/// The full path to a file on S3 would be s3://bucket/<data_directory>/prefix/file
 pub struct S3ObjectStore {
     client: Client,
     bucket: String,
@@ -276,6 +284,13 @@ pub struct S3ObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
+    fn get_object_prefix(&self, obj_id: u64) -> String {
+        let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % S3_NUM_PREFIXES;
+        let mut obj_prefix = prefix.to_string();
+        obj_prefix.push('/');
+        obj_prefix
+    }
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
             "s3 upload error"
@@ -392,6 +407,44 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
+    /// Deletes the objects with the given paths permanently from the storage. If an object
+    /// specified in the request is not found, it will be considered as successfully deleted.
+    ///
+    /// Uses AWS' DeleteObjects API. See [AWS Docs](https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html) for more details.
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
+        // AWS restricts the number of objects per request to 1000.
+        const MAX_LEN: usize = 1000;
+
+        // If needed, split given set into subsets of size with no more than `MAX_LEN` objects.
+        for start_idx /* inclusive */ in (0..paths.len()).step_by(MAX_LEN) {
+            let end_idx /* exclusive */ = cmp::min(paths.len(), start_idx + MAX_LEN);
+            let slice = &paths[start_idx..end_idx];
+
+            // Create identifiers from paths.
+            let mut obj_ids = Vec::with_capacity(slice.len());
+            for path in slice {
+                obj_ids.push(ObjectIdentifier::builder().key(path).build());
+            }
+
+            // Build and submit request to delete objects.
+            let delete_builder = Delete::builder().set_objects(Some(obj_ids));
+            let delete_output = self
+                .client
+                .delete_objects()
+                .bucket(&self.bucket)
+                .delete(delete_builder.build())
+                .send()
+                .await?;
+
+            // Check if there were errors.
+            if let Some(err_list) = delete_output.errors() && !err_list.is_empty() {
+                return Err(ObjectError::internal(format!("DeleteObjects request returned exception for some objects: {:?}", err_list)));
+            }
+        }
+
+        Ok(())
+    }
+
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         let mut ret: Vec<ObjectMetadata> = vec![];
         let mut next_continuation_token = None;
@@ -479,5 +532,39 @@ impl S3ObjectStore {
             part_size: MINIO_PART_SIZE,
             metrics,
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg(not(madsim))]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::object::object_metrics::ObjectStoreMetrics;
+    use crate::object::s3::S3_NUM_PREFIXES;
+    use crate::object::{ObjectStore, S3ObjectStore};
+
+    fn get_hash_of_object(obj_id: u64) -> u32 {
+        let crc_hash = crc32fast::hash(&obj_id.to_be_bytes());
+        crc_hash % S3_NUM_PREFIXES
+    }
+
+    #[tokio::test]
+    async fn test_get_object_prefix() {
+        let store = S3ObjectStore::new(
+            "mybucket".to_string(),
+            Arc::new(ObjectStoreMetrics::unused()),
+        )
+        .await;
+
+        for obj_id in 0..99999 {
+            let hash = get_hash_of_object(obj_id);
+            let prefix = store.get_object_prefix(obj_id);
+            assert_eq!(format!("{}/", hash), prefix);
+        }
+
+        let obj_prefix = String::default();
+        let path = format!("{}/{}{}.data", "hummock_001", obj_prefix, 101);
+        assert_eq!("hummock_001/101.data", path);
     }
 }

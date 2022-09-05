@@ -20,6 +20,8 @@ include ./nexmark/q15.slt.part
 include ./nexmark/q16.slt.part
 include ./nexmark/q17.slt.part
 include ./nexmark/q20.slt.part
+include ./nexmark/q21.slt.part
+include ./nexmark/q22.slt.part
 
 include ./nexmark/drop_views.slt.part
 

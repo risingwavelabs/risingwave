@@ -26,6 +26,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
+use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 
@@ -178,6 +179,9 @@ impl StreamMaterialize {
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
+            // TODO(zehua): replace it with FragmentId::placeholder()
+            fragment_id: FragmentId::MAX - 1,
+            vnode_col_idx: None,
         };
 
         Ok(Self { base, input, table })

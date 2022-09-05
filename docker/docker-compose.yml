@@ -2,7 +2,7 @@
 version: "3"
 services:
   compactor-0:
-    image: "ghcr.io/singularity-data/risingwave:nightly-20220620"
+    image: "ghcr.io/risingwavelabs/risingwave:nightly-20220620"
     command:
       - compactor-node
       - "--host"
@@ -39,7 +39,7 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    image: "ghcr.io/singularity-data/risingwave:nightly-20220620"
+    image: "ghcr.io/risingwavelabs/risingwave:nightly-20220620"
     command:
       - compute-node
       - "--host"
@@ -121,20 +121,23 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    image: "ghcr.io/singularity-data/risingwave:nightly-20220620"
+    image: "ghcr.io/risingwavelabs/risingwave:nightly-20220620"
     command:
       - frontend-node
       - "--host"
       - "0.0.0.0:4566"
       - "--meta-addr"
       - "http://meta-node-0:5690"
+      - "--config-path"
+      - /risingwave.toml
     expose:
       - "4566"
     ports:
       - "4566:4566"
     depends_on:
       - meta-node-0
-    volumes: []
+    volumes:
+      - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
     container_name: frontend-node-0
@@ -173,7 +176,7 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    image: "ghcr.io/singularity-data/risingwave:nightly-20220620"
+    image: "ghcr.io/risingwavelabs/risingwave:nightly-20220620"
     command:
       - meta-node
       - "--listen-addr"

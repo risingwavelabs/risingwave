@@ -18,6 +18,7 @@ use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::SourceManagerRef;
 use risingwave_storage::StateStoreImpl;
 
@@ -68,6 +69,10 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     /// get task level metrics.
     /// None indicates that not collect task metrics.
     fn get_task_metrics(&self) -> Option<BatchTaskMetrics>;
+
+    /// Get compute client pool. This is used in grpc exchange to avoid creating new compute client
+    /// for each grpc call.
+    fn client_pool(&self) -> ComputeClientPoolRef;
 }
 
 /// Batch task context on compute node.
@@ -106,6 +111,10 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn get_task_metrics(&self) -> Option<BatchTaskMetrics> {
         Some(self.task_metrics.clone())
+    }
+
+    fn client_pool(&self) -> ComputeClientPoolRef {
+        self.env.client_pool()
     }
 }
 

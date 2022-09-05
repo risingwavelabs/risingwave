@@ -439,15 +439,14 @@ mod tests {
         let mut epoch: u64 = 1;
         for _ in 0..kv_count {
             epoch += 1;
-            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local = keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: existing_table_id.into(),
             });
-            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest().await.unwrap();
+            local.ingest().await.unwrap();
 
             let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
@@ -566,15 +565,14 @@ mod tests {
             )
             .await;
             epoch += 1;
-            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local = keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: TableId::from(table_id),
             });
-            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest().await.unwrap();
+            local.ingest().await.unwrap();
 
             let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
@@ -729,15 +727,14 @@ mod tests {
         for _ in 0..kv_count {
             epoch += millisec_interval_epoch;
             epoch_set.insert(epoch);
-            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local = keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: TableId::from(existing_table_id),
             });
-            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest().await.unwrap();
+            local.ingest().await.unwrap();
             let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
@@ -895,15 +892,14 @@ mod tests {
         for _ in 0..kv_count {
             epoch += millisec_interval_epoch;
             epoch_set.insert(epoch);
-            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local = keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: keyspace.table_id(),
             });
-            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = [key_prefix, &rand::thread_rng().gen::<[u8; 32]>()].concat();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest().await.unwrap();
+            local.ingest().await.unwrap();
             let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }

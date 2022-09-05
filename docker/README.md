@@ -14,14 +14,14 @@ To ensure you are using the latest version of RisingWave image,
 
 ```
 # Ensure risingwave image is of latest version
-docker pull ghcr.io/singularity-data/risingwave:latest
+docker pull ghcr.io/risingwavelabs/risingwave:latest
 ```
 
 To start a RisingWave playground, run
 
 ```
 # Start playground
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/singularity-data/risingwave:latest playground
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:latest playground
 ```
 
 To start a RisingWave cluster, run

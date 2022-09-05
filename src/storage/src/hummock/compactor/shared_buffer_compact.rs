@@ -233,12 +233,10 @@ impl SharedBufferCompactRunner {
         context: Arc<Context>,
         sst_watermark_epoch: HummockEpoch,
     ) -> Self {
-        let sstable_store = context.sstable_store.clone();
         let options = context.options.as_ref().into();
         let compactor = Compactor::new(
             context,
             options,
-            sstable_store,
             key_range,
             CachePolicy::Fill,
             false,

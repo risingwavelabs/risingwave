@@ -26,7 +26,7 @@ use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
-use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
+use crate::optimizer::property::{Distribution, DistributionDisplay};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
@@ -39,8 +39,12 @@ pub struct BatchSeqScan {
 impl BatchSeqScan {
     fn new_inner(logical: LogicalScan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
         let ctx = logical.base.ctx.clone();
-        // TODO: derive from input
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            dist,
+            logical.get_out_column_index_order(),
+        );
 
         {
             // validate scan_range
@@ -164,7 +168,10 @@ impl fmt::Display for BatchSeqScan {
                     .eq_conds
                     .iter()
                     .zip(order_names.iter())
-                    .map(|(v, name)| format!("{} = {:?}", name, v))
+                    .map(|(v, name)| match v {
+                        Some(v) => format!("{} = {:?}", name, v),
+                        None => format!("{} IS NULL", name),
+                    })
                     .collect_vec();
                 if !is_full_range(&scan_range.range) {
                     let i = scan_range.eq_conds.len();

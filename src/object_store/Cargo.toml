@@ -14,6 +14,7 @@ aws-smithy-http = "0.46"
 aws-smithy-types = "0.46"
 aws-types = { version = "0.46", features = ["hardcoded-credentials"] }
 bytes = { version = "1", features = ["serde"] }
+crc32fast = "1.3.2"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
@@ -28,4 +29,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

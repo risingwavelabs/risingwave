@@ -33,7 +33,7 @@ pub async fn handle_create_database(
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
         if let Some(info) = reader.get_user_by_name(session.user_name()) {
-            if !info.can_create_db && !info.is_supper {
+            if !info.can_create_db && !info.is_super {
                 return Err(PermissionDenied("Do not have the privilege".to_string()).into());
             }
         } else {
