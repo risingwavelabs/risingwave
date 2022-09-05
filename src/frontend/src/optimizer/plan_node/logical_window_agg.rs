@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
@@ -21,7 +22,7 @@ use risingwave_common::types::DataType;
 
 use super::logical_agg::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
-    ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    gen_filter_and_pushdown, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
@@ -265,7 +266,10 @@ impl ColPrunable for LogicalWindowAgg {
 
 impl PredicatePushdown for LogicalWindowAgg {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        LogicalFilter::create(self.clone().into(), predicate)
+        let mut window_col = FixedBitSet::with_capacity(self.schema().len());
+        window_col.insert(self.schema().len() - 1);
+        let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
+        gen_filter_and_pushdown(self, window_pred, other_pred)
     }
 }
 

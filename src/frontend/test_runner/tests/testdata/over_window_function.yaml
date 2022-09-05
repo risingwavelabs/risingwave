@@ -94,17 +94,16 @@
           LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
             LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan: |
-    LogicalFilter { predicate: (t.x > t.y) }
-      LogicalProject { exprs: [t.x, t.y] }
-        LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
-          LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+    LogicalProject { exprs: [t.x, t.y] }
+      LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
+        LogicalScan { table: t, output_columns: [t.x, t.y, t._row_id], required_columns: [x, y, _row_id], predicate: (t.x > t.y) }
   stream_plan: |
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamExchange { dist: HashShard(t._row_id) }
-        StreamFilter { predicate: (t.x > t.y) }
-          StreamProject { exprs: [t.x, t.y, t._row_id] }
-            StreamGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
-              StreamExchange { dist: HashShard(t.y) }
+        StreamProject { exprs: [t.x, t.y, t._row_id] }
+          StreamGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
+            StreamExchange { dist: HashShard(t.y) }
+              StreamFilter { predicate: (t.x > t.y) }
                 StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Group TopN in batch mode

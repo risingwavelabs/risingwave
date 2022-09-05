@@ -374,19 +374,35 @@
       WHERE A.id = B.auction AND B.date_time BETWEEN A.date_time AND A.expires
     )
     WHERE rownum <= 1;
+  logical_plan: |
+    LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time] }
+      LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
+        LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, ROW_NUMBER] }
+          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY auction.id ORDER BY bid.price DESC NULLS FIRST, bid.date_time ASC NULLS LAST) }
+            LogicalFilter { predicate: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
+              LogicalJoin { type: Inner, on: true, output: all }
+                LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction._row_id] }
+                LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time] }
       LogicalTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] }
-        LogicalFilter { predicate: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
-          LogicalJoin { type: Inner, on: true, output: all }
-            LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction._row_id] }
-            LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+        LogicalJoin { type: Inner, on: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires), output: all }
+          LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction._row_id] }
+          LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+  stream_plan: |
+    StreamMaterialize { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, auction._row_id(hidden), bid._row_id(hidden)], pk_columns: [auction._row_id, bid._row_id] }
+      StreamExchange { dist: HashShard(auction._row_id, bid._row_id) }
+        StreamProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, auction._row_id, bid._row_id] }
+          StreamGroupTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] }
+            StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
+              StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+                StreamExchange { dist: HashShard(auction.id) }
+                  StreamTableScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction._row_id], pk: [auction._row_id], distribution: UpstreamHashShard(auction._row_id) }
+                StreamExchange { dist: HashShard(bid.auction) }
+                  StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
   batch_error: |-
     Feature is not yet implemented: Group TopN in batch mode
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
-  stream_error: |-
-    Feature is not yet implemented: stream nested-loop join
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - id: nexmark_q10
   before:
   - create_tables
