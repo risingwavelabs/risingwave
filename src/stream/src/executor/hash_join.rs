@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
+use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -384,6 +385,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         input_r: BoxedExecutor,
         params_l: JoinParams,
         params_r: JoinParams,
+        null_safe: Vec<bool>,
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
         executor_id: u64,
@@ -452,6 +454,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .iter()
             .map(|&idx| original_schema[idx].clone())
             .collect();
+
+        let null_matched: FixedBitSet = {
+            let mut null_matched = FixedBitSet::with_capacity(null_safe.len());
+            for (idx, col_null_matched) in null_safe.into_iter().enumerate() {
+                null_matched.set(idx, col_null_matched);
+            }
+            null_matched
+        };
         Self {
             ctx: ctx.clone(),
             input_l: Some(input_l),
@@ -464,6 +474,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_l.clone(),
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
+                    null_matched.clone(),
                     state_table_l,
                     metrics.clone(),
                     ctx.id,
@@ -480,6 +491,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_r.clone(),
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
+                    null_matched,
                     state_table_r,
                     metrics.clone(),
                     ctx.id,
@@ -624,7 +636,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         key: &K,
         ht: &mut JoinHashMap<K, S>,
     ) -> StreamExecutorResult<Option<HashValueType>> {
-        if key.has_null() {
+        if !key.null_bitmap().is_subset(ht.null_matched()) {
             Ok(None)
         } else {
             ht.remove_state(key).await.map(Some)
@@ -882,6 +894,7 @@ mod tests {
 
     fn create_executor<const T: JoinTypePrimitive>(
         with_condition: bool,
+        null_safe: bool,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
             fields: vec![
@@ -911,6 +924,7 @@ mod tests {
             Box::new(source_r),
             params_l,
             params_r,
+            vec![null_safe],
             vec![1],
             (0..schema_len).into_iter().collect_vec(),
             1,
@@ -965,6 +979,7 @@ mod tests {
             Box::new(source_r),
             params_l,
             params_r,
+            vec![false],
             vec![1],
             (0..schema_len).into_iter().collect_vec(),
             1,
@@ -1002,7 +1017,8 @@ mod tests {
              + 3 10
              + 6 11",
         );
-        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::Inner }>(false);
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::Inner }>(false, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1054,6 +1070,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_streaming_null_safe_hash_inner_join() {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I I
+             + 1 4
+             + 2 5
+             + . 6",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I I
+             + . 8
+             - . 8",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I I
+             + 2 7
+             + 4 8
+             + 6 9",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I  I
+             + . 10
+             + 6 11",
+        );
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::Inner }>(false, true);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I I I
+                + 2 5 2 7"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I I I
+                + . 6 . 10"
+            )
+        );
+    }
+
+    #[tokio::test]
     async fn test_streaming_hash_left_semi_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1089,7 +1181,8 @@ mod tests {
             "  I  I
              - 6 9",
         );
-        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::LeftSemi }>(false);
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::LeftSemi }>(false, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1130,6 +1223,117 @@ mod tests {
             StreamChunk::from_pretty(
                 " I I
                 + 3 6"
+            )
+        );
+
+        // push the 3rd left chunk (tests forward_exactly_once)
+        tx_l.push_chunk(chunk_l3);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                + 6 10"
+            )
+        );
+
+        // push the 3rd right chunk
+        // (tests that no change if there are still matches)
+        tx_r.push_chunk(chunk_r3);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
+
+        // push the 3rd left chunk
+        // (tests that deletion occurs when there are no more matches)
+        tx_r.push_chunk(chunk_r4);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                - 6 10"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_streaming_null_safe_hash_left_semi_join() {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I I
+             + 1 4
+             + 2 5
+             + . 6",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I I
+             + . 8
+             - . 8",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I I
+             + 2 7
+             + 4 8
+             + 6 9",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I  I
+             + . 10
+             + 6 11",
+        );
+        let chunk_l3 = StreamChunk::from_pretty(
+            "  I I
+             + 6 10",
+        );
+        let chunk_r3 = StreamChunk::from_pretty(
+            "  I  I
+             - 6 11",
+        );
+        let chunk_r4 = StreamChunk::from_pretty(
+            "  I  I
+             - 6 9",
+        );
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::LeftSemi }>(false, true);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                + 2 5"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                + . 6"
             )
         );
 
@@ -1436,7 +1640,8 @@ mod tests {
             "  I  I
              - 6 9",
         );
-        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::RightSemi }>(false);
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::RightSemi }>(false, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1548,7 +1753,8 @@ mod tests {
             "  I I
              - 1 3",
         );
-        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::LeftAnti }>(false);
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::LeftAnti }>(false, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1676,7 +1882,8 @@ mod tests {
             "  I I
              - 1 3",
         );
-        let (mut tx_r, mut tx_l, mut hash_join) = create_executor::<{ JoinType::LeftAnti }>(false);
+        let (mut tx_r, mut tx_l, mut hash_join) =
+            create_executor::<{ JoinType::LeftAnti }>(false, false);
 
         // push the init barrier for left and right
         tx_r.push_barrier(1, false);
@@ -1790,7 +1997,8 @@ mod tests {
              + 3 10
              + 6 11",
         );
-        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::Inner }>(false);
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::Inner }>(false, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1886,7 +2094,8 @@ mod tests {
              + 3 10
              + 6 11",
         );
-        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::Inner }>(false);
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::Inner }>(false, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1982,7 +2191,8 @@ mod tests {
              + 3 10
              + 6 11",
         );
-        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::LeftOuter }>(false);
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::LeftOuter }>(false, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2040,6 +2250,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_streaming_null_safe_hash_left_join() {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I I
+             + 1 4
+             + 2 5
+             + . 6",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I I
+             + . 8
+             - . 8",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I I
+             + 2 7
+             + 4 8
+             + 6 9",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I  I
+             + . 10
+             + 6 11",
+        );
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::LeftOuter }>(false, true);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I I I
+                + 1 4 . .
+                + 2 5 . .
+                + . 6 . ."
+            )
+        );
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I I I
+                + . 8 . .
+                - . 8 . ."
+            )
+        );
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I I
+                U- 2 5 . .
+                U+ 2 5 2 7"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I I
+                U- . 6 . .
+                U+ . 6 . 10"
+            )
+        );
+    }
+
+    #[tokio::test]
     async fn test_streaming_hash_right_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -2064,7 +2356,7 @@ mod tests {
              - 5 10",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::RightOuter }>(false);
+            create_executor::<{ JoinType::RightOuter }>(false, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2301,7 +2593,8 @@ mod tests {
              + 5 10
              - 5 10",
         );
-        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::FullOuter }>(false);
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::FullOuter }>(false, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2387,7 +2680,8 @@ mod tests {
              - 5 10
              + 1 2",
         );
-        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::FullOuter }>(true);
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::FullOuter }>(true, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2476,7 +2770,8 @@ mod tests {
              + 3 10
              + 6 11",
         );
-        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::Inner }>(true);
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::Inner }>(true, false);
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
