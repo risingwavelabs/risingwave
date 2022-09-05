@@ -46,6 +46,7 @@
 #![feature(map_try_insert)]
 #![feature(result_option_inspect)]
 #![feature(never_type)]
+#![feature(btreemap_alloc)]
 
 #[macro_use]
 extern crate tracing;

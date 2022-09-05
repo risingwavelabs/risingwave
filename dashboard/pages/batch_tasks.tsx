@@ -14,14 +14,18 @@
  * limitations under the License.
  *
  */
-import React from 'react';
 
-export default function About() {
+import { Box, useToast } from "@chakra-ui/react"
+import NoData from "../components/NoData"
+import Title from "../components/Title"
+
+export default function BatchTasks() {
+  const toast = useToast()
+
   return (
-    <>
-      <div>
-        About
-      </div>
-    </>
-  );
+    <Box p={3}>
+      <Title>Batch Tasks</Title>
+      <NoData />
+    </Box>
+  )
 }

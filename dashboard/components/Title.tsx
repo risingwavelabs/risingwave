@@ -14,6 +14,15 @@
  * limitations under the License.
  *
  */
-export default {
-  baseUrl: "http://127.0.0.1:5691"
+
+import { Text } from "@chakra-ui/react"
+import React from "react"
+
+function Title({ children }: { children: React.ReactNode }) {
+  return (
+    <Text mb={2} textColor="teal.500" fontWeight="semibold" lineHeight="6">
+      {children}
+    </Text>
+  )
 }
+export default Title

@@ -60,7 +60,7 @@ psql -h localhost -p 4566 -d dev -U root
 
 ```sql
 /* create a table */
-create table t1(v1 int not null);
+create table t1(v1 int);
 
 /* create a materialized view based on the previous table */
 create materialized view mv1 as select sum(v1) as sum_v1 from t1;
