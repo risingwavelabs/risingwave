@@ -1,5 +1,7 @@
 #!/bin/bash
 
+pwd
+
 # Exits as soon as any line fails.
 set -euo pipefail
 
