@@ -122,3 +122,13 @@ query T
 select array[1,2] || array[array[3,4]];
 ----
 {{1,2},{3,4}}
+
+query T
+select '123'::varchar || array['abc'];
+----
+{123,abc}
+
+query T
+select array['abc'] || '123'::varchar;
+----
+{abc,123}
