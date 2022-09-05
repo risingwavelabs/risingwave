@@ -23,7 +23,7 @@ use risingwave_pb::expr::ExprNode;
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
 use crate::{bail, ensure, ExprError, Result};
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Operation {
     ConcatArray,
     AppendArray,
@@ -32,12 +32,23 @@ pub enum Operation {
     PrependValue,
 }
 
-#[derive(Debug)]
 pub struct ArrayConcatExpression {
     return_type: DataType,
     left: BoxedExpression,
     right: BoxedExpression,
     op: Operation,
+    op_func: fn(DatumRef, DatumRef) -> Datum,
+}
+
+impl std::fmt::Debug for ArrayConcatExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArrayConcatExpression")
+            .field("return_type", &self.return_type)
+            .field("left", &self.left)
+            .field("right", &self.right)
+            .field("op", &self.op)
+            .finish()
+    }
 }
 
 impl ArrayConcatExpression {
@@ -52,6 +63,13 @@ impl ArrayConcatExpression {
             left,
             right,
             op,
+            op_func: match op {
+                Operation::ConcatArray => Self::concat_array,
+                Operation::AppendArray => Self::append_array,
+                Operation::PrependArray => Self::prepend_array,
+                Operation::AppendValue => Self::append_value,
+                Operation::PrependValue => Self::prepend_value,
+            },
         }
     }
 
@@ -198,14 +216,8 @@ impl ArrayConcatExpression {
         }
     }
 
-    fn dispatch(&self, left: DatumRef, right: DatumRef) -> Datum {
-        match self.op {
-            Operation::ConcatArray => Self::concat_array(left, right),
-            Operation::AppendArray => Self::append_array(left, right),
-            Operation::AppendValue => Self::append_value(left, right),
-            Operation::PrependArray => Self::prepend_array(left, right),
-            Operation::PrependValue => Self::prepend_value(left, right),
-        }
+    fn evaluate(&self, left: DatumRef, right: DatumRef) -> Datum {
+        (self.op_func)(left, right)
     }
 }
 
@@ -228,7 +240,7 @@ impl Expression for ArrayConcatExpression {
             if !vis {
                 builder.append_null()?;
             } else {
-                builder.append_datum(&self.dispatch(left, right))?;
+                builder.append_datum(&self.evaluate(left, right))?;
             }
         }
         Ok(Arc::new(builder.finish()?))
@@ -237,7 +249,7 @@ impl Expression for ArrayConcatExpression {
     fn eval_row(&self, input: &Row) -> Result<Datum> {
         let left_data = self.left.eval_row(input)?;
         let right_data = self.right.eval_row(input)?;
-        Ok(self.dispatch(to_datum_ref(&left_data), to_datum_ref(&right_data)))
+        Ok(self.evaluate(to_datum_ref(&left_data), to_datum_ref(&right_data)))
     }
 }
 
