@@ -41,11 +41,13 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{get_epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+    CompactTask, CompactTaskProgress, KeyRange as KeyRange_vec, LevelType, SstableInfo,
+    SubscribeCompactTasksResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::compact;
@@ -225,6 +227,42 @@ impl Compactor {
             .await;
         let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
+        let mut splits: Vec<KeyRange_vec> = vec![];
+        splits.push(KeyRange_vec::new(vec![], vec![]));
+        // collect sstable_ids to get meta data
+        let sstable_ids = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table| table.id)
+            .collect_vec();
+        let mut indexes = vec![];
+
+        // preload the meta and get the smallest key to split sub_compaction
+        for sstable_id in sstable_ids {
+            let meta = context
+                .sstable_store
+                .sstable(sstable_id, &mut StoreLocalStatistic::default())
+                .await
+                .unwrap()
+                .value()
+                .meta
+                .smallest_key
+                .clone();
+            indexes.push(meta);
+        }
+        indexes.sort();
+        const SPLIT_RANGE_STEP: usize = 8;
+        let concurrency = indexes.len() / SPLIT_RANGE_STEP;
+        let step = (indexes.len() + concurrency - 1) / concurrency;
+        for (idx, key) in indexes.into_iter().enumerate() {
+            if idx > 0 && idx % step == 0 {
+                splits.last_mut().unwrap().right = key.clone();
+                splits.push(KeyRange_vec::new(key, vec![]));
+            }
+        }
+
+        compact_task.splits = splits;
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
