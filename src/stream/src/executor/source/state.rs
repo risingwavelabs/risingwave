@@ -225,7 +225,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_state_restore() {
-        let partition = SplitId::new("p01".into());
+        let partition = "p01".into();
         let state_store_handler = SourceStateHandler::new(new_test_keyspace());
         let list_states = state_store_handler
             .restore_states(partition, u64::MAX)
