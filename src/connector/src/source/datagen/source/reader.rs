@@ -47,7 +47,7 @@ impl SplitReader for DatagenSplitReader {
         Self: Sized,
     {
         let mut assigned_split = DatagenSplit::default();
-        let mut split_id = SplitId::default();
+        let mut split_id: SplitId = "".into();
         let mut events_so_far = u64::default();
         if let Some(splits) = state {
             tracing::debug!("Splits for datagen found! {:?}", splits);
