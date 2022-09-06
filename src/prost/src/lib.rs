@@ -46,7 +46,9 @@ pub mod source;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/monitor_service.rs")]
 pub mod monitor_service;
-
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/health.rs")]
+pub mod health;
 
 #[rustfmt::skip]
 #[path = "catalog.serde.rs"]
