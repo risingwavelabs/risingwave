@@ -334,7 +334,11 @@ async fn run_slt_task(glob: &str, host: &str) {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
-        tester.run_file_async(path).await.unwrap();
+        tester
+            .run_file_async(path)
+            .await
+            .map_err(|e| panic!("{e}"))
+            .unwrap()
     }
 }
 
@@ -349,6 +353,7 @@ async fn run_parallel_slt_task(
     tester
         .run_parallel_async(glob, hosts.to_vec(), Risingwave::connect, jobs)
         .await
+        .map_err(|e| panic!("{e}"))
 }
 
 struct Risingwave {
