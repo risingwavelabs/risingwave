@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
@@ -22,8 +24,10 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_source::ProtobufParser;
-use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
+use risingwave_source::{AvroParser, ProtobufParser};
+use risingwave_sqlparser::ast::{
+    AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema,
+};
 
 use super::create_table::{
     bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
@@ -72,6 +76,22 @@ pub(crate) fn make_prost_source(
     })
 }
 
+/// Map an Avro schema to a relational schema.
+async fn extract_avro_table_schema(
+    schema: &AvroSchema,
+    with_properties: HashMap<String, String>,
+) -> Result<Vec<ProstColumnCatalog>> {
+    let parser = AvroParser::new(schema.row_schema_location.0.as_str(), with_properties).await?;
+    let vec_column_desc = parser.map_to_columns()?;
+    Ok(vec_column_desc
+        .into_iter()
+        .map(|c| ProstColumnCatalog {
+            column_desc: Some(c),
+            is_hidden: false,
+        })
+        .collect_vec())
+}
+
 /// Map a protobuf schema to a relational schema.
 fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstColumnCatalog>> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
@@ -107,6 +127,20 @@ pub async fn handle_create_source(
                 properties: with_properties.clone(),
                 row_format: RowFormatType::Protobuf as i32,
                 row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+                row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
+                columns,
+                pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
+            }
+        }
+        SourceSchema::Avro(avro_schema) => {
+            assert_eq!(columns.len(), 1);
+            assert_eq!(pk_column_ids, vec![0.into()]);
+            assert_eq!(row_id_index, Some(0));
+            columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
+            StreamSourceInfo {
+                properties: with_properties.clone(),
+                row_format: RowFormatType::Avro as i32,
+                row_schema_location: avro_schema.row_schema_location.0.clone(),
                 row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
                 columns,
                 pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
