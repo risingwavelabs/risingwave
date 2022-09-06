@@ -38,6 +38,7 @@ members = [
   "src/utils/runtime",
   "src/utils/static-link",
   "src/utils/stats_alloc",
+  "src/utils/sync-point",
   "src/workspace-hack",
 ]
 

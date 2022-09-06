@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
-use risingwave_common::util::sync_point::on_sync_point;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
@@ -211,7 +210,7 @@ where
         if let Some(vacuum_task) = request.into_inner().vacuum_task {
             self.vacuum_manager.report_vacuum_task(vacuum_task).await?;
         }
-        on_sync_point("AFTER_REPORT_VACUUM").await.unwrap();
+        sync_point::on("AFTER_REPORT_VACUUM").await;
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
     }
 

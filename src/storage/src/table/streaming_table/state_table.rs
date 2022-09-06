@@ -38,7 +38,7 @@ use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
-    serialize_pk, serialize_pk_with_vnode, serialize_value, streaming_deserialize,
+    serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -365,7 +365,7 @@ impl<S: StateStore> StateTable<S> {
 
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = serialize_value(value).map_err(err)?;
+        let value_bytes = value.serialize().map_err(err)?;
         self.mem_table.insert(key_bytes, value_bytes);
         Ok(())
     }
@@ -376,7 +376,7 @@ impl<S: StateStore> StateTable<S> {
         let pk = old_value.by_indices(self.pk_indices());
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = serialize_value(old_value).map_err(err)?;
+        let value_bytes = old_value.serialize().map_err(err)?;
         self.mem_table.delete(key_bytes, value_bytes);
         Ok(())
     }
@@ -393,8 +393,8 @@ impl<S: StateStore> StateTable<S> {
             self.compute_vnode_by_pk(&new_pk),
         );
 
-        let old_value_bytes = serialize_value(old_value).map_err(err)?;
-        let new_value_bytes = serialize_value(new_value).map_err(err)?;
+        let old_value_bytes = old_value.serialize().map_err(err)?;
+        let new_value_bytes = new_value.serialize().map_err(err)?;
         self.mem_table
             .update(new_key_bytes, old_value_bytes, new_value_bytes);
         Ok(())

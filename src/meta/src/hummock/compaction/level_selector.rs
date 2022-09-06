@@ -368,6 +368,7 @@ impl LevelSelector for DynamicLevelSelector {
 
 #[cfg(test)]
 pub mod tests {
+    use std::collections::HashSet;
     use std::ops::Range;
 
     use itertools::Itertools;
@@ -467,6 +468,14 @@ pub mod tests {
                 })
                 .collect_vec(),
             total_file_size,
+        }
+    }
+
+    fn assert_compaction_task(compact_task: &CompactionTask, level_handlers: &[LevelHandler]) {
+        for i in &compact_task.input.input_levels {
+            for t in &i.table_infos {
+                assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.id));
+            }
         }
     }
 
@@ -579,6 +588,7 @@ pub mod tests {
             .pick_compaction(1, &levels, &mut levels_handlers)
             .unwrap();
         // trivial move.
+        assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 0);
         assert!(compaction.input.input_levels[1].table_infos.is_empty());
         assert_eq!(compaction.input.target_level, 0);
@@ -601,6 +611,7 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(1, &levels, &mut levels_handlers)
             .unwrap();
+        assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 0);
         assert_eq!(compaction.input.target_level, 2);
         assert_eq!(compaction.target_file_size, config.target_file_size_base);
@@ -612,6 +623,7 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(2, &levels, &mut levels_handlers)
             .unwrap();
+        assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 3);
         assert_eq!(compaction.input.target_level, 4);
         assert_eq!(compaction.input.input_levels[0].table_infos.len(), 1);
@@ -625,5 +637,180 @@ pub mod tests {
         // to score.
         let compaction = selector.pick_compaction(2, &levels, &mut levels_handlers);
         assert!(compaction.is_none());
+    }
+
+    #[test]
+    fn test_manual_compaction_picker_l0() {
+        let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
+        let selector = DynamicLevelSelector::new(config, Arc::new(RangeOverlapStrategy::default()));
+        let l0 = generate_l0_with_overlap(vec![
+            generate_table(0, 1, 0, 500, 1),
+            generate_table(1, 1, 0, 500, 1),
+        ]);
+        assert_eq!(l0.sub_levels.len(), 2);
+        let levels = vec![
+            generate_level(1, vec![]),
+            generate_level(2, vec![]),
+            generate_level(3, vec![]),
+            Level {
+                level_idx: 4,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(2, 1, 0, 100, 1),
+                    generate_table(3, 1, 101, 200, 1),
+                    generate_table(4, 1, 222, 300, 1),
+                ],
+                total_file_size: 0,
+                sub_level_id: 0,
+            },
+        ];
+        assert_eq!(levels.len(), 4);
+        let levels = Levels {
+            levels,
+            l0: Some(l0),
+        };
+        let mut levels_handler = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+
+        // pick_l0_to_sub_level
+        {
+            let option = ManualCompactionOption {
+                sst_ids: vec![0, 1],
+                key_range: KeyRange {
+                    left: vec![],
+                    right: vec![],
+                    inf: true,
+                },
+                internal_table_id: HashSet::default(),
+                level: 0,
+            };
+            let task = selector
+                .manual_pick_compaction(1, &levels, &mut levels_handler, option)
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 0);
+            assert_eq!(task.input.input_levels[1].level_idx, 0);
+            assert_eq!(task.input.target_level, 0);
+        }
+
+        for level_handler in &mut levels_handler {
+            for pending_task_id in &level_handler.pending_tasks_ids() {
+                level_handler.remove_task(*pending_task_id);
+            }
+        }
+
+        // pick_l0_to_base_level
+        {
+            let option = ManualCompactionOption {
+                sst_ids: vec![],
+                key_range: KeyRange {
+                    left: vec![],
+                    right: vec![],
+                    inf: true,
+                },
+                internal_table_id: HashSet::default(),
+                level: 0,
+            };
+            let task = selector
+                .manual_pick_compaction(2, &levels, &mut levels_handler, option)
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 3);
+            assert_eq!(task.input.input_levels[0].level_idx, 0);
+            assert_eq!(task.input.input_levels[1].level_idx, 0);
+            assert_eq!(task.input.input_levels[2].level_idx, 4);
+            assert_eq!(task.input.target_level, 4);
+        }
+    }
+
+    /// tests `DynamicLevelSelector::manual_pick_compaction`
+    #[test]
+    fn test_manual_compaction_picker() {
+        let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
+        let selector = DynamicLevelSelector::new(config, Arc::new(RangeOverlapStrategy::default()));
+        let l0 = generate_l0_with_overlap(vec![]);
+        assert_eq!(l0.sub_levels.len(), 0);
+        let levels = vec![
+            generate_level(1, vec![]),
+            generate_level(2, vec![]),
+            generate_level(
+                3,
+                vec![
+                    generate_table(0, 1, 150, 151, 1),
+                    generate_table(1, 1, 250, 251, 1),
+                ],
+            ),
+            Level {
+                level_idx: 4,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(2, 1, 0, 100, 1),
+                    generate_table(3, 1, 101, 200, 1),
+                    generate_table(4, 1, 222, 300, 1),
+                ],
+                total_file_size: 0,
+                sub_level_id: 0,
+            },
+        ];
+        assert_eq!(levels.len(), 4);
+        let levels = Levels {
+            levels,
+            l0: Some(l0),
+        };
+        let mut levels_handler = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+
+        // pick l3 -> l4
+        {
+            let option = ManualCompactionOption {
+                sst_ids: vec![0, 1],
+                key_range: KeyRange {
+                    left: vec![],
+                    right: vec![],
+                    inf: true,
+                },
+                internal_table_id: HashSet::default(),
+                level: 3,
+            };
+            let task = selector
+                .manual_pick_compaction(1, &levels, &mut levels_handler, option)
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 3);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 2);
+            assert_eq!(task.input.input_levels[1].level_idx, 4);
+            assert_eq!(task.input.input_levels[1].table_infos.len(), 2);
+            assert_eq!(task.input.target_level, 4);
+        }
+
+        for level_handler in &mut levels_handler {
+            for pending_task_id in &level_handler.pending_tasks_ids() {
+                level_handler.remove_task(*pending_task_id);
+            }
+        }
+
+        // pick l4 -> l4
+        {
+            let option = ManualCompactionOption {
+                sst_ids: vec![],
+                key_range: KeyRange {
+                    left: vec![],
+                    right: vec![],
+                    inf: true,
+                },
+                internal_table_id: HashSet::default(),
+                level: 4,
+            };
+            let task = selector
+                .manual_pick_compaction(1, &levels, &mut levels_handler, option)
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 4);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 3);
+            assert_eq!(task.input.input_levels[1].level_idx, 4);
+            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+            assert_eq!(task.input.target_level, 4);
+        }
     }
 }
