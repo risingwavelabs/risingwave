@@ -130,7 +130,7 @@ impl HummockStorage {
                 .await?,
             ));
         }
-        for sync_uncommitted_data in sync_uncommitted_data.into_iter().rev() {
+        for sync_uncommitted_data in sync_uncommitted_data {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
                     &sync_uncommitted_data,
@@ -328,7 +328,7 @@ impl HummockStorage {
             }
             table_counts += table_count;
         }
-        for sync_uncommitted_data in sync_uncommitted_data.into_iter().rev() {
+        for sync_uncommitted_data in sync_uncommitted_data {
             let (value, table_count) = self
                 .get_from_order_sorted_uncommitted_data(
                     sync_uncommitted_data,

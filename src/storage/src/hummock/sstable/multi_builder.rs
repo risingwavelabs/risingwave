@@ -24,8 +24,8 @@ use super::SstableMeta;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockResult, MemoryLimiter, SstableBuilder, SstableBuilderOptions,
-    SstableWriterOptions,
+    BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
+    SstableBuilderOptions, SstableWriter, SstableWriterOptions,
 };
 use crate::monitor::StateStoreMetrics;
 
@@ -33,7 +33,8 @@ pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<UploadJoinHandle>>;
+    type Writer: SstableWriter<Output = UploadJoinHandle>;
+    async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>>;
 }
 
 pub struct SplitTableOutput {
@@ -57,7 +58,7 @@ where
 
     sst_outputs: Vec<SplitTableOutput>,
 
-    current_builder: Option<SstableBuilder<UploadJoinHandle>>,
+    current_builder: Option<SstableBuilder<F::Writer>>,
 
     /// Statistics.
     pub stats: Arc<StateStoreMetrics>,
@@ -207,16 +208,20 @@ impl LocalTableBuilderFactory {
 
 #[async_trait::async_trait]
 impl TableBuilderFactory for LocalTableBuilderFactory {
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<UploadJoinHandle>> {
+    type Writer = BatchUploadWriter;
+
+    async fn open_builder(&self) -> HummockResult<SstableBuilder<BatchUploadWriter>> {
         let id = self.next_id.fetch_add(1, SeqCst);
         let tracker = self.limiter.require_memory(1).await.unwrap();
-        let mut writer_options = SstableWriterOptions::from(&self.options);
-        writer_options.tracker = Some(tracker);
+        let writer_options = SstableWriterOptions {
+            capacity_hint: Some(self.options.capacity),
+            tracker: Some(tracker),
+            policy: self.policy,
+        };
         let writer = self
             .sstable_store
             .clone()
-            .create_sst_writer(id, self.policy, writer_options, None)
-            .await?;
+            .create_sst_writer(id, writer_options);
         let builder = SstableBuilder::new_for_test(id, writer, self.options.clone());
 
         Ok(builder)
@@ -242,7 +247,6 @@ mod tests {
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: 0,
-            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::new_for_test(builder_factory);

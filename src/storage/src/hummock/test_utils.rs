@@ -22,15 +22,15 @@ use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{
-    CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta, SstableWriteMode,
-    SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
+    CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
+    DEFAULT_RESTART_INTERVAL,
 };
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockStateStoreIter, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef,
+    SstableStoreRef, SstableWriter,
 };
 use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
@@ -103,14 +103,14 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
 
 pub fn default_writer_opt_for_test() -> SstableWriterOptions {
     SstableWriterOptions {
-        mode: SstableWriteMode::Batch,
         capacity_hint: None,
         tracker: None,
+        policy: CachePolicy::Disable,
     }
 }
 
-pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> Box<InMemWriter> {
-    Box::new(InMemWriter::from(opt))
+pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> InMemWriter {
+    InMemWriter::from(opt)
 }
 
 /// Generates sstable data and metadata from given `kv_iter`
@@ -132,12 +132,10 @@ pub async fn put_sst(
     data: Bytes,
     meta: SstableMeta,
     sstable_store: SstableStoreRef,
-    options: SstableWriterOptions,
+    mut options: SstableWriterOptions,
 ) -> HummockResult<()> {
-    let mut writer = sstable_store
-        .clone()
-        .create_sst_writer(sst_id, CachePolicy::NotFill, options, None)
-        .await?;
+    options.policy = CachePolicy::NotFill;
+    let mut writer = sstable_store.clone().create_sst_writer(sst_id, options);
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
@@ -157,15 +155,11 @@ pub async fn gen_test_sstable_inner(
     policy: CachePolicy,
 ) -> Sstable {
     let writer_opts = SstableWriterOptions {
-        mode: SstableWriteMode::Batch,
         capacity_hint: None,
         tracker: None,
+        policy,
     };
-    let writer = sstable_store
-        .clone()
-        .create_sst_writer(sst_id, policy, writer_opts, None)
-        .await
-        .unwrap();
+    let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
     let mut b = SstableBuilder::new_for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice()).unwrap();

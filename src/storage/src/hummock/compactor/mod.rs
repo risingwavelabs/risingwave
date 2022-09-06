@@ -56,35 +56,34 @@ pub use sstable_store::{
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
-pub use self::context::TaskProgressTracker;
-use super::multi_builder::{CapacitySplitTableBuilder, UploadJoinHandle};
+use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions, SstableWriterOptions};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryLimiter;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef,
-    DEFAULT_ENTRY_SIZE,
+    validate_ssts, BatchSstableWriterFactory, CachePolicy, HummockError, SstableBuilder,
+    SstableIdManagerRef, SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
-pub struct RemoteBuilderFactory {
+pub struct RemoteBuilderFactory<F: SstableWriterFactory> {
     sstable_id_manager: SstableIdManagerRef,
-    sstable_store: SstableStoreRef,
     limiter: Arc<MemoryLimiter>,
     options: SstableBuilderOptions,
     policy: CachePolicy,
     remote_rpc_cost: Arc<AtomicU64>,
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-    task_progress_tracker: Option<TaskProgressTracker>,
+    sstable_writer_factory: F,
 }
 
 #[async_trait::async_trait]
-impl TableBuilderFactory for RemoteBuilderFactory {
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<UploadJoinHandle>> {
+impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
+    type Writer = F::Writer;
+
+    async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>> {
         // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
             .limiter
@@ -99,17 +98,14 @@ impl TableBuilderFactory for RemoteBuilderFactory {
         let table_id = self.sstable_id_manager.get_new_sst_id().await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
-        let mut writer_options = SstableWriterOptions::from(&self.options);
-        writer_options.tracker = Some(tracker);
+        let writer_options = SstableWriterOptions {
+            capacity_hint: Some(self.options.capacity + self.options.block_capacity),
+            tracker: Some(tracker),
+            policy: self.policy,
+        };
         let writer = self
-            .sstable_store
-            .clone()
-            .create_sst_writer(
-                table_id,
-                self.policy,
-                writer_options,
-                self.task_progress_tracker.clone(),
-            )
+            .sstable_writer_factory
+            .create_sst_writer(table_id, writer_options)
             .await?;
         let builder = SstableBuilder::new(
             table_id,
@@ -621,7 +617,7 @@ impl Compactor {
 
     /// Compact the given key range and merge iterator.
     /// Upon a successful return, the built SSTs are already uploaded to object store.
-    async fn compact_key_range_impl(
+    async fn compact_key_range(
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
@@ -629,30 +625,6 @@ impl Compactor {
         task_progress_tracker: Option<TaskProgressTracker>,
     ) -> HummockResult<Vec<SstableInfo>> {
         let get_id_time = Arc::new(AtomicU64::new(0));
-        let mut options = self.options.clone();
-        options.estimate_bloom_filter_capacity = self
-            .context
-            .filter_key_extractor_manager
-            .estimate_bloom_filter_size(options.capacity);
-        if options.estimate_bloom_filter_capacity == 0 {
-            options.estimate_bloom_filter_capacity = options.capacity / DEFAULT_ENTRY_SIZE;
-        }
-
-        let builder_factory = RemoteBuilderFactory {
-            sstable_id_manager: self.context.sstable_id_manager.clone(),
-            sstable_store: self.context.sstable_store.clone(),
-            limiter: self.context.read_memory_limiter.clone(),
-            options,
-            policy: self.task_config.cache_policy,
-            remote_rpc_cost: get_id_time.clone(),
-            filter_key_extractor,
-            task_progress_tracker: task_progress_tracker.clone(),
-        };
-
-        // NOTICE: should be user_key overlap, NOT full_key overlap!
-        let mut builder =
-            CapacitySplitTableBuilder::new(builder_factory, self.context.stats.clone());
-
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
             self.context.stats.write_build_l0_sst_duration.start_timer()
@@ -660,15 +632,28 @@ impl Compactor {
             self.context.stats.compact_sst_duration.start_timer()
         };
 
-        Compactor::compact_and_build_sst(
-            &mut builder,
-            &self.task_config,
-            self.context.stats.clone(),
-            iter,
-            compaction_filter,
-        )
-        .await?;
-        let split_table_outputs = builder.finish()?;
+        let split_table_outputs = if self.options.capacity as u64
+            > self.context.options.min_sst_size_for_streaming_upload
+        {
+            self.compact_key_range_impl(
+                StreamingSstableWriterFactory::new(self.context.sstable_store.clone()),
+                iter,
+                compaction_filter,
+                filter_key_extractor,
+                get_id_time.clone(),
+            )
+            .await?
+        } else {
+            self.compact_key_range_impl(
+                BatchSstableWriterFactory::new(self.context.sstable_store.clone()),
+                iter,
+                compaction_filter,
+                filter_key_extractor,
+                get_id_time.clone(),
+            )
+            .await?
+        };
+
         compact_timer.observe_duration();
 
         let mut ssts = Vec::with_capacity(split_table_outputs.len());
@@ -733,6 +718,37 @@ impl Compactor {
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
         Ok(ssts)
+    }
+
+    async fn compact_key_range_impl<F: SstableWriterFactory>(
+        &self,
+        writer_factory: F,
+        iter: impl HummockIterator<Direction = Forward>,
+        compaction_filter: impl CompactionFilter,
+        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        get_id_time: Arc<AtomicU64>,
+    ) -> HummockResult<Vec<SplitTableOutput>> {
+        let builder_factory = RemoteBuilderFactory {
+            sstable_id_manager: self.context.sstable_id_manager.clone(),
+            limiter: self.context.read_memory_limiter.clone(),
+            options: self.options.clone(),
+            policy: self.task_config.cache_policy,
+            remote_rpc_cost: get_id_time,
+            filter_key_extractor,
+            sstable_writer_factory: writer_factory,
+        };
+
+        let mut sst_builder =
+            CapacitySplitTableBuilder::new(builder_factory, self.context.stats.clone());
+        Compactor::compact_and_build_sst(
+            &mut sst_builder,
+            &self.task_config,
+            self.context.stats.clone(),
+            iter,
+            compaction_filter,
+        )
+        .await?;
+        sst_builder.finish()
     }
 }
 

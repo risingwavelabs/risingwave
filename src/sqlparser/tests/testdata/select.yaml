@@ -50,10 +50,16 @@
 - input: SELECT * FROM unnest(Array[1,2,3]);
   formatted_sql: SELECT * FROM unnest(ARRAY[1, 2, 3])
   formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: false, projection: [Wildcard], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "unnest", quote_style: None }]), alias: None, args: [Unnamed(Expr(Array([Value(Number("1", false)), Value(Number("2", false)), Value(Number("3", false))])))] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+    Query(Query { with: None, body: Select(Select { distinct: false, projection: [Wildcard], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "unnest", quote_style: None }]), alias: None, args: [Unnamed(Expr(Array([Value(Number("1")), Value(Number("2")), Value(Number("3"))])))] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
 - input: SELECT id, fname, lname FROM customer WHERE salary <> 'Not Provided' AND salary <> ''
   formatted_sql: SELECT id, fname, lname FROM customer WHERE (salary <> 'Not Provided') AND (salary <> '')
 
 - input: SELECT id FROM customer WHERE NOT salary = ''
   formatted_sql: SELECT id FROM customer WHERE NOT (salary = '')
+
+- input: SELECT * FROM t LIMIT 1 FETCH FIRST ROWS ONLY
+  error_msg: "sql parser error: Cannot specify both LIMIT and FETCH"
+
+- input: SELECT * FROM t FETCH FIRST ROWS WITH TIES
+  error_msg: "sql parser error: WITH TIES cannot be specified without ORDER BY clause"
