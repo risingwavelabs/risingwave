@@ -130,7 +130,7 @@ impl HummockStorage {
                 .await?,
             ));
         }
-        for sync_uncommitted_data in sync_uncommitted_data.into_iter().rev() {
+        for sync_uncommitted_data in sync_uncommitted_data {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
                     &sync_uncommitted_data,
@@ -306,6 +306,7 @@ impl HummockStorage {
         for epoch_replicated_batches in replicated_batches {
             for batch in epoch_replicated_batches {
                 if let Some(v) = self.get_from_batch(&batch, key) {
+                    local_stats.report(self.stats.as_ref());
                     return Ok(v.into_user_value());
                 }
             }
@@ -324,11 +325,12 @@ impl HummockStorage {
                 )
                 .await?;
             if let Some(v) = value {
+                local_stats.report(self.stats.as_ref());
                 return Ok(v.into_user_value());
             }
             table_counts += table_count;
         }
-        for sync_uncommitted_data in sync_uncommitted_data.into_iter().rev() {
+        for sync_uncommitted_data in sync_uncommitted_data {
             let (value, table_count) = self
                 .get_from_order_sorted_uncommitted_data(
                     sync_uncommitted_data,
@@ -339,6 +341,7 @@ impl HummockStorage {
                 )
                 .await?;
             if let Some(v) = value {
+                local_stats.report(self.stats.as_ref());
                 return Ok(v.into_user_value());
             }
             table_counts += table_count;
@@ -368,6 +371,7 @@ impl HummockStorage {
                             )
                             .await?
                         {
+                            local_stats.report(self.stats.as_ref());
                             return Ok(v.into_user_value());
                         }
                     }
@@ -404,6 +408,7 @@ impl HummockStorage {
                         .get_from_table(table, &internal_key, check_bloom_filter, &mut local_stats)
                         .await?
                     {
+                        local_stats.report(self.stats.as_ref());
                         return Ok(v.into_user_value());
                     }
                 }

@@ -17,6 +17,7 @@ use std::alloc::Global;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
+use fixedbitset::FixedBitSet;
 use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
@@ -205,6 +206,8 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     join_key_data_types: Vec<DataType>,
     /// Data types of all columns
     col_data_types: Vec<DataType>,
+    /// Null safe bitmap for each join pair
+    null_matched: FixedBitSet,
     /// Indices of the primary keys
     pk_indices: Vec<usize>,
     /// Current epoch
@@ -223,6 +226,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
         data_types: Vec<DataType>,
+        null_matched: FixedBitSet,
         state_table: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
@@ -242,6 +246,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             ),
             join_key_data_types,
             col_data_types: data_types,
+            null_matched,
             pk_indices,
             current_epoch: 0,
             state_table,
@@ -345,8 +350,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a key
-    pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
-        if let Some(entry) = self.inner.get_mut(join_key) {
+    pub fn insert(&mut self, key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
+        if let Some(entry) = self.inner.get_mut(key) {
             entry.insert(pk, value.encode()?);
         }
 
@@ -356,8 +361,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a key
-    pub fn delete(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
-        if let Some(entry) = self.inner.get_mut(join_key) {
+    pub fn delete(&mut self, key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
+        if let Some(entry) = self.inner.get_mut(key) {
             entry.remove(pk);
         }
 
@@ -404,6 +409,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.iter()
             .map(|(k, v)| k.estimated_size() + v.estimated_size())
             .sum()
+    }
+
+    pub fn null_matched(&self) -> &FixedBitSet {
+        &self.null_matched
     }
 }
 

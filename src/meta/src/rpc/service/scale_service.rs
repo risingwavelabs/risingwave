@@ -15,12 +15,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::meta::reschedule_request::Reschedule;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, ResumeRequest,
-    ResumeResponse,
+    GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, RescheduleRequest,
+    RescheduleResponse, ResumeRequest, ResumeResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tokio::sync::RwLock;
@@ -30,7 +32,7 @@ use crate::barrier::{BarrierManagerRef, Command};
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
-use crate::stream::SourceManagerRef;
+use crate::stream::{GlobalStreamManagerRef, ParallelUnitReschedule, SourceManagerRef};
 
 pub struct ScaleServiceImpl<S: MetaStore> {
     barrier_manager: BarrierManagerRef<S>,
@@ -38,6 +40,7 @@ pub struct ScaleServiceImpl<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     source_manager: SourceManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
+    stream_manager: GlobalStreamManagerRef<S>,
     ddl_lock: Arc<RwLock<()>>,
 }
 
@@ -51,6 +54,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
+        stream_manager: GlobalStreamManagerRef<S>,
         ddl_lock: Arc<RwLock<()>>,
     ) -> Self {
         Self {
@@ -59,6 +63,7 @@ where
             cluster_manager,
             source_manager,
             catalog_manager,
+            stream_manager,
             ddl_lock,
         }
     }
@@ -131,5 +136,46 @@ where
             actor_splits,
             stream_source_infos,
         }))
+    }
+
+    async fn reschedule(
+        &self,
+        request: Request<RescheduleRequest>,
+    ) -> Result<Response<RescheduleResponse>, Status> {
+        self.ddl_lock.write().await;
+
+        let req = request.into_inner();
+
+        self.stream_manager
+            .reschedule_actors(
+                req.reschedules
+                    .into_iter()
+                    .map(|(fragment_id, reschedule)| {
+                        let Reschedule {
+                            added_parallel_units,
+                            removed_parallel_units,
+                        } = reschedule;
+
+                        (
+                            fragment_id,
+                            ParallelUnitReschedule {
+                                added_parallel_units: added_parallel_units
+                                    .into_iter()
+                                    .sorted()
+                                    .dedup()
+                                    .collect(),
+                                removed_parallel_units: removed_parallel_units
+                                    .into_iter()
+                                    .sorted()
+                                    .dedup()
+                                    .collect(),
+                            },
+                        )
+                    })
+                    .collect(),
+            )
+            .await?;
+
+        Ok(Response::new(RescheduleResponse { success: true }))
     }
 }

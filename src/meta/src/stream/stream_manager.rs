@@ -35,8 +35,8 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{
-    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, MetaSrvEnv, SchemaId,
-    WorkerId,
+    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, IdGeneratorManagerRef,
+    MetaSrvEnv, SchemaId, WorkerId,
 };
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
@@ -91,13 +91,13 @@ impl CreateMaterializedViewContext {
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager<S: MetaStore> {
     /// Manages definition and status of fragments and actors
-    fragment_manager: FragmentManagerRef<S>,
+    pub(super) fragment_manager: FragmentManagerRef<S>,
 
     /// Broadcasts and collect barriers
-    barrier_manager: BarrierManagerRef<S>,
+    pub(crate) barrier_manager: BarrierManagerRef<S>,
 
     /// Maintains information of the cluster
-    cluster_manager: ClusterManagerRef<S>,
+    pub(crate) cluster_manager: ClusterManagerRef<S>,
 
     /// Maintains streaming sources from external system like kafka
     source_manager: SourceManagerRef<S>,
@@ -106,7 +106,10 @@ pub struct GlobalStreamManager<S: MetaStore> {
     scheduler: Scheduler<S>,
 
     /// Client Pool to stream service on compute nodes
-    client_pool: StreamClientPoolRef,
+    pub(crate) client_pool: StreamClientPoolRef,
+
+    /// id generator manager.
+    pub(crate) id_gen_manager: IdGeneratorManagerRef<S>,
 
     compaction_group_manager: CompactionGroupManagerRef<S>,
 }
@@ -131,6 +134,7 @@ where
             source_manager,
             client_pool: env.stream_client_pool_ref(),
             compaction_group_manager,
+            id_gen_manager: env.id_gen_manager_ref(),
         })
     }
 
@@ -933,7 +937,13 @@ mod tests {
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
-            let compactor_manager = Arc::new(CompactorManager::new());
+            // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
+            // heartbeat thread here, so it doesn't matter.
+            let compactor_manager = Arc::new(
+                CompactorManager::new_with_meta(env.clone(), 1)
+                    .await
+                    .unwrap(),
+            );
 
             let hummock_manager = Arc::new(
                 HummockManager::new(

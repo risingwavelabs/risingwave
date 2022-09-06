@@ -43,6 +43,10 @@ where
         let compaction = compaction_guard.deref_mut();
         let (compact_statuses, compact_task_assignment) =
             compaction.cancel_assigned_tasks_for_context_ids(context_ids.as_ref())?;
+        for context_id in context_ids.as_ref() {
+            self.compactor_manager
+                .purge_heartbeats_for_context(*context_id);
+        }
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);
