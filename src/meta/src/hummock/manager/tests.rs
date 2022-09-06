@@ -24,7 +24,6 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
@@ -190,8 +189,7 @@ async fn test_hummock_compaction_task() {
 
 #[tokio::test]
 async fn test_hummock_table() {
-    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
+    let (_env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
 
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
@@ -209,12 +207,7 @@ async fn test_hummock_table() {
     .await
     .unwrap();
 
-    let pinned_version = match hummock_manager.pin_version(context_id).await.unwrap() {
-        Payload::VersionDeltas(_) => {
-            unreachable!("should get full version")
-        }
-        Payload::PinnedVersion(version) => version,
-    };
+    let pinned_version = hummock_manager.get_current_version().await;
     let levels =
         pinned_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
     assert_eq!(
@@ -241,8 +234,7 @@ async fn test_hummock_table() {
 
 #[tokio::test]
 async fn test_hummock_transaction() {
-    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
+    let (_env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
     let mut committed_tables = vec![];
 
     // Add and commit tables in epoch1.
@@ -259,14 +251,9 @@ async fn test_hummock_transaction() {
         )
         .await;
         // Get tables before committing epoch1. No tables should be returned.
-        let pinned_version = match hummock_manager.pin_version(context_id).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
-        assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
-        assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
+        let current_version = hummock_manager.get_current_version().await;
+        assert_eq!(current_version.max_committed_epoch, INVALID_EPOCH);
+        assert!(get_sorted_committed_sstable_ids(&current_version).is_empty());
 
         // Commit epoch1
         commit_from_meta_node(
@@ -279,16 +266,11 @@ async fn test_hummock_transaction() {
         committed_tables.extend(tables_in_epoch1.clone());
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
-        let pinned_version = match hummock_manager.pin_version(context_id).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
-        assert_eq!(pinned_version.max_committed_epoch, epoch1);
+        let current_version = hummock_manager.get_current_version().await;
+        assert_eq!(current_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(&pinned_version)
+            get_sorted_committed_sstable_ids(&current_version)
         );
     }
 
@@ -307,16 +289,11 @@ async fn test_hummock_transaction() {
         .await;
         // Get tables before committing epoch2. tables_in_epoch1 should be returned and
         // tables_in_epoch2 should be invisible.
-        let pinned_version = match hummock_manager.pin_version(context_id).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
-        assert_eq!(pinned_version.max_committed_epoch, epoch1);
+        let current_version = hummock_manager.get_current_version().await;
+        assert_eq!(current_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(&pinned_version)
+            get_sorted_committed_sstable_ids(&current_version)
         );
 
         // Commit epoch2
@@ -331,16 +308,11 @@ async fn test_hummock_transaction() {
 
         // Get tables after committing epoch2. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
-        let pinned_version = match hummock_manager.pin_version(context_id).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
-        assert_eq!(pinned_version.max_committed_epoch, epoch2);
+        let current_version = hummock_manager.get_current_version().await;
+        assert_eq!(current_version.max_committed_epoch, epoch2);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(&pinned_version)
+            get_sorted_committed_sstable_ids(&current_version)
         );
     }
 }
@@ -481,15 +453,14 @@ async fn test_context_id_invalidation() {
 
 #[tokio::test]
 async fn test_hummock_manager_basic() {
-    let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(1).await;
-    let context_id_1 = worker_node.id;
+    let (_env, hummock_manager, cluster_manager, _worker_node) = setup_compute_env(1).await;
 
     let fake_host_address_2 = HostAddress {
         host: "127.0.0.1".to_string(),
         port: 2,
     };
     let fake_parallelism = 4;
-    let worker_node_2 = cluster_manager
+    cluster_manager
         .add_worker_node(
             WorkerType::ComputeNode,
             fake_host_address_2,
@@ -497,7 +468,6 @@ async fn test_hummock_manager_basic() {
         )
         .await
         .unwrap();
-    let context_id_2 = worker_node_2.id;
 
     // initial version id
     assert_eq!(
@@ -539,17 +509,8 @@ async fn test_hummock_manager_basic() {
     );
     for _ in 0..2 {
         // should pin latest because u64::MAX
-        let version = match hummock_manager.pin_version(context_id_1).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
+        let version = hummock_manager.get_current_version().await;
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
-        assert_eq!(
-            hummock_manager.get_min_pinned_version_id().await,
-            FIRST_VERSION_ID + 1
-        );
     }
 
     commit_one(epoch, hummock_manager.clone()).await;
@@ -557,18 +518,8 @@ async fn test_hummock_manager_basic() {
 
     for _ in 0..2 {
         // should pin latest because deltas cannot contain INVALID_EPOCH
-        let version = match hummock_manager.pin_version(context_id_2).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
+        let version = hummock_manager.get_current_version().await;
         assert_eq!(version.id, FIRST_VERSION_ID + 2);
-        // pinned by context_id_1
-        assert_eq!(
-            hummock_manager.get_min_pinned_version_id().await,
-            FIRST_VERSION_ID + 1
-        );
     }
 }
 
