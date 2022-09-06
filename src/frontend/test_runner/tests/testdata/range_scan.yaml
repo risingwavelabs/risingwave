@@ -32,22 +32,22 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 1/0
-  batch_error: 'Expr error: DivisionByZero'
+  batch_error: 'Expr error: Division by zero'
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 2147483647 + 1
-  batch_error: 'Expr error: NumericOutOfRange'
+  batch_error: 'Expr error: Out of range'
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 'a'
-  batch_error: 'Expr error: Cast("str", "i64")'
+  batch_error: 'Expr error: Can''t cast str to i64'
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id > 'a'
-  batch_error: 'Expr error: Cast("str", "i64")'
+  batch_error: 'Expr error: Can''t cast str to i64'
 - before:
   - create_table_and_mv
   sql: |
@@ -131,7 +131,7 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id in ('42', '43.0')
-  batch_error: 'Expr error: Cast("str", "i64")'
+  batch_error: 'Expr error: Can''t cast str to i64'
 - before:
   - create_table_and_mv
   sql: |
