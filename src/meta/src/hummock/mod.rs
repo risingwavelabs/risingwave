@@ -72,7 +72,7 @@ where
 }
 
 /// Starts a task to handle meta local notification.
-async fn local_notification_receiver<S>(
+pub async fn local_notification_receiver<S>(
     hummock_manager: Arc<HummockManager<S>>,
     compactor_manager: Arc<CompactorManager>,
     notification_manager: NotificationManagerRef,
