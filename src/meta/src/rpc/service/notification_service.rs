@@ -84,13 +84,15 @@ where
         let creating_tables = catalog_guard.database.list_creating_tables();
         let users = catalog_guard.user.list_users();
 
-        let context_id = self
+        let context_id = match self
             .cluster_manager
             .get_cluster_core_guard()
             .await
             .get_worker_by_host(host_address.clone())
-            .unwrap()
-            .worker_id();
+        {
+            Some(worker) => worker.worker_id(),
+            None => return Err(Status::invalid_argument("worker is removed")),
+        };
 
         let fragment_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.fragment_id));
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
