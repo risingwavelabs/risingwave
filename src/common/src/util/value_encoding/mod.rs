@@ -17,10 +17,7 @@
 
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
-use itertools::Itertools;
 
-use crate::array::ArrayImpl;
-use crate::buffer::Bitmap;
 use crate::types::{
     to_datum_ref, DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper,
     NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
