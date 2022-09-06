@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -51,6 +52,7 @@ async fn test_failpoints_state_store_read_upload() {
         filter_key_extractor_manager.clone(),
     )
     .unwrap();
+    let local_version_manager = hummock_storage.local_version_manager();
     let observer_manager = get_observer_manager(
         env,
         hummock_manager_ref,
@@ -115,6 +117,10 @@ async fn test_failpoints_state_store_read_upload() {
     // sync epoch1 test the read_error
     let ssts = hummock_storage.sync(1).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(1, ssts).await.unwrap();
+    local_version_manager
+        .wait_epoch(HummockReadEpoch::Committed(1))
+        .await
+        .unwrap();
     // clear block cache
     sstable_store.clear_block_cache();
     sstable_store.clear_meta_cache();
@@ -168,6 +174,10 @@ async fn test_failpoints_state_store_read_upload() {
 
     let ssts = hummock_storage.sync(3).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(3, ssts).await.unwrap();
+    local_version_manager
+        .wait_epoch(HummockReadEpoch::Committed(3))
+        .await
+        .unwrap();
 
     let value = hummock_storage
         .get(

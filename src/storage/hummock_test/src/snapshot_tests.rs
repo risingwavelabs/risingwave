@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -95,6 +96,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         filter_key_extractor_manager.clone(),
     )
     .unwrap();
+    let vm = hummock_storage.local_version_manager().clone();
     let observer_manager = get_observer_manager(
         env,
         hummock_manager_ref,
@@ -126,6 +128,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .commit_epoch(epoch1, ssts)
                 .await
                 .unwrap();
+            vm.wait_epoch(HummockReadEpoch::Committed(epoch1))
+                .await
+                .unwrap();
         }
     }
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
@@ -150,6 +155,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch2, ssts)
+                .await
+                .unwrap();
+            vm.wait_epoch(HummockReadEpoch::Committed(epoch2))
                 .await
                 .unwrap();
         }
@@ -179,6 +187,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .commit_epoch(epoch3, ssts)
                 .await
                 .unwrap();
+            vm.wait_epoch(HummockReadEpoch::Committed(epoch3))
+                .await
+                .unwrap();
         }
     }
     assert_count_range_scan!(hummock_storage, .., 0, epoch3);
@@ -203,6 +214,7 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         filter_key_extractor_manager.clone(),
     )
     .unwrap();
+    let vm = hummock_storage.local_version_manager().clone();
     let observer_manager = get_observer_manager(
         env,
         hummock_manager_ref,
@@ -235,6 +247,9 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch, ssts)
+                .await
+                .unwrap();
+            vm.wait_epoch(HummockReadEpoch::Committed(epoch))
                 .await
                 .unwrap();
         }
@@ -271,6 +286,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         filter_key_extractor_manager.clone(),
     )
     .unwrap();
+    let vm = hummock_storage.local_version_manager().clone();
     let observer_manager = get_observer_manager(
         env,
         hummock_manager_ref,
@@ -306,6 +322,9 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 .commit_epoch(epoch, ssts)
                 .await
                 .unwrap();
+            vm.wait_epoch(HummockReadEpoch::Committed(epoch))
+                .await
+                .unwrap();
         }
     }
     hummock_storage
@@ -332,6 +351,9 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch + 1, ssts)
+                .await
+                .unwrap();
+            vm.wait_epoch(HummockReadEpoch::Committed(epoch + 1))
                 .await
                 .unwrap();
         }
