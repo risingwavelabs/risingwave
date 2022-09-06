@@ -1,7 +1,5 @@
 #!/bin/bash
 
-pwd
-
 # Exits as soon as any line fails.
 set -euo pipefail
 
@@ -29,6 +27,9 @@ buildkite-agent artifact download risingwave-"$profile" target/debug/
 buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
+
+echo "--- Download mise"
+buildkite-agent artifact download avro-simple-schema.avsc /risingwave/avro-simple-schema.avsc
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
