@@ -122,7 +122,7 @@ where
                 RetryableError::default(),
             )
             .await
-            .expect("release_contexts should always be retryable and eventually succeed.")
+            .expect("release_contexts should always be retryable and eventually succeed.");
         }
     });
     (join_handle, shutdown_tx)
