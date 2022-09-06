@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
-use std::env;
 use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::future::Future;
