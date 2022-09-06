@@ -148,7 +148,7 @@ impl SharedContext {
             .take()
             .ok_or_else(|| {
                 RwError::from(ErrorCode::InternalError(format!(
-                    "receiver from {} to {} does no exist",
+                    "receiver from {} to {} does not exist",
                     ids.0, ids.1
                 )))
             })

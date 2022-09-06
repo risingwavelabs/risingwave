@@ -20,3 +20,18 @@
       LogicalScan { table: pg_cast, columns: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext] }
   batch_plan: |
     BatchScan { table: pg_cast, columns: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext], distribution: Single }
+- sql: |
+    select pg_catalog.pg_get_userbyid(1)
+  logical_plan: |
+    LogicalProject { exprs: [pg_user.name] }
+      LogicalJoin { type: LeftOuter, on: true, output: all }
+        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+        LogicalProject { exprs: [pg_user.name] }
+          LogicalFilter { predicate: (1:Int32 = pg_user.usesysid) }
+            LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
+  batch_plan: |
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+      BatchValues { rows: [[]] }
+      BatchProject { exprs: [pg_user.name] }
+        BatchFilter { predicate: (1:Int32 = pg_user.usesysid) }
+          BatchScan { table: pg_user, columns: [pg_user.name, pg_user.usesysid], distribution: Single }

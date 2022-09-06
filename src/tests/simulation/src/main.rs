@@ -66,6 +66,10 @@ pub struct Args {
     #[clap(short, long)]
     jobs: Option<usize>,
 
+    /// The probability of etcd request timeout.
+    #[clap(long, default_value = "0.0")]
+    etcd_timeout_rate: f32,
+
     /// Randomly kill the meta node after each query.
     ///
     /// Currently only available when `-j` is not set.
@@ -109,6 +113,23 @@ async fn main() {
     println!("seed = {}", handle.seed());
     println!("{:?}", args);
 
+    // etcd node
+    handle
+        .create_node()
+        .name("etcd")
+        .ip("192.168.10.1".parse().unwrap())
+        .init(|| async {
+            let addr = "0.0.0.0:2388".parse().unwrap();
+            etcd_client::SimServer::builder()
+                .timeout_rate(args.etcd_timeout_rate)
+                .serve(addr)
+                .await
+                .unwrap();
+        })
+        .build();
+    // wait for the service to be ready
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // meta node
     handle
         .create_node()
@@ -121,12 +142,16 @@ async fn main() {
                 // "src/config/risingwave.toml",
                 "--listen-addr",
                 "0.0.0.0:5690",
+                "--backend",
+                "etcd",
+                "--etcd-endpoints",
+                "192.168.10.1:2388",
             ]);
             risingwave_meta::start(opts).await
         })
         .build();
     // wait for the service to be ready
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
     // frontend node
     let mut frontend_ip = vec![];
@@ -309,7 +334,11 @@ async fn run_slt_task(glob: &str, host: &str) {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
-        tester.run_file_async(path).await.unwrap();
+        tester
+            .run_file_async(path)
+            .await
+            .map_err(|e| panic!("{e}"))
+            .unwrap()
     }
 }
 
@@ -324,6 +353,7 @@ async fn run_parallel_slt_task(
     tester
         .run_parallel_async(glob, hosts.to_vec(), Risingwave::connect, jobs)
         .await
+        .map_err(|e| panic!("{e}"))
 }
 
 struct Risingwave {

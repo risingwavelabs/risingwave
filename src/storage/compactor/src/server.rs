@@ -133,6 +133,7 @@ pub async fn compactor_serve(
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
         read_memory_limiter: memory_limiter,
         sstable_id_manager: sstable_id_manager.clone(),
+        task_progress: Default::default(),
     });
     let compactor_context = Arc::new(CompactorContext {
         context,
