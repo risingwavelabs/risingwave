@@ -114,13 +114,8 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
     }
 }
 
-/// We diverge from PostgreSQL, instead of having undefined behaviour for overflows,
-/// See: <https://github.com/risingwavelabs/risingwave/blob/b4eb1107bc16f8d583563f776f748632ddcaa0cb/src/expr/src/vector_op/bitwise_op.rs#L24>
-/// NOTE(kwannoel): This approach is brittle, but I'm not sure of a better approach.
-/// RisingWave implementation intentionally only returns error message.
-/// See discussion: <https://github.com/risingwavelabs/risingwave/issues/4811>
 fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
-    db_error.message().contains("Expr error: Out of range")
+    db_error.message().contains(BatchError::NumericOutOfRange.to_string())
 }
 
 /// Workaround to permit runtime errors not being propagated through channels.
