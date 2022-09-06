@@ -164,7 +164,7 @@ fn print_kv_pairs(
 ) -> anyhow::Result<()> {
     println!("\tKV-Pairs:");
 
-    let block = Box::new(Block::decode(&block_data, uncompressed_capacity).unwrap());
+    let block = Box::new(Block::decode(block_data, uncompressed_capacity).unwrap());
     let holder = BlockHolder::from_owned_block(block);
     let mut block_iter = BlockIterator::new(holder);
     block_iter.seek_to_first();

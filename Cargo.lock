@@ -4768,6 +4768,7 @@ dependencies = [
  "risingwave_pb",
  "thiserror",
  "tokio-retry",
+ "tokio-stream",
  "tracing",
  "workspace-hack",
 ]
@@ -4999,6 +5000,7 @@ dependencies = [
  "either",
  "enum-as-inner",
  "farmhash",
+ "fixedbitset",
  "futures",
  "futures-async-stream",
  "hyper",

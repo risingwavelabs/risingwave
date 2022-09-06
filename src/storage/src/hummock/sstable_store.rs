@@ -29,9 +29,10 @@ use zstd::zstd_safe::WriteBuf;
 
 use super::utils::MemoryTracker;
 use super::{
-    Block, BlockCache, BlockMeta, Sstable, SstableBuilderOptions, SstableMeta, SstableWriter,
-    TieredCache, TieredCacheKey, TieredCacheValue,
+    Block, BlockCache, BlockMeta, Sstable, SstableMeta, SstableWriter, TieredCache, TieredCacheKey,
+    TieredCacheValue,
 };
+use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::{BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
@@ -74,7 +75,7 @@ impl TieredCacheValue for Box<Block> {
     }
 
     fn decode(buf: Vec<u8>) -> Self {
-        Box::new(Block::decode_from_raw(buf))
+        Box::new(Block::decode_from_raw(Bytes::from(buf)))
     }
 }
 
@@ -262,7 +263,7 @@ impl SstableStore {
                 }
 
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
-                let block = Block::decode(&block_data, uncompressed_capacity)?;
+                let block = Block::decode(block_data, uncompressed_capacity)?;
                 Ok(Box::new(block))
             }
         };
@@ -393,24 +394,12 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub async fn create_sst_writer(
+    pub fn create_sst_writer(
         self: Arc<Self>,
         sst_id: HummockSstableId,
-        policy: CachePolicy,
         options: SstableWriterOptions,
-    ) -> HummockResult<BoxedSstableWriter> {
-        match &options.mode {
-            SstableWriteMode::Batch => Ok(Box::new(BatchUploadWriter::new(
-                sst_id, self, policy, options,
-            ))),
-            SstableWriteMode::Streaming => {
-                let data_path = self.get_sst_data_path(sst_id);
-                let uploader = self.store.streaming_upload(&data_path).await?;
-                Ok(Box::new(StreamingUploadWriter::new(
-                    sst_id, self, policy, uploader, options,
-                )))
-            }
-        }
+    ) -> BatchUploadWriter {
+        BatchUploadWriter::new(sst_id, self, options)
     }
 
     pub async fn put_sst_meta(
@@ -448,41 +437,49 @@ impl MemoryCollector for SstableStore {
     }
 }
 
-pub type BoxedSstableWriter = Box<dyn SstableWriter<Output = JoinHandle<HummockResult<()>>>>;
-
-pub enum SstableWriteMode {
-    Batch,
-    Streaming,
-}
-
 pub struct SstableWriterOptions {
-    pub mode: SstableWriteMode,
     /// Total length of SST data.
     pub capacity_hint: Option<usize>,
     pub tracker: Option<MemoryTracker>,
+    pub policy: CachePolicy,
 }
 
-impl From<&SstableBuilderOptions> for SstableWriterOptions {
-    fn from(builder_opts: &SstableBuilderOptions) -> Self {
-        if builder_opts.enable_sst_streaming_upload {
-            Self {
-                mode: SstableWriteMode::Streaming,
-                capacity_hint: None,
-                tracker: None,
-            }
-        } else {
-            Self {
-                mode: SstableWriteMode::Batch,
-                capacity_hint: Some(builder_opts.capacity + builder_opts.block_capacity),
-                tracker: None,
-            }
-        }
+#[async_trait::async_trait]
+pub trait SstableWriterFactory: Send + Sync {
+    type Writer: SstableWriter<Output = UploadJoinHandle>;
+
+    async fn create_sst_writer(
+        &self,
+        sst_id: HummockSstableId,
+        options: SstableWriterOptions,
+    ) -> HummockResult<Self::Writer>;
+}
+
+pub struct BatchSstableWriterFactory {
+    sstable_store: SstableStoreRef,
+}
+
+impl BatchSstableWriterFactory {
+    pub fn new(sstable_store: SstableStoreRef) -> Self {
+        BatchSstableWriterFactory { sstable_store }
     }
 }
 
-pub struct BlockRange {
-    begin: usize,
-    end: usize,
+#[async_trait::async_trait]
+impl SstableWriterFactory for BatchSstableWriterFactory {
+    type Writer = BatchUploadWriter;
+
+    async fn create_sst_writer(
+        &self,
+        sst_id: HummockSstableId,
+        options: SstableWriterOptions,
+    ) -> HummockResult<Self::Writer> {
+        Ok(BatchUploadWriter::new(
+            sst_id,
+            self.sstable_store.clone(),
+            options,
+        ))
+    }
 }
 
 /// Buffer SST data and upload it as a whole on `finish`.
@@ -492,7 +489,7 @@ pub struct BatchUploadWriter {
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
     buf: BytesMut,
-    block_info: Vec<(BlockRange, usize)>,
+    block_info: Vec<Block>,
     tracker: Option<MemoryTracker>,
 }
 
@@ -500,13 +497,12 @@ impl BatchUploadWriter {
     pub fn new(
         sst_id: HummockSstableId,
         sstable_store: Arc<SstableStore>,
-        policy: CachePolicy,
         options: SstableWriterOptions,
     ) -> Self {
         Self {
             sst_id,
             sstable_store,
-            policy,
+            policy: options.policy,
             buf: BytesMut::with_capacity(options.capacity_hint.unwrap_or(0)),
             block_info: Vec::new(),
             tracker: options.tracker,
@@ -518,27 +514,23 @@ impl SstableWriter for BatchUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
 
     fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
-        let block_offset = self.buf.len();
         self.buf.put_slice(block);
         if let CachePolicy::Fill = self.policy {
-            self.block_info.push((
-                BlockRange {
-                    begin: block_offset,
-                    end: self.buf.len(),
-                },
+            self.block_info.push(Block::decode(
+                Bytes::from(block.to_vec()),
                 meta.uncompressed_size as usize,
-            ));
+            )?);
         }
         Ok(())
     }
 
-    fn finish(mut self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output> {
+    fn finish(mut self, size_footer: u32) -> HummockResult<Self::Output> {
         let join_handle = tokio::spawn(async move {
             // Upload size footer.
             self.buf.put_slice(&size_footer.to_le_bytes());
             let data = self.buf.freeze();
 
-            let tracker = self.tracker.map(|mut t| {
+            let _tracker = self.tracker.map(|mut t| {
                 if !t.try_increase_memory(data.capacity() as u64) {
                     tracing::debug!("failed to allocate increase memory for data file, sst id: {}, file size: {}",
                                     self.sst_id, data.capacity());
@@ -547,23 +539,23 @@ impl SstableWriter for BatchUploadWriter {
             });
 
             // Upload data to object store.
-            let ret = self
-                .sstable_store
+            self.sstable_store
                 .clone()
                 .put_sst_data(self.sst_id, data.clone())
-                .await;
+                .await?;
 
             // Add block cache.
-            if let CachePolicy::Fill = self.policy && ret.is_ok() {
+            if CachePolicy::Fill == self.policy {
                 debug_assert!(!self.block_info.is_empty());
-                for (block_idx, (block_range, uncompressed_size)) in self.block_info.iter().enumerate() {
-                    let block = Block::decode(&data[block_range.begin..block_range.end], *uncompressed_size)?;
-                self.sstable_store.block_cache
-                    .insert(self.sst_id, block_idx as u64, Box::new(block));
+                for (block_idx, block) in self.block_info.into_iter().enumerate() {
+                    self.sstable_store.block_cache.insert(
+                        self.sst_id,
+                        block_idx as u64,
+                        Box::new(block),
+                    );
                 }
             }
-            drop(tracker);
-            ret
+            Ok(())
         });
         Ok(join_handle)
     }
@@ -580,7 +572,7 @@ pub struct StreamingUploadWriter {
     /// Data are uploaded block by block, except for the size footer.
     object_uploader: ObjectStreamingUploader,
     /// Compressed blocks to refill block or meta cache. Keep the uncompressed capacity for decode.
-    blocks: Vec<(Bytes, usize)>,
+    blocks: Vec<Block>,
     data_len: usize,
     tracker: Option<MemoryTracker>,
 }
@@ -589,14 +581,13 @@ impl StreamingUploadWriter {
     pub fn new(
         sst_id: HummockSstableId,
         sstable_store: SstableStoreRef,
-        policy: CachePolicy,
         object_uploader: ObjectStreamingUploader,
         options: SstableWriterOptions,
     ) -> Self {
         Self {
             sst_id,
             sstable_store,
-            policy,
+            policy: options.policy,
             object_uploader,
             blocks: Vec::new(),
             data_len: 0,
@@ -608,19 +599,19 @@ impl StreamingUploadWriter {
 impl SstableWriter for StreamingUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
 
-    fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
-        self.data_len += block.len();
-        let block = BytesMut::from(block).freeze();
+    fn write_block(&mut self, block_data: &[u8], meta: &BlockMeta) -> HummockResult<()> {
+        self.data_len += block_data.len();
+        let block_data = Bytes::from(block_data.to_vec());
         if let CachePolicy::Fill = self.policy {
-            self.blocks
-                .push((block.clone(), meta.uncompressed_size as usize));
+            let block = Block::decode(block_data.clone(), meta.uncompressed_size as usize)?;
+            self.blocks.push(block);
         }
         self.object_uploader
-            .write_bytes(block)
+            .write_bytes(block_data)
             .map_err(HummockError::object_io_error)
     }
 
-    fn finish(mut self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output> {
+    fn finish(mut self, size_footer: u32) -> HummockResult<UploadJoinHandle> {
         // Upload size footer.
         self.object_uploader
             .write_bytes(Bytes::from(size_footer.to_le_bytes().to_vec()))
@@ -646,8 +637,7 @@ impl SstableWriter for StreamingUploadWriter {
             // Add block cache.
             if let CachePolicy::Fill = self.policy && ret.is_ok() {
                 debug_assert!(!self.blocks.is_empty());
-                for (block_idx, (block, uncompressed_size)) in self.blocks.iter().enumerate() {
-                    let block = Block::decode(block.chunk(), *uncompressed_size)?;
+                for (block_idx, block) in self.blocks.into_iter().enumerate() {
                     self.sstable_store.block_cache
                         .insert(self.sst_id, block_idx as u64, Box::new(block));
                 }
@@ -663,6 +653,36 @@ impl SstableWriter for StreamingUploadWriter {
     }
 }
 
+pub struct StreamingSstableWriterFactory {
+    sstable_store: SstableStoreRef,
+}
+
+impl StreamingSstableWriterFactory {
+    pub fn new(sstable_store: SstableStoreRef) -> Self {
+        StreamingSstableWriterFactory { sstable_store }
+    }
+}
+
+#[async_trait::async_trait]
+impl SstableWriterFactory for StreamingSstableWriterFactory {
+    type Writer = StreamingUploadWriter;
+
+    async fn create_sst_writer(
+        &self,
+        sst_id: HummockSstableId,
+        options: SstableWriterOptions,
+    ) -> HummockResult<Self::Writer> {
+        let path = self.sstable_store.get_sst_data_path(sst_id);
+        let uploader = self.sstable_store.store.streaming_upload(&path).await?;
+        Ok(StreamingUploadWriter::new(
+            sst_id,
+            self.sstable_store.clone(),
+            uploader,
+            options,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ops::Range;
@@ -670,7 +690,7 @@ mod tests {
 
     use risingwave_hummock_sdk::HummockSstableId;
 
-    use super::{SstableStoreRef, SstableWriteMode, SstableWriterOptions};
+    use super::{SstableStoreRef, SstableWriterOptions};
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -678,7 +698,7 @@ mod tests {
         default_builder_opt_for_test, gen_test_sstable_data, put_sst,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{SstableIterator, SstableMeta};
+    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta};
     use crate::monitor::StoreLocalStatistic;
 
     const SST_ID: HummockSstableId = 1;
@@ -724,9 +744,9 @@ mod tests {
                 .map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
         );
         let writer_opts = SstableWriterOptions {
-            mode: SstableWriteMode::Batch,
             capacity_hint: None,
             tracker: None,
+            policy: CachePolicy::Disable,
         };
         put_sst(
             SST_ID,
@@ -753,9 +773,9 @@ mod tests {
                 .map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
         );
         let writer_opts = SstableWriterOptions {
-            mode: SstableWriteMode::Streaming,
             capacity_hint: None,
             tracker: None,
+            policy: CachePolicy::Disable,
         };
         put_sst(
             SST_ID,
