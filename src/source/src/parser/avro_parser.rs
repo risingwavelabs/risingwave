@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
+use std::env;
 use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::future::Future;
@@ -262,7 +263,6 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
 
 impl SourceParser for AvroParser {
     fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
-        println!("payload {:?}", payload);
         let reader_rs = Reader::with_schema(&self.schema, payload);
         if let Ok(reader) = reader_rs {
             let mut rows = Vec::new();
