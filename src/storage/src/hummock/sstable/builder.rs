@@ -347,10 +347,13 @@ pub(super) mod tests {
         }
 
         let output = b.finish().unwrap();
-        let meta = output.meta;
+        let info = output.sst_info;
 
-        assert_eq!(test_key_of(0), meta.smallest_key);
-        assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), meta.largest_key);
+        assert_eq!(test_key_of(0), info.key_range.as_ref().unwrap().left);
+        assert_eq!(
+            test_key_of(TEST_KEYS_COUNT - 1),
+            info.key_range.as_ref().unwrap().right
+        );
     }
 
     async fn test_with_bloom_filter(with_blooms: bool) {
