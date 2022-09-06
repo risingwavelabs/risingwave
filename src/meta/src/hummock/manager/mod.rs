@@ -18,7 +18,7 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use function_name::named;
 use itertools::Itertools;
@@ -51,7 +51,7 @@ use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::CompactorManagerRef;
-use crate::manager::{ClusterManagerRef, IdCategory, MetaSrvEnv, META_NODE_ID};
+use crate::manager::{ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID};
 use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
@@ -755,6 +755,11 @@ where
     /// Cancels a compaction task no matter it's assigned or unassigned.
     pub async fn cancel_compact_task(&self, compact_task: &mut CompactTask) -> Result<bool> {
         compact_task.set_task_status(TaskStatus::Canceled);
+        self.cancel_compact_task_impl(compact_task).await
+    }
+
+    pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
+        assert_eq!(compact_task.task_status(), TaskStatus::Canceled);
         self.report_compact_task_impl(None, compact_task).await
     }
 
@@ -1375,7 +1380,7 @@ where
     }
 
     pub async fn trigger_manual_compaction(
-        self: &Arc<Self>,
+        &self,
         compaction_group: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<()> {
@@ -1400,7 +1405,7 @@ where
         let compact_task = self
             .manual_get_compact_task(compaction_group, manual_compaction_option)
             .await;
-        let mut compact_task = match compact_task {
+        let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
                 // No compaction task available.
@@ -1449,19 +1454,10 @@ where
         }
 
         if is_failed {
-            let hummock_manager = self.clone();
-            tokio::spawn(async move {
-                while let Err(e) = hummock_manager.cancel_compact_task(&mut compact_task).await {
-                    tracing::error!(
-                        "Failed to cancel task {}, will retry. {:#?}",
-                        compact_task.task_id,
-                        e
-                    );
-                    tokio::time::sleep(Duration::from_secs(60)).await;
-                }
-                tracing::info!("Cancelled task {}", compact_task.task_id);
-            });
-
+            self.env
+                .notification_manager()
+                .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(compact_task))
+                .await;
             return Err(Error::InternalError(anyhow::anyhow!(
                 "Failed to trigger_manual_compaction"
             )));
