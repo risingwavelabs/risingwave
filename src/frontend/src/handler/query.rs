@@ -55,6 +55,18 @@ pub async fn handle_query(
     };
     debug!("query_mode:{:?}", query_mode);
 
+    let timer = if query_mode == QueryMode::Local && stmt_type == StatementType::SELECT {
+        Some(
+            session
+                .env()
+                .frontend_metrics
+                .latency_local_execution
+                .start_timer(),
+        )
+    } else {
+        None
+    };
+
     let (rows, pg_descs) = match query_mode {
         QueryMode::Local => {
             if stmt_type.is_dml() {
@@ -86,6 +98,15 @@ pub async fn handle_query(
     // Implicitly flush the writes.
     if session.config().get_implicit_flush() {
         flush_for_write(&session, stmt_type).await?;
+    }
+
+    if let Some(timer) = timer {
+        timer.observe_duration();
+        session
+            .env()
+            .frontend_metrics
+            .query_counter_local_execution
+            .inc();
     }
 
     Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))

@@ -37,8 +37,8 @@ use risingwave_common::error::Result;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_common_service::MetricsManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -344,10 +344,12 @@ impl FrontendEnv {
         monitor_process(&registry).unwrap();
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
 
-        MetricsManager::boot_metrics_service(
-            "127.0.0.1:2222".to_string(),
-            Arc::new(registry),
-        );
+        if opts.metrics_level > 0 {
+            MetricsManager::boot_metrics_service(
+                opts.prometheus_listener_addr.clone(),
+                Arc::new(registry),
+            );
+        }
 
         Ok((
             Self {

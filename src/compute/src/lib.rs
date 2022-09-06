@@ -60,7 +60,7 @@ pub struct ComputeNodeOpts {
     pub prometheus_listener_addr: String,
 
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics 
+    /// 0 = close metrics
     /// >0 = open metrics
     #[clap(long, default_value = "0")]
     pub metrics_level: u32,
