@@ -185,9 +185,6 @@ where
                 format!("invalid hummock context {}", context_id),
             ));
         }
-        self.hummock_manager
-            .cancel_assigned_tasks_for_context_ids(context_id)
-            .await?;
         let rx = self
             .compactor_manager
             .add_compactor(context_id, req.max_concurrent_task_number);
