@@ -243,7 +243,7 @@ where
                     .await
                 {
                     tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
-                    // TODO #3677: handle cancellation via compaction heartbeat after #4496
+                    // handle cancellation via compaction heartbeat
                     return false;
                 }
                 continue 'send_task;
