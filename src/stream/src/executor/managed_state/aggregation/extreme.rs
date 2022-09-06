@@ -18,11 +18,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
-use itertools::Itertools;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::*;
+use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -158,18 +158,14 @@ impl<S: StateStore> GenericExtremeState<S> {
     }
 
     fn state_row_to_cache_entry(&self, state_row: &Row) -> StreamExecutorResult<(Vec<u8>, Datum)> {
-        let mut serializer = memcomparable::Serializer::new(vec![]);
-        self.state_table_order_col_indices
-            .iter()
-            .zip_eq(self.state_table_order_types.iter())
-            .try_for_each(|(idx, order_type)| {
-                serializer.set_reverse(match order_type {
-                    OrderType::Ascending => false,
-                    OrderType::Descending => true,
-                });
-                serialize_datum_into(&(state_row.0)[*idx], &mut serializer)
-            })?;
-        let cache_key = serializer.into_inner();
+        let mut cache_key = Vec::new();
+        let serializer = OrderedRowSerializer::new(self.state_table_order_types.clone());
+        serializer.serialize_datums(
+            self.state_table_order_col_indices
+                .iter()
+                .map(|col_idx| &(state_row.0)[*col_idx]),
+            &mut cache_key,
+        );
         let cache_data = state_row[self.state_table_agg_col_idx].clone();
         Ok((cache_key, cache_data))
     }
