@@ -143,7 +143,7 @@ pub async fn put_sst(
         let end_offset = offset + block_meta.len as usize;
         writer.write_block(&data[offset..end_offset], block_meta)?;
     }
-    meta.footer = writer.data_len() as u64;
+    meta.meta_offset = writer.data_len() as u64;
     let sst = SstableInfo {
         id: sst_id,
         key_range: Some(KeyRange {
@@ -153,7 +153,7 @@ pub async fn put_sst(
         }),
         file_size: meta.estimated_size as u64,
         table_ids: vec![],
-        meta_offset: meta.footer,
+        meta_offset: meta.meta_offset,
     };
     let writer_output = writer.finish(meta)?;
     writer_output.await.unwrap()?;

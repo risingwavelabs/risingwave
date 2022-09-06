@@ -111,7 +111,7 @@ impl Sstable {
             }),
             file_size: self.meta.estimated_size as u64,
             table_ids: vec![],
-            meta_offset: self.meta.footer,
+            meta_offset: self.meta.meta_offset,
         }
     }
 }
@@ -164,7 +164,7 @@ pub struct SstableMeta {
     pub key_count: u32,
     pub smallest_key: Vec<u8>,
     pub largest_key: Vec<u8>,
-    pub footer: u64,
+    pub meta_offset: u64,
     /// Format version, for further compatibility.
     pub version: u32,
 }
@@ -198,7 +198,7 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count as u32);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u64_le(self.footer);
+        buf.put_u64_le(self.meta_offset);
         let checksum = xxhash64_checksum(&buf[start_offset..]);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
@@ -244,7 +244,7 @@ impl SstableMeta {
             key_count,
             smallest_key,
             largest_key,
-            footer,
+            meta_offset: footer,
             version,
         })
     }
@@ -303,7 +303,7 @@ mod tests {
             key_count: 123,
             smallest_key: b"0-smallest-key".to_vec(),
             largest_key: b"9-largest-key".to_vec(),
-            footer: 123,
+            meta_offset: 123,
             version: VERSION,
         };
         let buf = meta.encode_to_bytes();

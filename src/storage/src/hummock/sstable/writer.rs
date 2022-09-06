@@ -103,7 +103,7 @@ mod tests {
             key_count: 0,
             smallest_key: Vec::new(),
             largest_key: Vec::new(),
-            footer: 0,
+            meta_offset: 0,
             version: VERSION,
         };
 

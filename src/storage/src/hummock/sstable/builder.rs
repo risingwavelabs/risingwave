@@ -247,7 +247,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             smallest_key,
             largest_key,
             version: VERSION,
-            footer: self.writer.data_len() as u64,
+            meta_offset: self.writer.data_len() as u64,
         };
         let sst_info = SstableInfo {
             id: self.sstable_id,
@@ -258,7 +258,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             }),
             file_size: meta.estimated_size as u64,
             table_ids: self.table_ids.into_iter().collect(),
-            meta_offset: meta.footer,
+            meta_offset: meta.meta_offset,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} add_bloom_filter_counts {}",
