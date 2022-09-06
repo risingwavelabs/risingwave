@@ -256,7 +256,7 @@ impl SharedBufferCompactRunner {
         let dummy_compaction_filter = DummyCompactionFilter {};
         let ssts = self
             .compactor
-            .compact_key_range_impl(iter, dummy_compaction_filter, filter_key_extractor, None)
+            .compact_key_range(iter, dummy_compaction_filter, filter_key_extractor, None)
             .await?;
         Ok((self.split_index, ssts))
     }

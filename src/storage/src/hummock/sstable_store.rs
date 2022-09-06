@@ -27,7 +27,6 @@ use risingwave_object_store::object::{
 use tokio::task::JoinHandle;
 use zstd::zstd_safe::WriteBuf;
 
-use super::compactor::TaskProgressTracker;
 use super::utils::MemoryTracker;
 use super::{
     Block, BlockCache, BlockMeta, Sstable, SstableMeta, SstableWriter, TieredCache, TieredCacheKey,
@@ -563,31 +562,6 @@ impl SstableWriter for BatchUploadWriter {
 
     fn data_len(&self) -> usize {
         self.buf.len()
-    }
-}
-
-/// This tracks the blocks written to the upload writer.
-/// It does not track the completion of SST upload, which is tracked separately.
-pub struct TrackedProgressUploadWriter<W: SstableWriter> {
-    writer: W,
-    task_progress_tracker: TaskProgressTracker,
-}
-
-impl<W: SstableWriter> SstableWriter for TrackedProgressUploadWriter<W> {
-    type Output = W::Output;
-
-    fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
-        self.writer.write_block(block, meta)
-    }
-
-    fn finish(self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output> {
-        let output = W::finish(Box::new(self.writer), size_footer);
-        self.task_progress_tracker.inc_ssts_sealed();
-        output
-    }
-
-    fn data_len(&self) -> usize {
-        self.writer.data_len()
     }
 }
 

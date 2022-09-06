@@ -99,7 +99,7 @@ impl CompactorRunner {
         );
         let ssts = self
             .compactor
-            .compact_key_range_impl(
+            .compact_key_range(
                 iter,
                 compaction_filter,
                 filter_key_extractor,

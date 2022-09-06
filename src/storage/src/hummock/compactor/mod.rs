@@ -31,7 +31,7 @@ pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
     TTLCompactionFilter,
 };
-pub use context::{CompactorContext, Context};
+pub use context::{CompactorContext, Context, TaskProgressTracker};
 use futures::future::try_join_all;
 use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
@@ -641,6 +641,7 @@ impl Compactor {
                 compaction_filter,
                 filter_key_extractor,
                 get_id_time.clone(),
+                task_progress_tracker.clone(),
             )
             .await?
         } else {
@@ -650,6 +651,7 @@ impl Compactor {
                 compaction_filter,
                 filter_key_extractor,
                 get_id_time.clone(),
+                task_progress_tracker.clone(),
             )
             .await?
         };
@@ -727,6 +729,7 @@ impl Compactor {
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         get_id_time: Arc<AtomicU64>,
+        task_progress_tracker: Option<TaskProgressTracker>,
     ) -> HummockResult<Vec<SplitTableOutput>> {
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
@@ -738,8 +741,11 @@ impl Compactor {
             sstable_writer_factory: writer_factory,
         };
 
-        let mut sst_builder =
-            CapacitySplitTableBuilder::new(builder_factory, self.context.stats.clone());
+        let mut sst_builder = CapacitySplitTableBuilder::new(
+            builder_factory,
+            self.context.stats.clone(),
+            task_progress_tracker,
+        );
         Compactor::compact_and_build_sst(
             &mut sst_builder,
             &self.task_config,
