@@ -429,7 +429,7 @@ mod tests {
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         // Only registered table_ids are accepted in commit_epoch
         register_table_ids_to_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager_ref.compaction_group_manager(),
             &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -454,7 +454,7 @@ mod tests {
 
         // Mimic dropping table
         unregister_table_ids_from_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager_ref.compaction_group_manager(),
             &[existing_table_id],
         )
         .await;
@@ -559,7 +559,7 @@ mod tests {
             };
             let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
             register_table_ids_to_compaction_group(
-                hummock_manager_ref.compaction_group_manager_ref_for_test(),
+                hummock_manager_ref.compaction_group_manager(),
                 &[table_id],
                 StaticCompactionGroupId::StateDefault.into(),
             )
@@ -580,7 +580,7 @@ mod tests {
 
         // Mimic dropping table
         unregister_table_ids_from_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager_ref.compaction_group_manager(),
             &[drop_table_id],
         )
         .await;
@@ -718,7 +718,7 @@ mod tests {
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager_ref.compaction_group_manager(),
             &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -883,7 +883,7 @@ mod tests {
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager_ref.compaction_group_manager(),
             &[keyspace.table_id().table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )

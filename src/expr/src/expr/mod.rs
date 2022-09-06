@@ -31,6 +31,7 @@ mod expr_nested_construct;
 mod expr_quaternary_bytes;
 mod expr_regexp;
 mod expr_ternary_bytes;
+mod expr_to_char_const_tmpl;
 pub mod expr_unary;
 mod expr_vnode;
 mod template;
