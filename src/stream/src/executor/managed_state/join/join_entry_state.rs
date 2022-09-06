@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use hashbrown::hash_map::{self, DefaultHashBuilder};
-use hashbrown::HashMap;
+use std::collections::{btree_map, BTreeMap};
+
 use risingwave_common::collection::estimate_size::EstimateSize;
 
 use super::*;
 
 #[expect(dead_code)]
-type JoinEntryStateIter<'a> = hash_map::Iter<'a, PkType, StateValueType>;
+type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
 
 #[expect(dead_code)]
-type JoinEntryStateValues<'a> = hash_map::Values<'a, PkType, StateValueType>;
+type JoinEntryStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
 
 #[expect(dead_code)]
-type JoinEntryStateValuesMut<'a> = hash_map::ValuesMut<'a, PkType, StateValueType>;
+type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
@@ -34,7 +34,7 @@ type JoinEntryStateValuesMut<'a> = hash_map::ValuesMut<'a, PkType, StateValueTyp
 /// join key will be presented in the cache.
 pub struct JoinEntryState {
     /// The full copy of the state. If evicted, it will be `None`.
-    cached: HashMap<PkType, StateValueType, DefaultHashBuilder, SharedStatsAlloc<Global>>,
+    cached: BTreeMap<PkType, StateValueType, SharedStatsAlloc<Global>>,
 
     /// Allocator for counting the memory usage of the `cached` map itself.
     allocator: SharedStatsAlloc<Global>,
@@ -48,7 +48,7 @@ impl Default for JoinEntryState {
         // TODO: may use static rc here.
         let allocator = StatsAlloc::new(Global).shared();
         Self {
-            cached: HashMap::new_in(allocator.clone()),
+            cached: BTreeMap::new_in(allocator.clone()),
             allocator,
             estimated_content_heap_size: 0,
         }
@@ -121,11 +121,8 @@ mod tests {
     async fn test_managed_all_or_none_state() {
         let mut managed_state = JoinEntryState::default();
         let pk_indices = [0];
-        let rows = [
-            Row::new(vec![Some(ScalarImpl::Int64(3)), Some(ScalarImpl::Int64(4))]),
-            Row::new(vec![Some(ScalarImpl::Int64(2)), Some(ScalarImpl::Int64(5))]),
-            Row::new(vec![Some(ScalarImpl::Int64(1)), Some(ScalarImpl::Int64(6))]),
-        ];
+        let col1 = [1, 2, 3];
+        let col2 = [6, 5, 4];
         let col_types = vec![DataType::Int64, DataType::Int64];
         let data_chunk = DataChunk::from_pretty(
             "I I
@@ -137,16 +134,19 @@ mod tests {
         for row_ref in data_chunk.rows() {
             let row: Row = row_ref.into();
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
+            // Pk is only a `i64` here, so encoding method does not matter.
             let pk = Row(pk).serialize().unwrap();
             let join_row = JoinRow { row, degree: 0 };
             managed_state.insert(pk, join_row.encode().unwrap());
         }
 
-        let matched_rows = managed_state.values_mut(&col_types).collect::<Vec<_>>();
-        assert_eq!(matched_rows.len(), rows.len());
-        for (_, matched_row) in matched_rows {
+        for ((_, matched_row), (d1, d2)) in managed_state
+            .values_mut(&col_types)
+            .zip_eq(col1.iter().zip_eq(col2.iter()))
+        {
             let matched_row = matched_row.unwrap();
-            assert!(rows.contains(&matched_row.row));
+            assert_eq!(matched_row.row[0], Some(ScalarImpl::Int64(*d1)));
+            assert_eq!(matched_row.row[1], Some(ScalarImpl::Int64(*d2)));
             assert_eq!(matched_row.degree, 0);
         }
     }

@@ -5022,7 +5022,6 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
- "hashbrown 0.11.2",
  "hyper",
  "iter-chunks",
  "itertools",

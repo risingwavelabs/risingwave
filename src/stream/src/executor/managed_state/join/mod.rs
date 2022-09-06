@@ -28,7 +28,8 @@ use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::value_encoding;
+use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
@@ -80,11 +81,6 @@ impl JoinRow {
         Ok(self.degree)
     }
 
-    /// Serialize the underlying row to value encoding. Order is not guaranteed.
-    pub fn serialize_by_indices(&self, indices: &[usize]) -> value_encoding::Result<Vec<u8>> {
-        self.row.serialize_by_indices(indices)
-    }
-
     /// Make degree as the last datum of row
     pub fn into_row(mut self) -> Row {
         self.row.0.push(Some(ScalarImpl::Int64(self.degree as i64)));
@@ -110,6 +106,10 @@ impl JoinRow {
             row: self.row.serialize()?,
             degree: self.degree,
         })
+    }
+
+    pub fn datums_by_indices<'a>(&'a self, indices: &'a [usize]) -> impl Iterator<Item = &Datum> {
+        self.row.datums_by_indices(indices)
     }
 }
 
@@ -149,7 +149,7 @@ impl EstimateSize for EncodedJoinRow {
     }
 }
 
-// Since pk does not need to be ordered, we can use value encoding for it.
+// Memcomparable encoding.
 type PkType = Vec<u8>;
 
 pub type StateValueType = EncodedJoinRow;
@@ -210,6 +210,8 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     null_matched: FixedBitSet,
     /// Indices of the primary keys
     pk_indices: Vec<usize>,
+    /// The memcomparable serializer of primary key.
+    pk_serializer: OrderedRowSerializer,
     /// Current epoch
     current_epoch: u64,
     /// State table
@@ -238,6 +240,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .collect_vec();
 
         let alloc = StatsAlloc::new(Global).shared();
+        // TODO: unify pk encoding with state table.
+        let pk_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending; pk_indices.len()]);
         Self {
             inner: EvictableHashMap::with_hasher_in(
                 target_cap,
@@ -248,6 +252,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             col_data_types: data_types,
             null_matched,
             pk_indices,
+            pk_serializer,
             current_epoch: 0,
             state_table,
             alloc,
@@ -336,7 +341,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         #[for_await]
         for row in table_iter {
             let row = row?.into_owned();
-            let pk = row.serialize_by_indices(&self.pk_indices)?;
+            let mut pk = vec![];
+            self.pk_serializer
+                .serialize_datums(row.datums_by_indices(&self.pk_indices), &mut pk);
 
             entry_state.insert(pk, JoinRow::from_row(row).encode()?);
         }
@@ -350,7 +357,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a key
-    pub fn insert(&mut self, key: &K, pk: PkType, value: JoinRow) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, key: &K, value: JoinRow) -> StreamExecutorResult<()> {
+        let mut pk = vec![];
+        self.pk_serializer
+            .serialize_datums(value.datums_by_indices(&self.pk_indices), &mut pk);
         if let Some(entry) = self.inner.get_mut(key) {
             entry.insert(pk, value.encode()?);
         }
@@ -361,7 +371,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a key
-    pub fn delete(&mut self, key: &K, pk: PkType, value: JoinRow) -> StreamExecutorResult<()> {
+    pub fn delete(&mut self, key: &K, value: JoinRow) -> StreamExecutorResult<()> {
+        let mut pk = vec![];
+        self.pk_serializer
+            .serialize_datums(value.datums_by_indices(&self.pk_indices), &mut pk);
         if let Some(entry) = self.inner.get_mut(key) {
             entry.remove(pk);
         }
