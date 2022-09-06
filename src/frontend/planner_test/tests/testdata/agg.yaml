@@ -190,25 +190,33 @@
     /* Use BatchSortAgg, when input provides order */
     create table t(v1 int, v2 int);
     create materialized view mv as select * from t order by v1 desc;
-    select max(v2) from mv group by v1;
+    select v1, max(v2) from mv group by v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [max(mv.v2)] }
-        BatchSortAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
-          BatchExchange { order: [mv.v1 DESC], dist: HashShard(mv.v1) }
-            BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
+      BatchSortAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
+        BatchExchange { order: [mv.v1 DESC], dist: HashShard(mv.v1) }
+          BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
 - sql: |
     /* Use BatchSortAgg, when output requires order */
     create table t(v1 int, v2 int);
-    select max(v2) from t group by v1 order by v1 desc;
+    select v1, max(v2) from t group by v1 order by v1 desc;
   batch_plan: |
-    BatchProject { exprs: [max(t.v2)] }
-      BatchExchange { order: [t.v1 DESC], dist: Single }
-        BatchSort { order: [t.v1 DESC] }
-          BatchProject { exprs: [max(t.v2), t.v1] }
-            BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
-              BatchExchange { order: [], dist: HashShard(t.v1) }
-                BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    BatchExchange { order: [t.v1 DESC], dist: Single }
+      BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+        BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
+          BatchSort { order: [t.v1 DESC] }
+            BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+- sql: |
+    /* Use BatchSortAgg, when output requires order with swapped output*/
+    create table t(v1 int, v2 int);
+    select max(v2), v1 from t group by v1 order by v1 desc;
+  batch_plan: |
+    BatchExchange { order: [t.v1 DESC], dist: Single }
+      BatchSort { order: [t.v1 DESC] }
+        BatchProject { exprs: [max(t.v2), t.v1] }
+          BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+            BatchExchange { order: [], dist: HashShard(t.v1) }
+              BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
     create table t (v1 real);
     select count(*) from t;

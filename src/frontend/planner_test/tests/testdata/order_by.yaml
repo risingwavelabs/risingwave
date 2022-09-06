@@ -196,3 +196,13 @@
     BatchExchange { order: [mv.v ASC], dist: Single }
       BatchSort { order: [mv.v ASC] }
         BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+- sql: |
+    CREATE TABLE test (a INTEGER, b INTEGER);
+    SELECT b % 2 AS f, SUM(a) FROM test GROUP BY b % 2 ORDER BY f;
+  batch_plan: |
+    BatchExchange { order: [(test.b % 2:Int32) ASC], dist: Single }
+      BatchSortAgg { group_key: [(test.b % 2:Int32)], aggs: [sum(test.a)] }
+        BatchExchange { order: [(test.b % 2:Int32) ASC], dist: HashShard((test.b % 2:Int32)) }
+          BatchSort { order: [(test.b % 2:Int32) ASC] }
+            BatchProject { exprs: [(test.b % 2:Int32), test.a] }
+              BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
