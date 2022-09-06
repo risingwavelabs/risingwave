@@ -275,7 +275,7 @@ impl BlockStream {
             )));
         }
 
-        let boxed_block = Box::new(Block::decode(&buffer, block_full_size)?);
+        let boxed_block = Box::new(Block::decode(Bytes::from(buffer), block_full_size)?);
         self.block_idx += 1;
 
         Ok(Some(BlockHolder::from_owned_block(boxed_block)))
