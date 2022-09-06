@@ -50,7 +50,11 @@ impl ScanRange {
             eq_conds: self
                 .eq_conds
                 .iter()
-                .map(|datum| serialize_datum(datum).expect("fail to serialize datum"))
+                .map(|datum| {
+                    let mut encoded = vec![];
+                    serialize_datum(datum, &mut encoded);
+                    encoded
+                })
                 .collect(),
             lower_bound: bound_to_proto(&self.range.0),
             upper_bound: bound_to_proto(&self.range.1),

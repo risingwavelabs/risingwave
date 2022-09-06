@@ -37,7 +37,7 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::optimizer::max_one_row_visitor::{HasMaxOneRowApply, HasMaxOneRowUncorrelatedApply};
-use crate::optimizer::plan_node::BatchExchange;
+use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
 use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply, PlanVisitor};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
@@ -340,6 +340,14 @@ impl PlanRoot {
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Distributed Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
+        }
+        // Always insert a exchange singleton for batch dml.
+        // TODO: Support local dml and
+        if plan.node_type() == PlanNodeType::BatchUpdate
+            || plan.node_type() == PlanNodeType::BatchInsert
+            || plan.node_type() == PlanNodeType::BatchDelete
+        {
+            plan = BatchExchange::new(plan, Order::any(), Distribution::Single).into();
         }
 
         Ok(plan)

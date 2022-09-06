@@ -497,9 +497,10 @@ impl S3ObjectStore {
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
-        let sdk_config = aws_config::SdkConfig::builder()
+        let sdk_config = aws_config::from_env()
             .retry_config(RetryConfig::new().with_max_attempts(4))
-            .build();
+            .load()
+            .await;
         let client = Client::new(&sdk_config);
 
         Self {
