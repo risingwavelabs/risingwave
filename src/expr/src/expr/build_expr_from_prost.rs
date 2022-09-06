@@ -214,7 +214,6 @@ pub fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     ensure!(children.len() == 2);
     let data_expr = expr_build_from_prost(&children[0])?;
     let tmpl_node = &children[1];
-    // TODO: Optimize for const template.
     if let RexNode::Constant(tmpl_value) = tmpl_node.get_rex_node().unwrap()
         && let Ok(tmpl) = ScalarImpl::from_proto_bytes(tmpl_value.get_body(), tmpl_node.get_return_type().unwrap())
     {
