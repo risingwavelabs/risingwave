@@ -70,6 +70,7 @@ impl Catalog {
     pub fn clear(&mut self) {
         self.database_by_name.clear();
         self.db_name_by_id.clear();
+        self.table_by_id.clear();
     }
 
     pub fn create_database(&mut self, db: ProstDatabase) {
