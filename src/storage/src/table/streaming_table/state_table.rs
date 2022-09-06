@@ -22,12 +22,13 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
-use risingwave_common::array::Row;
+use itertools::{izip, Itertools};
+use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
 use risingwave_common::types::VirtualNode;
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
@@ -400,6 +401,42 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
+    /// Write batch with a StreamChunk which should have the same schema with the table.
+    pub fn write_from_chunk(&mut self, chunk: StreamChunk) -> StorageResult<()> {
+        let chunk = chunk.compact().unwrap();
+        let (chunk, op) = chunk.into_parts();
+        let hash_builder = CRC32FastBuilder {};
+
+        let mut vnode_and_pks = vec![vec![]; chunk.cardinality()];
+
+        chunk
+            .get_hash_values(&self.dist_key_indices, hash_builder)
+            .unwrap()
+            .into_iter()
+            .zip_eq(vnode_and_pks.iter_mut())
+            .for_each(|(h, vnode_and_pk)| {
+                vnode_and_pk.extend_from_slice(h.to_vnode().to_be_bytes().as_slice())
+            });
+
+        chunk
+            .rows_with_holes()
+            .zip_eq(vnode_and_pks.iter_mut())
+            .for_each(|(r, vnode_and_pk)| {
+                if let Some(r) = r {
+                    self.pk_serializer.serialize_ref(r, vnode_and_pk);
+                }
+            });
+        let values = chunk.serialize();
+        // the chunk has been compacted at the most first in the function
+        for (op, key, value) in izip!(op, vnode_and_pks, values) {
+            match op {
+                Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
+                Op::Delete | Op::UpdateDelete => self.mem_table.delete(key, value),
+            }
+        }
+        todo!()
+    }
+
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.batch_write_rows(mem_table, new_epoch).await?;
@@ -407,7 +444,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Write to state store.
-    pub async fn batch_write_rows(
+    async fn batch_write_rows(
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,

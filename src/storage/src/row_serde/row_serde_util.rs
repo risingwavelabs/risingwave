@@ -40,40 +40,6 @@ pub fn serialize_pk_with_vnode(
     [&vnode.to_be_bytes(), pk_bytes.as_slice()].concat()
 }
 
-pub fn vec_serialize_value(columns: &[&ArrayImpl], vis: Vis) -> Vec<Vec<u8>> {
-    match vis {
-        Vis::Bitmap(vis) => {
-            let rows_num = vis.len();
-            let mut buffers = vec![vec![]; rows_num];
-            for c in columns {
-                for (i, buffer) in buffers.iter_mut().enumerate() {
-                    assert_eq!(c.len(), rows_num);
-                    // SAFETY(value_at_unchecked): the idx is always in bound.
-                    unsafe {
-                        if vis.is_set_unchecked(i) {
-                            serialize_datum_ref(&c.value_at_unchecked(i), buffer);
-                        }
-                    }
-                }
-            }
-            buffers
-        }
-        Vis::Compact(rows_num) => {
-            let mut buffers = vec![vec![]; rows_num];
-            for c in columns {
-                assert_eq!(c.len(), rows_num);
-                for (i, buffer) in buffers.iter_mut().enumerate() {
-                    // SAFETY(value_at_unchecked): the idx is always in bound.
-                    unsafe {
-                        serialize_datum_ref(&c.value_at_unchecked(i), buffer);
-                    }
-                }
-            }
-            buffers
-        }
-    }
-}
-
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
     let column_id = from_slice::<u32>(bytes)? ^ (1 << 31);
     Ok((column_id as i32).into())
