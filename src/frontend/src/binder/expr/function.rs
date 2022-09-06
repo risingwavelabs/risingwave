@@ -148,6 +148,10 @@ impl Binder {
             "octet_length" => ExprType::OctetLength,
             "bit_length" => ExprType::BitLength,
             "regexp_match" => ExprType::RegexpMatch,
+            // array
+            "array_cat" => ExprType::ArrayCat,
+            "array_append" => ExprType::ArrayAppend,
+            "array_prepend" => ExprType::ArrayPrepend,
             // System information operations.
             "pg_typeof" if inputs.len() == 1 => {
                 let input = &inputs[0];
@@ -181,7 +185,7 @@ impl Binder {
         Ok(FunctionCall::new(function_type, inputs)?.into())
     }
 
-    pub(super) fn bind_agg(&mut self, f: Function, kind: AggKind) -> Result<ExprImpl> {
+    pub(super) fn bind_agg(&mut self, mut f: Function, kind: AggKind) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
         let inputs: Vec<ExprImpl> = f
             .args
@@ -215,6 +219,10 @@ impl Binder {
                             .into(),
                     )
                     .into());
+                }
+                AggKind::Max | AggKind::Min => {
+                    // distinct max or min returns the same result as non-distinct max or min.
+                    f.distinct = false;
                 }
                 _ => (),
             };

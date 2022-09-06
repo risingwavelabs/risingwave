@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
@@ -37,7 +37,7 @@ use crate::expr::{
     Literal, OrderBy,
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
-use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
+use crate::optimizer::plan_node::{gen_filter_and_pushdown, BatchSortAgg, LogicalProject};
 use crate::optimizer::property::{
     Direction, Distribution, FunctionalDependencySet, Order, RequiredDist,
 };
@@ -306,7 +306,10 @@ pub struct LogicalAgg {
 }
 
 impl LogicalAgg {
-    pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, Vec<Vec<usize>>) {
+    pub fn infer_internal_table_catalog(
+        &self,
+        vnode_col_idx: Option<usize>,
+    ) -> (Vec<TableCatalog>, Vec<Vec<usize>>) {
         let mut table_catalogs = vec![];
         let out_fields = self.base.schema.fields();
         let in_fields = self.input().schema().fields().to_vec();
@@ -362,6 +365,7 @@ impl LogicalAgg {
                 in_dist_key.clone(),
                 in_append_only,
                 column_mapping,
+                vnode_col_idx,
             )
         };
 
@@ -393,6 +397,7 @@ impl LogicalAgg {
                 in_dist_key.clone(),
                 in_append_only,
                 column_mapping,
+                vnode_col_idx,
             )
         };
         // Map input col idx -> table col idx.
@@ -506,11 +511,10 @@ impl LogicalAgg {
         let mut local_group_key = self.group_key().to_vec();
         local_group_key.push(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
-        let local_agg = StreamHashAgg::new(LogicalAgg::new(
-            self.agg_calls().to_vec(),
-            local_group_key,
-            project.into(),
-        ));
+        let local_agg = StreamHashAgg::new(
+            LogicalAgg::new(self.agg_calls().to_vec(), local_group_key, project.into()),
+            Some(vnode_col_idx),
+        );
 
         if self.group_key().is_empty() {
             let exchange =
@@ -530,17 +534,21 @@ impl LogicalAgg {
         } else {
             let exchange = RequiredDist::shard_by_key(input_col_num, self.group_key())
                 .enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-            let global_agg = StreamHashAgg::new(LogicalAgg::new(
-                self.agg_calls()
-                    .iter()
-                    .enumerate()
-                    .map(|(partial_output_idx, agg_call)| {
-                        agg_call.partial_to_total_agg_call(n_local_group_key + partial_output_idx)
-                    })
-                    .collect(),
-                self.group_key().to_vec(),
-                exchange,
-            ));
+            let global_agg = StreamHashAgg::new(
+                LogicalAgg::new(
+                    self.agg_calls()
+                        .iter()
+                        .enumerate()
+                        .map(|(partial_output_idx, agg_call)| {
+                            agg_call
+                                .partial_to_total_agg_call(n_local_group_key + partial_output_idx)
+                        })
+                        .collect(),
+                    self.group_key().to_vec(),
+                    exchange,
+                ),
+                None,
+            );
             Ok(global_agg.into())
         }
     }
@@ -555,6 +563,7 @@ impl LogicalAgg {
                     RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
                         .enforce_if_not_satisfies(stream_input, &Order::any())?,
                 ),
+                None,
             )
             .into());
         }
@@ -690,12 +699,16 @@ impl LogicalAggBuilder {
     pub fn syntax_check(&self) -> Result<()> {
         let mut has_distinct = false;
         let mut has_order_by = false;
+        let mut has_non_distinct_string_agg = false;
         self.agg_calls.iter().for_each(|agg_call| {
             if agg_call.distinct {
                 has_distinct = true;
             }
             if !agg_call.order_by_fields.is_empty() {
                 has_order_by = true;
+            }
+            if !agg_call.distinct && agg_call.agg_kind == AggKind::StringAgg {
+                has_non_distinct_string_agg = true;
             }
         });
 
@@ -704,6 +717,17 @@ impl LogicalAggBuilder {
         if has_distinct && has_order_by {
             return Err(ErrorCode::InvalidInputSyntax(
                 "Order by aggregates are disallowed to occur with distinct aggregates".into(),
+            )
+            .into());
+        }
+
+        // when there are distinct aggregates, non-distinct aggregates will be rewritten as
+        // two-phase aggregates, while string_agg can not be rewritten as two-phase aggregates, so
+        // we have to ban this case now.
+        if has_distinct && has_non_distinct_string_agg {
+            return Err(ErrorCode::NotImplemented(
+                "Non-distinct string_agg can't appear with distinct aggregates".into(),
+                TrackingIssue::none(),
             )
             .into());
         }
@@ -1233,6 +1257,23 @@ impl ToBatch for LogicalAgg {
         let new_logical = self.clone_with_input(new_input);
         if self.group_key().is_empty() {
             Ok(BatchSimpleAgg::new(new_logical).into())
+        } else if self.group_key().iter().all(|group_by_idx| {
+            new_logical
+                .input()
+                .order()
+                .field_order
+                .iter()
+                .any(|field_order| field_order.index == *group_by_idx)
+                && new_logical
+                    .input()
+                    .schema()
+                    .fields()
+                    .get(*group_by_idx)
+                    .unwrap()
+                    .data_type
+                    == DataType::Int32
+        }) {
+            Ok(BatchSortAgg::new(new_logical).into())
         } else {
             Ok(BatchHashAgg::new(new_logical).into())
         }

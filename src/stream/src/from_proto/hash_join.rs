@@ -64,6 +64,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
         );
+        let null_safe = node.get_null_safe().to_vec();
         let output_indices = node
             .get_output_indices()
             .iter()
@@ -124,6 +125,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             source_r,
             params_l,
             params_r,
+            null_safe,
             pk_indices: params.pk_indices,
             output_indices,
             executor_id: params.executor_id,
@@ -149,6 +151,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     source_r: Box<dyn Executor>,
     params_l: JoinParams,
     params_r: JoinParams,
+    null_safe: Vec<bool>,
     pk_indices: PkIndices,
     output_indices: Vec<usize>,
     executor_id: u64,
@@ -173,6 +176,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.source_r,
             args.params_l,
             args.params_r,
+            args.null_safe,
             args.pk_indices,
             args.output_indices,
             args.executor_id,

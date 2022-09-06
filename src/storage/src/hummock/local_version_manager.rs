@@ -334,13 +334,13 @@ impl LocalVersionManager {
     }
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
-    /// we will only determine that it is greater than `max_current_epoch` and not wait
+    /// we will only check whether it is greater than `max_current_epoch` and won't wait.
     pub async fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> HummockResult<()> {
         let wait_epoch = match wait_epoch {
             HummockReadEpoch::Committed(epoch) => epoch,
             HummockReadEpoch::Current(epoch) => {
                 assert!(
-                    epoch > self.local_version.read().get_max_current_epoch()
+                    epoch <= self.local_version.read().get_max_sync_epoch()
                         && epoch != HummockEpoch::MAX
                 );
                 return Ok(());
@@ -554,7 +554,7 @@ impl LocalVersionManager {
             };
             let mut sync_size = 0;
             let mut all_uncommitted_data = vec![];
-            let epochs = local_version_guard
+            let mut epochs = local_version_guard
                 .drain_shared_buffer(..=epoch)
                 .into_iter()
                 .map(|(key, value)| {
@@ -573,9 +573,6 @@ impl LocalVersionManager {
                 prev_max_sync_epoch,
                 epochs,
             );
-            // Data of smaller epoch was added first. Take a `reverse` to make the data of greater
-            // epoch appear first.
-            all_uncommitted_data.reverse();
             if epochs.is_empty() {
                 tracing::trace!("sync epoch {} has no more task to do", epoch);
                 return Ok(SyncResult {
@@ -583,6 +580,10 @@ impl LocalVersionManager {
                     ..Default::default()
                 });
             }
+            // Data of smaller epoch was added first. Take a `reverse` to make the data of greater
+            // epoch appear first.
+            all_uncommitted_data.reverse();
+            epochs.reverse();
             let task_payload = all_uncommitted_data
                 .into_iter()
                 .flat_map(to_order_sorted)
@@ -614,7 +615,7 @@ impl LocalVersionManager {
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         let ssts = self
             .shared_buffer_uploader
-            .flush(task_payload, *epochs.first().unwrap(), epoch)
+            .flush(task_payload, *epochs.last().unwrap(), epoch)
             .await?;
         self.local_version
             .write()
