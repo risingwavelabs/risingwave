@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilder, NaiveDateTimeArray, Utf8ArrayBuilder};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
