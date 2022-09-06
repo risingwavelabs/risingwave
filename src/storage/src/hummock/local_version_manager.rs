@@ -328,7 +328,7 @@ impl LocalVersionManager {
     }
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
-    /// we will only check whether it is greater than `max_current_epoch` and won't wait.
+    /// we will only check whether it is le `max_sync_epoch` and won't wait.
     pub async fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> HummockResult<()> {
         let wait_epoch = match wait_epoch {
             HummockReadEpoch::Committed(epoch) => epoch,

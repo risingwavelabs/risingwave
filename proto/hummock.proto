@@ -83,10 +83,6 @@ message HummockVersionDeltas {
   repeated HummockVersionDelta version_deltas = 1;
 }
 
-message HummockCurrentEpoch {
-  uint64 current_epoch = 1;
-}
-
 // We will have two epoch after decouple
 message HummockSnapshot {
   // Epoch with checkpoint, we will read durable data with it.
