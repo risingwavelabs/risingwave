@@ -499,9 +499,7 @@ impl SstableWriter for BatchUploadWriter {
         }
         Ok(())
     }
-
     fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
-        println!("finish {}", self.sst_id);
         let join_handle = tokio::spawn(async move {
             meta.encode_to(&mut self.buf);
             let data = Bytes::from(self.buf);
@@ -609,6 +607,7 @@ impl SstableWriter for StreamingUploadWriter {
                 .await
                 .map_err(HummockError::object_io_error)?;
             self.sstable_store.insert_meta_cache(self.sst_id, meta);
+
 
             // Add block cache.
             if let CachePolicy::Fill = self.policy {
