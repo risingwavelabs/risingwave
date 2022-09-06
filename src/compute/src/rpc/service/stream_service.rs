@@ -164,7 +164,7 @@ impl StreamService for StreamServiceImpl {
             .mgr
             .sync_epoch(req.prev_epoch)
             .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
-            .await;
+            .await?;
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,

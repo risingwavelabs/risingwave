@@ -15,14 +15,13 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableDesc;
+use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, FragmentId, SchemaId};
-use crate::catalog::TableId;
 use crate::optimizer::property::FieldOrder;
 
 /// Includes full information about a table.
@@ -94,6 +93,11 @@ impl TableCatalog {
     /// Get a reference to the table catalog's table id.
     pub fn id(&self) -> TableId {
         self.id
+    }
+
+    pub fn with_id(mut self, id: TableId) -> Self {
+        self.id = id;
+        self
     }
 
     /// Get the table catalog's associated source id.
