@@ -121,7 +121,7 @@ mod tests {
             .for_each(|(block, meta)| {
                 writer.write_block(&block[..], meta).unwrap();
             });
-        let output_data = writer.finish(blocks.len() as u32).unwrap();
+        let output_data = writer.finish(&meta).unwrap();
         assert_eq!(output_data, data);
     }
 }

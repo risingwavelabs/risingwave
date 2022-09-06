@@ -33,7 +33,7 @@ pub use compaction_filter::{
 };
 pub use context::{CompactorContext, Context, TaskProgressTracker};
 use futures::future::try_join_all;
-use futures::{stream, StreamExt};
+use futures::{stream, StreamExt, TryFutureExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
@@ -674,7 +674,13 @@ impl Compactor {
             let sst_size = sst_info.file_size;
             ssts.push(sst_info);
 
-            upload_join_handles.push(upload_join_handle);
+            let tracker_cloned = task_progress_tracker.clone();
+            upload_join_handles.push(upload_join_handle.and_then(|_| async move {
+                if let Some(tracker) = tracker_cloned {
+                    tracker.inc_ssts_uploaded();
+                }
+                Ok(())
+            }));
 
             if self.context.is_share_buffer_compact {
                 self.context

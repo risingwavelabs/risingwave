@@ -21,8 +21,6 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
-
-use super::SstableMeta;
 use crate::hummock::compactor::TaskProgressTracker;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
