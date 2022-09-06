@@ -43,7 +43,9 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
+use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
+use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
@@ -202,6 +204,44 @@ where
         // Release snapshots pinned by meta on restarting.
         instance.release_contexts([META_NODE_ID]).await?;
         Ok(instance)
+    }
+
+    pub async fn start_compaction_heartbeat(
+        hummock_manager: Arc<Self>,
+    ) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let compactor_manager = hummock_manager.compactor_manager.clone();
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(std::time::Duration::from_millis(1000));
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {
+                    },
+                    // Shutdown
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Compaction heartbeat checker is stopped");
+                        return;
+                    }
+                }
+                // TODO: add metrics to track expired tasks
+                for (context_id, mut task) in compactor_manager.get_expired_tasks() {
+                    tracing::info!("Task with task_id {} with context_id {context_id} has expired due to lack of visible progress", task.task_id);
+                    if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                        // Forcefully cancel the task so that it terminates early on the compactor
+                        // node.
+                        let _ = compactor.cancel_task(task.task_id).await;
+                        tracing::info!("CancelTask operation for task_id {} has been sent to node with context_id {context_id}", task.task_id);
+                    }
+
+                    if let Err(e) = hummock_manager.cancel_compact_task(&mut task).await {
+                        tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                            until we can successfully report its status. {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
+                    }
+                }
+            }
+        });
+        (join_handle, shutdown_tx)
     }
 
     /// Load state from meta store.
@@ -815,6 +855,9 @@ where
         );
         commit_multi_var!(self, Some(assignee_context_id), compact_task_assignment)?;
 
+        self.compactor_manager
+            .initiate_task_heartbeat(assignee_context_id, compact_task.clone());
+
         #[cfg(test)]
         {
             drop(compaction_guard);
@@ -936,6 +979,14 @@ where
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
 
+        // A task heartbeat is removed IFF we report the task status of a task and it still has a
+        // valid assignment, OR we remove the node context from our list of nodes, in which
+        // case the associated heartbeats are forcefully purged.
+        if let Some(context_id) = assignee_context_id {
+            self.compactor_manager
+                .remove_task_heartbeat(context_id, compact_task.task_id);
+        }
+
         // Update compaaction task count.
         let task_label = match task_status {
             TaskStatus::Success => "success",
@@ -968,7 +1019,7 @@ where
             compact_task.compaction_group_id,
         );
 
-        self.try_send_compaction_request(compact_task.compaction_group_id);
+        self.try_send_compaction_request(compact_task.compaction_group_id)?;
 
         #[cfg(test)]
         {
@@ -1219,7 +1270,7 @@ where
         drop(versioning_guard);
         // commit_epoch may contains SSTs from any compaction group
         for id in modified_compaction_groups {
-            self.try_send_compaction_request(id);
+            self.try_send_compaction_request(id)?;
         }
         #[cfg(test)]
         {
@@ -1372,11 +1423,14 @@ where
     }
 
     /// Sends a compaction request to compaction scheduler.
-    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
+    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> Result<bool> {
         if let Some(sender) = self.compaction_scheduler.read().as_ref() {
-            return sender.try_send(compaction_group);
+            sender
+                .try_send(compaction_group)
+                .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))
+        } else {
+            Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
         }
-        false
     }
 
     pub async fn trigger_manual_compaction(

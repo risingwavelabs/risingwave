@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Value {
     /// Numeric literal
-    Number(String, bool),
+    Number(String),
     /// 'string value'
     SingleQuotedString(String),
     /// N'string value'
@@ -59,7 +59,7 @@ pub enum Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Value::Number(v, l) => write!(f, "{}{long}", v, long = if *l { "L" } else { "" }),
+            Value::Number(v) => write!(f, "{}", v),
             Value::DoubleQuotedString(v) => write!(f, "\"{}\"", v),
             Value::SingleQuotedString(v) => write!(f, "'{}'", escape_single_quote_string(v)),
             Value::NationalStringLiteral(v) => write!(f, "N'{}'", v),

@@ -27,7 +27,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
-use super::managed_state::top_n::ManagedTopNStateNew;
+use super::managed_state::top_n::ManagedTopNState;
 use super::top_n::{generate_executor_pk_indices_info, TopNCache};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
@@ -90,7 +90,7 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore> {
     internal_key_order_types: Vec<OrderType>,
 
     /// We are interested in which element is in the range of [offset, offset+limit).
-    managed_state: ManagedTopNStateNew<S>,
+    managed_state: ManagedTopNState<S>,
 
     /// which column we used to group the data.
     group_by: Vec<usize>,
@@ -124,7 +124,7 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
 
         let managed_state =
-            ManagedTopNStateNew::<S>::new(total_count, state_table, ordered_row_deserializer);
+            ManagedTopNState::<S>::new(total_count, state_table, ordered_row_deserializer);
 
         Ok(Self {
             info: ExecutorInfo {

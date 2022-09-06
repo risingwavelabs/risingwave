@@ -169,6 +169,7 @@ pub async fn compute_node_serve(
                 filter_key_extractor_manager: filter_key_extractor_manager.clone(),
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
+                task_progress: Default::default(),
             });
             // TODO: use normal sstable store for single-process mode.
             let compactor_sstable_store = CompactorSstableStore::new(
