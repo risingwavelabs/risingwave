@@ -6,7 +6,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > (1.5:Decimal * min(t2.x))) }
-        LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
+        LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
           LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [(1.5:Decimal * min(t2.x))] }
             LogicalAgg { aggs: [min(t2.x)] }
@@ -30,13 +30,13 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > min(t2.x)) }
-        LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
+        LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
           LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [min(t2.x)] }
             LogicalAgg { aggs: [min(t2.x)] }
               LogicalProject { exprs: [t2.x] }
                 LogicalFilter { predicate: (t2.y = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
-                  LogicalJoin { type: LeftOuter, on: true, output: all }
+                  LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
                     LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
                     LogicalProject { exprs: [CorrelatedInputRef { index: 1, correlated_id: 1 }] }
                       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
@@ -48,13 +48,13 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > min(t2.x)) }
-        LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
+        LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
           LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [min(t2.x)] }
             LogicalAgg { aggs: [min(t2.x)] }
               LogicalProject { exprs: [t2.x] }
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) AND (CorrelatedInputRef { index: 0, correlated_id: 1 } = max(t3.x)) }
-                  LogicalJoin { type: LeftOuter, on: true, output: all }
+                  LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
                     LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
                     LogicalProject { exprs: [max(t3.x)] }
                       LogicalAgg { aggs: [max(t3.x)] }
@@ -86,7 +86,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > (1.5:Decimal * min(t2.x))) }
-        LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
+        LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
           LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [(1.5:Decimal * min(t2.x))] }
             LogicalAgg { aggs: [min(t2.x)] }
@@ -110,7 +110,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > count) }
-        LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
+        LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
           LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [count] }
             LogicalAgg { aggs: [count] }
@@ -133,7 +133,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > (count + count)) }
-        LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
+        LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
           LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [(count + count)] }
             LogicalAgg { aggs: [count, count] }
@@ -220,7 +220,7 @@
         LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t2.x] }
           LogicalFilter { predicate: (t2.y = CorrelatedInputRef { index: 1, correlated_id: 1 }) AND (t2.x > min(t3.x)) }
-            LogicalJoin { type: LeftOuter, on: true, output: all }
+            LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
               LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
               LogicalProject { exprs: [min(t3.x)] }
                 LogicalAgg { aggs: [min(t3.x)] }
@@ -244,7 +244,7 @@
       LogicalApply { type: LeftSemi, on: (t1.y = t2.x), correlated_id: 1 }
         LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t2.x] }
-          LogicalJoin { type: LeftSemi, on: (t2.y = t3.y), output: all }
+          LogicalApply { type: LeftSemi, on: (t2.y = t3.y), correlated_id: 2 }
             LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
             LogicalProject { exprs: [t3.y] }
               LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t3.y) }
@@ -257,7 +257,7 @@
     select x from t1 where y in (select x from t2 where y in (select y from t3 where t2.y = t3.y));
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
-      LogicalJoin { type: LeftSemi, on: (t1.y = t2.x), output: all }
+      LogicalApply { type: LeftSemi, on: (t1.y = t2.x), correlated_id: 1 }
         LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t2.x] }
           LogicalApply { type: LeftSemi, on: (t2.y = t3.y), correlated_id: 2 }
@@ -337,7 +337,7 @@
     );
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalJoin { type: LeftSemi, on: true, output: all }
+      LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
         LogicalAgg { aggs: [] }
           LogicalProject { exprs: [] }
             LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id] }
@@ -376,21 +376,7 @@
     create table t1(x int, y int);
     create table t2(x int, y int);
     select t2.x, (select x from t1 where t1.y = t2.y) from t2 where x > 100 order by t2.x limit 100;
-  logical_plan: |
-    LogicalProject { exprs: [t2.x, t1.x] }
-      LogicalTopN { order: "[t2.x ASC]", limit: 100, offset: 0 }
-        LogicalProject { exprs: [t2.x, t1.x, t2.x] }
-          LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
-            LogicalFilter { predicate: (t2.x > 100:Int32) }
-              LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
-            LogicalProject { exprs: [t1.x] }
-              LogicalFilter { predicate: (t1.y = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
-                LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-  optimized_logical_plan: |
-    LogicalTopN { order: "[t2.x ASC]", limit: 100, offset: 0 }
-      LogicalJoin { type: LeftOuter, on: (t1.y = t2.y), output: [t2.x, t1.x, t2.x] }
-        LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: (t2.x > 100:Int32) }
-        LogicalScan { table: t1, columns: [t1.x, t1.y] }
+  optimizer_error: 'internal error: Subquery can not be unnested.'
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -646,15 +632,7 @@
     create table t1 (a int, b int);
     create table t2 (b int, c int);
     select a, (select t1.a), c from t1, t2 where t1.b = t2.b order by c;
-  optimized_logical_plan: |
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.a, t1.a), output: [t1.a, t1.a, t2.c] }
-      LogicalJoin { type: Inner, on: (t1.b = t2.b), output: [t1.a, t2.c] }
-        LogicalScan { table: t1, columns: [t1.a, t1.b] }
-        LogicalScan { table: t2, columns: [t2.b, t2.c] }
-      LogicalJoin { type: Inner, on: true, output: [t1.a, t1.a] }
-        LogicalAgg { group_key: [t1.a], aggs: [] }
-          LogicalScan { table: t1, columns: [t1.a] }
-        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  optimizer_error: 'internal error: Subquery can not be unnested.'
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);

@@ -170,11 +170,15 @@ impl PlanRoot {
         }
 
         // Simple Unnesting.
-        // Pull correlated predicates up the algebra tree to unnest simple subquery.
         plan = self.optimize_by_rules(
             plan,
             "Simple Unnesting".to_string(),
-            vec![PullUpCorrelatedPredicateRule::create()],
+            vec![
+                // Pull correlated predicates up the algebra tree to unnest simple subquery.
+                PullUpCorrelatedPredicateRule::create(),
+                // Convert apply to join.
+                ApplyToJoinRule::create(),
+            ],
             ApplyOrder::TopDown,
         );
 
