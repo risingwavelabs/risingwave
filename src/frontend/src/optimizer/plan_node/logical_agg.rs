@@ -602,7 +602,11 @@ impl LogicalAgg {
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 
-    fn output_requires_order(&self, required_order: &Order) -> bool {
+    // Check if the output of the aggregation needs to be sorted
+    // If so, push down the sort below the aggregation and use sort merge aggregation
+    // The output must require an order an all group_keys and the datatype of the
+    // columns need to be int32
+    fn output_requires_order_on_group_keys(&self, required_order: &Order) -> bool {
         self.group_key().iter().all(|group_by_idx| {
             required_order
                 .field_order
@@ -612,7 +616,10 @@ impl LogicalAgg {
         })
     }
 
-    fn input_supplies_order(&self, new_logical: &LogicalAgg) -> bool {
+    // Check if the input is already sorted, and hence sort merge aggregation can be used
+    // It can only be used, if the input is sorted on all group key indices and the
+    // datatype of the column is int32
+    fn input_provides_order_on_group_keys(&self, new_logical: &LogicalAgg) -> bool {
         self.group_key().iter().all(|group_by_idx| {
             new_logical
                 .input()
@@ -1269,20 +1276,20 @@ impl ToBatch for LogicalAgg {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
+        let mut input_order = Order::any();
+        let output_requires_order = self.output_requires_order_on_group_keys(required_order);
+        if output_requires_order {
+            // Push down sort before aggregation
+            input_order = self
+                .o2i_col_mapping()
+                .rewrite_provided_order(required_order);
+        }
+        let new_input = self.input().to_batch_with_order_required(&input_order)?;
         let new_logical = self.clone_with_input(new_input);
         if self.group_key().is_empty() {
             required_order.enforce_if_not_satisfies(BatchSimpleAgg::new(new_logical).into())
-        } else if self.input_supplies_order(&new_logical) {
+        } else if self.input_provides_order_on_group_keys(&new_logical) || output_requires_order {
             required_order.enforce_if_not_satisfies(BatchSortAgg::new(new_logical).into())
-        } else if self.output_requires_order(required_order) {
-            let sorted_input = self.input().to_batch_with_order_required(
-                &self
-                    .o2i_col_mapping()
-                    .rewrite_provided_order(required_order),
-            )?;
-            let sorted_logical = self.clone_with_input(sorted_input);
-            required_order.enforce_if_not_satisfies(BatchSortAgg::new(sorted_logical).into())
         } else {
             required_order.enforce_if_not_satisfies(BatchHashAgg::new(new_logical).into())
         }
