@@ -23,8 +23,9 @@ use risingwave_pb::stream_plan::DynamicFilterNode;
 use super::utils::TableCatalogBuilder;
 use crate::catalog::TableCatalog;
 use crate::expr::Expr;
-use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, ToStreamProst};
+use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{Condition, ConditionDisplay};
 
 #[derive(Clone, Debug)]
@@ -92,21 +93,21 @@ impl PlanTreeNodeBinary for StreamDynamicFilter {
 
 impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 
-impl ToStreamProst for StreamDynamicFilter {
-    fn to_stream_prost_body(&self) -> NodeBody {
+impl StreamNode for StreamDynamicFilter {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
+        let condition = self
+            .predicate
+            .as_expr_unless_true()
+            .map(|x| x.to_expr_proto());
+        let left_table = infer_left_internal_table_catalog(self.clone().into(), self.left_index)
+            .with_id(state.gen_table_id_wrapped());
+        let right_table = infer_right_internal_table_catalog(self.right.clone())
+            .with_id(state.gen_table_id_wrapped());
         NodeBody::DynamicFilter(DynamicFilterNode {
             left_key: self.left_index as u32,
-            condition: self
-                .predicate
-                .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
-            left_table: Some(
-                infer_left_internal_table_catalog(self.clone().into(), self.left_index)
-                    .to_state_table_prost(),
-            ),
-            right_table: Some(
-                infer_right_internal_table_catalog(self.right.clone()).to_state_table_prost(),
-            ),
+            condition,
+            left_table: Some(left_table.to_state_table_prost()),
+            right_table: Some(right_table.to_state_table_prost()),
         })
     }
 }

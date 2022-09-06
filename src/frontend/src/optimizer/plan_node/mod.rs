@@ -132,7 +132,7 @@ impl dyn PlanNode {
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
-    pub fn to_stream_prost(&self) -> StreamPlanProst {
+    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanProst {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost();
         }
@@ -140,18 +140,18 @@ impl dyn PlanNode {
             return stream_index_scan.adhoc_to_stream_prost();
         }
 
-        let node = Some(self.to_stream_prost_body());
+        let node = Some(self.to_stream_prost_body(state));
         let input = self
             .inputs()
             .into_iter()
-            .map(|plan| plan.to_stream_prost())
+            .map(|plan| plan.to_stream_prost(state))
             .collect();
         // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
             identity: format!("{}", self),
             node_body: node,
-            operator_id: self.id().0 as u64,
+            operator_id: self.id().0 as _,
             stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
@@ -325,6 +325,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
