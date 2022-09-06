@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode;
 
@@ -27,10 +27,12 @@ use crate::expr::expr_ternary_bytes::{
     new_overlay_exp, new_replace_expr, new_split_part_expr, new_substr_start_end,
     new_translate_expr,
 };
+use crate::expr::expr_to_char_const_tmpl::{ExprToCharConstTmpl, ExprToCharConstTmplContext};
 use crate::expr::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
-use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
+use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
+use crate::vector_op::to_char::compile_pattern_to_chrono;
 use crate::{bail, ensure, Result};
 
 fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
@@ -211,9 +213,23 @@ pub fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
     let data_expr = expr_build_from_prost(&children[0])?;
-    // TODO: Optimize for const template.
-    let tmpl_expr = expr_build_from_prost(&children[1])?;
-    Ok(new_to_char(data_expr, tmpl_expr, ret_type))
+    let tmpl_node = &children[1];
+    if let RexNode::Constant(tmpl_value) = tmpl_node.get_rex_node().unwrap()
+        && let Ok(tmpl) = ScalarImpl::from_proto_bytes(tmpl_value.get_body(), tmpl_node.get_return_type().unwrap())
+    {
+        let tmpl = tmpl.as_utf8();
+        let pattern = compile_pattern_to_chrono(tmpl);
+
+        Ok(ExprToCharConstTmpl {
+            ctx: ExprToCharConstTmplContext {
+                chrono_tmpl: pattern,
+            },
+            child: data_expr,
+        }.boxed())
+    } else {
+        let tmpl_expr = expr_build_from_prost(&children[1])?;
+        Ok(new_to_char(data_expr, tmpl_expr, ret_type))
+    }
 }
 
 #[cfg(test)]
