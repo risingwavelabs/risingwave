@@ -36,7 +36,7 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
-use crate::optimizer::plan_visitor::{PlanVisitor, has_batch_exchange, has_logical_apply};
+use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
