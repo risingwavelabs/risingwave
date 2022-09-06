@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::fmt::{Display, Formatter, Write as _};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::ops::{Add, Sub};
+use std::ops::{Add, Neg, Sub};
 
 use anyhow::anyhow;
 use byteorder::{BigEndian, WriteBytesExt};
@@ -406,6 +406,18 @@ impl CheckedSub for IntervalUnit {
         let days = self.days.checked_sub(other.days)?;
         let ms = self.ms.checked_sub(other.ms)?;
         Some(IntervalUnit { months, days, ms })
+    }
+}
+
+impl Neg for IntervalUnit {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self {
+            months: -self.months,
+            days: -self.days,
+            ms: -self.ms,
+        }
     }
 }
 

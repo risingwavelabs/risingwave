@@ -26,7 +26,9 @@ use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    add_new_sub_level, HummockVersionExt,
+};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
     HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
@@ -41,7 +43,9 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
+use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
+use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
@@ -49,7 +53,7 @@ use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::CompactorManagerRef;
-use crate::manager::{ClusterManagerRef, IdCategory, MetaSrvEnv, META_NODE_ID};
+use crate::manager::{ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID};
 use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
@@ -200,6 +204,44 @@ where
         // Release snapshots pinned by meta on restarting.
         instance.release_contexts([META_NODE_ID]).await?;
         Ok(instance)
+    }
+
+    pub async fn start_compaction_heartbeat(
+        hummock_manager: Arc<Self>,
+    ) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let compactor_manager = hummock_manager.compactor_manager.clone();
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(std::time::Duration::from_millis(1000));
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {
+                    },
+                    // Shutdown
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Compaction heartbeat checker is stopped");
+                        return;
+                    }
+                }
+                // TODO: add metrics to track expired tasks
+                for (context_id, mut task) in compactor_manager.get_expired_tasks() {
+                    tracing::info!("Task with task_id {} with context_id {context_id} has expired due to lack of visible progress", task.task_id);
+                    if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                        // Forcefully cancel the task so that it terminates early on the compactor
+                        // node.
+                        let _ = compactor.cancel_task(task.task_id).await;
+                        tracing::info!("CancelTask operation for task_id {} has been sent to node with context_id {context_id}", task.task_id);
+                    }
+
+                    if let Err(e) = hummock_manager.cancel_compact_task(&mut task).await {
+                        tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                            until we can successfully report its status. {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
+                    }
+                }
+            }
+        });
+        (join_handle, shutdown_tx)
     }
 
     /// Load state from meta store.
@@ -753,6 +795,11 @@ where
     /// Cancels a compaction task no matter it's assigned or unassigned.
     pub async fn cancel_compact_task(&self, compact_task: &mut CompactTask) -> Result<bool> {
         compact_task.set_task_status(TaskStatus::Canceled);
+        self.cancel_compact_task_impl(compact_task).await
+    }
+
+    pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
+        assert_eq!(compact_task.task_status(), TaskStatus::Canceled);
         self.report_compact_task_impl(None, compact_task).await
     }
 
@@ -807,6 +854,9 @@ where
             },
         );
         commit_multi_var!(self, Some(assignee_context_id), compact_task_assignment)?;
+
+        self.compactor_manager
+            .initiate_task_heartbeat(assignee_context_id, compact_task.clone());
 
         #[cfg(test)]
         {
@@ -929,6 +979,14 @@ where
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
 
+        // A task heartbeat is removed IFF we report the task status of a task and it still has a
+        // valid assignment, OR we remove the node context from our list of nodes, in which
+        // case the associated heartbeats are forcefully purged.
+        if let Some(context_id) = assignee_context_id {
+            self.compactor_manager
+                .remove_task_heartbeat(context_id, compact_task.task_id);
+        }
+
         // Update compaaction task count.
         let task_label = match task_status {
             TaskStatus::Success => "success",
@@ -961,7 +1019,7 @@ where
             compact_task.compaction_group_id,
         );
 
-        self.try_send_compaction_request(compact_task.compaction_group_id);
+        self.try_send_compaction_request(compact_task.compaction_group_id)?;
 
         #[cfg(test)]
         {
@@ -1127,7 +1185,13 @@ where
 
         let mut modified_compaction_groups = vec![];
         // Append SSTs to a new version.
-        for (compaction_group_id, sstables) in &sstables.into_iter().group_by(|(cg_id, _)| *cg_id) {
+        for (compaction_group_id, sstables) in &sstables
+            .into_iter()
+            // the sort is stable sort, and will not change the order within compaction group.
+            // Do a sort so that sst in the same compaction group can be consecutive
+            .sorted_by_key(|(cg_id, _)| *cg_id)
+            .group_by(|(cg_id, _)| *cg_id)
+        {
             modified_compaction_groups.push(compaction_group_id);
             let group_sstables = sstables.into_iter().map(|(_, sst)| sst).collect_vec();
             let level_deltas = &mut new_version_delta
@@ -1140,28 +1204,16 @@ where
                 .l0
                 .as_mut()
                 .expect("Expect level 0 is not empty");
+            let l0_sub_level_id = max_committed_epoch;
             let level_delta = LevelDelta {
                 level_idx: 0,
                 inserted_table_infos: group_sstables.clone(),
-                l0_sub_level_id: max_committed_epoch,
+                l0_sub_level_id,
                 ..Default::default()
             };
-
-            // All files will be committed in one new Overlapping sub-level and become
-            // Nonoverlapping  after at least one compaction.
-            let level = Level {
-                level_type: LevelType::Overlapping as i32,
-                level_idx: 0,
-                total_file_size: group_sstables
-                    .iter()
-                    .map(|table| table.file_size)
-                    .sum::<u64>(),
-                table_infos: group_sstables,
-                sub_level_id: level_delta.l0_sub_level_id,
-            };
-            version_l0.total_file_size += level.total_file_size;
-            version_l0.sub_levels.push(level);
             level_deltas.push(level_delta);
+
+            add_new_sub_level(version_l0, l0_sub_level_id, group_sstables);
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
@@ -1218,7 +1270,7 @@ where
         drop(versioning_guard);
         // commit_epoch may contains SSTs from any compaction group
         for id in modified_compaction_groups {
-            self.try_send_compaction_request(id);
+            self.try_send_compaction_request(id)?;
         }
         #[cfg(test)]
         {
@@ -1371,11 +1423,14 @@ where
     }
 
     /// Sends a compaction request to compaction scheduler.
-    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
+    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> Result<bool> {
         if let Some(sender) = self.compaction_scheduler.read().as_ref() {
-            return sender.try_send(compaction_group);
+            sender
+                .try_send(compaction_group)
+                .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))
+        } else {
+            Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
         }
-        false
     }
 
     pub async fn trigger_manual_compaction(
@@ -1404,7 +1459,7 @@ where
         let compact_task = self
             .manual_get_compact_task(compaction_group, manual_compaction_option)
             .await;
-        let mut compact_task = match compact_task {
+        let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
                 // No compaction task available.
@@ -1425,7 +1480,6 @@ where
         };
 
         let mut is_failed = false;
-        let mut need_cancel_task = false;
         if let Err(e) = self
             .assign_compaction_task(&compact_task, compactor.context_id())
             .await
@@ -1444,7 +1498,6 @@ where
                 .await
             {
                 is_failed = true;
-                need_cancel_task = true;
                 tracing::warn!(
                     "Failed to send task {} to {}. {:#?}",
                     compact_task.task_id,
@@ -1454,14 +1507,11 @@ where
             }
         }
 
-        if need_cancel_task {
-            if let Err(e) = self.cancel_compact_task(&mut compact_task).await {
-                tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
-                // TODO #3677: handle cancellation via compaction heartbeat after #4496
-            }
-        }
-
         if is_failed {
+            self.env
+                .notification_manager()
+                .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(compact_task))
+                .await;
             return Err(Error::InternalError(anyhow::anyhow!(
                 "Failed to trigger_manual_compaction"
             )));
@@ -1490,7 +1540,7 @@ where
         assignment_ref.get(&task_id).cloned()
     }
 
-    pub fn compaction_group_manager_ref_for_test(&self) -> CompactionGroupManagerRef<S> {
+    pub fn compaction_group_manager(&self) -> CompactionGroupManagerRef<S> {
         self.compaction_group_manager.clone()
     }
 

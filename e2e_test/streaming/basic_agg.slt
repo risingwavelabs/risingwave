@@ -1,0 +1,45 @@
+statement ok
+create table t (v1 int, v2 numeric, v3 double, v4 interval);
+
+statement ok
+insert into t values
+(null, 2, 3, interval '1' second),
+(4, null, 6, interval '1' minute),
+(7, 8, null, interval '1' hour),
+(10, 11, 12, null);
+
+statement ok
+create materialized view mv_sum as
+select
+    count(*) as count_all,
+    count(v1) as count_v1,
+    count(v2) as count_v2,
+    count(v3) as count_v3,
+    count(v4) as count_v4,
+    sum(v1) as sum_v1,
+    sum(v2) as sum_v2,
+    sum(v3) as sum_v3,
+    sum(v4) as sum_v4,
+    min(v1) as min_v1,
+    min(v2) as min_v2,
+    min(v3) as min_v3,
+    min(v4) as min_v4,
+    max(v1) as max_v1,
+    max(v2) as max_v2,
+    max(v3) as max_v3,
+    max(v4) as max_v4
+from t;
+
+statement ok
+flush;
+
+query I
+select * from mv_sum;
+----
+4  3  3  3  3  21  21  21  01:01:01  4  2  3  00:00:01  10  11  12  01:00:00
+
+statement ok
+drop materialized view mv_sum;
+
+statement ok
+drop table t;

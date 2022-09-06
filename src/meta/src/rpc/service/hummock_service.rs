@@ -184,13 +184,23 @@ where
                 format!("invalid hummock context {}", context_id),
             ));
         }
-        self.hummock_manager
-            .cancel_assigned_tasks_for_context_ids(context_id)
-            .await?;
         let rx = self
             .compactor_manager
             .add_compactor(context_id, req.max_concurrent_task_number);
         Ok(Response::new(RwReceiverStream::new(rx)))
+    }
+
+    // TODO: convert this into a stream.
+    async fn report_compaction_task_progress(
+        &self,
+        request: Request<ReportCompactionTaskProgressRequest>,
+    ) -> Result<Response<ReportCompactionTaskProgressResponse>, Status> {
+        let req = request.into_inner();
+        self.compactor_manager
+            .update_task_heartbeats(req.context_id, &req.progress);
+        Ok(Response::new(ReportCompactionTaskProgressResponse {
+            status: None,
+        }))
     }
 
     async fn report_vacuum_task(

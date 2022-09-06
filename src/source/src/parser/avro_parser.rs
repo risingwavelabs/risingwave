@@ -20,6 +20,7 @@ use std::path::Path;
 use apache_avro::types::Value;
 use apache_avro::{Reader, Schema};
 use chrono::{Datelike, NaiveDate};
+use itertools::Itertools;
 use num_traits::FromPrimitive;
 use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
@@ -28,6 +29,7 @@ use risingwave_common::types::{
     DataType, Datum, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
 };
 use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
+use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use crate::{Event, SourceColumnDesc, SourceParser};
@@ -76,6 +78,86 @@ impl AvroParser {
         } else {
             Err(arvo_schema.err().unwrap())
         }
+    }
+
+    pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
+        if let Schema::Record { fields, .. } = &self.schema {
+            let mut index = 0;
+            Ok(fields
+                .iter()
+                .map(|field| {
+                    Self::avro_field_to_column_desc(&field.name, &field.schema, &mut index)
+                })
+                .collect::<Result<Vec<_>>>()?)
+        } else {
+            Err(RwError::from(InternalError(
+                "schema invalid, record required".into(),
+            )))
+        }
+    }
+
+    fn avro_field_to_column_desc(
+        name: &str,
+        schema: &Schema,
+        index: &mut i32,
+    ) -> Result<ColumnDesc> {
+        let data_type = Self::avro_type_mapping(schema)?;
+        if let Schema::Record {
+            name: schema_name,
+            fields,
+            ..
+        } = schema
+        {
+            let vec_column = fields
+                .iter()
+                .map(|f| Self::avro_field_to_column_desc(&f.name, &f.schema, index))
+                .collect::<Result<Vec<_>>>()?;
+            *index += 1;
+            Ok(ColumnDesc {
+                column_type: Some(data_type.to_protobuf()),
+                column_id: *index,
+                name: name.to_owned(),
+                field_descs: vec_column,
+                type_name: schema_name.to_string(),
+            })
+        } else {
+            *index += 1;
+            Ok(ColumnDesc {
+                column_type: Some(data_type.to_protobuf()),
+                column_id: *index,
+                name: name.to_owned(),
+                ..Default::default()
+            })
+        }
+    }
+
+    fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
+        let data_type = match schema {
+            Schema::String => DataType::Varchar,
+            Schema::Int => DataType::Int32,
+            Schema::Long => DataType::Int64,
+            Schema::Boolean => DataType::Boolean,
+            Schema::Float => DataType::Float32,
+            Schema::Double => DataType::Float64,
+            Schema::Date => DataType::Date,
+            Schema::TimestampMillis => DataType::Timestamp,
+            Schema::Record { fields, .. } => {
+                let struct_fields = fields
+                    .iter()
+                    .map(|f| Self::avro_type_mapping(&f.schema))
+                    .collect::<Result<Vec<_>>>()?;
+                let struct_names = fields.iter().map(|f| f.name.clone()).collect_vec();
+                DataType::new_struct(struct_fields, struct_names)
+            }
+            _ => {
+                return Err(RwError::from(InternalError(format!(
+                    "unsupported type in Avro: {:?}",
+                    schema
+                ))));
+            }
+        };
+
+        Ok(data_type)
     }
 }
 
@@ -577,6 +659,14 @@ mod test {
             }
         }
         record
+    }
+
+    #[tokio::test]
+    async fn test_map_to_columns() {
+        let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc")
+            .await
+            .unwrap();
+        println!("{:?}", avro_parser_rs.map_to_columns().unwrap());
     }
 
     #[tokio::test]
