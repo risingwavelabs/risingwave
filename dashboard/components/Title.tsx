@@ -25,4 +25,5 @@ function Title({ children }: { children: React.ReactNode }) {
     </Text>
   )
 }
+
 export default Title
