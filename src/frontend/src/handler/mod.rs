@@ -32,7 +32,6 @@ pub mod create_source;
 pub mod create_table;
 pub mod create_user;
 mod describe;
-pub mod dml;
 mod drop_database;
 mod drop_index;
 pub mod drop_mv;
@@ -139,10 +138,10 @@ pub async fn handle(
                     .into(),
             ),
         },
-        Statement::Query(_) => query::handle_query(context, stmt, format).await,
-        Statement::Insert { .. } | Statement::Delete { .. } | Statement::Update { .. } => {
-            dml::handle_dml(context, stmt).await
-        }
+        Statement::Query(_)
+        | Statement::Insert { .. }
+        | Statement::Delete { .. }
+        | Statement::Update { .. } => query::handle_query(context, stmt, format).await,
         Statement::CreateView {
             materialized: true,
             or_replace: false,
