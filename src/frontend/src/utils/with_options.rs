@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
@@ -118,8 +132,9 @@ impl TryFrom<&[SqlOption]> for WithOptions {
 impl TryFrom<&Statement> for WithOptions {
     type Error = RwError;
 
-    fn try_from(value: &Statement) -> Result<Self, Self::Error> {
-        match value {
+    /// Extract options from the `WITH` clause from the given statement.
+    fn try_from(statement: &Statement) -> Result<Self, Self::Error> {
+        match statement {
             // Explain: forward to the inner statement.
             Statement::Explain { statement, .. } => Self::try_from(statement.as_ref()),
 
