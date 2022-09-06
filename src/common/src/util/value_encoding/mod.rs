@@ -18,9 +18,10 @@
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 
+use crate::array::ArrayImpl;
 use crate::types::{
-    DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
+    to_datum_ref, DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper,
+    NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
 };
 
 pub mod error;
@@ -49,12 +50,27 @@ pub fn deserialize_cell(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
 }
 
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
-pub fn serialize_datum(cell: &Datum, mut buf: impl BufMut) {
-    if let Some(datum) = cell {
+pub fn serialize_datum(cell: &Datum, buf: impl BufMut) {
+    serialize_datum_ref(&to_datum_ref(cell), buf);
+}
+
+/// Serialize a datum into bytes (Not order guarantee, used in value encoding).
+pub fn serialize_datum_ref(datum_ref: &DatumRef, mut buf: impl BufMut) {
+    if let Some(d) = datum_ref {
         buf.put_u8(1);
-        serialize_value(datum.as_scalar_ref_impl(), &mut buf)
+        serialize_value(*d, &mut buf)
     } else {
         buf.put_u8(0);
+    }
+}
+
+fn vec_serialize_datum_ref(array: &ArrayImpl, mut buffers: Vec<impl BufMut>) {
+    assert_eq!(array.len(), buffers.len());
+    for (i, buffer) in buffers.iter_mut().enumerate() {
+        // SAFETY(value_at_unchecked): the idx is always in bound.
+        unsafe {
+            serialize_datum_ref(&array.value_at_unchecked(i), buffer);
+        }
     }
 }
 
