@@ -601,6 +601,35 @@ impl LogicalAgg {
             .iter()
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
+
+    fn output_requires_order(&self, required_order: &Order) -> bool {
+        self.group_key().iter().all(|group_by_idx| {
+            required_order
+                .field_order
+                .iter()
+                .any(|field_order| field_order.index == *group_by_idx)
+                && self.schema().fields().get(*group_by_idx).unwrap().data_type == DataType::Int32
+        })
+    }
+
+    fn input_supplies_order(&self, new_logical: &LogicalAgg) -> bool {
+        self.group_key().iter().all(|group_by_idx| {
+            new_logical
+                .input()
+                .order()
+                .field_order
+                .iter()
+                .any(|field_order| field_order.index == *group_by_idx)
+                && new_logical
+                    .input()
+                    .schema()
+                    .fields()
+                    .get(*group_by_idx)
+                    .unwrap()
+                    .data_type
+                    == DataType::Int32
+        })
+    }
 }
 
 /// `LogicalAggBuilder` extracts agg calls and references to group columns from select list and
@@ -1236,29 +1265,26 @@ impl PredicatePushdown for LogicalAgg {
 
 impl ToBatch for LogicalAgg {
     fn to_batch(&self) -> Result<PlanRef> {
+        self.to_batch_with_order_required(&Order::any())
+    }
+
+    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         if self.group_key().is_empty() {
-            Ok(BatchSimpleAgg::new(new_logical).into())
-        } else if self.group_key().iter().all(|group_by_idx| {
-            new_logical
-                .input()
-                .order()
-                .field_order
-                .iter()
-                .any(|field_order| field_order.index == *group_by_idx)
-                && new_logical
-                    .input()
-                    .schema()
-                    .fields()
-                    .get(*group_by_idx)
-                    .unwrap()
-                    .data_type
-                    == DataType::Int32
-        }) {
-            Ok(BatchSortAgg::new(new_logical).into())
+            required_order.enforce_if_not_satisfies(BatchSimpleAgg::new(new_logical).into())
+        } else if self.input_supplies_order(&new_logical) {
+            required_order.enforce_if_not_satisfies(BatchSortAgg::new(new_logical).into())
+        } else if self.output_requires_order(required_order) {
+            let sorted_input = self.input().to_batch_with_order_required(
+                &self
+                    .o2i_col_mapping()
+                    .rewrite_provided_order(required_order),
+            )?;
+            let sorted_logical = self.clone_with_input(sorted_input);
+            required_order.enforce_if_not_satisfies(BatchSortAgg::new(sorted_logical).into())
         } else {
-            Ok(BatchHashAgg::new(new_logical).into())
+            required_order.enforce_if_not_satisfies(BatchHashAgg::new(new_logical).into())
         }
     }
 }
