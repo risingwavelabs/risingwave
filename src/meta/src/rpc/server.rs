@@ -41,7 +41,7 @@ use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::barrier::GlobalBarrierManager;
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
-use crate::hummock::CompactionScheduler;
+use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
 };
@@ -310,7 +310,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     monitor_process(meta_metrics.registry()).unwrap();
-    let compactor_manager = Arc::new(hummock::CompactorManager::new());
+    let compactor_manager = Arc::new(
+        hummock::CompactorManager::new_with_meta(env.clone(), max_heartbeat_interval.as_secs())
+            .await
+            .unwrap(),
+    );
 
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval, meta_metrics.clone())
@@ -466,7 +470,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     }
 
     let mut sub_tasks = hummock::start_hummock_workers(
-        hummock_manager,
+        hummock_manager.clone(),
         compactor_manager,
         vacuum_trigger,
         notification_manager,
@@ -474,6 +478,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         &env.opts,
     )
     .await;
+    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
     sub_tasks.push((lease_handle, lease_shutdown));
     #[cfg(not(test))]
     {

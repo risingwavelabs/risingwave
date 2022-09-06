@@ -16,7 +16,7 @@ clap = { version = "3", features = ["derive", "env"] }
 crc32fast = "1"
 derivative = "2"
 either = "1"
-etcd-client = "0.10"
+etcd-client = { version = "0.2", package = "madsim-etcd-client" }
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

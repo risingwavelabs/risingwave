@@ -37,9 +37,8 @@ pub use self::ddl::{
 };
 pub use self::operator::{BinaryOperator, UnaryOperator};
 pub use self::query::{
-    Cte, Fetch, Join, JoinConstraint, JoinOperator, LateralView, Offset, OffsetRows, OrderByExpr,
-    Query, Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top,
-    Values, With,
+    Cte, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr, Query, Select,
+    SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top, Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{DateTimeField, TrimWhereField, Value};
@@ -1971,13 +1970,13 @@ mod tests {
     fn test_array_index_display() {
         let array_index = Expr::ArrayIndex {
             obj: Box::new(Expr::Identifier(Ident::new("v1"))),
-            index: Box::new(Expr::Value(Value::Number("1".into(), false))),
+            index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1]", format!("{}", array_index));
 
         let array_index2 = Expr::ArrayIndex {
             obj: Box::new(array_index),
-            index: Box::new(Expr::Value(Value::Number("1".into(), false))),
+            index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1][1]", format!("{}", array_index2));
     }
