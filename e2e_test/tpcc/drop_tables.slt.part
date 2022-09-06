@@ -1,0 +1,24 @@
+statement ok
+DROP TABLE customer;
+
+statement ok
+DROP TABLE district;
+
+statement ok
+DROP TABLE history;
+
+statement ok
+DROP TABLE item;
+
+statement ok
+DROP TABLE neworder;
+
+statement ok
+DROP TABLE orders;
+
+statement ok
+DROP TABLE stock;
+
+statement ok
+DROP TABLE warehouse;
+
