@@ -230,6 +230,7 @@ impl Compactor {
         let mut splits: Vec<KeyRange_vec> = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
         // collect sstable_ids to get meta data
+
         let sstable_ids = compact_task
             .input_ssts
             .iter()
@@ -240,16 +241,20 @@ impl Compactor {
 
         // preload the meta and get the smallest key to split sub_compaction
         for sstable_id in sstable_ids {
-            let meta = context
-                .sstable_store
-                .sstable(sstable_id, &mut StoreLocalStatistic::default())
-                .await
-                .unwrap()
-                .value()
-                .meta
-                .smallest_key
-                .clone();
-            indexes.push(meta);
+            // extend
+            indexes.extend(
+                context
+                    .sstable_store
+                    .sstable(sstable_id, &mut StoreLocalStatistic::default())
+                    .await
+                    .unwrap()
+                    .value()
+                    .meta
+                    .block_metas
+                    .iter()
+                    .map(|block| block.smallest_key.clone())
+                    .collect_vec(),
+            );
         }
         indexes.sort();
         const SPLIT_RANGE_STEP: usize = 8;
