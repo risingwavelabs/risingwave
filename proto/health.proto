@@ -2,7 +2,9 @@ syntax = "proto3";
 
 package health;
 
-message HealthCheckRequest { string service = 1; }
+message HealthCheckRequest {
+  string service = 1;
+}
 
 message HealthCheckResponse {
   enum ServingStatus {
@@ -13,4 +15,6 @@ message HealthCheckResponse {
   ServingStatus status = 1;
 }
 
-service Health { rpc Check(HealthCheckRequest) returns (HealthCheckResponse); }
+service Health {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
