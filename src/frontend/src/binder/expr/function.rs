@@ -35,11 +35,16 @@ impl Binder {
         let function_name = if f.name.0.len() == 1 {
             f.name.0.get(0).unwrap().real_value()
         } else if f.name.0.len() == 2 {
-            assert_eq!(
-                PG_CATALOG_SCHEMA_NAME,
-                f.name.0.get(0).unwrap().real_value()
-            );
-            f.name.0.get(1).unwrap().real_value()
+            let schema_name = f.name.0.get(0).unwrap().real_value();
+            if schema_name == PG_CATALOG_SCHEMA_NAME {
+                f.name.0.get(1).unwrap().real_value()
+            } else {
+                return Err(ErrorCode::BindError(format!(
+                    "Unsupported function name under schema: {}",
+                    schema_name
+                ))
+                .into());
+            }
         } else {
             return Err(ErrorCode::NotImplemented(
                 format!("qualified function: {}", f.name),
