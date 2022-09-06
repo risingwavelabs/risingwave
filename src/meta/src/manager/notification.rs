@@ -212,6 +212,7 @@ impl NotificationManagerCore {
             compute_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
             local_senders: vec![],
+            /// FIXME: see issue #5145, may cause frontend to wait. Refactor after decouple ckpt.
             current_version: 0,
         }
     }
