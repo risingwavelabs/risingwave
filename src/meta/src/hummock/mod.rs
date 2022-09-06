@@ -100,13 +100,14 @@ where
                                 retry_strategy.clone(),
                                 || async {
                                     if let Err(err) = hummock_manager.release_contexts(vec![worker_node.id]).await {
-                                        tracing::warn!("Failed to release context {}. {}. Will retry.", worker_node.id, err);
+                                        tracing::warn!("Failed to release hummock context {}. {}. Will retry.", worker_node.id, err);
                                         return Err(err);
                                     }
                                     Ok(())
                                 }, RetryableError::default())
                                 .await
                                 .expect("retry until success");
+                            tracing::info!("Released hummock context {}", worker_node.id);
                         },
                         Some(LocalNotification::CompactionTaskNeedCancel(mut compact_task)) => {
                             compact_task.set_task_status(risingwave_pb::hummock::compact_task::TaskStatus::Canceled);
@@ -121,6 +122,7 @@ where
                                 }, RetryableError::default())
                                 .await
                                 .expect("retry until success");
+                            tracing::info!("Cancelled compaction task {}", compact_task.task_id);
                         }
                     }
                 }
