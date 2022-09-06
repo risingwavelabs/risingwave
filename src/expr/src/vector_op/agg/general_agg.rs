@@ -16,7 +16,6 @@ use std::marker::PhantomData;
 
 use risingwave_common::array::*;
 use risingwave_common::bail;
-use risingwave_common::row::Row;
 use risingwave_common::types::*;
 
 use crate::vector_op::agg::aggregator::Aggregator;

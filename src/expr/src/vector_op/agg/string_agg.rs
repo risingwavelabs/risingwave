@@ -15,13 +15,11 @@
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use risingwave_common::bail;
-use risingwave_common::row::{Row, RowRef};
-use risingwave_common::types::{DataType, Scalar, ScalarImpl};
-use risingwave_common::util::encoding_for_comparison::{encode_row, is_type_encodable};
+use risingwave_common::row::RowRef;
+use risingwave_common::types::{DataType, Scalar};
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
-use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::Result;
 

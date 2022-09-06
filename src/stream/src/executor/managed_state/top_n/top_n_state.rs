@@ -16,10 +16,7 @@ use std::collections::BTreeMap;
 
 use futures::pin_mut;
 use futures::stream::StreamExt;
-use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::Row;
-use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;

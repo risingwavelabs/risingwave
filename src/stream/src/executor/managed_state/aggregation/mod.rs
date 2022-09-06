@@ -21,7 +21,6 @@ pub use extreme::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::hash::HashCode;
 use risingwave_common::row::Row;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::OrderedRow;

@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};

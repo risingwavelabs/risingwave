@@ -15,8 +15,6 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 
-use risingwave_common::row::Row;
-
 #[derive(Clone)]
 pub enum RowOp {
     Insert(Vec<u8>),

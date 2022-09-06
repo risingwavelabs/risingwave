@@ -26,11 +26,10 @@ use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DataChunk, DecimalArray, F32Array,
     F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    NaiveDateTimeArray, NaiveTimeArray, StructArray, Utf8Array, Vis, *,
+    NaiveDateTimeArray, NaiveTimeArray, StructArray, Utf8Array, Vis,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::hash::HashCode;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::AggKind;

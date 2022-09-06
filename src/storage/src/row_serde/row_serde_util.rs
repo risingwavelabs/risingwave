@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bytes::Buf;
 use memcomparable::from_slice;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
