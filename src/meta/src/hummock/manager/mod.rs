@@ -37,9 +37,9 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    pin_version_response, CompactTask, CompactTaskAssignment, HummockCurrentEpoch,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionDelta, Level, LevelDelta, LevelType, OverlappingLevel, ValidationTask,
+    pin_version_response, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta,
+    LevelType, OverlappingLevel, ValidationTask,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -1233,14 +1233,6 @@ where
                 Operation::Update, // Frontends don't care about operation.
                 Info::HummockSnapshot(HummockSnapshot {
                     committed_epoch: self.max_committed_epoch.load(Ordering::Relaxed),
-                    current_epoch: max_current_epoch,
-                }),
-            );
-        self.env
-            .notification_manager()
-            .notify_compute_asynchronously(
-                Operation::Update,
-                Info::HummockCurrentEpoch(HummockCurrentEpoch {
                     current_epoch: max_current_epoch,
                 }),
             );

@@ -49,7 +49,6 @@ pub struct LocalVersion {
     /// key when we find it
     pub sync_uncommitted_data: VecDeque<(Vec<HummockEpoch>, SyncUncommittedData)>,
     max_sync_epoch: u64,
-    max_current_epoch: HummockEpoch,
 }
 
 #[derive(Debug, Clone)]
@@ -120,7 +119,6 @@ impl LocalVersion {
             version_ids_in_use,
             sync_uncommitted_data: Default::default(),
             max_sync_epoch: 0,
-            max_current_epoch: 0,
         }
     }
 
@@ -140,10 +138,6 @@ impl LocalVersion {
 
     pub fn get_max_sync_epoch(&self) -> HummockEpoch {
         self.max_sync_epoch
-    }
-
-    pub fn get_max_current_epoch(&self) -> HummockEpoch {
-        self.max_current_epoch
     }
 
     pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
@@ -232,10 +226,6 @@ impl LocalVersion {
             .or_insert_with(|| SharedBuffer::new(global_upload_task_size))
     }
 
-    pub fn update_current_epoch(&mut self, current_epoch: HummockEpoch) {
-        self.max_current_epoch = self.max_current_epoch.max(current_epoch);
-    }
-
     /// Returns epochs cleaned from shared buffer.
     pub fn set_pinned_version(
         &mut self,
@@ -291,8 +281,6 @@ impl LocalVersion {
                     cleaned_epochs
                 }
             };
-
-        self.update_current_epoch(new_pinned_version.max_committed_epoch());
         // update pinned version
         self.pinned_version = new_pinned_version;
 
@@ -384,7 +372,6 @@ impl LocalVersion {
                 cleaned_epoch.push(*epoch);
             }
         }
-        self.max_current_epoch = 0;
         self.sync_uncommitted_data.clear();
         self.shared_buffer.clear();
         self.replicated_batches.clear();

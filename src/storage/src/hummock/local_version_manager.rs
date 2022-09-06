@@ -257,12 +257,6 @@ impl LocalVersionManager {
         .await
     }
 
-    pub fn update_current_epoch(&self, current_epoch: HummockEpoch) {
-        self.local_version
-            .write()
-            .update_current_epoch(current_epoch);
-    }
-
     /// Updates cached version if the new version is of greater id.
     /// You shouldn't unpin even the method returns false, as it is possible `hummock_version` is
     /// being referenced by some readers.

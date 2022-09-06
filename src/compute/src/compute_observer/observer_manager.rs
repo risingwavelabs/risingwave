@@ -62,10 +62,6 @@ impl ObserverNodeImpl for ComputeObserverNode {
                 );
             }
 
-            Info::HummockCurrentEpoch(hummock_current_epoch) => self
-                .local_version_manager
-                .update_current_epoch(hummock_current_epoch.current_epoch),
-
             _ => {
                 panic!("error type notification");
             }

@@ -194,7 +194,6 @@ message SubscribeResponse {
     hummock.HummockSnapshot hummock_snapshot = 12;
     common.ParallelUnitMapping parallel_unit_mapping = 13;
     hummock.HummockVersionDeltas hummock_version_deltas = 14;
-    hummock.HummockCurrentEpoch hummock_current_epoch = 15;
     MetaSnapshot snapshot = 20;
   }
 }
