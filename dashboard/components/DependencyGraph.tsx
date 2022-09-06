@@ -1,7 +1,6 @@
 import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
-import { Dag, zherebko } from "d3-dag"
-import { DagLink, DagNode, Point } from "d3-dag/dist/dag"
+import { Dag, DagLink, DagNode, zherebko } from "d3-dag"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 const nodeRadius = 5
@@ -11,7 +10,7 @@ export default function DependencyGraph({
   mvDependency,
   svgWidth,
   selectedId,
-  onSelectedIdChange
+  onSelectedIdChange,
 }: {
   mvDependency: Dag
   svgWidth: number
@@ -46,7 +45,7 @@ export default function DependencyGraph({
     // How to draw edges
     const curveStyle = d3.curveMonotoneY
     const line = d3
-      .line<Point>()
+      .line<{ x: number; y: number }>()
       .curve(curveStyle)
       .x(({ x }) => x + MARGIN_X)
       .y(({ y }) => y)
@@ -61,11 +60,14 @@ export default function DependencyGraph({
       sel
         .attr("d", ({ points }: DagLink) => line(points))
         .attr("fill", "none")
-        .attr("stroke-width", (d: any) => isSelected(d.source) || isSelected(d.target) ? 2 : 1)
+        .attr("stroke-width", (d: any) =>
+          isSelected(d.source) || isSelected(d.target) ? 2 : 1
+        )
         .attr("stroke", (d: any) =>
           isSelected(d.source) || isSelected(d.target)
             ? theme.colors.teal["500"]
-            : theme.colors.gray["300"])
+            : theme.colors.gray["300"]
+        )
     const createEdge = (sel: any) =>
       sel.append("path").attr("class", "edge").call(applyEdge)
     edgeSelection.exit().remove()
@@ -81,12 +83,12 @@ export default function DependencyGraph({
       sel
         .attr(
           "transform",
-          ({ x, y }: Point) => `translate(${x + MARGIN_X}, ${y})`
+          ({ x, y }: { x: number; y: number }) =>
+            `translate(${x + MARGIN_X}, ${y})`
         )
         .attr("fill", (d: any) =>
-          isSelected(d)
-            ? theme.colors.teal["500"]
-            : theme.colors.gray["500"])
+          isSelected(d) ? theme.colors.teal["500"] : theme.colors.gray["500"]
+        )
 
     const createNode = (sel: any) =>
       sel
@@ -113,9 +115,8 @@ export default function DependencyGraph({
         .attr("alignment-baseline", "middle")
         .attr("y", (d: any) => d.y)
         .attr("fill", (d: any) =>
-          isSelected(d)
-            ? theme.colors.black["500"]
-            : theme.colors.gray["500"])
+          isSelected(d) ? theme.colors.black["500"] : theme.colors.gray["500"]
+        )
         .attr("font-weight", "600")
     const createLabel = (sel: any) =>
       sel.append("text").attr("class", "label").call(applyLabel)
@@ -133,9 +134,15 @@ export default function DependencyGraph({
     const applyOverlay = (sel: any) =>
       sel
         .attr("x", STROKE_WIDTH)
-        .attr("height", nodeRadius * 2 + edgeRadius * 2 - MARGIN_Y * 2 - STROKE_WIDTH * 2)
+        .attr(
+          "height",
+          nodeRadius * 2 + edgeRadius * 2 - MARGIN_Y * 2 - STROKE_WIDTH * 2
+        )
         .attr("width", svgWidth - STROKE_WIDTH * 2)
-        .attr("y", (d: any) => d.y - nodeRadius - edgeRadius + MARGIN_Y + STROKE_WIDTH)
+        .attr(
+          "y",
+          (d: any) => d.y - nodeRadius - edgeRadius + MARGIN_Y + STROKE_WIDTH
+        )
         .attr("rx", 5)
         .attr("fill", theme.colors.gray["500"])
         .attr("opacity", 0)
@@ -187,7 +194,7 @@ export default function DependencyGraph({
     overlaySelection.call(applyOverlay)
 
     setSvgHeight(`${height}px`)
-  }, [mvDependency, selectedId, svgWidth, onSelectedIdChange])
+  }, [mvDependency, selectedId, svgWidth, onSelectedIdChange, mvDependencyDag])
 
   return (
     <svg ref={svgRef} width={`${svgWidth}px`} height={svgHeight}>

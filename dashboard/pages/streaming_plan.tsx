@@ -121,7 +121,7 @@ export default function Streaming() {
         }
       }
     }
-    return () => { }
+    return () => {}
   }, [router, router.query.id, mvList])
 
   const fragmentDependency = fragmentDependencyCallback()
