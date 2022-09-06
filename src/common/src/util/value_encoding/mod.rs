@@ -64,7 +64,7 @@ pub fn serialize_datum_ref(datum_ref: &DatumRef, mut buf: impl BufMut) {
     }
 }
 
-fn vec_serialize_datum_ref(array: &ArrayImpl, mut buffers: Vec<impl BufMut>) {
+pub fn vec_serialize_datum_ref(array: &ArrayImpl, mut buffers: Vec<impl BufMut>) {
     assert_eq!(array.len(), buffers.len());
     for (i, buffer) in buffers.iter_mut().enumerate() {
         // SAFETY(value_at_unchecked): the idx is always in bound.
