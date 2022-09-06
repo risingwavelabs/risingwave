@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
+use risingwave_expr::error::ExprError;
 use tokio_postgres::error::{DbError, Error as PgError, SqlState};
 
 use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
@@ -115,7 +116,9 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
 }
 
 fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
-    db_error.message().contains(BatchError::NumericOutOfRange.to_string())
+    db_error
+        .message()
+        .contains(&ExprError::NumericOutOfRange.to_string())
 }
 
 /// Workaround to permit runtime errors not being propagated through channels.
