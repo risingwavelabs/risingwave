@@ -141,7 +141,7 @@ pub async fn handle(
         },
         Statement::Query(_) => query::handle_query(context, stmt, format).await,
         Statement::Insert { .. } | Statement::Delete { .. } | Statement::Update { .. } => {
-            dml::handle_dml(context, stmt).await
+            query::handle_query(context, stmt, false).await
         }
         Statement::CreateView {
             materialized: true,

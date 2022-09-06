@@ -24,6 +24,7 @@ use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::binder::{Binder, BoundStatement};
+use crate::handler::dml;
 use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{force_local_mode, to_pg_field, to_pg_rows};
 use crate::planner::Planner;
@@ -58,7 +59,14 @@ pub async fn handle_query(
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let (data_stream, pg_descs) = match query_mode {
-        QueryMode::Local => local_execute(context, bound)?,
+        QueryMode::Local => {
+            if stmt_type.is_dml() {
+                // DML do not support local mode yet.
+                distribute_execute(context, bound, shutdown_tx).await?
+            } else {
+                local_execute(context, bound)?
+            }
+        }
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => distribute_execute(context, bound, shutdown_tx).await?,
     };
@@ -80,9 +88,23 @@ pub async fn handle_query(
 
     let rows_count = match stmt_type {
         StatementType::SELECT => rows.len() as i32,
+        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
+            let first_row = rows[0].values();
+            let affected_rows_str = first_row[0]
+                .as_ref()
+                .expect("compute node should return affected rows in output");
+            String::from_utf8(affected_rows_str.to_vec())
+                .unwrap()
+                .parse()
+                .unwrap_or_default()
+        }
         _ => unreachable!(),
     };
 
+    // Implicitly flush the writes.
+    if session.config().get_implicit_flush() {
+        dml::flush_for_write(&session, stmt_type).await?;
+    }
     Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
 }
 
@@ -91,6 +113,9 @@ fn to_statement_type(stmt: &Statement) -> StatementType {
 
     match stmt {
         Statement::Query(_) => SELECT,
+        Statement::Insert { .. } => INSERT,
+        Statement::Delete { .. } => DELETE,
+        Statement::Update { .. } => UPDATE,
         _ => unreachable!(),
     }
 }
