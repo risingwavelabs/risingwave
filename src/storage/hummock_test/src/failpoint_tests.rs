@@ -26,6 +26,8 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::StateStore;
 
+use super::test_utils::get_observer_manager;
+
 #[tokio::test]
 #[ignore]
 #[cfg(all(test, feature = "failpoints"))]
@@ -34,8 +36,9 @@ async fn test_failpoints_state_store_read_upload() {
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -45,9 +48,18 @@ async fn test_failpoints_state_store_read_upload() {
         hummock_options.clone(),
         sstable_store.clone(),
         meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager.clone(),
     )
     .unwrap();
+    let observer_manager = get_observer_manager(
+        env,
+        hummock_manager_ref,
+        filter_key_extractor_manager,
+        hummock_storage.local_version_manager().clone(),
+        worker_node,
+    )
+    .await;
+    observer_manager.start().await.unwrap();
 
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![

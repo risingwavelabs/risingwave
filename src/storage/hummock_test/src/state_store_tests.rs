@@ -15,44 +15,19 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_compute::compute_observer::observer_manager::ComputeObserverNode;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::{HummockManager, MockHummockMetaClient};
-use risingwave_meta::manager::MetaSrvEnv;
-use risingwave_meta::storage::MemStore;
-use risingwave_pb::common::WorkerNode;
+use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStore, WriteOptions};
 use risingwave_storage::StateStoreIter;
 
-use super::test_utils::{get_test_observer_manager, TestNotificationClient};
-
-async fn get_observer_manager(
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: Arc<HummockManager<MemStore>>,
-    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
-    local_version_manager: Arc<LocalVersionManager>,
-    worker_node: WorkerNode,
-) -> ObserverManager<TestNotificationClient<MemStore>> {
-    let client = TestNotificationClient::new(env.notification_manager_ref(), hummock_manager_ref);
-    let compute_observer_node =
-        ComputeObserverNode::new(filter_key_extractor_manager, local_version_manager);
-    get_test_observer_manager(
-        client,
-        worker_node.get_host().unwrap().into(),
-        Box::new(compute_observer_node),
-        worker_node.get_type().unwrap(),
-    )
-    .await
-}
+use super::test_utils::get_observer_manager;
 
 #[tokio::test]
 async fn test_basic() {
