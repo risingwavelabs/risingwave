@@ -60,9 +60,6 @@ pub struct GenericExtremeState<S: StateStore> {
     /// The columns to order by in state table.
     state_table_order_col_indices: Vec<usize>,
 
-    /// The order types of `state_table_order_col_indices`.
-    state_table_order_types: Vec<OrderType>,
-
     /// Number of all items in the state store.
     total_count: usize,
 
@@ -75,6 +72,9 @@ pub struct GenericExtremeState<S: StateStore> {
     /// - the cache is empty and `total_count` is 0, or
     /// - the cache is not empty and elements in it are the top ones in the state table.
     cache_synced: bool,
+
+    /// Serializer for cache key.
+    cache_key_serializer: OrderedRowSerializer,
 }
 
 /// A trait over all table-structured states.
@@ -142,6 +142,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             )
         }))
         .unzip();
+        let cache_key_serializer = OrderedRowSerializer::new(state_table_order_types);
 
         Self {
             _phantom_data: PhantomData,
@@ -150,17 +151,16 @@ impl<S: StateStore> GenericExtremeState<S> {
             upstream_agg_col_idx,
             state_table_agg_col_idx,
             state_table_order_col_indices,
-            state_table_order_types,
             total_count: row_count,
             cache: Cache::new(cache_capacity),
             cache_synced: row_count == 0, // if there is no row, the cache is synced initially
+            cache_key_serializer,
         }
     }
 
     fn state_row_to_cache_entry(&self, state_row: &Row) -> StreamExecutorResult<(Vec<u8>, Datum)> {
         let mut cache_key = Vec::new();
-        let serializer = OrderedRowSerializer::new(self.state_table_order_types.clone());
-        serializer.serialize_datums(
+        self.cache_key_serializer.serialize_datums(
             self.state_table_order_col_indices
                 .iter()
                 .map(|col_idx| &(state_row.0)[*col_idx]),
