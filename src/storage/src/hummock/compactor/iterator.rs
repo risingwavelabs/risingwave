@@ -22,10 +22,11 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
+use super::sstable_store::BlockStream;
 use crate::hummock::compactor::CompactorSstableStoreRef;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockHolder, BlockIterator, BlockStream, HummockResult};
+use crate::hummock::{BlockHolder, BlockIterator, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates over the KV-pairs of an SST while downloading it.
