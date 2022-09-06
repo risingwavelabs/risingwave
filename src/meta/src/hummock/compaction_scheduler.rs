@@ -70,8 +70,8 @@ impl CompactionRequestChannel {
 
 /// Schedules compaction task picking and assignment.
 pub struct CompactionScheduler<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
@@ -79,8 +79,8 @@ pub struct CompactionScheduler<S>
 }
 
 impl<S> CompactionScheduler<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub fn new(
         env: MetaSrvEnv<S>,
@@ -182,7 +182,7 @@ impl<S> CompactionScheduler<S>
                     tokio::time::sleep(Duration::from_secs(
                         self.env.opts.compactor_selection_retry_interval_sec,
                     ))
-                        .await;
+                    .await;
                     match self
                         .hummock_manager
                         .cancel_compact_task(&mut compact_task)
