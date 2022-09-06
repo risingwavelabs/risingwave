@@ -18,6 +18,7 @@ dyn-clone = "1"
 either = "1"
 enum-as-inner = "0.5"
 farmhash = "1"
+fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hyper = "0.14"
