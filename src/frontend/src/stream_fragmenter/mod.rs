@@ -34,7 +34,7 @@ use crate::optimizer::PlanRef;
 /// The mutable state when building fragment graph.
 #[derive(Derivative)]
 #[derivative(Default)]
-pub(crate) struct BuildFragmentGraphState {
+pub struct BuildFragmentGraphState {
     /// fragment graph field, transformed from input streaming plan.
     fragment_graph: StreamFragmentGraph,
     /// local fragment id
@@ -67,16 +67,21 @@ impl BuildFragmentGraphState {
     }
 
     /// Generate an table id
-    fn gen_table_id(&mut self) -> u32 {
+    pub fn gen_table_id(&mut self) -> u32 {
         let ret = self.next_table_id;
         self.next_table_id += 1;
         ret
+    }
+
+    /// Generate an table id
+    pub fn gen_table_id_wrapped(&mut self) -> TableId {
+        TableId::new(self.gen_table_id())
     }
 }
 
 pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
     let mut state = BuildFragmentGraphState::default();
-    let stream_node = plan_node.to_stream_prost();
+    let stream_node = plan_node.to_stream_prost(&mut state);
     generate_fragment_graph(&mut state, stream_node).unwrap();
     let mut fragment_graph = state.fragment_graph.to_protobuf();
     fragment_graph.dependent_table_ids = state
@@ -207,8 +212,6 @@ fn build_fragment(
         _ => {}
     };
 
-    assign_local_table_id_to_stream_node(state, &mut stream_node);
-
     // handle join logic
     if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap() {
         if delta_index_join.get_join_type()? == JoinType::Inner
@@ -260,311 +263,4 @@ fn build_fragment(
         })
         .collect::<Result<_>>()?;
     Ok(stream_node)
-}
-
-/// This function assigns the `table_id` based on the type of `StreamNode`
-/// Be careful it has side effects and will change the `StreamNode`
-fn assign_local_table_id_to_stream_node(
-    state: &mut BuildFragmentGraphState,
-    stream_node: &mut StreamNode,
-) {
-    match stream_node.node_body.as_mut().unwrap() {
-        // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
-        // with only equal conditions
-        NodeBody::HashJoin(hash_join_node) => {
-            // Allocate local table id. It will be rewrite to global table id after get table id
-            // offset from id generator.
-            if let Some(left_table) = &mut hash_join_node.left_table {
-                left_table.id = state.gen_table_id();
-            }
-            if let Some(right_table) = &mut hash_join_node.right_table {
-                right_table.id = state.gen_table_id();
-            }
-        }
-
-        NodeBody::Source(node) => {
-            node.state_table_id = state.gen_table_id();
-        }
-
-        NodeBody::GlobalSimpleAgg(node) => {
-            for table in &mut node.internal_tables {
-                table.id = state.gen_table_id();
-            }
-        }
-
-        // Rewrite hash agg. One agg call -> one table id.
-        NodeBody::HashAgg(hash_agg_node) => {
-            for table in &mut hash_agg_node.internal_tables {
-                table.id = state.gen_table_id();
-            }
-        }
-
-        NodeBody::AppendOnlyTopN(append_only_top_n_node) => {
-            if let Some(table) = &mut append_only_top_n_node.table {
-                table.id = state.gen_table_id();
-            } else {
-                panic!("Append only TopN node's table shouldn't be None");
-            }
-        }
-        NodeBody::TopN(top_n_node) => {
-            if let Some(table) = &mut top_n_node.table {
-                table.id = state.gen_table_id();
-            } else {
-                panic!("TopNNode's table shouldn't be None");
-            }
-        }
-
-        NodeBody::GroupTopN(group_top_n_node) => {
-            if let Some(table) = &mut group_top_n_node.table {
-                table.id = state.gen_table_id();
-            } else {
-                panic!("GroupTopNNode's table shouldn't be None");
-            }
-        }
-
-        NodeBody::DynamicFilter(dynamic_filter_node) => {
-            if let Some(left_table) = &mut dynamic_filter_node.left_table {
-                left_table.id = state.gen_table_id();
-            }
-            if let Some(right_table) = &mut dynamic_filter_node.right_table {
-                right_table.id = state.gen_table_id();
-            }
-        }
-
-        _ => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_pb::catalog::{Table, Table as ProstTable};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::expr::agg_call::{Arg, Type};
-    use risingwave_pb::expr::{AggCall, InputRefExpr};
-    use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
-    use risingwave_pb::stream_plan::*;
-
-    use super::*;
-
-    fn make_sum_aggcall(idx: i32) -> AggCall {
-        AggCall {
-            r#type: Type::Sum as i32,
-            args: vec![Arg {
-                input: Some(InputRefExpr { column_idx: idx }),
-                r#type: Some(DataType {
-                    type_name: TypeName::Int64 as i32,
-                    ..Default::default()
-                }),
-            }],
-            return_type: Some(DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            distinct: false,
-            order_by_fields: vec![],
-            filter: None,
-        }
-    }
-
-    fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
-        ColumnCatalog {
-            column_desc: Some(ColumnDesc {
-                column_type: Some(DataType {
-                    type_name: column_type as i32,
-                    ..Default::default()
-                }),
-                column_id,
-                ..Default::default()
-            }),
-            is_hidden: false,
-        }
-    }
-
-    fn make_internal_table(is_agg_value: bool) -> ProstTable {
-        let mut columns = vec![make_column(TypeName::Int64, 0)];
-        if !is_agg_value {
-            columns.push(make_column(TypeName::Int32, 1));
-        }
-        ProstTable {
-            id: TableId::placeholder().table_id,
-            name: String::new(),
-            columns,
-            order_key: vec![ColumnOrder {
-                index: 0,
-                order_type: 2,
-            }],
-            stream_key: vec![2],
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn test_assign_local_table_id_to_stream_node() {
-        // let fragmenter = StreamFragmenter {};
-        let mut state = BuildFragmentGraphState::default();
-        let mut expect_table_id = 0;
-        state.gen_table_id(); // to consume one table_id
-
-        {
-            // test HashJoin Type
-            let mut stream_node = StreamNode {
-                node_body: Some(NodeBody::HashJoin(HashJoinNode {
-                    left_table: Some(Table {
-                        id: 0,
-                        ..Default::default()
-                    }),
-                    right_table: Some(Table {
-                        id: 0,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            };
-            assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
-
-            if let NodeBody::HashJoin(hash_join_node) = stream_node.node_body.as_ref().unwrap() {
-                expect_table_id += 1;
-                assert_eq!(
-                    expect_table_id,
-                    hash_join_node.left_table.as_ref().unwrap().id
-                );
-                expect_table_id += 1;
-                assert_eq!(
-                    expect_table_id,
-                    hash_join_node.right_table.as_ref().unwrap().id
-                );
-            }
-        }
-
-        {
-            // test SimpleAgg Type
-            let mut stream_node = StreamNode {
-                node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
-                    agg_calls: vec![
-                        make_sum_aggcall(0),
-                        make_sum_aggcall(1),
-                        make_sum_aggcall(2),
-                    ],
-                    internal_tables: vec![
-                        make_internal_table(true),
-                        make_internal_table(false),
-                        make_internal_table(false),
-                    ],
-                    ..Default::default()
-                })),
-                ..Default::default()
-            };
-            assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
-
-            if let NodeBody::GlobalSimpleAgg(global_simple_agg_node) =
-                stream_node.node_body.as_ref().unwrap()
-            {
-                assert_eq!(
-                    global_simple_agg_node.agg_calls.len(),
-                    global_simple_agg_node.internal_tables.len()
-                );
-                for table in &global_simple_agg_node.internal_tables {
-                    expect_table_id += 1;
-                    assert_eq!(expect_table_id, table.id);
-                }
-            }
-        }
-
-        {
-            // test HashAgg Type
-            let mut stream_node = StreamNode {
-                node_body: Some(NodeBody::HashAgg(HashAggNode {
-                    agg_calls: vec![
-                        make_sum_aggcall(0),
-                        make_sum_aggcall(1),
-                        make_sum_aggcall(2),
-                        make_sum_aggcall(3),
-                    ],
-                    internal_tables: vec![
-                        make_internal_table(true),
-                        make_internal_table(false),
-                        make_internal_table(false),
-                        make_internal_table(false),
-                    ],
-                    ..Default::default()
-                })),
-                ..Default::default()
-            };
-            assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
-
-            if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_ref().unwrap() {
-                assert_eq!(
-                    hash_agg_node.agg_calls.len(),
-                    hash_agg_node.internal_tables.len()
-                );
-                for table in &hash_agg_node.internal_tables {
-                    expect_table_id += 1;
-                    assert_eq!(expect_table_id, table.id);
-                }
-            }
-        }
-
-        {
-            // test TopN Type
-            let mut stream_node = StreamNode {
-                node_body: Some(NodeBody::TopN(TopNNode {
-                    table: Some(Table {
-                        id: 0,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            };
-            assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
-            if let NodeBody::TopN(top_n_node) = stream_node.node_body.as_ref().unwrap() {
-                expect_table_id += 1;
-                assert_eq!(expect_table_id, top_n_node.table.as_ref().unwrap().id);
-            }
-        }
-        {
-            // test Group TopN Type
-            let mut stream_node = StreamNode {
-                node_body: Some(NodeBody::GroupTopN(GroupTopNNode {
-                    table: Some(Table {
-                        id: 0,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            };
-            assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
-            if let NodeBody::GroupTopN(node) = stream_node.node_body.as_ref().unwrap() {
-                expect_table_id += 1;
-                assert_eq!(expect_table_id, node.table.as_ref().unwrap().id);
-            }
-        }
-
-        {
-            // test AppendOnlyTopN Type
-            let mut stream_node = StreamNode {
-                node_body: Some(NodeBody::AppendOnlyTopN(TopNNode {
-                    table: Some(Table {
-                        id: 0,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            };
-            assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
-            if let NodeBody::AppendOnlyTopN(append_only_top_n_node) =
-                stream_node.node_body.as_ref().unwrap()
-            {
-                expect_table_id += 1;
-                assert_eq!(
-                    expect_table_id,
-                    append_only_top_n_node.table.as_ref().unwrap().id
-                );
-            }
-        }
-    }
 }
