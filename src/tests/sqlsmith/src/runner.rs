@@ -115,6 +115,12 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
     }
 }
 
+fn is_division_by_zero_err(db_error: &DbError) -> bool {
+    db_error
+        .message()
+        .contains(&ExprError::DivisionByZero.to_string())
+}
+
 fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
     db_error
         .message()
@@ -132,7 +138,10 @@ fn is_broken_chan_err(db_error: &DbError) -> bool {
 
 fn is_permissible_error(db_error: &DbError) -> bool {
     let is_internal_error = *db_error.code() == SqlState::INTERNAL_ERROR;
-    is_internal_error && (is_numeric_out_of_range_err(db_error) || is_broken_chan_err(db_error))
+    is_internal_error
+        && (is_numeric_out_of_range_err(db_error)
+            || is_broken_chan_err(db_error)
+            || is_division_by_zero_err(db_error))
 }
 
 /// Validate client responses
