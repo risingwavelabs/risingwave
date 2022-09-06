@@ -232,6 +232,7 @@ mod logical_insert;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
+mod logical_over_agg;
 mod logical_project;
 mod logical_project_set;
 mod logical_scan;
@@ -241,7 +242,6 @@ mod logical_topn;
 mod logical_union;
 mod logical_update;
 mod logical_values;
-mod logical_window_agg;
 mod stream_delta_join;
 mod stream_dynamic_filter;
 mod stream_exchange;
@@ -296,6 +296,7 @@ pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
+pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
 pub use logical_project::{LogicalProject, LogicalProjectBuilder};
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
@@ -305,7 +306,6 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
-pub use logical_window_agg::{LogicalWindowAgg, PlanWindowFunction};
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dynamic_filter::StreamDynamicFilter;
 pub use stream_exchange::StreamExchange;
@@ -365,7 +365,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
-            , { Logical, WindowAgg }
+            , { Logical, OverAgg }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -437,7 +437,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
-            , { Logical, WindowAgg }
+            , { Logical, OverAgg }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }

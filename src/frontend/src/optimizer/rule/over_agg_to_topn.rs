@@ -31,15 +31,15 @@ use crate::PlanRef;
 ///   (SELECT .., ROW_NUMBER() OVER(PARTITION BY .. ORDER BY ..) rank from ..)
 /// WHERE rank < ..;
 /// ```
-pub struct WindowAggToTopNRule;
+pub struct OverAggToTopNRule;
 
-impl WindowAggToTopNRule {
+impl OverAggToTopNRule {
     pub fn create() -> Box<dyn Rule> {
-        Box::new(WindowAggToTopNRule)
+        Box::new(OverAggToTopNRule)
     }
 }
 
-impl Rule for WindowAggToTopNRule {
+impl Rule for OverAggToTopNRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project_upper = plan.as_logical_project()?;
         let plan = project_upper.input();
@@ -47,22 +47,22 @@ impl Rule for WindowAggToTopNRule {
         let plan = filter.input();
         let project_lower = plan.as_logical_project()?;
         let plan = project_lower.input();
-        let window_agg = plan.as_logical_window_agg()?;
-        let input = window_agg.input();
+        let over_agg = plan.as_logical_over_agg()?;
+        let input = over_agg.input();
 
         // The position of the window function in project_lower
-        let window_agg_pos = {
-            let window_agg_len = window_agg.schema().len();
+        let window_func_pos = {
+            let over_agg_len = over_agg.schema().len();
             project_lower.exprs().iter().position(|e| {
                 e.as_input_ref()
-                    .map(|i| i.index() == window_agg_len - 1)
+                    .map(|i| i.index() == over_agg_len - 1)
                     .unwrap_or(false)
             })?
         };
 
         if project_upper.exprs().iter().any(|expr| {
             expr.collect_input_refs(project_lower.schema().len())
-                .contains(window_agg_pos)
+                .contains(window_func_pos)
         }) {
             // TopN with ranking output is not supported yet.
             return None;
@@ -73,13 +73,13 @@ impl Rule for WindowAggToTopNRule {
             return_type: _,
             partition_by,
             order_by,
-        } = &window_agg.window_function;
+        } = &over_agg.window_function;
         assert_eq!(function_type, &WindowFunctionType::RowNumber);
 
         let (rank_pred, other_pred) = {
             let predicate = filter.predicate();
             let mut rank_col = FixedBitSet::with_capacity(project_lower.schema().len());
-            rank_col.set(window_agg_pos, true);
+            rank_col.set(window_func_pos, true);
             predicate.clone().split_disjoint(&rank_col)
         };
 
@@ -89,7 +89,7 @@ impl Rule for WindowAggToTopNRule {
                 return None;
             }
             let (input_ref, cmp, v) = rank_pred.conjunctions[0].as_comparison_const()?;
-            assert_eq!(input_ref.index, window_agg_pos);
+            assert_eq!(input_ref.index, window_func_pos);
             let v = v
                 .cast_implicit(DataType::Int64)
                 .ok()?

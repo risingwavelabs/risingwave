@@ -378,7 +378,7 @@
     LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time] }
       LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
         LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, ROW_NUMBER] }
-          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY auction.id ORDER BY bid.price DESC NULLS FIRST, bid.date_time ASC NULLS LAST) }
+          LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY auction.id ORDER BY bid.price DESC NULLS FIRST, bid.date_time ASC NULLS LAST) }
             LogicalFilter { predicate: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
               LogicalJoin { type: Inner, on: true, output: all }
                 LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction._row_id] }
@@ -625,7 +625,7 @@
     LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
       LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
         LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
-          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC NULLS FIRST) }
+          LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC NULLS FIRST) }
             LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id(hidden)], pk_columns: [bid._row_id] }
@@ -648,13 +648,13 @@
     LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
       LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
         LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
-          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC NULLS FIRST) }
+          LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC NULLS FIRST) }
             LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   optimizer_error: |
-    internal error: WindowAgg can not be transformed. Plan:
+    internal error: OverAgg can not be transformed. Plan:
     LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
       LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
-        LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC NULLS FIRST) }
+        LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC NULLS FIRST) }
           LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
 - id: nexmark_q20
   before:

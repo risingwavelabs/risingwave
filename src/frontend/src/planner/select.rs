@@ -25,8 +25,8 @@ use crate::expr::{
 };
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalProjectSet, LogicalValues,
-    LogicalWindowAgg, PlanAggCall, PlanRef,
+    LogicalAgg, LogicalApply, LogicalJoin, LogicalOverAgg, LogicalProject, LogicalProjectSet,
+    LogicalValues, PlanAggCall, PlanRef,
 };
 use crate::planner::Planner;
 use crate::utils::Condition;
@@ -78,7 +78,7 @@ impl Planner {
             (root, select_items) = self.substitute_subqueries(root, select_items)?;
         }
         if select_items.iter().any(|e| e.has_window_function()) {
-            (root, select_items) = LogicalWindowAgg::create(root, select_items)?;
+            (root, select_items) = LogicalOverAgg::create(root, select_items)?;
         }
 
         if select_items.iter().any(|e| e.has_table_function()) {

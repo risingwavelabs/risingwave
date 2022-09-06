@@ -32,7 +32,7 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
-use self::plan_visitor::has_logical_window_agg;
+use self::plan_visitor::has_logical_over_agg;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
@@ -289,15 +289,15 @@ impl PlanRoot {
             plan,
             "Convert Window Aggregation".to_string(),
             vec![
-                WindowAggToTopNRule::create(),
+                OverAggToTopNRule::create(),
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
             ],
             ApplyOrder::TopDown,
         );
-        if has_logical_window_agg(plan.clone()) {
+        if has_logical_over_agg(plan.clone()) {
             return Err(ErrorCode::InternalError(format!(
-                "WindowAgg can not be transformed. Plan:\n{}",
+                "OverAgg can not be transformed. Plan:\n{}",
                 plan.explain_to_string().unwrap()
             ))
             .into());

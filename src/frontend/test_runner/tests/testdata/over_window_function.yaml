@@ -19,7 +19,7 @@
     select row_number() over(PARTITION BY x ORDER BY x) from t;
   logical_plan: |
     LogicalProject { exprs: [ROW_NUMBER] }
-      LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
+      LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
         LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t(x int);
@@ -45,7 +45,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.x] }
       LogicalProject { exprs: [t.x, ROW_NUMBER] }
-        LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
+        LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
           LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t(x int);
@@ -73,13 +73,13 @@
     LogicalProject { exprs: [t.x, ROW_NUMBER] }
       LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
         LogicalProject { exprs: [t.x, ROW_NUMBER] }
-          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
+          LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
             LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimizer_error: |
-    internal error: WindowAgg can not be transformed. Plan:
+    internal error: OverAgg can not be transformed. Plan:
     LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
       LogicalProject { exprs: [t.x, ROW_NUMBER] }
-        LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
+        LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
           LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     /* TopN without rank output */
@@ -91,7 +91,7 @@
     LogicalProject { exprs: [t.x, t.y] }
       LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) AND (t.x > t.y) }
         LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
-          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
+          LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
             LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [t.x, t.y] }
@@ -143,9 +143,9 @@
     where 3 <= rank AND rank <= 5;
     -- complex rank range is not supported yet
   optimizer_error: |
-    internal error: WindowAgg can not be transformed. Plan:
+    internal error: OverAgg can not be transformed. Plan:
     LogicalProject { exprs: [t.x, t.y] }
       LogicalFilter { predicate: (3:Int32 <= ROW_NUMBER) AND (ROW_NUMBER <= 5:Int32) }
         LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
-          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
+          LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
             LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
