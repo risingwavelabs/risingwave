@@ -19,11 +19,11 @@ pub mod property;
 
 mod delta_join_solver;
 mod heuristic;
+mod max_one_row_visitor;
 mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
 mod rule;
-mod max_one_row_visitor;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -186,7 +186,10 @@ impl PlanRoot {
 
         if HasMaxOneRowUncorrelatedApply().visit(plan.clone()) {
             // return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
-            return Err(ErrorCode::InternalError("Scalar subquery might produce more than one row.".into()).into());
+            return Err(ErrorCode::InternalError(
+                "Scalar subquery might produce more than one row.".into(),
+            )
+            .into());
         }
 
         // General Unnesting.
@@ -214,7 +217,10 @@ impl PlanRoot {
 
         if HasMaxOneRowApply().visit(plan.clone()) {
             // return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
-            return Err(ErrorCode::InternalError("Scalar subquery might produce more than one row.".into()).into());
+            return Err(ErrorCode::InternalError(
+                "Scalar subquery might produce more than one row.".into(),
+            )
+            .into());
         }
 
         if has_logical_apply(plan.clone()) {

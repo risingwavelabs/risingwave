@@ -1,4 +1,7 @@
-use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalExpand, LogicalHopWindow, LogicalLimit, LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{
+    LogicalAgg, LogicalApply, LogicalExpand, LogicalHopWindow, LogicalLimit, LogicalProjectSet,
+    LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeUnary,
+};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 pub struct MaxOneRowVisitor();

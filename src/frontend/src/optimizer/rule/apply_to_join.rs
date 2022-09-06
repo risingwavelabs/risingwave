@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
 use super::{BoxedRule, Rule};
+use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
 use crate::optimizer::plan_node::{LogicalApply, LogicalJoin};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::PlanRef;
