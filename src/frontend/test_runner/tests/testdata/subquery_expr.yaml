@@ -7,6 +7,11 @@
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalProject { exprs: [1:Int32] }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftOuter, on: true, output: all }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      LogicalProject { exprs: [1:Int32] }
+        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t(x int);
     select (select x from t), 1 from t;
@@ -16,6 +21,23 @@
         LogicalScan { table: t, columns: [t.x, t._row_id] }
         LogicalProject { exprs: [t.x] }
           LogicalScan { table: t, columns: [t.x, t._row_id] }
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+- sql: |
+    create table t(x int);
+    select (select x from t limit 1), 1 from t;
+  logical_plan: |
+    LogicalProject { exprs: [t.x, 1:Int32] }
+      LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+        LogicalScan { table: t, columns: [t.x, t._row_id] }
+        LogicalLimit { limit: 1, offset: 0 }
+          LogicalProject { exprs: [t.x] }
+            LogicalScan { table: t, columns: [t.x, t._row_id] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [t.x, 1:Int32] }
+      LogicalJoin { type: LeftOuter, on: true, output: all }
+        LogicalScan { table: t, columns: [] }
+        LogicalLimit { limit: 1, offset: 0 }
+          LogicalScan { table: t, columns: [t.x] }
 - sql: |
     create table t(x int);
     select (select x from t) + 1 from t;
@@ -25,6 +47,7 @@
         LogicalScan { table: t, columns: [t.x, t._row_id] }
         LogicalProject { exprs: [t.x] }
           LogicalScan { table: t, columns: [t.x, t._row_id] }
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     create table t(x int);
     select (select x from t), (select 1);
@@ -37,6 +60,7 @@
             LogicalScan { table: t, columns: [t.x, t._row_id] }
         LogicalProject { exprs: [1:Int32] }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     create table t(x int);
     select x + (select x + (select x as v1 from t) as v2 from t) as v3 from t;
@@ -49,6 +73,7 @@
             LogicalScan { table: t, columns: [t.x, t._row_id] }
             LogicalProject { exprs: [t.x] }
               LogicalScan { table: t, columns: [t.x, t._row_id] }
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     select (select 1, 2);
   binder_error: 'Bind error: Subquery must return only one column'

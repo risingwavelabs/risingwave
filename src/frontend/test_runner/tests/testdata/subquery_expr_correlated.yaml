@@ -376,7 +376,7 @@
     create table t1(x int, y int);
     create table t2(x int, y int);
     select t2.x, (select x from t1 where t1.y = t2.y) from t2 where x > 100 order by t2.x limit 100;
-  optimizer_error: 'internal error: Subquery can not be unnested.'
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -632,7 +632,7 @@
     create table t1 (a int, b int);
     create table t2 (b int, c int);
     select a, (select t1.a), c from t1, t2 where t1.b = t2.b order by c;
-  optimizer_error: 'internal error: Subquery can not be unnested.'
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);

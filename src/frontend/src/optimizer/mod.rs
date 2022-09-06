@@ -23,6 +23,7 @@ mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
 mod rule;
+mod max_one_row_visitor;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -35,8 +36,9 @@ use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterializ
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
+use crate::optimizer::max_one_row_visitor::{HasMaxOneRowApply, HasMaxOneRowUncorrelatedApply};
 use crate::optimizer::plan_node::BatchExchange;
-use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply};
+use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply, PlanVisitor};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
@@ -182,6 +184,11 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
+        if HasMaxOneRowUncorrelatedApply().visit(plan.clone()) {
+            // return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
+            return Err(ErrorCode::InternalError("Scalar subquery might produce more than one row.".into()).into());
+        }
+
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
         // join.
@@ -204,6 +211,11 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
+
+        if HasMaxOneRowApply().visit(plan.clone()) {
+            // return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
+            return Err(ErrorCode::InternalError("Scalar subquery might produce more than one row.".into()).into());
+        }
 
         if has_logical_apply(plan.clone()) {
             return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
