@@ -11,16 +11,16 @@ export RUST_LOG=off
 
 # bugs here! Tracking issue https://github.com/risingwavelabs/risingwave/issues/4527
 echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, streaming"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-compute './e2e_test/streaming/\*\*/\*.slt'
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-compute './e2e_test/streaming/\*\*/\*.slt'
 
 # bugs here! Tracking issue https://github.com/risingwavelabs/risingwave/issues/4527
 echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, batch"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-compute './e2e_test/batch/\*\*/\*.slt'
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-compute './e2e_test/batch/\*\*/\*.slt'
 
 # bugs here! Tracking issue https://github.com/risingwavelabs/risingwave/issues/4527
 echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, streaming"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-meta './e2e_test/streaming/\*\*/\*.slt'
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-meta './e2e_test/streaming/\*\*/\*.slt'
 
 # bugs here! Tracking issue https://github.com/risingwavelabs/risingwave/issues/5103
 echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, streaming"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER --etcd-timeout-rate=0.01 './e2e_test/streaming/\*\*/\*.slt'
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --etcd-timeout-rate=0.01 './e2e_test/streaming/\*\*/\*.slt'
