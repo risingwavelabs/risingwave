@@ -26,7 +26,8 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
-use crate::hummock::compactor::{CompactOutput, Compactor, Context};
+use crate::hummock::compactor::context::Context;
+use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
@@ -255,7 +256,7 @@ impl SharedBufferCompactRunner {
         let dummy_compaction_filter = DummyCompactionFilter {};
         let ssts = self
             .compactor
-            .compact_key_range(iter, dummy_compaction_filter, filter_key_extractor)
+            .compact_key_range(iter, dummy_compaction_filter, filter_key_extractor, None)
             .await?;
         Ok((self.split_index, ssts))
     }
