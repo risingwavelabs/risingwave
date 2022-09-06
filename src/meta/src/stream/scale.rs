@@ -221,6 +221,17 @@ where
     ) -> MetaResult<()> {
         let ctx = self.build_reschedule_context(&reschedule).await?;
 
+        let mut revert_funcs = scopeguard::guard(
+            vec![],
+            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
+                tokio::spawn(async move {
+                    for revert_func in revert_funcs.into_iter().rev() {
+                        revert_func.await;
+                    }
+                });
+            },
+        );
+
         // Index of actors to create/remove
         let mut fragment_actors_to_remove = HashMap::with_capacity(reschedule.len());
         let mut fragment_actors_to_create = HashMap::with_capacity(reschedule.len());
@@ -653,9 +664,18 @@ where
             fragment_created_actors.insert(*fragment_id, created_actors);
         }
 
-        self.fragment_manager
-            .pre_apply_reschedules(fragment_created_actors)
-            .await?;
+        let applied_reschedules = self
+            .fragment_manager
+            .pre_apply_reschedules(fragment_created_actors.clone())
+            .await;
+
+        let fragment_manager_ref = self.fragment_manager.clone();
+
+        revert_funcs.push(Box::pin(async move {
+            fragment_manager_ref
+                .cancel_apply_reschedules(applied_reschedules)
+                .await;
+        }));
 
         self.barrier_manager
             .run_multiple_commands(vec![
@@ -663,7 +683,11 @@ where
                 Command::RescheduleFragment(reschedule_fragment),
                 Command::Plain(Some(Mutation::Resume(ResumeMutation {}))),
             ])
-            .await
+            .await?;
+
+        revert_funcs.clear();
+
+        Ok(())
     }
 
     // Modifies the upstream and downstream actors of the new created actor according to the overall

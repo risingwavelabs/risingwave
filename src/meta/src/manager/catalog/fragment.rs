@@ -452,13 +452,21 @@ where
     pub async fn pre_apply_reschedules(
         &self,
         mut created_actors: HashMap<FragmentId, HashMap<ActorId, (StreamActor, ActorStatus)>>,
-    ) -> MetaResult<()> {
+    ) -> HashMap<FragmentId, HashSet<ActorId>> {
         let map = &mut self.core.write().await.table_fragments;
+
+        let mut applied_reschedules = HashMap::new();
+
         for table_fragments in map.values_mut() {
             let mut updated_actor_status = HashMap::new();
 
             for (fragment_id, fragment) in &mut table_fragments.fragments {
                 if let Some(fragment_create_actors) = created_actors.remove(fragment_id) {
+                    applied_reschedules
+                        .entry(*fragment_id)
+                        .or_insert_with(HashSet::new)
+                        .extend(fragment_create_actors.keys());
+
                     for (actor_id, (actor, actor_status)) in fragment_create_actors {
                         fragment.actors.push(actor);
                         updated_actor_status.insert(actor_id, actor_status);
@@ -468,7 +476,28 @@ where
 
             table_fragments.actor_status.extend(updated_actor_status);
         }
-        Ok(())
+
+        applied_reschedules
+    }
+
+    // Undo the changes in `pre_apply_reschedules`
+    pub async fn cancel_apply_reschedules(
+        &self,
+        applied_reschedules: HashMap<FragmentId, HashSet<ActorId>>,
+    ) {
+        let map = &mut self.core.write().await.table_fragments;
+        for table_fragments in map.values_mut() {
+            for (fragment_id, fragment) in &mut table_fragments.fragments {
+                if let Some(fragment_create_actors) = applied_reschedules.get(fragment_id) {
+                    table_fragments
+                        .actor_status
+                        .drain_filter(|actor_id, _| fragment_create_actors.contains(actor_id));
+                    fragment
+                        .actors
+                        .drain_filter(|actor| fragment_create_actors.contains(&actor.actor_id));
+                }
+            }
+        }
     }
 
     /// Apply `Reschedule`s to fragments.
