@@ -121,10 +121,9 @@ impl Planner {
     }
 
     /// For `(NOT) EXISTS subquery` or `(NOT) IN subquery`, we can plan it as
-    /// `LeftSemi/LeftAnti` [`LogicalApply`] (correlated) or [`LogicalJoin`].
-    ///
-    /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] (correlated) or
-    /// [`LogicalJoin`] using [`Self::substitute_subqueries`].
+    /// `LeftSemi/LeftAnti` [`LogicalApply`]
+    /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] using
+    /// [`Self::substitute_subqueries`].
     fn plan_where(&mut self, mut input: PlanRef, where_clause: ExprImpl) -> Result<PlanRef> {
         if !where_clause.has_subquery() {
             return Ok(LogicalFilter::create_with_expr(input, where_clause));
@@ -220,8 +219,8 @@ impl Planner {
     /// Substitutes all [`Subquery`] in `exprs`.
     ///
     /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
-    /// replaced by a new `LeftOuter` [`LogicalApply`] (correlated) or [`LogicalJoin`]
-    /// (uncorrelated) node, whose left side is `root` and right side is the planned subquery.
+    /// replaced by a new `LeftOuter` [`LogicalApply`] whose left side is `root` and right side is
+    /// the planned subquery.
     ///
     /// The [`InputRef`]s' indexes start from `root.schema().len()`,
     /// which means they are additional columns beyond the original `root`.
