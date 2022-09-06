@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::expr_node::Type;
 use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -247,10 +246,7 @@ impl Binder {
     /// `bind_get_user_by_id_select` binds a select statement that returns a single user name by id,
     /// this is used for function `pg_catalog.get_user_by_id()`.
     pub fn bind_get_user_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
-        let select_items = vec![ExprImpl::InputRef(Box::new(InputRef::new(
-            PG_USER_NAME_INDEX,
-            DataType::Varchar,
-        )))];
+        let select_items = vec![InputRef::new(PG_USER_NAME_INDEX, DataType::Varchar).into()];
         let schema = Schema {
             fields: vec![Field::with_name(
                 DataType::Varchar,
@@ -258,28 +254,30 @@ impl Binder {
             )],
         };
         let input = match input {
-            ExprImpl::InputRef(input_ref) => ExprImpl::CorrelatedInputRef(Box::new(
-                CorrelatedInputRef::new(input_ref.index, input_ref.data_type.clone(), 1),
-            )),
-            ExprImpl::CorrelatedInputRef(col_input_ref) => {
-                ExprImpl::CorrelatedInputRef(Box::new(CorrelatedInputRef::new(
-                    col_input_ref.index(),
-                    col_input_ref.return_type(),
-                    col_input_ref.depth() + 1,
-                )))
+            ExprImpl::InputRef(input_ref) => {
+                CorrelatedInputRef::new(input_ref.index(), input_ref.return_type(), 1).into()
             }
+            ExprImpl::CorrelatedInputRef(col_input_ref) => CorrelatedInputRef::new(
+                col_input_ref.index(),
+                col_input_ref.return_type(),
+                col_input_ref.depth() + 1,
+            )
+            .into(),
             ExprImpl::Literal(_) => input.clone(),
-            _ => unimplemented!("Unsupported input type"),
+            _ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
         };
         let from =
             Some(self.bind_table_or_source(PG_CATALOG_SCHEMA_NAME, PG_USER_TABLE_NAME, None)?);
-        let where_clause = Some(ExprImpl::FunctionCall(Box::new(FunctionCall::new(
-            Type::Equal,
-            vec![
-                input,
-                ExprImpl::InputRef(Box::new(InputRef::new(PG_USER_ID_INDEX, DataType::Int32))),
-            ],
-        )?)));
+        let where_clause = Some(
+            FunctionCall::new(
+                ExprType::Equal,
+                vec![
+                    input,
+                    InputRef::new(PG_USER_ID_INDEX, DataType::Int32).into(),
+                ],
+            )?
+            .into(),
+        );
 
         Ok(BoundSelect {
             distinct: false,
