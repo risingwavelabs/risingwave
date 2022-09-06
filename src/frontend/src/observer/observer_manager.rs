@@ -126,7 +126,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
             }
         }
         catalog_guard.set_version(resp.version);
-        self.catalog_updated_tx.send(resp.version).unwrap();
+        user_guard.set_version(resp.version);
         Ok(())
     }
 }
