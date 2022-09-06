@@ -73,7 +73,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.14.0"
-source = "git+https://github.com/singularity-data/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
+source = "git+https://github.com/risingwavelabs/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
 dependencies = [
  "byteorder",
  "bzip2",
@@ -2608,7 +2608,7 @@ dependencies = [
 [[package]]
 name = "lru"
 version = "0.7.6"
-source = "git+https://github.com/singularity-data/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
+source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
 dependencies = [
  "hashbrown 0.11.2",
 ]
@@ -2634,9 +2634,9 @@ dependencies = [
 
 [[package]]
 name = "lz4-sys"
-version = "1.9.3"
+version = "1.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7be8908e2ed6f31c02db8a9fa962f03e36c53fbfde437363eae3306b85d7e17"
+checksum = "57d27b317e207b10f69f5e75494119e391a96f48861ae870d1da6edac98ca900"
 dependencies = [
  "cc",
  "libc",
@@ -2664,9 +2664,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.4"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fbcfa3e52808d948f10928c17a720efd3324942b1059cef77cc88077ea639f9"
+checksum = "69239c86b096ba429e109d5e36c3e639d19d36e0d0a8c3df1e168b72a5008770"
 dependencies = [
  "ahash",
  "async-channel",
@@ -2690,10 +2690,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "madsim-macros"
-version = "0.2.0"
+name = "madsim-etcd-client"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45a95505369fabd293bcb3eaab7cefd668f174a7e533dcf247eed97a91ea5d2a"
+checksum = "54cc5db0885f71b5e8eb71ec1002b94bf5b8f5b1011c4d709b23a1fd3b5c01d8"
+dependencies = [
+ "etcd-client",
+ "http",
+ "madsim",
+ "spin 0.9.4",
+ "tonic",
+ "tracing",
+]
+
+[[package]]
+name = "madsim-macros"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8abbe137adbf2023c066b8acb3fdef0a4bec6494642ef2174d060fc99a9f80ea"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -2714,9 +2728,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.2.1"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4f9a94d5152ffebadc3ced26c8c9c5ba64ee1a2374669599f6b4cdd13cf4017"
+checksum = "efddb30ea11cec8e8a74c73e24ee8dce75746c55152542a6d3a04393926a5792"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -3392,6 +3406,7 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes",
+ "itertools",
  "madsim-tokio",
  "regex",
  "thiserror",
@@ -4116,6 +4131,7 @@ dependencies = [
  "criterion",
  "either",
  "farmhash",
+ "fixedbitset",
  "futures",
  "futures-async-stream",
  "itertools",
@@ -4228,6 +4244,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
+ "sync-point",
  "tikv-jemallocator",
  "tracing",
  "workspace-hack",
@@ -4250,6 +4267,7 @@ dependencies = [
  "crc32fast",
  "either",
  "enum-as-inner",
+ "fixedbitset",
  "futures",
  "futures-async-stream",
  "humantime",
@@ -4292,6 +4310,7 @@ dependencies = [
 name = "risingwave_common_service"
 version = "0.1.11"
 dependencies = [
+ "async-trait",
  "hyper",
  "madsim-tokio",
  "madsim-tonic",
@@ -4544,6 +4563,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "pgwire",
+ "prometheus",
  "prost",
  "rand 0.8.5",
  "risingwave_batch",
@@ -4555,6 +4575,8 @@ dependencies = [
  "risingwave_source",
  "risingwave_sqlparser",
  "risingwave_storage",
+ "serde",
+ "serde_derive",
  "serde_json",
  "sha2",
  "smallvec",
@@ -4562,26 +4584,6 @@ dependencies = [
  "thiserror",
  "tracing",
  "uuid",
- "workspace-hack",
-]
-
-[[package]]
-name = "risingwave_frontend_test_runner"
-version = "0.1.11"
-dependencies = [
- "anyhow",
- "console",
- "futures",
- "itertools",
- "libtest-mimic",
- "madsim-tokio",
- "risingwave_frontend",
- "risingwave_sqlparser",
- "serde",
- "serde_with",
- "serde_yaml 0.9.9",
- "tempfile",
- "walkdir",
  "workspace-hack",
 ]
 
@@ -4606,6 +4608,7 @@ dependencies = [
 name = "risingwave_hummock_test"
 version = "0.1.11"
 dependencies = [
+ "async-trait",
  "bytes",
  "fail",
  "futures",
@@ -4614,6 +4617,8 @@ dependencies = [
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_common_service",
+ "risingwave_compute",
  "risingwave_hummock_sdk",
  "risingwave_meta",
  "risingwave_object_store",
@@ -4629,6 +4634,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "async-recursion",
  "async-stream",
  "async-trait",
  "axum",
@@ -4639,7 +4645,6 @@ dependencies = [
  "crc32fast",
  "derivative",
  "either",
- "etcd-client",
  "fail",
  "function_name",
  "futures",
@@ -4647,6 +4652,7 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
+ "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -4670,6 +4676,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
+ "sync-point",
  "tempfile",
  "thiserror",
  "tokio-retry",
@@ -4694,6 +4701,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "bytes",
+ "crc32fast",
  "fail",
  "futures",
  "hyper",
@@ -4722,6 +4730,26 @@ dependencies = [
  "prost-helpers",
  "prost-types",
  "serde",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_planner_test"
+version = "0.1.11"
+dependencies = [
+ "anyhow",
+ "console",
+ "futures",
+ "itertools",
+ "libtest-mimic",
+ "madsim-tokio",
+ "risingwave_frontend",
+ "risingwave_sqlparser",
+ "serde",
+ "serde_with",
+ "serde_yaml 0.9.9",
+ "tempfile",
+ "walkdir",
  "workspace-hack",
 ]
 
@@ -4757,6 +4785,7 @@ dependencies = [
  "risingwave_pb",
  "thiserror",
  "tokio-retry",
+ "tokio-stream",
  "tracing",
  "workspace-hack",
 ]
@@ -4787,12 +4816,14 @@ dependencies = [
  "futures",
  "glob",
  "madsim",
+ "madsim-etcd-client",
  "madsim-tokio",
  "rand 0.8.5",
  "risingwave_compactor",
  "risingwave_compute",
  "risingwave_frontend",
  "risingwave_meta",
+ "risingwave_sqlsmith",
  "sqllogictest",
  "tokio-postgres",
  "tracing",
@@ -4957,6 +4988,7 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.4",
+ "sync-point",
  "tempfile",
  "thiserror",
  "tokio-metrics",
@@ -4987,6 +5019,7 @@ dependencies = [
  "either",
  "enum-as-inner",
  "farmhash",
+ "fixedbitset",
  "futures",
  "futures-async-stream",
  "hyper",
@@ -5045,6 +5078,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "serial_test",
+ "sync-point",
 ]
 
 [[package]]
@@ -5557,9 +5591,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be941156714c31025cba4ddae47005e15b0b76efffcb3826ba559bd31a2f0f49"
+checksum = "e69883160fe47b7662659307bb7d32e854791c05e9951d1fe87c35bc09bd6422"
 dependencies = [
  "async-trait",
  "difference",
@@ -5684,6 +5718,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "sync-point"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "madsim-tokio",
+ "spin 0.9.4",
+ "thiserror",
 ]
 
 [[package]]

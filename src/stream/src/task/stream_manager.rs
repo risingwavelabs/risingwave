@@ -228,25 +228,26 @@ impl LocalStreamManager {
         result
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> (Vec<LocalSstableInfo>, bool) {
+    pub async fn sync_epoch(&self, epoch: u64) -> Result<(Vec<LocalSstableInfo>, bool)> {
         let timer = self
             .core
             .lock()
             .streaming_metrics
             .barrier_sync_latency
             .start_timer();
-        let (local_sst_info, sync_succeed) = dispatch_state_store!(self.state_store(), store, {
+        let res = dispatch_state_store!(self.state_store(), store, {
             match store.sync(epoch).await {
-                Ok(sync_result) => (sync_result.uncommitted_ssts, sync_result.sync_succeed),
-                // TODO: Handle sync failure by propagating it back to global barrier manager
-                Err(e) => panic!(
-                    "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
-                    epoch, e
-                ),
+                Ok(sync_result) => Ok((sync_result.uncommitted_ssts, sync_result.sync_succeed)),
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
+                        epoch, e);
+                    Err(e.into())
+                }
             }
         });
         timer.observe_duration();
-        (local_sst_info, sync_succeed)
+        res
     }
 
     pub async fn clear_storage_buffer(&self) {
@@ -297,6 +298,7 @@ impl LocalStreamManager {
             epoch,
             mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
             checkpoint: true,
+            passed_actors: vec![],
         };
 
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
@@ -548,7 +550,7 @@ impl LocalStreamManagerCore {
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> BoxedExecutor {
-        DebugExecutor::new(
+        WrapperExecutor::new(
             executor,
             input_pos,
             actor_id,

@@ -17,12 +17,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
-use risingwave_common::util::sync_point::on_sync_point;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
-use crate::error::meta_error_to_tonic;
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumManager};
@@ -78,8 +76,7 @@ where
         let payload = self
             .hummock_manager
             .pin_version(req.context_id, req.last_pinned)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
         Ok(Response::new(PinVersionResponse {
             status: None,
             payload: Some(payload),
@@ -91,10 +88,7 @@ where
         request: Request<UnpinVersionRequest>,
     ) -> Result<Response<UnpinVersionResponse>, Status> {
         let req = request.into_inner();
-        self.hummock_manager
-            .unpin_version(req.context_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        self.hummock_manager.unpin_version(req.context_id).await?;
         Ok(Response::new(UnpinVersionResponse { status: None }))
     }
 
@@ -105,8 +99,7 @@ where
         let req = request.into_inner();
         self.hummock_manager
             .unpin_version_before(req.context_id, req.unpin_version_before)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
         Ok(Response::new(UnpinVersionBeforeResponse { status: None }))
     }
 
@@ -122,8 +115,7 @@ where
             Some(compact_task) => {
                 self.hummock_manager
                     .report_compact_task(req.context_id, &compact_task)
-                    .await
-                    .map_err(meta_error_to_tonic)?;
+                    .await?;
                 Ok(Response::new(ReportCompactionTasksResponse {
                     status: None,
                 }))
@@ -136,11 +128,7 @@ where
         request: Request<PinSnapshotRequest>,
     ) -> Result<Response<PinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        let hummock_snapshot = self
-            .hummock_manager
-            .pin_snapshot(req.context_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let hummock_snapshot = self.hummock_manager.pin_snapshot(req.context_id).await?;
         Ok(Response::new(PinSnapshotResponse {
             status: None,
             snapshot: Some(hummock_snapshot),
@@ -152,10 +140,7 @@ where
         request: Request<UnpinSnapshotRequest>,
     ) -> Result<Response<UnpinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        self.hummock_manager
-            .unpin_snapshot(req.context_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        self.hummock_manager.unpin_snapshot(req.context_id).await?;
         Ok(Response::new(UnpinSnapshotResponse { status: None }))
     }
 
@@ -166,8 +151,7 @@ where
         let req = request.into_inner();
         self.hummock_manager
             .unpin_snapshot_before(req.context_id, req.min_snapshot.unwrap())
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
         Ok(Response::new(UnpinSnapshotBeforeResponse { status: None }))
     }
 
@@ -178,8 +162,7 @@ where
         let sst_id_range = self
             .hummock_manager
             .get_new_sst_ids(request.into_inner().number)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
         Ok(Response::new(GetNewSstIdsResponse {
             status: None,
             start_id: sst_id_range.start_id,
@@ -196,8 +179,10 @@ where
         // check_context and add_compactor as a whole is not atomic, but compactor_manager will
         // remove invalid compactor eventually.
         if !self.hummock_manager.check_context(context_id).await {
-            return Err(anyhow::anyhow!("invalid hummock context {}", context_id))
-                .map_err(meta_error_to_tonic);
+            return Err(Status::new(
+                tonic::Code::Internal,
+                format!("invalid hummock context {}", context_id),
+            ));
         }
         let rx = self
             .compactor_manager
@@ -205,17 +190,27 @@ where
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
+    // TODO: convert this into a stream.
+    async fn report_compaction_task_progress(
+        &self,
+        request: Request<ReportCompactionTaskProgressRequest>,
+    ) -> Result<Response<ReportCompactionTaskProgressResponse>, Status> {
+        let req = request.into_inner();
+        self.compactor_manager
+            .update_task_heartbeats(req.context_id, &req.progress);
+        Ok(Response::new(ReportCompactionTaskProgressResponse {
+            status: None,
+        }))
+    }
+
     async fn report_vacuum_task(
         &self,
         request: Request<ReportVacuumTaskRequest>,
     ) -> Result<Response<ReportVacuumTaskResponse>, Status> {
         if let Some(vacuum_task) = request.into_inner().vacuum_task {
-            self.vacuum_manager
-                .report_vacuum_task(vacuum_task)
-                .await
-                .map_err(meta_error_to_tonic)?;
+            self.vacuum_manager.report_vacuum_task(vacuum_task).await?;
         }
-        on_sync_point("AFTER_REPORT_VACUUM").await.unwrap();
+        sync_point::on("AFTER_REPORT_VACUUM").await;
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
     }
 
@@ -271,10 +266,8 @@ where
                 .select_table_fragments_by_table_id(&table_id)
                 .await
             {
-                option.internal_table_id = HashSet::from_iter(table_fragment.internal_table_ids());
+                option.internal_table_id = HashSet::from_iter(table_fragment.all_table_ids());
             }
-            option.internal_table_id.insert(request.table_id); // need to handle outer table_id
-                                                               // (mv)
         }
 
         assert!(option
@@ -290,8 +283,7 @@ where
 
         self.hummock_manager
             .trigger_manual_compaction(compaction_group_id, option)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         Ok(Response::new(TriggerManualCompactionResponse {
             status: None,
@@ -302,10 +294,7 @@ where
         &self,
         _request: Request<GetEpochRequest>,
     ) -> Result<Response<GetEpochResponse>, Status> {
-        let hummock_snapshot = self
-            .hummock_manager
-            .get_last_epoch()
-            .map_err(meta_error_to_tonic)?;
+        let hummock_snapshot = self.hummock_manager.get_last_epoch()?;
         Ok(Response::new(GetEpochResponse {
             status: None,
             snapshot: Some(hummock_snapshot),
@@ -344,8 +333,7 @@ where
                 request.into_inner().sst_retention_time_sec,
             ))
             .await
-            .map_err(MetaError::from)
-            .map_err(meta_error_to_tonic)?;
+            .map_err(MetaError::from)?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 }

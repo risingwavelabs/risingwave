@@ -17,10 +17,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use risingwave_common::util::sync_point::on_sync_point;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
@@ -32,6 +32,7 @@ use crate::storage::MetaStore;
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
 
 pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
+
 /// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
 /// compaction groups.
 pub struct CompactionRequestChannel {
@@ -48,16 +49,17 @@ impl CompactionRequestChannel {
     }
 
     /// Enqueues only if the target is not yet in queue.
-    pub fn try_send(&self, compaction_group: CompactionGroupId) -> bool {
+    pub fn try_send(
+        &self,
+        compaction_group: CompactionGroupId,
+    ) -> Result<bool, SendError<CompactionGroupId>> {
         let mut guard = self.scheduled.lock();
         if guard.contains(&compaction_group) {
-            return false;
+            return Ok(false);
         }
-        if self.request_tx.send(compaction_group).is_err() {
-            return false;
-        }
+        self.request_tx.send(compaction_group)?;
         guard.insert(compaction_group);
-        true
+        Ok(true)
     }
 
     fn unschedule(&self, compaction_group: CompactionGroupId) {
@@ -70,9 +72,9 @@ pub struct CompactionScheduler<S>
 where
     S: MetaStore,
 {
+    env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    compactor_selection_retry_interval_sec: u64,
 }
 
 impl<S> CompactionScheduler<S>
@@ -85,9 +87,9 @@ where
         compactor_manager: CompactorManagerRef,
     ) -> Self {
         Self {
+            env,
             hummock_manager,
             compactor_manager,
-            compactor_selection_retry_interval_sec: env.opts.compactor_selection_retry_interval_sec,
         }
     }
 
@@ -98,24 +100,37 @@ where
         self.hummock_manager
             .set_compaction_scheduler(request_channel.clone());
         tracing::info!("Start compaction scheduler.");
-        'compaction_trigger: loop {
+        let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
+            self.env.opts.periodic_compaction_interval_sec,
+        ));
+        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
             let compaction_group: CompactionGroupId = tokio::select! {
                 compaction_group = request_rx.recv() => {
                     match compaction_group {
                         Some(compaction_group) => compaction_group,
                         None => {
-                            break 'compaction_trigger;
+                            tracing::warn!("Compactor Scheduler: The Hummock manager has dropped the connection,
+                                it means it has either died or started a new session. Exiting.");
+                            break;
                         }
                     }
                 },
-                // Shutdown compactor
+                _ = min_trigger_interval.tick() => {
+                    // Periodically trigger compaction for all compaction groups.
+                    for cg_id in self.hummock_manager.compaction_group_manager().compaction_group_ids().await {
+                        if let Err(e) = request_channel.try_send(cg_id) {
+                            tracing::warn!("Failed to schedule compaction for compaction group {}. {}", cg_id, e);
+                        }
+                    }
+                    continue;
+                },
+                // Shutdown compactor scheduler
                 _ = &mut shutdown_rx => {
-                    break 'compaction_trigger;
+                    break;
                 }
             };
-            on_sync_point("BEFORE_SCHEDULE_COMPACTION_TASK")
-                .await
-                .unwrap();
+            sync_point::on("BEFORE_SCHEDULE_COMPACTION_TASK").await;
             self.pick_and_assign(compaction_group, request_channel.clone())
                 .await;
         }
@@ -161,14 +176,13 @@ where
                     let current_compactor_tasks =
                         self.hummock_manager.list_assigned_tasks_number().await;
                     tracing::warn!("No idle compactor available. The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
-                    compact_task.task_status = false;
                     tokio::time::sleep(Duration::from_secs(
-                        self.compactor_selection_retry_interval_sec,
+                        self.env.opts.compactor_selection_retry_interval_sec,
                     ))
                     .await;
                     match self
                         .hummock_manager
-                        .cancel_compact_task(&compact_task)
+                        .cancel_compact_task(&mut compact_task)
                         .await
                     {
                         Ok(_) => return false,
@@ -220,21 +234,28 @@ where
                     e
                 );
                 // Cancel the task at best effort
-                compact_task.task_status = false;
                 if let Err(e) = self
                     .hummock_manager
-                    .report_compact_task(compactor.context_id(), &compact_task)
+                    .cancel_compact_task(&mut compact_task)
                     .await
                 {
                     tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
-                    // TODO #3677: handle cancellation via compaction heartbeat after #4496
+                    // handle cancellation via compaction heartbeat
                     return false;
                 }
                 continue 'send_task;
             }
 
             // Reschedule it in case there are more tasks from this compaction group.
-            request_channel.try_send(compaction_group);
+            if let Err(e) = request_channel.try_send(compaction_group) {
+                tracing::error!(
+                    "Failed to reschedule compaction group {} after sending new task {}. {:#?}",
+                    compaction_group,
+                    compact_task.task_id,
+                    e
+                );
+                return false;
+            }
 
             return true;
         }

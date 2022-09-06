@@ -38,7 +38,7 @@ use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenterV2;
+use crate::stream_fragmenter::build_graph;
 
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
@@ -152,11 +152,11 @@ pub fn bind_sql_table_constraints(
             // later.
             vec![]
         }
-        (Some(cid), true) => vec![ColumnId::new(cid.get_id())],
+        (Some(cid), true) => vec![cid],
         (None, false) => {
             let name_to_id = column_descs
                 .iter()
-                .map(|c| (c.name.as_str(), ColumnId::new(c.column_id.get_id())))
+                .map(|c| (c.name.as_str(), c.column_id))
                 .collect::<HashMap<_, _>>();
             pk_column_names
                 .iter()
@@ -275,7 +275,7 @@ pub async fn handle_create_table(
             columns,
             constraints,
         )?;
-        let graph = StreamFragmenterV2::build_graph(plan);
+        let graph = build_graph(plan);
 
         (graph, source, table)
     };

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 assert_matches = "1"
+async-recursion = "1.0.0"
 async-stream = "0.3"
 async-trait = "0.1"
 byteorder = "1"
@@ -15,7 +16,7 @@ clap = { version = "3", features = ["derive", "env"] }
 crc32fast = "1"
 derivative = "2"
 either = "1"
-etcd-client = "0.10"
+etcd-client = { version = "0.2", package = "madsim-etcd-client" }
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -42,6 +43,7 @@ serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
 smallvec = "1"
+sync-point = { path = "../utils/sync-point" }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -53,15 +55,15 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [target.'cfg(not(madsim))'.dependencies]
 axum = "0.5"
 tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"

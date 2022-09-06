@@ -23,10 +23,7 @@ use risingwave_object_store::object::BlockLocation;
 
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::utils::MemoryTracker;
-use crate::hummock::{
-    Block, CachePolicy, HummockError, HummockResult, MemoryLimiter, Sstable, SstableMeta,
-    SstableStoreWrite,
-};
+use crate::hummock::{Block, HummockError, HummockResult, MemoryLimiter, Sstable};
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
 pub struct SstableBlocks {
@@ -47,7 +44,7 @@ impl SstableBlocks {
         let idx = self.offset_index;
         let next_offset = self.offset + self.block_size[idx - self.start_index].0;
         let capacity = self.block_size[idx - self.start_index].1;
-        let block = match Block::decode(&self.block_data[self.offset..next_offset], capacity) {
+        let block = match Block::decode(self.block_data.slice(self.offset..next_offset), capacity) {
             Ok(block) => Box::new(block),
             Err(_) => return None,
         };
@@ -161,21 +158,5 @@ impl MemoryCollector for CompactorMemoryCollector {
     fn get_total_memory_usage(&self) -> u64 {
         self.uploading_memory_limiter.get_memory_usage()
             + self.sstable_store.memory_limiter.get_memory_usage()
-    }
-}
-
-#[async_trait::async_trait]
-impl SstableStoreWrite for CompactorSstableStore {
-    async fn put_sst(
-        &self,
-        sst_id: HummockSstableId,
-        meta: SstableMeta,
-        data: Bytes,
-        _policy: CachePolicy,
-    ) -> HummockResult<()> {
-        // TODO: fill cache for L0
-        self.sstable_store
-            .put_sst(sst_id, meta, data, CachePolicy::NotFill)
-            .await
     }
 }

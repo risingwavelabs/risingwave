@@ -15,14 +15,13 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableDesc;
+use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, SchemaId};
-use crate::catalog::TableId;
+use super::{DatabaseId, FragmentId, SchemaId};
 use crate::optimizer::property::FieldOrder;
 
 /// Includes full information about a table.
@@ -51,7 +50,7 @@ use crate::optimizer::property::FieldOrder;
 ///
 /// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableCatalog {
     pub id: TableId,
 
@@ -82,12 +81,23 @@ pub struct TableCatalog {
     pub owner: u32,
 
     pub properties: HashMap<String, String>,
+
+    pub fragment_id: FragmentId,
+
+    /// an optional column index which is the vnode of each row computed by the table's consistent
+    /// hash distribution
+    pub vnode_col_idx: Option<usize>,
 }
 
 impl TableCatalog {
     /// Get a reference to the table catalog's table id.
     pub fn id(&self) -> TableId {
         self.id
+    }
+
+    pub fn with_id(mut self, id: TableId) -> Self {
+        self.id = id;
+        self
     }
 
     /// Get the table catalog's associated source id.
@@ -169,6 +179,10 @@ impl TableCatalog {
             appendonly: self.appendonly,
             owner: self.owner,
             properties: self.properties.clone(),
+            fragment_id: self.fragment_id,
+            vnode_col_idx: self
+                .vnode_col_idx
+                .map(|i| ProstColumnIndex { index: i as _ }),
         }
     }
 }
@@ -215,6 +229,8 @@ impl From<ProstTable> for TableCatalog {
             appendonly: tb.appendonly,
             owner: tb.owner,
             properties: tb.properties,
+            fragment_id: tb.fragment_id,
+            vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
         }
     }
 }
@@ -295,6 +311,8 @@ mod tests {
                 String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                 String::from("300"),
             )]),
+            fragment_id: 0,
+            vnode_col_idx: None,
         }
         .into();
 
@@ -348,6 +366,8 @@ mod tests {
                     String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                     String::from("300")
                 )]),
+                fragment_id: 0,
+                vnode_col_idx: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

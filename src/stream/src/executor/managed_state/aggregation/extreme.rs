@@ -22,7 +22,7 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::*;
-use risingwave_common::util::ordered::OrderedRow;
+use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -34,6 +34,9 @@ use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
+
+// Memcomparable row.
+type CacheKey = Vec<u8>;
 
 /// Generic managed agg state for min/max.
 /// It maintains a top N cache internally, using `HashSet`, and the sort key
@@ -48,14 +51,14 @@ pub struct GenericExtremeState<S: StateStore> {
     /// Contains the column mapping between upstream schema and state table.
     state_table_col_mapping: Arc<StateTableColumnMapping>,
 
+    // The column to aggregate in input chunk.
+    upstream_agg_col_idx: usize,
+
     /// The column to aggregate in state table.
     state_table_agg_col_idx: usize,
 
     /// The columns to order by in state table.
     state_table_order_col_indices: Vec<usize>,
-
-    /// The order types of `state_table_order_col_indices`.
-    state_table_order_types: Vec<OrderType>,
 
     /// Number of all items in the state store.
     total_count: usize,
@@ -63,12 +66,15 @@ pub struct GenericExtremeState<S: StateStore> {
     /// Cache for the top N elements in the state. Note that the cache
     /// won't store group_key so the column indices should be offsetted
     /// by group_key.len(), which is handled by `state_row_to_cache_row`.
-    cache: Cache<Datum>,
+    cache: Cache<CacheKey, Datum>,
 
     /// Whether the cache is synced to state table. The cache is synced iff:
     /// - the cache is empty and `total_count` is 0, or
     /// - the cache is not empty and elements in it are the top ones in the state table.
     cache_synced: bool,
+
+    /// Serializer for cache key.
+    cache_key_serializer: OrderedRowSerializer,
 }
 
 /// A trait over all table-structured states.
@@ -113,6 +119,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         row_count: usize,
         cache_capacity: usize,
     ) -> Self {
+        let upstream_agg_col_idx = agg_call.args.val_indices()[0];
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
             .upstream_to_state_table(agg_call.args.val_indices()[0])
@@ -135,27 +142,32 @@ impl<S: StateStore> GenericExtremeState<S> {
             )
         }))
         .unzip();
+        let cache_key_serializer = OrderedRowSerializer::new(state_table_order_types);
 
         Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
             state_table_col_mapping: col_mapping,
+            upstream_agg_col_idx,
             state_table_agg_col_idx,
             state_table_order_col_indices,
-            state_table_order_types,
             total_count: row_count,
             cache: Cache::new(cache_capacity),
             cache_synced: row_count == 0, // if there is no row, the cache is synced initially
+            cache_key_serializer,
         }
     }
 
-    fn state_row_to_cache_entry(&self, state_row: &Row) -> (OrderedRow, Datum) {
-        let cache_key = OrderedRow::new(
-            state_row.by_indices(&self.state_table_order_col_indices),
-            &self.state_table_order_types,
+    fn state_row_to_cache_entry(&self, state_row: &Row) -> StreamExecutorResult<(Vec<u8>, Datum)> {
+        let mut cache_key = Vec::new();
+        self.cache_key_serializer.serialize_datums(
+            self.state_table_order_col_indices
+                .iter()
+                .map(|col_idx| &(state_row.0)[*col_idx]),
+            &mut cache_key,
         );
         let cache_data = state_row[self.state_table_agg_col_idx].clone();
-        (cache_key, cache_data)
+        Ok((cache_key, cache_data))
     }
 
     /// Apply a chunk of data to the state.
@@ -168,12 +180,17 @@ impl<S: StateStore> GenericExtremeState<S> {
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, columns));
 
-        for (i, op) in ops.iter().enumerate() {
-            let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
-            if !visible {
-                continue;
-            }
-
+        for (i, op) in ops
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
+            .filter(|(i, _)| {
+                columns[self.upstream_agg_col_idx]
+                    .null_bitmap()
+                    .is_set(*i)
+                    .unwrap()
+            })
+        {
             let state_row = Row::new(
                 self.state_table_col_mapping
                     .upstream_columns()
@@ -181,8 +198,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                     .map(|col_idx| columns[*col_idx].datum_at(i))
                     .collect(),
             );
-            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
-
+            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row)?;
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     if self.cache_synced
@@ -237,7 +253,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             #[for_await]
             for state_row in all_data_iter.take(self.cache.capacity()) {
                 let state_row = state_row?;
-                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref());
+                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref())?;
                 self.cache.insert(cache_key, cache_data);
             }
             self.cache_synced = true;
@@ -657,7 +673,9 @@ mod tests {
             epoch += 1;
 
             match managed_state_1.get_output(epoch, &state_table_1).await? {
-                None => {} // pass
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(&s, "a");
+                }
                 _ => panic!("unexpected output"),
             }
             match managed_state_2.get_output(epoch, &state_table_2).await? {

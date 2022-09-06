@@ -465,7 +465,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         let mut user_info = lock.get_user_by_name(&old_name).unwrap().clone();
         request.update_fields.into_iter().for_each(|field| {
             if field == UpdateField::Super as i32 {
-                user_info.is_supper = update_user.is_supper;
+                user_info.is_super = update_user.is_super;
             } else if field == UpdateField::Login as i32 {
                 user_info.can_login = update_user.can_login;
             } else if field == UpdateField::CreateDb as i32 {
@@ -558,7 +558,7 @@ impl MockUserInfoWriter {
         user_info.write().create_user(UserInfo {
             id: DEFAULT_SUPER_USER_ID,
             name: DEFAULT_SUPER_USER.to_string(),
-            is_supper: true,
+            is_super: true,
             can_create_db: true,
             can_create_user: true,
             can_login: true,

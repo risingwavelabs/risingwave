@@ -63,15 +63,6 @@ impl ComputeNodeService {
             cmd.arg("--enable-async-stack-trace");
         }
 
-        if config.enable_tiered_cache {
-            let prefix_data = env::var("PREFIX_DATA")?;
-            cmd.arg("--file-cache-dir").arg(
-                PathBuf::from(prefix_data)
-                    .join("filecache")
-                    .join(config.port.to_string()),
-            );
-        }
-
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {
             0 => {}
@@ -148,6 +139,14 @@ impl Task for ComputeNodeService {
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
+        if self.config.enable_tiered_cache {
+            let prefix_data = env::var("PREFIX_DATA")?;
+            cmd.arg("--file-cache-dir").arg(
+                PathBuf::from(prefix_data)
+                    .join("filecache")
+                    .join(self.config.port.to_string()),
+            );
+        }
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

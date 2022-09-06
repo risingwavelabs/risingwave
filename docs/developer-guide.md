@@ -2,9 +2,9 @@
 
 This guide is intended to be used by contributors to learn about how to develop RisingWave. The instructions about how to submit code changes are included in [contributing guidelines](../CONTRIBUTING.md).
 
-If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/singularity-data/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
+If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/risingwavelabs/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
 
-To report bugs, create a [GitHub issue](https://github.com/singularity-data/risingwave/issues/new/choose).
+To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/risingwave/issues/new/choose).
 
 
 ## Table of contents
@@ -157,6 +157,13 @@ Now you can run `./risedev d` to start a new dev cluster. The new dev cluster wi
 
 You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config is an example.
 
+### Configure system variables
+
+You can check `src/common/src/config.rs` to see all the configurable variables. 
+If additional variables are needed, 
+include them in the correct sections (such as `[server]` or `[storage]`) in `src/config/risingwave.toml`.
+
+
 ### Start the playground with RiseDev
 
 If you do not need to start a full cluster to develop, you can issue `./risedev p` to start the playground, where the metadata node, compute nodes and frontend nodes are running in the same process. Logs are printed to stdout instead of separate log files.
@@ -277,7 +284,7 @@ If you want to see the coverage report, run this command:
 
 ### Planner tests
 
-RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/test_runner/README.md).
+RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/plan_test/README.md).
 
 ### End-to-end tests
 

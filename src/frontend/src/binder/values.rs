@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{align_types, CorrelatedId, ExprImpl};
+use crate::expr::{align_types, CorrelatedId, Depth, ExprImpl};
 
 #[derive(Debug, Clone)]
 pub struct BoundValues {
@@ -49,10 +49,13 @@ impl BoundValues {
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         self.exprs_mut()
-            .flat_map(|expr| expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id))
+            .flat_map(|expr| {
+                expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+            })
             .collect()
     }
 }
@@ -148,8 +151,8 @@ mod tests {
         let mut binder = mock_binder();
 
         // Test i32 -> decimal.
-        let expr1 = Expr::Value(Value::Number("1".to_string(), false));
-        let expr2 = Expr::Value(Value::Number("1.1".to_string(), false));
+        let expr1 = Expr::Value(Value::Number("1".to_string()));
+        let expr2 = Expr::Value(Value::Number("1.1".to_string()));
         let values = Values(vec![vec![expr1], vec![expr2]]);
         let res = binder.bind_values(values, None).unwrap();
 

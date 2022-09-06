@@ -1,0 +1,8 @@
+statement ok
+DROP SOURCE person;
+
+statement ok
+DROP SOURCE auction;
+
+statement ok
+DROP SOURCE bid;

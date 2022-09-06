@@ -15,7 +15,7 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
@@ -24,7 +24,12 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::catalog::pg_catalog::pg_user::{
+    PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
+};
+use crate::expr::{
+    CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef,
+};
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -72,16 +77,20 @@ impl BoundSelect {
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         let mut correlated_indices = self
             .exprs_mut()
-            .flat_map(|expr| expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id))
+            .flat_map(|expr| {
+                expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+            })
             .collect_vec();
 
         if let Some(relation) = self.from.as_mut() {
-            correlated_indices
-                .extend(relation.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
+            correlated_indices.extend(
+                relation.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+            );
         }
 
         correlated_indices
@@ -107,15 +116,19 @@ impl Binder {
         Self::require_bool_clause(&selection, "WHERE")?;
 
         // Bind GROUP BY clause.
+        self.context.clause = Some(Clause::GroupBy);
         let group_by = select
             .group_by
             .into_iter()
             .map(|expr| self.bind_expr(expr))
             .try_collect()?;
+        self.context.clause = None;
 
         // Bind HAVING clause.
+        self.context.clause = Some(Clause::Having);
         let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
         Self::require_bool_clause(&having, "HAVING")?;
+        self.context.clause = None;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
@@ -228,6 +241,54 @@ impl Binder {
             }
         }
         Ok((select_list, aliases))
+    }
+
+    /// `bind_get_user_by_id_select` binds a select statement that returns a single user name by id,
+    /// this is used for function `pg_catalog.get_user_by_id()`.
+    pub fn bind_get_user_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
+        let select_items = vec![InputRef::new(PG_USER_NAME_INDEX, DataType::Varchar).into()];
+        let schema = Schema {
+            fields: vec![Field::with_name(
+                DataType::Varchar,
+                UNNAMED_COLUMN.to_string(),
+            )],
+        };
+        let input = match input {
+            ExprImpl::InputRef(input_ref) => {
+                CorrelatedInputRef::new(input_ref.index(), input_ref.return_type(), 1).into()
+            }
+            ExprImpl::CorrelatedInputRef(col_input_ref) => CorrelatedInputRef::new(
+                col_input_ref.index(),
+                col_input_ref.return_type(),
+                col_input_ref.depth() + 1,
+            )
+            .into(),
+            ExprImpl::Literal(_) => input.clone(),
+            _ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
+        };
+        let from =
+            Some(self.bind_table_or_source(PG_CATALOG_SCHEMA_NAME, PG_USER_TABLE_NAME, None)?);
+        let where_clause = Some(
+            FunctionCall::new(
+                ExprType::Equal,
+                vec![
+                    input,
+                    InputRef::new(PG_USER_ID_INDEX, DataType::Int32).into(),
+                ],
+            )?
+            .into(),
+        );
+
+        Ok(BoundSelect {
+            distinct: false,
+            select_items,
+            aliases: vec![None],
+            from,
+            where_clause,
+            group_by: vec![],
+            having: None,
+            schema,
+        })
     }
 
     pub fn iter_bound_columns<'a>(

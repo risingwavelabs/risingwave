@@ -46,6 +46,7 @@
 #![feature(map_try_insert)]
 #![feature(result_option_inspect)]
 #![feature(never_type)]
+#![feature(btreemap_alloc)]
 
 #[macro_use]
 extern crate tracing;
@@ -61,6 +62,6 @@ pub mod task;
 /// - TODO: If set to `true`, The MV will be suspended and removed from further checkpoints. It can
 ///   still be used to serve outdated data without corruption.
 ///
-/// See also <https://github.com/singularity-data/risingwave/issues/4625>.
+/// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
 #[expect(dead_code)]
 const STRICT_MODE: bool = false;

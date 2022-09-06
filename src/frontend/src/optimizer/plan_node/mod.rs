@@ -38,6 +38,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
+use serde::Serialize;
 
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
@@ -67,7 +68,7 @@ pub trait PlanNode:
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Serialize)]
 pub struct PlanNodeId(pub i32);
 
 #[derive(Debug, PartialEq)]
@@ -127,6 +128,36 @@ impl dyn PlanNode {
         &self.plan_base().functional_dependency
     }
 
+    /// Serialize the plan node and its children to a stream plan proto.
+    ///
+    /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
+    /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
+    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanProst {
+        if let Some(stream_table_scan) = self.as_stream_table_scan() {
+            return stream_table_scan.adhoc_to_stream_prost();
+        }
+        if let Some(stream_index_scan) = self.as_stream_index_scan() {
+            return stream_index_scan.adhoc_to_stream_prost();
+        }
+
+        let node = Some(self.to_stream_prost_body(state));
+        let input = self
+            .inputs()
+            .into_iter()
+            .map(|plan| plan.to_stream_prost(state))
+            .collect();
+        // TODO: support pk_indices and operator_id
+        StreamPlanProst {
+            input,
+            identity: format!("{}", self),
+            node_body: node,
+            operator_id: self.id().0 as _,
+            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+            fields: self.schema().to_prost(),
+            append_only: self.append_only(),
+        }
+    }
+
     /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> BatchPlanProst {
         self.to_batch_prost_identity(true)
@@ -149,36 +180,6 @@ impl dyn PlanNode {
                 "".into()
             },
             node_body,
-        }
-    }
-
-    /// Serialize the plan node and its children to a stream plan proto.
-    ///
-    /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
-    /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
-    pub fn to_stream_prost(&self) -> StreamPlanProst {
-        if let Some(stream_table_scan) = self.as_stream_table_scan() {
-            return stream_table_scan.adhoc_to_stream_prost();
-        }
-        if let Some(stream_index_scan) = self.as_stream_index_scan() {
-            return stream_index_scan.adhoc_to_stream_prost();
-        }
-
-        let node = Some(self.to_stream_prost_body());
-        let input = self
-            .inputs()
-            .into_iter()
-            .map(|plan| plan.to_stream_prost())
-            .collect();
-        // TODO: support pk_indices and operator_id
-        StreamPlanProst {
-            input,
-            identity: format!("{}", self),
-            node_body: node,
-            operator_id: self.id().0 as u64,
-            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
-            fields: self.schema().to_prost(),
-            append_only: self.append_only(),
         }
     }
 }
@@ -215,6 +216,7 @@ mod batch_project_set;
 mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
+mod batch_sort_agg;
 mod batch_table_function;
 mod batch_topn;
 mod batch_union;
@@ -277,6 +279,7 @@ pub use batch_project_set::BatchProjectSet;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
+pub use batch_sort_agg::BatchSortAgg;
 pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
@@ -322,6 +325,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
@@ -362,6 +366,7 @@ macro_rules! for_all_plan_nodes {
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
+            , { Batch, SortAgg }
             , { Batch, Project }
             , { Batch, Filter }
             , { Batch, Insert }
@@ -430,7 +435,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, ProjectSet }
             , { Logical, Union }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
-            // if we dont support that, we don't need LogicalSort, just require the Order at the top of query
+            // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }
     };
 }
@@ -443,6 +448,7 @@ macro_rules! for_batch_plan_nodes {
             [$($x),*]
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
+            , { Batch, SortAgg }
             , { Batch, Project }
             , { Batch, Filter }
             , { Batch, SeqScan }
@@ -500,7 +506,7 @@ macro_rules! enum_plan_node_type {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
-            #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq)]
+            #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq, Serialize)]
             pub enum PlanNodeType {
                 $( [<$convention $name>] ),*
             }

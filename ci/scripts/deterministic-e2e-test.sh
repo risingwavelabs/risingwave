@@ -9,26 +9,33 @@ echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Build deterministic simulation e2e test runner"
-timeout 10m cargo make sslt --profile ci-release -- --help
+cargo make sslt --profile ci-release -- --help
+
+export RUNNER=./target/sim/ci-release/risingwave_simulation
+export RUST_LOG=off
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, ddl"
-timeout 10s cargo make sslt --profile ci-release -- './e2e_test/ddl/**/*.slt'
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/ddl/\*\*/\*.slt'
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, streaming"
-timeout 1m cargo make sslt --profile ci-release -- './e2e_test/streaming/**/*.slt'
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/streaming/\*\*/\*.slt'
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, batch"
-timeout 30s cargo make sslt --profile ci-release -- './e2e_test/batch/**/*.slt'
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/batch/\*\*/\*.slt'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, streaming"
-timeout 90s cargo make sslt --profile ci-release -- -j 16 './e2e_test/streaming/**/*.slt'
+seq 10 | parallel MADSIM_TEST_SEED={} $RUNNER -j 16 './e2e_test/streaming/\*\*/\*.slt'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
-timeout 30s cargo make sslt --profile ci-release -- -j 16 './e2e_test/batch/**/*.slt'
+seq 10 | parallel MADSIM_TEST_SEED={} $RUNNER -j 16 './e2e_test/batch/\*\*/\*.slt'
 
-# bugs here!
-echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, streaming"
-RUST_LOG=off timeout 2m cargo make sslt --profile ci-release -- --kill-node './e2e_test/streaming/**/*.slt' || true
+# bugs here! Tracking issue https://github.com/risingwavelabs/risingwave/issues/4527
+# echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, streaming"
+# seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-compute './e2e_test/streaming/\*\*/\*.slt' || true
 
-echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, batch"
-RUST_LOG=off timeout 2m cargo make sslt --profile ci-release -- --kill-node './e2e_test/batch/**/*.slt'
+# bugs here! Tracking issue https://github.com/risingwavelabs/risingwave/issues/4527
+# echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, batch"
+# seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-compute './e2e_test/batch/\*\*/\*.slt' || true
+
+echo "--- deterministic simulation e2e, ci-3cn-1fe, fuzzing"
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata

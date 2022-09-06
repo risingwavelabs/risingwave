@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::Layout;
 use std::backtrace::Backtrace;
 use std::convert::Infallible;
 use std::fmt::{Debug, Display, Formatter};
@@ -66,58 +65,48 @@ impl Display for TrackingIssue {
         match self.0 {
             Some(id) => write!(
                 f,
-                "Tracking issue: https://github.com/singularity-data/risingwave/issues/{}",
+                "Tracking issue: https://github.com/risingwavelabs/risingwave/issues/{}",
                 id
             ),
-            None => write!(f, "No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md"),
+            None => write!(f, "No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml"),
         }
     }
 }
 
 #[derive(Error, Debug)]
 pub enum ErrorCode {
-    #[error("ok")]
-    OK,
-    #[error("Failed to alloc memory for layout: {layout:?}")]
-    MemoryError { layout: Layout },
     #[error("internal error: {0}")]
     InternalError(String),
     #[error("connector error: {0}")]
     ConnectorError(BoxedError),
-    #[error(transparent)]
-    ProstError(prost::DecodeError),
     #[error("Feature is not yet implemented: {0}\n{1}")]
     NotImplemented(String, TrackingIssue),
     #[error(transparent)]
     IoError(IoError),
-    #[error("Storage error: {0:?}")]
+    #[error("Storage error: {0}")]
     StorageError(
         #[backtrace]
         #[source]
         BoxedError,
     ),
-    #[error("Expr error: {0:?}")]
+    #[error("Expr error: {0}")]
     ExprError(BoxedError),
-    #[error("BatchError: {0:?}")]
+    #[error("BatchError: {0}")]
     BatchError(BoxedError),
-    #[error("Array error: {0:?}")]
+    #[error("Array error: {0}")]
     ArrayError(ArrayError),
-    #[error("Stream error: {0:?}")]
+    #[error("Stream error: {0}")]
     StreamError(
         #[backtrace]
         #[source]
         BoxedError,
     ),
-    #[error("RPC error: {0:?}")]
+    #[error("RPC error: {0}")]
     RpcError(BoxedError),
-    #[error("Parse error: {0}")]
-    ParseError(String),
     #[error("Bind error: {0}")]
     BindError(String),
     #[error("Catalog error: {0}")]
     CatalogError(BoxedError),
-    #[error("Out of range")]
-    NumericValueOutOfRange,
     #[error("Protocol error: {0}")]
     ProtocolError(String),
     #[error("Scheduler error: {0}")]
@@ -132,8 +121,6 @@ pub enum ErrorCode {
     MemComparableError(MemComparableError),
     #[error("Error while de/se values: {0}")]
     ValueEncodingError(ValueEncodingError),
-    #[error("Error while interact with meta service: {0}")]
-    MetaError(String),
     #[error("Invalid value [{config_value:?}] for [{config_entry:?}]")]
     InvalidConfigValue {
         config_entry: String,
@@ -147,21 +134,8 @@ pub enum ErrorCode {
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
 
-    /// This error occurs when the meta node receives heartbeat from a previous removed worker
-    /// node. Currently we don't support re-register, and the worker node need a full restart.
-    #[error("Unknown worker")]
-    UnknownWorker,
-
     #[error("unrecognized configuration parameter \"{0}\"")]
     UnrecognizedConfigurationParameter(String),
-
-    /// `Eof` represents an upstream node will not generate new data. This error is rare in our
-    /// system, currently only used in the `BatchQueryExecutor` as an ephemeral solution.
-    #[error("End of the stream")]
-    Eof,
-
-    #[error("Unknown error: {0}")]
-    UnknownError(String),
 }
 
 pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {
@@ -170,10 +144,6 @@ pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
     ErrorCode::InternalError(msg.into()).into()
-}
-
-pub fn parse_error(msg: impl Into<String>) -> RwError {
-    ErrorCode::ParseError(msg.into()).into()
 }
 
 #[derive(Clone)]
@@ -185,7 +155,6 @@ pub struct RwError {
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
         match &*err.inner {
-            ErrorCode::OK => tonic::Status::ok(err.to_string()),
             ErrorCode::ExprError(e) => tonic::Status::invalid_argument(e.to_string()),
             ErrorCode::PermissionDenied(e) => tonic::Status::permission_denied(e),
             ErrorCode::InternalError(e) => tonic::Status::internal(e),
@@ -287,10 +256,6 @@ impl PartialEq for RwError {
 impl PartialEq for ErrorCode {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (&ErrorCode::OK, &ErrorCode::OK) => true,
-            (&ErrorCode::MemoryError { layout }, &ErrorCode::MemoryError { layout: layout2 }) => {
-                layout == layout2
-            }
             (&ErrorCode::InternalError(ref msg), &ErrorCode::InternalError(ref msg2)) => {
                 msg == msg2
             }
@@ -480,12 +445,6 @@ mod tests {
     use crate::error::ErrorCode::InternalError;
 
     #[test]
-    fn test_display_ok() {
-        let ret: RwError = ErrorCode::OK.into();
-        println!("Error: {}", ret);
-    }
-
-    #[test]
     fn test_display_internal_error() {
         let internal_error = ErrorCode::InternalError("some thing bad happened!".to_string());
         println!("{:?}", RwError::from(internal_error));
@@ -532,16 +491,6 @@ mod tests {
                 )))),
                 error
             );
-        }
-
-        {
-            let layout = Layout::new::<u64>();
-            let expected_error = ErrorCode::MemoryError { layout };
-            let error = (|| {
-                ensure!(a < 0, ErrorCode::MemoryError { layout });
-                Ok(())
-            })();
-            assert_eq!(Err(RwError::from(expected_error)), error);
         }
     }
 

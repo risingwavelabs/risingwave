@@ -18,6 +18,7 @@ use std::sync::Arc;
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
+use aws_smithy_types::retry::RetryConfig;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream;
@@ -40,6 +41,8 @@ const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
 const S3_PART_SIZE: usize = 16 * 1024 * 1024;
 // TODO: we should do some benchmark to determine the proper part size for MinIO
 const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
+/// The number of S3 bucket prefixes
+const S3_NUM_PREFIXES: u32 = 256;
 
 /// S3 multipart upload handle.
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
@@ -260,6 +263,10 @@ impl StreamingUploader for S3StreamingUploader {
         }
         Ok(())
     }
+
+    fn get_memory_usage(&self) -> u64 {
+        (self.part_size + MIN_PART_SIZE) as u64
+    }
 }
 
 fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
@@ -267,6 +274,7 @@ fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
 }
 
 /// Object store with S3 backend
+/// The full path to a file on S3 would be s3://bucket/<data_directory>/prefix/file
 pub struct S3ObjectStore {
     client: Client,
     bucket: String,
@@ -277,6 +285,13 @@ pub struct S3ObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
+    fn get_object_prefix(&self, obj_id: u64) -> String {
+        let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % S3_NUM_PREFIXES;
+        let mut obj_prefix = prefix.to_string();
+        obj_prefix.push('/');
+        obj_prefix
+    }
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
             "s3 upload error"
@@ -481,8 +496,12 @@ impl S3ObjectStore {
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        let shared_config = aws_config::load_from_env().await;
-        let client = Client::new(&shared_config);
+        // Retry 3 times if we get server-side errors or throttling errors
+        let sdk_config = aws_config::from_env()
+            .retry_config(RetryConfig::new().with_max_attempts(4))
+            .load()
+            .await;
+        let client = Client::new(&sdk_config);
 
         Self {
             client,
@@ -518,5 +537,39 @@ impl S3ObjectStore {
             part_size: MINIO_PART_SIZE,
             metrics,
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg(not(madsim))]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::object::object_metrics::ObjectStoreMetrics;
+    use crate::object::s3::S3_NUM_PREFIXES;
+    use crate::object::{ObjectStore, S3ObjectStore};
+
+    fn get_hash_of_object(obj_id: u64) -> u32 {
+        let crc_hash = crc32fast::hash(&obj_id.to_be_bytes());
+        crc_hash % S3_NUM_PREFIXES
+    }
+
+    #[tokio::test]
+    async fn test_get_object_prefix() {
+        let store = S3ObjectStore::new(
+            "mybucket".to_string(),
+            Arc::new(ObjectStoreMetrics::unused()),
+        )
+        .await;
+
+        for obj_id in 0..99999 {
+            let hash = get_hash_of_object(obj_id);
+            let prefix = store.get_object_prefix(obj_id);
+            assert_eq!(format!("{}/", hash), prefix);
+        }
+
+        let obj_prefix = String::default();
+        let path = format!("{}/{}{}.data", "hummock_001", obj_prefix, 101);
+        assert_eq!("hummock_001/101.data", path);
     }
 }

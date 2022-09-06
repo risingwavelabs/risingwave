@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
@@ -175,7 +176,7 @@ async fn test_hummock_compaction_task() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -209,14 +210,13 @@ async fn test_hummock_compaction_task() {
     assert_eq!(compact_task.get_task_id(), 2);
 
     // Cancel the task and succeed.
-    compact_task.task_status = false;
     assert!(hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .cancel_compact_task(&mut compact_task)
         .await
         .unwrap());
-    // Cancel the task and told the task is not found, which may have been processed previously.
-    assert!(!hummock_manager
-        .report_compact_task(context_id, &compact_task)
+    // Cancel a non-existent task and succeed.
+    assert!(hummock_manager
+        .cancel_compact_task(&mut compact_task)
         .await
         .unwrap());
 
@@ -232,7 +232,7 @@ async fn test_hummock_compaction_task() {
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
     // Finish the task and succeed.
-    compact_task.task_status = true;
+    compact_task.set_task_status(TaskStatus::Success);
 
     assert!(hummock_manager
         .report_compact_task(context_id, &compact_task)
@@ -253,7 +253,7 @@ async fn test_hummock_table() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -314,7 +314,7 @@ async fn test_hummock_transaction() {
         // Add tables in epoch1
         let tables_in_epoch1 = generate_test_tables(epoch1, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager_ref_for_test(),
+            hummock_manager.compaction_group_manager(),
             &tables_in_epoch1,
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -373,7 +373,7 @@ async fn test_hummock_transaction() {
         // Add tables in epoch2
         let tables_in_epoch2 = generate_test_tables(epoch2, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager_ref_for_test(),
+            hummock_manager.compaction_group_manager(),
             &tables_in_epoch2,
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -499,7 +499,41 @@ async fn test_release_context_resource() {
 
 #[tokio::test]
 async fn test_context_id_validation() {
-    let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let invalid_context_id = HummockContextId::MAX;
+    let context_id = worker_node.id;
+
+    // Invalid context id is rejected.
+    let error = hummock_manager
+        .pin_version(invalid_context_id, u64::MAX)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::InvalidContext(_)));
+
+    // Valid context id is accepted.
+    hummock_manager
+        .pin_version(context_id, u64::MAX)
+        .await
+        .unwrap();
+    // Pin multiple times is OK.
+    hummock_manager
+        .pin_version(context_id, u64::MAX)
+        .await
+        .unwrap();
+}
+
+// This is a non-deterministic test depending on the use of timeouts
+#[cfg(madsim)]
+#[tokio::test]
+async fn test_context_id_invalidation() {
+    use crate::hummock::local_notification_receiver;
+    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (member_join, member_shutdown) = local_notification_receiver(
+        hummock_manager.clone(),
+        hummock_manager.compactor_manager_ref_for_test(),
+        env.notification_manager_ref(),
+    )
+    .await;
     let invalid_context_id = HummockContextId::MAX;
     let context_id = worker_node.id;
 
@@ -521,11 +555,33 @@ async fn test_context_id_validation() {
         .await
         .unwrap();
 
-    // Remove the node from cluster will invalidate context id.
+    // Remove the node from cluster will invalidate context id by clearing
+    // the invalidated pinned versions.
     cluster_manager
         .delete_worker_node(worker_node.host.unwrap())
         .await
         .unwrap();
+
+    // Notification of local subscribers and resultant deletion of worker node from
+    // the Hummock manager needs time to complete. This test can run for a maximum of 10 seconds.
+    // (in practice, this usually succeeds on first try)
+    let mut success = false;
+    for _ in 0..40 {
+        if hummock_manager
+            .pin_version(context_id, u64::MAX)
+            .await
+            .is_err()
+        {
+            success = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    member_shutdown.send(()).unwrap();
+    member_join.await.unwrap();
+    if !success {
+        panic!("context_id did not get invalidated")
+    }
 }
 
 #[tokio::test]
@@ -558,7 +614,7 @@ async fn test_hummock_manager_basic() {
     let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef<MemStore>| async move {
         let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager_ref_for_test(),
+            hummock_manager.compaction_group_manager(),
             &original_tables,
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -702,7 +758,7 @@ async fn test_pin_snapshot_response_lost() {
     let mut epoch: u64 = 1;
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -724,7 +780,7 @@ async fn test_pin_snapshot_response_lost() {
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -751,7 +807,7 @@ async fn test_pin_snapshot_response_lost() {
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -773,7 +829,7 @@ async fn test_pin_snapshot_response_lost() {
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -801,7 +857,7 @@ async fn test_print_compact_task() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -841,7 +897,7 @@ async fn test_invalid_sst_id() {
     let epoch = 1;
     let ssts = generate_test_tables(epoch, vec![1]);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &ssts,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -946,6 +1002,218 @@ async fn test_trigger_manual_compaction() {
             .await;
         assert!(result.is_err());
     }
+}
+
+// This is a non-deterministic test
+#[cfg(madsim)]
+#[tokio::test]
+async fn test_hummock_compaction_task_heartbeat() {
+    use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+    use risingwave_pb::hummock::CompactTaskProgress;
+
+    use crate::hummock::HummockManager;
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let sst_num = 2;
+
+    let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+    let _tx = compactor_manager.add_compactor(context_id, 100);
+    let (join_handle, shutdown_tx) =
+        HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
+
+    // No compaction task available.
+    let task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap();
+    assert_eq!(task, None);
+
+    // Add some sstables and commit.
+    let epoch: u64 = 1;
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager(),
+        &original_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&original_tables),
+    )
+    .await
+    .unwrap();
+
+    // Get a compaction task.
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        compact_task
+            .get_input_ssts()
+            .first()
+            .unwrap()
+            .get_level_idx(),
+        0
+    );
+    assert_eq!(compact_task.get_task_id(), 2);
+    // send task
+    compactor_manager
+        .random_compactor()
+        .unwrap()
+        .send_task(Task::CompactTask(compact_task.clone()))
+        .await
+        .unwrap();
+
+    for i in 0..10 {
+        // send heartbeats to the task over 2.5 seconds
+        let req = CompactTaskProgress {
+            task_id: compact_task.task_id,
+            num_ssts_sealed: i + 1,
+            num_ssts_uploaded: 0,
+        };
+        compactor_manager.update_task_heartbeats(context_id, &vec![req]);
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+
+    // Cancel the task immediately and succeed.
+    compact_task.set_task_status(TaskStatus::Failed);
+
+    assert!(hummock_manager
+        .report_compact_task(context_id, &compact_task)
+        .await
+        .unwrap());
+
+    // Get a compaction task.
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id)
+        .await
+        .unwrap();
+    assert_eq!(compact_task.get_task_id(), 3);
+    // send task
+    compactor_manager
+        .random_compactor()
+        .unwrap()
+        .send_task(Task::CompactTask(compact_task.clone()))
+        .await
+        .unwrap();
+
+    // do not send heartbeats to the task for 2.5 seconds (ttl = 1s, heartbeat check freq. = 1s)
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+
+    // Cancel the task after heartbeat has triggered and fail.
+    compact_task.set_task_status(TaskStatus::Failed);
+    assert!(!hummock_manager
+        .report_compact_task(context_id, &compact_task)
+        .await
+        .unwrap());
+    shutdown_tx.send(()).unwrap();
+    join_handle.await.unwrap();
+}
+
+// This is a non-deterministic test
+#[cfg(madsim)]
+#[tokio::test]
+async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
+    use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+    use risingwave_pb::hummock::CompactTaskProgress;
+
+    use crate::hummock::HummockManager;
+    let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let sst_num = 2;
+
+    let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+    let _tx = compactor_manager.add_compactor(context_id, 100);
+    let (join_handle, shutdown_tx) =
+        HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
+
+    // No compaction task available.
+    let task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap();
+    assert_eq!(task, None);
+
+    // Add some sstables and commit.
+    let epoch: u64 = 1;
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager(),
+        &original_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&original_tables),
+    )
+    .await
+    .unwrap();
+
+    // Get a compaction task.
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        compact_task
+            .get_input_ssts()
+            .first()
+            .unwrap()
+            .get_level_idx(),
+        0
+    );
+    assert_eq!(compact_task.get_task_id(), 2);
+    // send task
+    compactor_manager
+        .random_compactor()
+        .unwrap()
+        .send_task(Task::CompactTask(compact_task.clone()))
+        .await
+        .unwrap();
+
+    // send heartbeats to the task immediately
+    let req = CompactTaskProgress {
+        task_id: compact_task.task_id,
+        num_ssts_sealed: 1,
+        num_ssts_uploaded: 1,
+    };
+    compactor_manager.update_task_heartbeats(context_id, &vec![req.clone()]);
+
+    // Removing the node from cluster will invalidate context id.
+    cluster_manager
+        .delete_worker_node(worker_node.host.unwrap())
+        .await
+        .unwrap();
+    hummock_manager
+        .release_contexts([context_id])
+        .await
+        .unwrap();
+
+    // Check that no heartbeats exist for the relevant context.
+    assert!(!compactor_manager.purge_heartbeats_for_context(worker_node.id));
+
+    shutdown_tx.send(()).unwrap();
+    join_handle.await.unwrap();
 }
 
 #[tokio::test]

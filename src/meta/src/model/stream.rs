@@ -45,9 +45,6 @@ pub struct TableFragments {
 
     /// The status of actors
     pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
-
-    /// Internal TableIds from all Fragments, included the table_id itself.
-    table_to_fragment_map: HashMap<u32, FragmentId>,
 }
 
 impl MetadataModel for TableFragments {
@@ -67,17 +64,10 @@ impl MetadataModel for TableFragments {
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
-        let table_to_fragment_map: HashMap<u32, FragmentId> = prost
-            .fragments
-            .values()
-            .flat_map(|f| f.state_table_ids.iter().map(|&t| (t, f.fragment_id)))
-            .collect();
-
         Self {
             table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
-            table_to_fragment_map,
         }
     }
 
@@ -88,16 +78,10 @@ impl MetadataModel for TableFragments {
 
 impl TableFragments {
     pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
-        let table_to_fragment_map: HashMap<u32, FragmentId> = fragments
-            .values()
-            .flat_map(|f| f.state_table_ids.iter().map(|&t| (t, f.fragment_id)))
-            .collect();
-
         Self {
             table_id,
             fragments,
             actor_status: BTreeMap::default(),
-            table_to_fragment_map,
         }
     }
 
@@ -210,7 +194,7 @@ impl TableFragments {
     }
 
     /// Returns actors that contains Chain node.
-    pub fn chain_actor_ids(&self) -> Vec<ActorId> {
+    pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
         self.fragments
             .values()
             .flat_map(|fragment| {
@@ -263,6 +247,15 @@ impl TableFragments {
         for (&actor_id, actor_status) in &self.actor_status {
             let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
+        }
+        map
+    }
+
+    pub fn actor_to_worker(&self) -> HashMap<ActorId, WorkerId> {
+        let mut map = HashMap::default();
+        for (&actor_id, actor_status) in &self.actor_status {
+            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
+            map.insert(actor_id, node_id);
         }
         map
     }
@@ -456,12 +449,10 @@ impl TableFragments {
             .collect_vec()
     }
 
-    /// Get the table mapping info from the fragment it belongs to.
-    pub fn get_table_hash_mapping(&self, table_id: u32) -> Option<ParallelUnitMapping> {
-        self.table_to_fragment_map.get(&table_id).map(|f| {
-            let mut mapping = self.fragments[f].vnode_mapping.clone().unwrap();
-            mapping.table_id = table_id;
-            mapping
-        })
+    /// Returns all internal table ids including the mview table.
+    pub fn all_table_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.fragments
+            .values()
+            .flat_map(|f| f.state_table_ids.clone())
     }
 }
