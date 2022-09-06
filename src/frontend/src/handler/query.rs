@@ -24,14 +24,13 @@ use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::binder::{Binder, BoundStatement};
-use crate::handler::dml;
 use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{force_local_mode, to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{
     BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution, SchedulerError,
 };
-use crate::session::OptimizerContext;
+use crate::session::{OptimizerContext, SessionImpl};
 
 pub async fn handle_query(
     context: OptimizerContext,
@@ -103,7 +102,7 @@ pub async fn handle_query(
 
     // Implicitly flush the writes.
     if session.config().get_implicit_flush() {
-        dml::flush_for_write(&session, stmt_type).await?;
+        flush_for_write(&session, stmt_type).await?;
     }
     Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
 }
@@ -198,4 +197,19 @@ fn local_execute(
     // TODO: Passing sql here
     let execution = LocalQueryExecution::new(query, front_env.clone(), "", session.auth_context());
     Ok((Box::pin(execution.run()), pg_descs))
+}
+
+async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
+    match stmt_type {
+        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
+            let client = session.env().meta_client();
+            let snapshot = client.flush().await?;
+            session
+                .env()
+                .hummock_snapshot_manager()
+                .update_epoch(snapshot);
+        }
+        _ => {}
+    }
+    Ok(())
 }
