@@ -263,6 +263,17 @@ impl Row {
         Ok(result)
     }
 
+    /// Serialize the row by the given `indices` into value encoding bytes.
+    ///
+    /// Use this method serialize row datums without allocation of owned datums.
+    pub fn serialize_by_indices(&self, indices: &[usize]) -> value_encoding::Result<Vec<u8>> {
+        let mut result = vec![];
+        for idx in indices {
+            result.extend(serialize_datum(&self.0[*idx])?);
+        }
+        Ok(result)
+    }
+
     /// Return number of cells in the row.
     pub fn size(&self) -> usize {
         self.0.len()

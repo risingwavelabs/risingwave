@@ -28,6 +28,7 @@ use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::util::value_encoding;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
@@ -79,11 +80,9 @@ impl JoinRow {
         Ok(self.degree)
     }
 
-    pub fn row_by_indices(&self, indices: &[usize]) -> Row {
-        Row(indices
-            .iter()
-            .map(|&idx| self.row.index(idx).to_owned())
-            .collect_vec())
+    /// Serialize the underlying row to value encoding. Order is not guaranteed.
+    pub fn serialize_by_indices(&self, indices: &[usize]) -> value_encoding::Result<Vec<u8>> {
+        self.row.serialize_by_indices(indices)
     }
 
     /// Make degree as the last datum of row
@@ -150,7 +149,8 @@ impl EstimateSize for EncodedJoinRow {
     }
 }
 
-type PkType = Row;
+// Since pk does not need to be ordered, we can use value encoding for it.
+type PkType = Vec<u8>;
 
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = JoinEntryState;
@@ -336,7 +336,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         #[for_await]
         for row in table_iter {
             let row = row?.into_owned();
-            let pk = row.by_indices(&self.pk_indices);
+            let pk = row.serialize_by_indices(&self.pk_indices)?;
 
             entry_state.insert(pk, JoinRow::from_row(row).encode()?);
         }
@@ -350,7 +350,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a key
-    pub fn insert(&mut self, key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, key: &K, pk: PkType, value: JoinRow) -> StreamExecutorResult<()> {
         if let Some(entry) = self.inner.get_mut(key) {
             entry.insert(pk, value.encode()?);
         }
@@ -361,7 +361,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a key
-    pub fn delete(&mut self, key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
+    pub fn delete(&mut self, key: &K, pk: PkType, value: JoinRow) -> StreamExecutorResult<()> {
         if let Some(entry) = self.inner.get_mut(key) {
             entry.remove(pk);
         }

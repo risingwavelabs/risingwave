@@ -121,8 +121,11 @@ mod tests {
     async fn test_managed_all_or_none_state() {
         let mut managed_state = JoinEntryState::default();
         let pk_indices = [0];
-        let col1 = [1, 2, 3];
-        let col2 = [6, 5, 4];
+        let rows = [
+            Row::new(vec![Some(ScalarImpl::Int64(3)), Some(ScalarImpl::Int64(4))]),
+            Row::new(vec![Some(ScalarImpl::Int64(2)), Some(ScalarImpl::Int64(5))]),
+            Row::new(vec![Some(ScalarImpl::Int64(1)), Some(ScalarImpl::Int64(6))]),
+        ];
         let col_types = vec![DataType::Int64, DataType::Int64];
         let data_chunk = DataChunk::from_pretty(
             "I I
@@ -134,18 +137,16 @@ mod tests {
         for row_ref in data_chunk.rows() {
             let row: Row = row_ref.into();
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
-            let pk = Row(pk);
+            let pk = Row(pk).serialize().unwrap();
             let join_row = JoinRow { row, degree: 0 };
             managed_state.insert(pk, join_row.encode().unwrap());
         }
 
-        for ((_, matched_row), (d1, d2)) in managed_state
-            .values_mut(&col_types)
-            .zip_eq(col1.iter().zip_eq(col2.iter()))
-        {
+        let matched_rows = managed_state.values_mut(&col_types).collect::<Vec<_>>();
+        assert_eq!(matched_rows.len(), rows.len());
+        for (_, matched_row) in matched_rows {
             let matched_row = matched_row.unwrap();
-            assert_eq!(matched_row.row[0], Some(ScalarImpl::Int64(*d1)));
-            assert_eq!(matched_row.row[1], Some(ScalarImpl::Int64(*d2)));
+            assert!(rows.contains(&matched_row.row));
             assert_eq!(matched_row.degree, 0);
         }
     }
