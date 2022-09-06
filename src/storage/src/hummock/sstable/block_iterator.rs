@@ -227,7 +227,7 @@ mod tests {
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         BlockIterator::new(BlockHolder::from_owned_block(Box::new(
-            Block::decode(&buf, capacity).unwrap(),
+            Block::decode(buf.into(), capacity).unwrap(),
         )))
     }
 

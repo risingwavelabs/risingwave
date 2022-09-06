@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::io::{Read, Write};
 use std::ops::Range;
 
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_hummock_sdk::VersionedComparator;
 use {lz4, zstd};
 
@@ -31,7 +31,7 @@ pub const DEFAULT_ENTRY_SIZE: usize = 16;
 #[derive(Clone)]
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
-    data: Vec<u8>,
+    data: Bytes,
     /// Uncompressed entried data length.
     data_len: usize,
     /// Restart points.
@@ -39,7 +39,7 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn decode(buf: &[u8], uncompressed_capacity: usize) -> HummockResult<Self> {
+    pub fn decode(buf: Bytes, uncompressed_capacity: usize) -> HummockResult<Self> {
         // Verify checksum.
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
         xxhash64_verify(&buf[..buf.len() - 8], xxhash64_checksum)?;
@@ -48,7 +48,7 @@ impl Block {
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
         let compressed_data = &buf[..buf.len() - 9];
         let buf = match compression {
-            CompressionAlgorithm::None => buf[..buf.len() - 9].to_vec(),
+            CompressionAlgorithm::None => buf.slice(0..(buf.len() - 9)),
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
@@ -57,7 +57,7 @@ impl Block {
                     .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)?;
                 debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
-                decoded
+                Bytes::from(decoded)
             }
             CompressionAlgorithm::Zstd => {
                 let mut decoder = zstd::Decoder::new(compressed_data.reader())
@@ -67,14 +67,14 @@ impl Block {
                     .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)?;
                 debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
-                decoded
+                Bytes::from(decoded)
             }
         };
 
         Ok(Self::decode_from_raw(buf))
     }
 
-    pub fn decode_from_raw(buf: Vec<u8>) -> Self {
+    pub fn decode_from_raw(buf: Bytes) -> Self {
         // Decode restart points.
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
@@ -99,7 +99,7 @@ impl Block {
     }
 
     pub fn capacity(&self) -> usize {
-        self.data.capacity() + self.restart_points.capacity() * std::mem::size_of::<u32>()
+        self.data.len() + self.restart_points.capacity() * std::mem::size_of::<u32>()
     }
 
     /// Gets restart point by index.
@@ -387,7 +387,7 @@ mod tests {
         builder.add(&full_key(b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
-        let block = Box::new(Block::decode(&buf, capacity).unwrap());
+        let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
@@ -432,7 +432,7 @@ mod tests {
         builder.add(&full_key(b"k4", 4), b"v04");
         let capcitiy = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
-        let block = Box::new(Block::decode(&buf, capcitiy).unwrap());
+        let block = Box::new(Block::decode(buf.into(), capcitiy).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
