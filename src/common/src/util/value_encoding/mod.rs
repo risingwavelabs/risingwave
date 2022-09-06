@@ -66,35 +66,6 @@ pub fn serialize_datum_ref(datum_ref: &DatumRef, mut buf: impl BufMut) {
     }
 }
 
-pub fn vec_serialize_datum_ref(
-    array: &ArrayImpl,
-    visibility: Option<&Bitmap>,
-    mut buffers: Vec<impl BufMut>,
-) {
-    assert_eq!(array.len(), buffers.len());
-    match visibility {
-        Some(vis) => {
-            for ((i, buffer), vis) in buffers.iter_mut().enumerate().zip_eq(vis.iter()) {
-                if !vis {
-                    continue;
-                }
-                // SAFETY(value_at_unchecked): the idx is always in bound.
-                unsafe {
-                    serialize_datum_ref(&array.value_at_unchecked(i), buffer);
-                }
-            }
-        }
-        None => {
-            for (i, buffer) in buffers.iter_mut().enumerate() {
-                // SAFETY(value_at_unchecked): the idx is always in bound.
-                unsafe {
-                    serialize_datum_ref(&array.value_at_unchecked(i), buffer);
-                }
-            }
-        }
-    }
-}
-
 /// Deserialize bytes into a datum (Not order guarantee, used in value encoding).
 pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
     let null_tag = data.get_u8();

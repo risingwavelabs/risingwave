@@ -15,13 +15,17 @@
 use std::sync::Arc;
 
 use bytes::Buf;
+use itertools::Itertools;
 use memcomparable::from_slice;
-use risingwave_common::array::Row;
+use risingwave_common::array::{ArrayImpl, Row, Vis};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::OrderedRowSerializer;
-use risingwave_common::util::value_encoding::deserialize_datum;
+use risingwave_common::util::value_encoding::{
+    deserialize_datum, serialize_datum_ref, vec_serialize_datum_ref,
+};
 
 use super::ColumnDescMapping;
 
@@ -38,6 +42,40 @@ pub fn serialize_pk_with_vnode(
 ) -> Vec<u8> {
     let pk_bytes = serialize_pk(pk, serializer);
     [&vnode.to_be_bytes(), pk_bytes.as_slice()].concat()
+}
+
+pub fn vec_serialize_value(columns: &[&ArrayImpl], vis: Vis) -> Vec<Vec<u8>> {
+    match vis {
+        Vis::Bitmap(vis) => {
+            let rows_num = vis.len();
+            let mut buffers = vec![vec![]; rows_num];
+            for c in columns {
+                for (i, buffer) in buffers.iter_mut().enumerate() {
+                    assert_eq!(c.len(), rows_num);
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        if vis.is_set_unchecked(i) {
+                            serialize_datum_ref(&c.value_at_unchecked(i), buffer);
+                        }
+                    }
+                }
+            }
+            buffers
+        }
+        Vis::Compact(rows_num) => {
+            let mut buffers = vec![vec![]; rows_num];
+            for c in columns {
+                assert_eq!(c.len(), rows_num);
+                for (i, buffer) in buffers.iter_mut().enumerate() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        serialize_datum_ref(&c.value_at_unchecked(i), buffer);
+                    }
+                }
+            }
+            buffers
+        }
+    }
 }
 
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
