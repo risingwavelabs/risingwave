@@ -416,21 +416,15 @@ async fn test_context_id_validation() {
 
     // Invalid context id is rejected.
     let error = hummock_manager
-        .pin_version(invalid_context_id, u64::MAX)
+        .pin_version(invalid_context_id)
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InvalidContext(_)));
 
     // Valid context id is accepted.
-    hummock_manager
-        .pin_version(context_id, u64::MAX)
-        .await
-        .unwrap();
+    hummock_manager.pin_version(context_id).await.unwrap();
     // Pin multiple times is OK.
-    hummock_manager
-        .pin_version(context_id, u64::MAX)
-        .await
-        .unwrap();
+    hummock_manager.pin_version(context_id).await.unwrap();
 }
 
 // This is a non-deterministic test depending on the use of timeouts
@@ -472,11 +466,7 @@ async fn test_context_id_invalidation() {
     // (in practice, this usually succeeds on first try)
     let mut success = false;
     for _ in 0..40 {
-        if hummock_manager
-            .pin_version(context_id, u64::MAX)
-            .await
-            .is_err()
-        {
+        if hummock_manager.pin_version(context_id).await.is_err() {
             success = true;
             break;
         }
