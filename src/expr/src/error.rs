@@ -47,6 +47,9 @@ pub enum ExprError {
     #[error("Array error: {0}")]
     Array(#[from] ArrayError),
 
+    #[error("More than one row returned by {0} used as an expression")]
+    MaxOneRow(&'static str),
+
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
