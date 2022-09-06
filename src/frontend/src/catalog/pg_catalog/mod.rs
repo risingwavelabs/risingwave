@@ -261,7 +261,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Utf8(source.name.clone())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(source.owner as i32)),
-                            Some(ScalarImpl::Utf8("S".to_string())),
+                            Some(ScalarImpl::Utf8("x".to_string())),
                         ])
                     })
                     .collect_vec();
