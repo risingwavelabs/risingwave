@@ -33,6 +33,7 @@ use crate::storage::MetaStore;
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
 
 pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
+
 /// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
 /// compaction groups.
 pub struct CompactionRequestChannel {
@@ -72,9 +73,9 @@ pub struct CompactionScheduler<S>
 where
     S: MetaStore,
 {
+    env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    compactor_selection_retry_interval_sec: u64,
 }
 
 impl<S> CompactionScheduler<S>
@@ -87,9 +88,9 @@ where
         compactor_manager: CompactorManagerRef,
     ) -> Self {
         Self {
+            env,
             hummock_manager,
             compactor_manager,
-            compactor_selection_retry_interval_sec: env.opts.compactor_selection_retry_interval_sec,
         }
     }
 
@@ -100,6 +101,10 @@ where
         self.hummock_manager
             .set_compaction_scheduler(request_channel.clone());
         tracing::info!("Start compaction scheduler.");
+        let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
+            self.env.opts.periodic_compaction_interval_sec,
+        ));
+        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let compaction_group: CompactionGroupId = tokio::select! {
                 compaction_group = request_rx.recv() => {
@@ -111,6 +116,15 @@ where
                             break;
                         }
                     }
+                },
+                _ = min_trigger_interval.tick() => {
+                    // Periodically trigger compaction for all compaction groups.
+                    for cg_id in self.hummock_manager.compaction_group_manager().compaction_group_ids().await {
+                        if let Err(e) = request_channel.try_send(cg_id) {
+                            tracing::warn!("Failed to schedule compaction for compaction group {}. {}", cg_id, e);
+                        }
+                    }
+                    continue;
                 },
                 // Shutdown compactor scheduler
                 _ = &mut shutdown_rx => {
@@ -166,7 +180,7 @@ where
                         self.hummock_manager.list_assigned_tasks_number().await;
                     tracing::warn!("No idle compactor available. The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
                     tokio::time::sleep(Duration::from_secs(
-                        self.compactor_selection_retry_interval_sec,
+                        self.env.opts.compactor_selection_retry_interval_sec,
                     ))
                     .await;
                     match self
@@ -229,7 +243,7 @@ where
                     .await
                 {
                     tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
-                    // TODO #3677: handle cancellation via compaction heartbeat after #4496
+                    // handle cancellation via compaction heartbeat
                     return false;
                 }
                 continue 'send_task;

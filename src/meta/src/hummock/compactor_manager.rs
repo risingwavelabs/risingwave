@@ -231,7 +231,7 @@ impl CompactorManager {
 
     /// Forcefully purging the heartbeats for a task is only safe when the
     /// context has been completely removed from meta.
-    /// Returns true if there were remanining heartbeats for the task.
+    /// Returns true if there were remaining heartbeats for the task.
     pub fn purge_heartbeats_for_context(&self, context_id: HummockContextId) -> bool {
         self.task_heartbeats.write().remove(&context_id).is_some()
     }
@@ -350,7 +350,7 @@ mod tests {
     {
         let original_tables = generate_test_tables(epoch, get_sst_ids(hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager_ref_for_test(),
+            hummock_manager.compaction_group_manager(),
             &original_tables,
             StaticCompactionGroupId::StateDefault.into(),
         )
