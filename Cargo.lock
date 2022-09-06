@@ -2634,9 +2634,9 @@ dependencies = [
 
 [[package]]
 name = "lz4-sys"
-version = "1.9.3"
+version = "1.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7be8908e2ed6f31c02db8a9fa962f03e36c53fbfde437363eae3306b85d7e17"
+checksum = "57d27b317e207b10f69f5e75494119e391a96f48861ae870d1da6edac98ca900"
 dependencies = [
  "cc",
  "libc",
@@ -2664,9 +2664,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.4"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fbcfa3e52808d948f10928c17a720efd3324942b1059cef77cc88077ea639f9"
+checksum = "69239c86b096ba429e109d5e36c3e639d19d36e0d0a8c3df1e168b72a5008770"
 dependencies = [
  "ahash",
  "async-channel",
@@ -2690,10 +2690,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "madsim-macros"
-version = "0.2.0"
+name = "madsim-etcd-client"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45a95505369fabd293bcb3eaab7cefd668f174a7e533dcf247eed97a91ea5d2a"
+checksum = "54cc5db0885f71b5e8eb71ec1002b94bf5b8f5b1011c4d709b23a1fd3b5c01d8"
+dependencies = [
+ "etcd-client",
+ "http",
+ "madsim",
+ "spin 0.9.4",
+ "tonic",
+ "tracing",
+]
+
+[[package]]
+name = "madsim-macros"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8abbe137adbf2023c066b8acb3fdef0a4bec6494642ef2174d060fc99a9f80ea"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -4548,6 +4562,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "pgwire",
+ "prometheus",
  "prost",
  "rand 0.8.5",
  "risingwave_batch",
@@ -4648,7 +4663,6 @@ dependencies = [
  "crc32fast",
  "derivative",
  "either",
- "etcd-client",
  "fail",
  "function_name",
  "futures",
@@ -4656,6 +4670,7 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
+ "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -4767,6 +4782,7 @@ dependencies = [
  "risingwave_pb",
  "thiserror",
  "tokio-retry",
+ "tokio-stream",
  "tracing",
  "workspace-hack",
 ]
@@ -4797,6 +4813,7 @@ dependencies = [
  "futures",
  "glob",
  "madsim",
+ "madsim-etcd-client",
  "madsim-tokio",
  "rand 0.8.5",
  "risingwave_compactor",
@@ -4998,6 +5015,7 @@ dependencies = [
  "either",
  "enum-as-inner",
  "farmhash",
+ "fixedbitset",
  "futures",
  "futures-async-stream",
  "hyper",

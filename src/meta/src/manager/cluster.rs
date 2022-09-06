@@ -206,7 +206,7 @@ where
         // Notify local subscribers.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerDeletion(worker_node))
+            .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
             .await;
 
         Ok(())

@@ -83,25 +83,25 @@ pub enum ErrorCode {
     NotImplemented(String, TrackingIssue),
     #[error(transparent)]
     IoError(IoError),
-    #[error("Storage error: {0:?}")]
+    #[error("Storage error: {0}")]
     StorageError(
         #[backtrace]
         #[source]
         BoxedError,
     ),
-    #[error("Expr error: {0:?}")]
+    #[error("Expr error: {0}")]
     ExprError(BoxedError),
-    #[error("BatchError: {0:?}")]
+    #[error("BatchError: {0}")]
     BatchError(BoxedError),
-    #[error("Array error: {0:?}")]
+    #[error("Array error: {0}")]
     ArrayError(ArrayError),
-    #[error("Stream error: {0:?}")]
+    #[error("Stream error: {0}")]
     StreamError(
         #[backtrace]
         #[source]
         BoxedError,
     ),
-    #[error("RPC error: {0:?}")]
+    #[error("RPC error: {0}")]
     RpcError(BoxedError),
     #[error("Bind error: {0}")]
     BindError(String),
