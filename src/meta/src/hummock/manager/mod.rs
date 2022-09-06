@@ -53,7 +53,7 @@ use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::CompactorManagerRef;
-use crate::manager::{ClusterManagerRef, IdCategory, MetaSrvEnv, META_NODE_ID};
+use crate::manager::{ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID};
 use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
@@ -795,6 +795,11 @@ where
     /// Cancels a compaction task no matter it's assigned or unassigned.
     pub async fn cancel_compact_task(&self, compact_task: &mut CompactTask) -> Result<bool> {
         compact_task.set_task_status(TaskStatus::Canceled);
+        self.cancel_compact_task_impl(compact_task).await
+    }
+
+    pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
+        assert_eq!(compact_task.task_status(), TaskStatus::Canceled);
         self.report_compact_task_impl(None, compact_task).await
     }
 
@@ -1454,7 +1459,7 @@ where
         let compact_task = self
             .manual_get_compact_task(compaction_group, manual_compaction_option)
             .await;
-        let mut compact_task = match compact_task {
+        let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
                 // No compaction task available.
@@ -1475,7 +1480,6 @@ where
         };
 
         let mut is_failed = false;
-        let mut need_cancel_task = false;
         if let Err(e) = self
             .assign_compaction_task(&compact_task, compactor.context_id())
             .await
@@ -1494,7 +1498,6 @@ where
                 .await
             {
                 is_failed = true;
-                need_cancel_task = true;
                 tracing::warn!(
                     "Failed to send task {} to {}. {:#?}",
                     compact_task.task_id,
@@ -1504,14 +1507,11 @@ where
             }
         }
 
-        if need_cancel_task {
-            if let Err(e) = self.cancel_compact_task(&mut compact_task).await {
-                tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
-                // TODO #3677: handle cancellation via compaction heartbeat after #4496
-            }
-        }
-
         if is_failed {
+            self.env
+                .notification_manager()
+                .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(compact_task))
+                .await;
             return Err(Error::InternalError(anyhow::anyhow!(
                 "Failed to trigger_manual_compaction"
             )));
@@ -1540,7 +1540,7 @@ where
         assignment_ref.get(&task_id).cloned()
     }
 
-    pub fn compaction_group_manager_ref_for_test(&self) -> CompactionGroupManagerRef<S> {
+    pub fn compaction_group_manager(&self) -> CompactionGroupManagerRef<S> {
         self.compaction_group_manager.clone()
     }
 
