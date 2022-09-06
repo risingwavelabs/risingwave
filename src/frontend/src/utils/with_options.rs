@@ -7,10 +7,14 @@ use risingwave_sqlparser::ast::{
     CreateSinkStatement, CreateSourceStatement, SqlOption, Statement, Value,
 };
 
+use crate::catalog::source_catalog::KAFKA_CONNECTOR;
+
 mod options {
+    use risingwave_common::catalog::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
+
     pub const APPEND_ONLY: &str = "appendonly";
     pub const CONNECTOR: &str = "connector";
-    pub const RETENTION_SECONDS: &str = "retention_seconds";
+    pub const RETENTION_SECONDS: &str = PROPERTIES_RETAINTION_SECOND_KEY;
 }
 
 #[derive(Default, Clone, Debug)]
@@ -19,8 +23,33 @@ pub struct WithOptions {
 }
 
 impl WithOptions {
+    pub fn new(inner: HashMap<String, String>) -> Self {
+        Self { inner }
+    }
+
     pub fn inner(&self) -> &HashMap<String, String> {
         &self.inner
+    }
+
+    pub fn retention_seconds(&self) -> Option<u32> {
+        self.inner
+            .get(options::RETENTION_SECONDS)
+            .and_then(|s| s.parse().ok())
+    }
+
+    pub fn append_only(&self) -> bool {
+        if let Some(val) = self.inner.get(options::APPEND_ONLY) {
+            if val.eq_ignore_ascii_case("true") {
+                return true;
+            }
+        }
+        if let Some(val) = self.inner.get(options::CONNECTOR) {
+            // Kafka source is append-only
+            if val.eq_ignore_ascii_case(KAFKA_CONNECTOR) {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn subset(&self, keys: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
