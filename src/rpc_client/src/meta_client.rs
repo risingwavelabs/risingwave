@@ -451,9 +451,7 @@ impl HummockMetaClient for MetaClient {
     }
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
-        let req = GetCurrentVersionRequest {
-            context_id: self.worker_id(),
-        };
+        let req = GetCurrentVersionRequest::default();
         Ok(self
             .inner
             .get_current_version(req)

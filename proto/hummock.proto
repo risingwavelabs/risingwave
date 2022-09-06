@@ -118,9 +118,7 @@ message UnpinVersionBeforeResponse {
   common.Status status = 1;
 }
 
-message GetCurrentVersionRequest {
-  uint32 context_id = 1;
-}
+message GetCurrentVersionRequest {}
 
 message GetCurrentVersionResponse {
   common.Status status = 1;
