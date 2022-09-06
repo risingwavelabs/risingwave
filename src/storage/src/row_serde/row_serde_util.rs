@@ -16,12 +16,12 @@ use std::sync::Arc;
 
 use bytes::Buf;
 use memcomparable::from_slice;
-use risingwave_common::array::{ArrayImpl, Row, Vis};
+use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::OrderedRowSerializer;
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_ref};
+use risingwave_common::util::value_encoding::deserialize_datum;
 
 use super::ColumnDescMapping;
 

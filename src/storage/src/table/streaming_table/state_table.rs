@@ -401,7 +401,9 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
-    /// Write batch with a StreamChunk which should have the same schema with the table.
+    /// Write batch with a `StreamChunk` which should have the same schema with the table.
+    // allow(izip, which use zip instead of zip_eq)
+    #[allow(clippy::disallowed_methods)]
     pub fn write_from_chunk(&mut self, chunk: StreamChunk) -> StorageResult<()> {
         let chunk = chunk.compact().unwrap();
         let (chunk, op) = chunk.into_parts();
