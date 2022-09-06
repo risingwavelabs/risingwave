@@ -471,6 +471,14 @@ pub mod tests {
         }
     }
 
+    fn assert_compaction_task(compact_task: &CompactionTask, level_handlers: &[LevelHandler]) {
+        for i in &compact_task.input.input_levels {
+            for t in &i.table_infos {
+                assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.id));
+            }
+        }
+    }
+
     #[test]
     fn test_dynamic_level() {
         let config = CompactionConfigBuilder::new()
@@ -580,6 +588,7 @@ pub mod tests {
             .pick_compaction(1, &levels, &mut levels_handlers)
             .unwrap();
         // trivial move.
+        assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 0);
         assert!(compaction.input.input_levels[1].table_infos.is_empty());
         assert_eq!(compaction.input.target_level, 0);
@@ -602,6 +611,7 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(1, &levels, &mut levels_handlers)
             .unwrap();
+        assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 0);
         assert_eq!(compaction.input.target_level, 2);
         assert_eq!(compaction.target_file_size, config.target_file_size_base);
@@ -613,6 +623,7 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(2, &levels, &mut levels_handlers)
             .unwrap();
+        assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 3);
         assert_eq!(compaction.input.target_level, 4);
         assert_eq!(compaction.input.input_levels[0].table_infos.len(), 1);
@@ -675,6 +686,7 @@ pub mod tests {
             let task = selector
                 .manual_pick_compaction(1, &levels, &mut levels_handler, option)
                 .unwrap();
+            assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 0);
             assert_eq!(task.input.input_levels[1].level_idx, 0);
@@ -702,6 +714,7 @@ pub mod tests {
             let task = selector
                 .manual_pick_compaction(2, &levels, &mut levels_handler, option)
                 .unwrap();
+            assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 3);
             assert_eq!(task.input.input_levels[0].level_idx, 0);
             assert_eq!(task.input.input_levels[1].level_idx, 0);
@@ -761,6 +774,7 @@ pub mod tests {
             let task = selector
                 .manual_pick_compaction(1, &levels, &mut levels_handler, option)
                 .unwrap();
+            assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 3);
             assert_eq!(task.input.input_levels[0].table_infos.len(), 2);
@@ -790,6 +804,7 @@ pub mod tests {
             let task = selector
                 .manual_pick_compaction(1, &levels, &mut levels_handler, option)
                 .unwrap();
+            assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 4);
             assert_eq!(task.input.input_levels[0].table_infos.len(), 3);
