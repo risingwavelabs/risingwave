@@ -1,11 +1,10 @@
+use std::sync::Arc;
 
-use risingwave_common::array::Array;
-use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_common::{types::DataType, array::{NaiveDateTimeArray, Utf8ArrayBuilder, ArrayBuilder}};
+use itertools::Itertools;
+use risingwave_common::array::{Array, ArrayBuilder, NaiveDateTimeArray, Utf8ArrayBuilder};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::Expression;
-use itertools::Itertools;
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub(crate) struct ExprToCharConstTmplContext {
@@ -23,7 +22,10 @@ impl Expression for ExprToCharConstTmpl {
         DataType::Varchar
     }
 
-    fn eval(&self, input: &risingwave_common::array::DataChunk) -> crate::Result<risingwave_common::array::ArrayRef> {
+    fn eval(
+        &self,
+        input: &risingwave_common::array::DataChunk,
+    ) -> crate::Result<risingwave_common::array::ArrayRef> {
         let data_arr = self.child.eval_checked(input)?;
         let data_arr: &NaiveDateTimeArray = data_arr.as_ref().into();
         let mut output = Utf8ArrayBuilder::new(input.capacity());
