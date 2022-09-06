@@ -41,7 +41,7 @@ use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     CachePolicy, CompactorSstableStore, CompressionAlgorithm, InMemWriter, MemoryLimiter,
     SstableBuilder, SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
-    SstableWriteMode, SstableWriterOptions, TieredCache,
+    SstableWriter, SstableWriterOptions, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -60,9 +60,9 @@ pub fn mock_sstable_store() -> SstableStoreRef {
 
 pub fn default_writer_opts() -> SstableWriterOptions {
     SstableWriterOptions {
-        mode: SstableWriteMode::Batch,
         capacity_hint: None,
         tracker: None,
+        policy: CachePolicy::Fill,
     }
 }
 
@@ -72,11 +72,8 @@ pub async fn put_sst(
     meta: SstableMeta,
     sstable_store: SstableStoreRef,
     options: SstableWriterOptions,
-    policy: CachePolicy,
 ) {
-    let mut writer = sstable_store
-        .clone()
-        .create_sst_writer(sst_id, policy, options, None);
+    let mut writer = sstable_store.clone().create_sst_writer(sst_id, options);
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
@@ -104,9 +101,8 @@ fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, Sstabl
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
-        enable_sst_streaming_upload: false,
     };
-    let writer = Box::new(InMemWriter::from(&opt));
+    let writer = InMemWriter::from(&opt);
     let mut builder = SstableBuilder::new_for_test(sstable_id, writer, opt);
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch);
@@ -152,15 +148,9 @@ fn bench_table_scan(c: &mut Criterion) {
         .unwrap();
     let sstable_store1 = sstable_store.clone();
     runtime.block_on(async move {
-        put_sst(
-            1,
-            data,
-            meta,
-            sstable_store1,
-            default_writer_opts(),
-            CachePolicy::NotFill,
-        )
-        .await;
+        let mut opts = default_writer_opts();
+        opts.policy = CachePolicy::NotFill;
+        put_sst(1, data, meta, sstable_store1, opts).await;
     });
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
@@ -183,7 +173,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
-        enable_sst_streaming_upload: false,
     };
     let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
         32,
@@ -241,7 +230,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             meta1,
             sstable_store1.clone(),
             default_writer_opts(),
-            CachePolicy::Fill,
         )
         .await;
         put_sst(
@@ -250,7 +238,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             meta2,
             sstable_store1.clone(),
             default_writer_opts(),
-            CachePolicy::Fill,
         )
         .await;
     });
@@ -266,7 +253,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             meta1,
             sstable_store1.clone(),
             default_writer_opts(),
-            CachePolicy::Fill,
         )
         .await;
         put_sst(
@@ -275,7 +261,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             meta2,
             sstable_store1.clone(),
             default_writer_opts(),
-            CachePolicy::Fill,
         )
         .await;
     });
