@@ -53,6 +53,7 @@ const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
 
 /// [`Sstable`] is a handle for accessing SST.
+#[derive(Clone)]
 pub struct Sstable {
     pub id: HummockSstableId,
     pub meta: SstableMeta,

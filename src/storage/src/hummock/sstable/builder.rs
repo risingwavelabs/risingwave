@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
+use risingwave_pb::hummock::SstableInfo;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
@@ -77,10 +78,9 @@ impl Default for SstableBuilderOptions {
 }
 
 pub struct SstableBuilderOutput<WO> {
-    pub sstable_id: u64,
-    pub meta: SstableMeta,
+    pub sst_info: SstableInfo,
+    pub bloom_filter_size: usize,
     pub writer_output: WO,
-    pub table_ids: Vec<u32>,
 }
 
 pub struct SstableBuilder<W: SstableWriter> {
@@ -249,7 +249,17 @@ impl<W: SstableWriter> SstableBuilder<W> {
             version: VERSION,
             footer: self.writer.data_len() as u64,
         };
-
+        let sst_info = SstableInfo {
+            id: self.sstable_id,
+            key_range: Some(risingwave_pb::hummock::KeyRange {
+                left: meta.smallest_key.clone(),
+                right: meta.largest_key.clone(),
+                inf: false,
+            }),
+            file_size: meta.estimated_size as u64,
+            table_ids: self.table_ids.into_iter().collect(),
+            meta_offset: meta.footer,
+        };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} add_bloom_filter_counts {}",
             meta.encoded_size(),
@@ -257,13 +267,13 @@ impl<W: SstableWriter> SstableBuilder<W> {
             self.key_count,
             self.add_bloom_filter_key_counts
         );
+        let bloom_filter_size = meta.bloom_filter.len();
 
-        let writer_output = self.writer.finish(&meta)?;
+        let writer_output = self.writer.finish(meta)?;
         Ok(SstableBuilderOutput::<W::Output> {
-            sstable_id: self.sstable_id,
-            meta,
+            sst_info,
+            bloom_filter_size,
             writer_output,
-            table_ids: self.table_ids.into_iter().collect(),
         })
     }
 

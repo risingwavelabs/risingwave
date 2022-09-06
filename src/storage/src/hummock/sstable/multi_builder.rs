@@ -159,36 +159,17 @@ where
             if let Some(tracker) = &self.task_progress_tracker {
                 tracker.inc_ssts_sealed();
             }
-            let meta = builder_output.meta;
 
-            let bloom_filter_size = meta.bloom_filter.len();
-
-            if bloom_filter_size != 0 {
+            if builder_output.bloom_filter_size != 0 {
                 self.stats
                     .sstable_bloom_filter_size
-                    .observe(bloom_filter_size as _);
+                    .observe(builder_output.bloom_filter_size as _);
             }
-
-            self.stats
-                .sstable_meta_size
-                .observe(meta.encoded_size() as _);
-
-            let sst_info = SstableInfo {
-                id: builder_output.sstable_id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: meta.smallest_key.clone(),
-                    right: meta.largest_key.clone(),
-                    inf: false,
-                }),
-                file_size: meta.estimated_size as u64,
-                table_ids: builder_output.table_ids,
-                meta_offset: meta.footer,
-            };
 
             self.sst_outputs.push(SplitTableOutput {
                 upload_join_handle: builder_output.writer_output,
-                bloom_filter_size,
-                sst_info,
+                bloom_filter_size: builder_output.bloom_filter_size,
+                sst_info: builder_output.sst_info,
             });
         }
         Ok(())

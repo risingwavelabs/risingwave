@@ -341,13 +341,14 @@ impl SstableStore {
         self.meta_cache
             .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
                 let store = self.store.clone();
-                let meta_path = self.get_sst_meta_path(sst_id);
+                let meta_path = self.get_sst_data_path(sst_id);
                 stats.cache_meta_block_miss += 1;
                 let stats_ptr = stats.remote_io_time.clone();
                 let loc = BlockLocation {
                     offset: sst.meta_offset as usize,
                     size: (sst.file_size - sst.meta_offset) as usize,
                 };
+                println!("file {}: {}, {}", sst.id, sst.meta_offset, sst.file_size);
                 async move {
                     let now = Instant::now();
 
@@ -499,9 +500,10 @@ impl SstableWriter for BatchUploadWriter {
         Ok(())
     }
 
-    fn finish(mut self, meta: &SstableMeta) -> HummockResult<Self::Output> {
-        meta.encode_to(&mut self.buf);
+    fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
+        println!("finish {}", self.sst_id);
         let join_handle = tokio::spawn(async move {
+            meta.encode_to(&mut self.buf);
             let data = Bytes::from(self.buf);
             let _tracker = self.tracker.map(|mut t| {
                 if !t.try_increase_memory(data.capacity() as u64) {
@@ -516,6 +518,7 @@ impl SstableWriter for BatchUploadWriter {
                 .clone()
                 .put_sst_data(self.sst_id, data.clone())
                 .await?;
+            self.sstable_store.insert_meta_cache(self.sst_id, meta);
 
             // Add block cache.
             if CachePolicy::Fill == self.policy {
@@ -584,11 +587,11 @@ impl SstableWriter for StreamingUploadWriter {
             .map_err(HummockError::object_io_error)
     }
 
-    fn finish(mut self, meta: &SstableMeta) -> HummockResult<UploadJoinHandle> {
-        let meta = Bytes::from(meta.encode_to_bytes());
+    fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
+        let meta_data = Bytes::from(meta.encode_to_bytes());
 
         self.object_uploader
-            .write_bytes(meta)
+            .write_bytes(meta_data)
             .map_err(HummockError::object_io_error)?;
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
@@ -605,6 +608,7 @@ impl SstableWriter for StreamingUploadWriter {
                 .finish()
                 .await
                 .map_err(HummockError::object_io_error)?;
+            self.sstable_store.insert_meta_cache(self.sst_id, meta);
 
             // Add block cache.
             if let CachePolicy::Fill = self.policy {
@@ -712,7 +716,7 @@ mod tests {
     async fn test_batch_upload() {
         let sstable_store = mock_sstable_store();
         let x_range = 0..100;
-        let (data, meta, _) = gen_test_sstable_data(
+        let (data, meta) = gen_test_sstable_data(
             default_builder_opt_for_test(),
             x_range
                 .clone()
@@ -741,7 +745,7 @@ mod tests {
         // Generate test data.
         let sstable_store = mock_sstable_store();
         let x_range = 0..100;
-        let (data, meta, _) = gen_test_sstable_data(
+        let (data, meta) = gen_test_sstable_data(
             default_builder_opt_for_test(),
             x_range
                 .clone()

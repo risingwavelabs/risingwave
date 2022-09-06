@@ -32,6 +32,7 @@ use crate::hummock::{
     CachePolicy, HummockStateStoreIter, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
     SstableStoreRef, SstableWriter,
 };
+use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
 
@@ -118,13 +119,13 @@ pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> InMemWriter {
 pub fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
-) -> (Bytes, SstableMeta, Vec<u32>) {
+) -> (Bytes, SstableMeta) {
     let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice()).unwrap();
     }
     let output = b.finish().unwrap();
-    (output.writer_output, output.meta, output.table_ids)
+    output.writer_output
 }
 
 /// Write the data and meta to `sstable_store`.
@@ -143,8 +144,6 @@ pub async fn put_sst(
         writer.write_block(&data[offset..end_offset], block_meta)?;
     }
     meta.footer = writer.data_len() as u64;
-    let writer_output = writer.finish(&meta)?;
-    writer_output.await.unwrap()?;
     let sst = SstableInfo {
         id: sst_id,
         key_range: Some(KeyRange {
@@ -156,7 +155,8 @@ pub async fn put_sst(
         table_ids: vec![],
         meta_offset: meta.footer,
     };
-
+    let writer_output = writer.finish(meta)?;
+    writer_output.await.unwrap()?;
     Ok(sst)
 }
 
@@ -180,7 +180,11 @@ pub async fn gen_test_sstable_inner(
     }
     let output = b.finish().unwrap();
     output.writer_output.await.unwrap().unwrap();
-    Sstable::new(sst_id, output.meta.clone())
+    let table = sstable_store
+        .sstable(&output.sst_info, &mut StoreLocalStatistic::default())
+        .await
+        .unwrap();
+    table.value().as_ref().clone()
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
