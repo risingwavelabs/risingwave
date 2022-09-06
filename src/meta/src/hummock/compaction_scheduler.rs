@@ -21,6 +21,7 @@ use risingwave_common::util::sync_point::on_sync_point;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
@@ -48,16 +49,17 @@ impl CompactionRequestChannel {
     }
 
     /// Enqueues only if the target is not yet in queue.
-    pub fn try_send(&self, compaction_group: CompactionGroupId) -> bool {
+    pub fn try_send(
+        &self,
+        compaction_group: CompactionGroupId,
+    ) -> Result<bool, SendError<CompactionGroupId>> {
         let mut guard = self.scheduled.lock();
         if guard.contains(&compaction_group) {
-            return false;
+            return Ok(false);
         }
-        if self.request_tx.send(compaction_group).is_err() {
-            return false;
-        }
+        self.request_tx.send(compaction_group)?;
         guard.insert(compaction_group);
-        true
+        Ok(true)
     }
 
     fn unschedule(&self, compaction_group: CompactionGroupId) {
@@ -98,19 +100,21 @@ where
         self.hummock_manager
             .set_compaction_scheduler(request_channel.clone());
         tracing::info!("Start compaction scheduler.");
-        'compaction_trigger: loop {
+        loop {
             let compaction_group: CompactionGroupId = tokio::select! {
                 compaction_group = request_rx.recv() => {
                     match compaction_group {
                         Some(compaction_group) => compaction_group,
                         None => {
-                            break 'compaction_trigger;
+                            tracing::warn!("Compactor Scheduler: The Hummock manager has dropped the connection,
+                                it means it has either died or started a new session. Exiting.");
+                            break;
                         }
                     }
                 },
-                // Shutdown compactor
+                // Shutdown compactor scheduler
                 _ = &mut shutdown_rx => {
-                    break 'compaction_trigger;
+                    break;
                 }
             };
             on_sync_point("BEFORE_SCHEDULE_COMPACTION_TASK")
@@ -232,7 +236,15 @@ where
             }
 
             // Reschedule it in case there are more tasks from this compaction group.
-            request_channel.try_send(compaction_group);
+            if let Err(e) = request_channel.try_send(compaction_group) {
+                tracing::error!(
+                    "Failed to reschedule compaction group {} after sending new task {}. {:#?}",
+                    compaction_group,
+                    compact_task.task_id,
+                    e
+                );
+                return false;
+            }
 
             return true;
         }

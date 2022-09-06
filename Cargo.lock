@@ -4768,6 +4768,7 @@ dependencies = [
  "risingwave_pb",
  "thiserror",
  "tokio-retry",
+ "tokio-stream",
  "tracing",
  "workspace-hack",
 ]
