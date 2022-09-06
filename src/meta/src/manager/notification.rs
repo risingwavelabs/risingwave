@@ -30,10 +30,12 @@ pub type Notification = Result<SubscribeResponse, Status>;
 pub type NotificationVersion = u64;
 
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::hummock::CompactTask;
 
 #[derive(Clone)]
 pub enum LocalNotification {
-    WorkerDeletion(WorkerNode),
+    WorkerNodeIsDeleted(WorkerNode),
+    CompactionTaskNeedCancel(CompactTask),
 }
 
 #[derive(Debug)]

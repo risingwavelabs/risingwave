@@ -526,9 +526,9 @@ async fn test_context_id_validation() {
 #[cfg(madsim)]
 #[tokio::test]
 async fn test_context_id_invalidation() {
-    use crate::hummock::subscribe_cluster_membership_change;
+    use crate::hummock::local_notification_receiver;
     let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
-    let (member_join, member_shutdown) = subscribe_cluster_membership_change(
+    let (member_join, member_shutdown) = local_notification_receiver(
         hummock_manager.clone(),
         hummock_manager.compactor_manager_ref_for_test(),
         env.notification_manager_ref(),
