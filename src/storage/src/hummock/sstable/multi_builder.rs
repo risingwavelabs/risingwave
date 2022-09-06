@@ -21,11 +21,12 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use tokio::task::JoinHandle;
 
 use super::SstableMeta;
+use crate::hummock::compactor::TaskProgressTracker;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockResult, MemoryLimiter, SstableBuilder, SstableBuilderOptions,
-    SstableWriterOptions,
+    BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
+    SstableBuilderOptions, SstableWriter, SstableWriterOptions,
 };
 use crate::monitor::StateStoreMetrics;
 
@@ -33,7 +34,8 @@ pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<UploadJoinHandle>>;
+    type Writer: SstableWriter<Output = UploadJoinHandle>;
+    async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>>;
 }
 
 pub struct SplitTableOutput {
@@ -57,10 +59,12 @@ where
 
     sst_outputs: Vec<SplitTableOutput>,
 
-    current_builder: Option<SstableBuilder<UploadJoinHandle>>,
+    current_builder: Option<SstableBuilder<F::Writer>>,
 
     /// Statistics.
     pub stats: Arc<StateStoreMetrics>,
+
+    task_progress_tracker: Option<TaskProgressTracker>,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -68,12 +72,17 @@ where
     F: TableBuilderFactory,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(builder_factory: F, stats: Arc<StateStoreMetrics>) -> Self {
+    pub fn new(
+        builder_factory: F,
+        stats: Arc<StateStoreMetrics>,
+        task_progress_tracker: Option<TaskProgressTracker>,
+    ) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
             stats,
+            task_progress_tracker,
         }
     }
 
@@ -83,6 +92,7 @@ where
             sst_outputs: Vec::new(),
             current_builder: None,
             stats: Arc::new(StateStoreMetrics::unused()),
+            task_progress_tracker: None,
         }
     }
 
@@ -148,6 +158,9 @@ where
     pub fn seal_current(&mut self) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.take() {
             let builder_output = builder.finish()?;
+            if let Some(tracker) = &self.task_progress_tracker {
+                tracker.inc_ssts_sealed();
+            }
             let meta = builder_output.meta;
 
             let bloom_filter_size = meta.bloom_filter.len();
@@ -207,16 +220,20 @@ impl LocalTableBuilderFactory {
 
 #[async_trait::async_trait]
 impl TableBuilderFactory for LocalTableBuilderFactory {
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<UploadJoinHandle>> {
+    type Writer = BatchUploadWriter;
+
+    async fn open_builder(&self) -> HummockResult<SstableBuilder<BatchUploadWriter>> {
         let id = self.next_id.fetch_add(1, SeqCst);
         let tracker = self.limiter.require_memory(1).await.unwrap();
-        let mut writer_options = SstableWriterOptions::from(&self.options);
-        writer_options.tracker = Some(tracker);
+        let writer_options = SstableWriterOptions {
+            capacity_hint: Some(self.options.capacity),
+            tracker: Some(tracker),
+            policy: self.policy,
+        };
         let writer = self
             .sstable_store
             .clone()
-            .create_sst_writer(id, self.policy, writer_options)
-            .await?;
+            .create_sst_writer(id, writer_options);
         let builder = SstableBuilder::new_for_test(id, writer, self.options.clone());
 
         Ok(builder)
@@ -242,7 +259,6 @@ mod tests {
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: 0,
-            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
