@@ -17,8 +17,10 @@
 
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
+use itertools::Itertools;
 
 use crate::array::ArrayImpl;
+use crate::buffer::Bitmap;
 use crate::types::{
     to_datum_ref, DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper,
     NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
@@ -64,12 +66,31 @@ pub fn serialize_datum_ref(datum_ref: &DatumRef, mut buf: impl BufMut) {
     }
 }
 
-pub fn vec_serialize_datum_ref(array: &ArrayImpl, mut buffers: Vec<impl BufMut>) {
+pub fn vec_serialize_datum_ref(
+    array: &ArrayImpl,
+    visibility: Option<&Bitmap>,
+    mut buffers: Vec<impl BufMut>,
+) {
     assert_eq!(array.len(), buffers.len());
-    for (i, buffer) in buffers.iter_mut().enumerate() {
-        // SAFETY(value_at_unchecked): the idx is always in bound.
-        unsafe {
-            serialize_datum_ref(&array.value_at_unchecked(i), buffer);
+    match visibility {
+        Some(vis) => {
+            for ((i, buffer), vis) in buffers.iter_mut().enumerate().zip_eq(vis.iter()) {
+                if !vis {
+                    continue;
+                }
+                // SAFETY(value_at_unchecked): the idx is always in bound.
+                unsafe {
+                    serialize_datum_ref(&array.value_at_unchecked(i), buffer);
+                }
+            }
+        }
+        None => {
+            for (i, buffer) in buffers.iter_mut().enumerate() {
+                // SAFETY(value_at_unchecked): the idx is always in bound.
+                unsafe {
+                    serialize_datum_ref(&array.value_at_unchecked(i), buffer);
+                }
+            }
         }
     }
 }
