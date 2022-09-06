@@ -18,31 +18,36 @@ use prometheus::{
 };
 
 pub struct FrontendMetrics {
-    pub register: Registry,
+    pub registry: Registry,
     pub qps_local_exection: GenericCounter<AtomicU64>,
     pub latency_local_execution: Histogram,
 }
 
 impl FrontendMetrics {
-    pub fn new(register: Registry) -> Self {
+    pub fn new(registry: Registry) -> Self {
         let qps_local_exection = register_int_counter_with_registry!(
             "frontend_qps_local_execution",
             "queries per second of local execution mode",
-            &register
+            &registry
         )
         .unwrap();
 
         let latency_local_execution = register_histogram_with_registry!(
             "frontend_latency_local_execution",
             "latency of local execution mode",
-            &register,
+            &registry,
         )
         .unwrap();
 
         Self {
-            register,
+            registry,
             qps_local_exection,
             latency_local_execution,
         }
+    }
+
+    /// Create a new `FrontendMetrics` instance used in tests or other places.
+    pub fn for_test() -> Self {
+        Self::new(prometheus::Registry::new())
     }
 }
