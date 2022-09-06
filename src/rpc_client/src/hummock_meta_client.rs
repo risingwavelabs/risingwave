@@ -17,8 +17,8 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion, SubscribeCompactTasksResponse,
-    VacuumTask,
+    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use tonic::Streaming;
 
