@@ -269,6 +269,24 @@ message GetNewSstIdsResponse {
   uint64 end_id = 3;
 }
 
+// This is a heartbeat message. Task will be considered dead if
+// `CompactTaskProgress` is not received for a timeout
+// or `num_ssts_sealed`/`num_ssts_uploaded` do not increase for a timeout.
+message CompactTaskProgress {
+  uint64 task_id = 1;
+  uint32 num_ssts_sealed = 2;
+  uint32 num_ssts_uploaded = 3;
+}
+
+message ReportCompactionTaskProgressRequest {
+  uint32 context_id = 1;
+  repeated CompactTaskProgress progress = 2;
+}
+
+message ReportCompactionTaskProgressResponse {
+  common.Status status = 1;
+}
+
 message SubscribeCompactTasksRequest {
   uint32 context_id = 1;
   uint64 max_concurrent_task_number = 2;
@@ -286,6 +304,7 @@ message SubscribeCompactTasksResponse {
     VacuumTask vacuum_task = 2;
     FullScanTask full_scan_task = 3;
     ValidationTask validation_task = 4;
+    CancelCompactTask cancel_compact_task = 5;
   }
 }
 
@@ -297,6 +316,12 @@ message VacuumTask {
 // Scan object store to get candidate orphan SSTs.
 message FullScanTask {
   uint64 sst_retention_time_sec = 1;
+}
+
+// Cancel compact task
+message CancelCompactTask {
+  uint32 context_id = 1;
+  uint64 task_id = 2;
 }
 
 message ReportVacuumTaskRequest {
@@ -347,6 +372,7 @@ service HummockManagerService {
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
+  rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);

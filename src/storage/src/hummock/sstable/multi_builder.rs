@@ -17,10 +17,11 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
+use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
-use super::SstableMeta;
+use crate::hummock::compactor::TaskProgressTracker;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -38,11 +39,9 @@ pub trait TableBuilderFactory {
 }
 
 pub struct SplitTableOutput {
-    pub sst_id: HummockSstableId,
-    pub meta: SstableMeta,
+    pub sst_info: SstableInfo,
     pub upload_join_handle: UploadJoinHandle,
     pub bloom_filter_size: usize,
-    pub table_ids: Vec<u32>,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -62,6 +61,8 @@ where
 
     /// Statistics.
     pub stats: Arc<StateStoreMetrics>,
+
+    task_progress_tracker: Option<TaskProgressTracker>,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -69,12 +70,17 @@ where
     F: TableBuilderFactory,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(builder_factory: F, stats: Arc<StateStoreMetrics>) -> Self {
+    pub fn new(
+        builder_factory: F,
+        stats: Arc<StateStoreMetrics>,
+        task_progress_tracker: Option<TaskProgressTracker>,
+    ) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
             stats,
+            task_progress_tracker,
         }
     }
 
@@ -84,6 +90,7 @@ where
             sst_outputs: Vec::new(),
             current_builder: None,
             stats: Arc::new(StateStoreMetrics::unused()),
+            task_progress_tracker: None,
         }
     }
 
@@ -149,6 +156,9 @@ where
     pub fn seal_current(&mut self) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.take() {
             let builder_output = builder.finish()?;
+            if let Some(tracker) = &self.task_progress_tracker {
+                tracker.inc_ssts_sealed();
+            }
             let meta = builder_output.meta;
 
             let bloom_filter_size = meta.bloom_filter.len();
@@ -163,12 +173,21 @@ where
                 .sstable_meta_size
                 .observe(meta.encoded_size() as _);
 
+            let sst_info = SstableInfo {
+                id: builder_output.sstable_id,
+                key_range: Some(risingwave_pb::hummock::KeyRange {
+                    left: meta.smallest_key.clone(),
+                    right: meta.largest_key.clone(),
+                    inf: false,
+                }),
+                file_size: meta.estimated_size as u64,
+                table_ids: builder_output.table_ids,
+            };
+
             self.sst_outputs.push(SplitTableOutput {
-                sst_id: builder_output.sstable_id,
-                meta,
                 upload_join_handle: builder_output.writer_output,
                 bloom_filter_size,
-                table_ids: builder_output.table_ids,
+                sst_info,
             });
         }
         Ok(())

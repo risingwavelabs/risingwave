@@ -39,6 +39,8 @@
 #![feature(map_try_insert)]
 #![feature(hash_drain_filter)]
 #![feature(is_some_with)]
+#![feature(btree_drain_filter)]
+#![feature(result_option_inspect)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
@@ -147,6 +149,10 @@ pub struct MetaNodeOpts {
     /// Enable sanity check when SSTs are committed. By default disabled.
     #[clap(long)]
     enable_committed_sst_sanity_check: bool,
+
+    /// Schedule compaction for all compaction groups with this interval.
+    #[clap(long, default_value = "60")]
+    pub periodic_compaction_interval_sec: u64,
 }
 
 use std::future::Future;
@@ -208,6 +214,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compactor_selection_retry_interval_sec: opts.compactor_selection_retry_interval_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
+                periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
             },
         )
         .await
