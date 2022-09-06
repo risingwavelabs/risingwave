@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
-use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
+use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
@@ -138,7 +138,7 @@ impl TableCatalog {
             appendonly: self.appendonly,
             retention_seconds: table_options
                 .retention_seconds
-                .unwrap_or(TABLE_OPTION_DUMMY_RETAINTION_SECOND),
+                .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
         }
     }
 

@@ -141,7 +141,7 @@ pub struct TableOption {
 impl From<&risingwave_pb::hummock::TableOption> for TableOption {
     fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
         let retention_seconds =
-            if table_option.retention_seconds == hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND {
+            if table_option.retention_seconds == hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND {
                 None
             } else {
                 Some(table_option.retention_seconds)
@@ -156,7 +156,7 @@ impl From<&TableOption> for risingwave_pb::hummock::TableOption {
         Self {
             retention_seconds: table_option
                 .retention_seconds
-                .unwrap_or(hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND),
+                .unwrap_or(hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND),
         }
     }
 }
