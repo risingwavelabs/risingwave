@@ -22,7 +22,6 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
-use risingwave_common::util::ordered::OrderedRow;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -60,14 +59,14 @@ pub fn verify_batch(
 }
 
 /// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
-pub struct Cache<T> {
+pub struct Cache<K: Ord, V> {
     /// The capacity of the cache.
     capacity: usize,
     /// Ordered cache entries.
-    entries: BTreeMap<OrderedRow, T>,
+    entries: BTreeMap<K, V>,
 }
 
-impl<T> Cache<T> {
+impl<K: Ord, V> Cache<K, V> {
     /// Create a new cache with specified capacity and order requirements.
     /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
     pub fn new(capacity: usize) -> Self {
@@ -100,7 +99,7 @@ impl<T> Cache<T> {
     /// Insert an entry into the cache.
     /// Key: `OrderedRow` composed of order by fields.
     /// Value: The value fields that are to be aggregated.
-    pub fn insert(&mut self, key: OrderedRow, value: T) {
+    pub fn insert(&mut self, key: K, value: V) {
         self.entries.insert(key, value);
         // evict if capacity is reached
         while self.entries.len() > self.capacity {
@@ -109,22 +108,22 @@ impl<T> Cache<T> {
     }
 
     /// Remove an entry from the cache.
-    pub fn remove(&mut self, key: OrderedRow) {
+    pub fn remove(&mut self, key: K) {
         self.entries.remove(&key);
     }
 
     /// Get the last (largest) key in the cache
-    pub fn last_key(&self) -> Option<&OrderedRow> {
+    pub fn last_key(&self) -> Option<&K> {
         self.entries.last_key_value().map(|(k, _)| k)
     }
 
     /// Get the first (smallest) value in the cache.
-    pub fn first_value(&self) -> Option<&T> {
+    pub fn first_value(&self) -> Option<&V> {
         self.entries.first_key_value().map(|(_, v)| v)
     }
 
     /// Iterate over the values in the cache.
-    pub fn iter_values(&self) -> impl Iterator<Item = &T> {
+    pub fn iter_values(&self) -> impl Iterator<Item = &V> {
         self.entries.values()
     }
 }
