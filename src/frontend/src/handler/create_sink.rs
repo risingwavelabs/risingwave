@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -30,13 +29,14 @@ use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
 use crate::optimizer::PlanRef;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::build_graph;
+use crate::WithOptions;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
     schema_id: SchemaId,
     name: String,
     associated_table_id: u32,
-    properties: HashMap<String, String>,
+    properties: &WithOptions,
     owner: u32,
 ) -> Result<ProstSink> {
     Ok(ProstSink {
@@ -45,7 +45,7 @@ pub(crate) fn make_prost_sink(
         database_id,
         name,
         associated_table_id,
-        properties,
+        properties: properties.inner().clone(),
         owner,
         dependent_relations: vec![],
     })
@@ -94,14 +94,14 @@ pub fn gen_sink_plan(
         )
     };
 
-    let with_properties = context.inner().with_options.inner().clone();
+    let properties = context.inner().with_options.clone();
 
     let sink = make_prost_sink(
         database_id,
         schema_id,
         stmt.sink_name.to_string(),
         associated_table_id,
-        with_properties.clone(),
+        &properties,
         session.user_id(),
     )?;
 
@@ -114,7 +114,7 @@ pub fn gen_sink_plan(
     ))
     .into();
 
-    let plan: PlanRef = StreamSink::new(scan_node, with_properties).into();
+    let plan: PlanRef = StreamSink::new(scan_node, properties).into();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();

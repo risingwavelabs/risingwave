@@ -12,18 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use bytes::Bytes;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, ScalarRefImpl};
-use risingwave_sqlparser::ast::{SqlOption, Value};
 
 use crate::binder::{BoundSetExpr, BoundStatement};
 

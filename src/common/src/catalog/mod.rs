@@ -165,7 +165,7 @@ impl TableOption {
     pub fn build_table_option(table_properties: &HashMap<String, String>) -> Self {
         // now we only support ttl for TableOption
         let mut result = TableOption::default();
-        if let Some(ttl_string) = table_properties.get(hummock::PROPERTIES_RETAINTION_SECOND_KEY) {
+        if let Some(ttl_string) = table_properties.get(hummock::PROPERTIES_RETENTION_SECOND_KEY) {
             match ttl_string.trim().parse::<u32>() {
                 Ok(retention_seconds_u32) => result.retention_seconds = Some(retention_seconds_u32),
                 Err(e) => {

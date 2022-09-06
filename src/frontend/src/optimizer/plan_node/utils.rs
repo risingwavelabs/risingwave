@@ -32,7 +32,7 @@ pub struct TableCatalogBuilder {
     // FIXME(stonepage): stream_key should be meaningless in internal state table, check if we
     // can remove it later
     stream_key: Vec<usize>,
-    properties: HashMap<String, String>,
+    properties: WithOptions,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -74,13 +74,9 @@ impl TableCatalogBuilder {
         });
     }
 
-    /// Add `properties` for `TableCatalog`
-    pub fn add_properties(&mut self, properties: HashMap<String, String>) {
-        self.properties = properties;
-    }
-
+    /// Set the `properties` for `TableCatalog`.
     pub fn set_properties(&mut self, properties: WithOptions) {
-        self.properties = properties.inner().clone();
+        self.properties = properties;
     }
 
     /// Check the column name whether exist before. if true, record occurrence and change the name

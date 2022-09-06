@@ -319,6 +319,6 @@ pub mod constant {
         }
 
         pub const TABLE_OPTION_DUMMY_RETAINTION_SECOND: u32 = 0;
-        pub const PROPERTIES_RETAINTION_SECOND_KEY: &str = "retention_seconds";
+        pub const PROPERTIES_RETENTION_SECOND_KEY: &str = "retention_seconds";
     }
 }

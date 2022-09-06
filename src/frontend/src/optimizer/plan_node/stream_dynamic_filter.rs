@@ -11,11 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -127,6 +126,10 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
     internal_table_catalog_builder
         .set_properties(base.ctx.inner().with_options.internal_table_subset());
+
+    schema.fields().iter().for_each(|field| {
+        internal_table_catalog_builder.add_column(field);
+    });
 
     pk_indices.iter().for_each(|idx| {
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)

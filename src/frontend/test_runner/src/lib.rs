@@ -255,7 +255,7 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let mut context = OptimizerContext::new(
+            let context = OptimizerContext::new(
                 session.clone(),
                 Arc::from(sql),
                 WithOptions::try_from(&stmt)?,
@@ -278,7 +278,6 @@ impl TestCase {
                 Statement::CreateTable {
                     name,
                     columns,
-                    with_options,
                     constraints,
                     ..
                 } => {
@@ -306,7 +305,6 @@ impl TestCase {
                     or_replace: false,
                     name,
                     query,
-                    with_options,
                     ..
                 } => {
                     create_mv::handle_create_mv(context, name, query).await?;

@@ -23,6 +23,7 @@ use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTabl
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, FragmentId, SchemaId};
 use crate::optimizer::property::FieldOrder;
+use crate::WithOptions;
 
 /// Includes full information about a table.
 ///
@@ -80,7 +81,8 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: u32,
 
-    pub properties: HashMap<String, String>,
+    /// Properties of the table. For example, "appendonly" or "retention_seconds".
+    pub properties: WithOptions,
 
     pub fragment_id: FragmentId,
 
@@ -178,7 +180,7 @@ impl TableCatalog {
                 .collect_vec(),
             appendonly: self.appendonly,
             owner: self.owner,
-            properties: self.properties.clone(),
+            properties: self.properties.inner().clone(),
             fragment_id: self.fragment_id,
             vnode_col_idx: self
                 .vnode_col_idx
@@ -228,7 +230,7 @@ impl From<ProstTable> for TableCatalog {
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
-            properties: tb.properties,
+            properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
             vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
         }
@@ -246,7 +248,7 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -259,6 +261,7 @@ mod tests {
     use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::TableCatalog;
     use crate::optimizer::property::{Direction, FieldOrder};
+    use crate::WithOptions;
 
     #[test]
     fn test_into_table_catalog() {
@@ -308,7 +311,7 @@ mod tests {
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
-                String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                String::from(PROPERTIES_RETENTION_SECOND_KEY),
                 String::from("300"),
             )]),
             fragment_id: 0,
@@ -362,10 +365,10 @@ mod tests {
                 distribution_key: vec![],
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-                properties: HashMap::from([(
-                    String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                properties: WithOptions::new(HashMap::from([(
+                    String::from(PROPERTIES_RETENTION_SECOND_KEY),
                     String::from("300")
-                )]),
+                )])),
                 fragment_id: 0,
                 vnode_col_idx: None,
             }

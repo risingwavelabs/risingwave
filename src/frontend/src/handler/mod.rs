@@ -76,7 +76,6 @@ pub async fn handle(
         Statement::CreateTable {
             name,
             columns,
-            with_options,
             constraints,
             ..
         } => create_table::handle_create_table(context, name, columns, constraints).await,
@@ -137,7 +136,6 @@ pub async fn handle(
             or_replace: false,
             name,
             query,
-            with_options,
             ..
         } => create_mv::handle_create_mv(context, name, query).await,
         Statement::Flush => flush::handle_flush(context).await,
