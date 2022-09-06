@@ -15,7 +15,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
 use super::BlockMeta;
-use crate::hummock::{HummockResult, SstableBuilderOptions};
+use crate::hummock::{HummockResult, SstableBuilderOptions, SstableMeta};
 
 /// A consumer of SST data.
 pub trait SstableWriter: Send {
@@ -25,7 +25,7 @@ pub trait SstableWriter: Send {
     fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()>;
 
     /// Finish writing the SST.
-    fn finish(self, size_footer: u32) -> HummockResult<Self::Output>;
+    fn finish(self, meta: &SstableMeta) -> HummockResult<Self::Output>;
 
     /// Get the length of data that has already been written.
     fn data_len(&self) -> usize;
@@ -58,7 +58,8 @@ impl SstableWriter for InMemWriter {
         Ok(())
     }
 
-    fn finish(mut self, size_footer: u32) -> HummockResult<Self::Output> {
+    fn finish(mut self, meta: &SstableMeta) -> HummockResult<Self::Output> {
+        let size_footer = meta.block_metas.len() as u32;
         self.buf.put_slice(&size_footer.to_le_bytes());
         let data = self.buf.freeze();
         Ok(data)
@@ -120,7 +121,7 @@ mod tests {
             .for_each(|(block, meta)| {
                 writer.write_block(&block[..], meta).unwrap();
             });
-        let output_data = writer.finish(blocks.len() as u32).unwrap();
+        let output_data = writer.finish(&meta).unwrap();
         assert_eq!(output_data, data);
     }
 }

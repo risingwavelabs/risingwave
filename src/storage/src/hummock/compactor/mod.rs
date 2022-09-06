@@ -33,7 +33,7 @@ pub use compaction_filter::{
 };
 pub use context::{CompactorContext, Context, TaskProgressTracker};
 use futures::future::try_join_all;
-use futures::{stream, StreamExt};
+use futures::{stream, StreamExt, TryFutureExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
@@ -662,24 +662,11 @@ impl Compactor {
         let mut upload_join_handles = vec![];
 
         for SplitTableOutput {
-            sst_id,
-            meta,
-            upload_join_handle,
             bloom_filter_size,
-            table_ids,
+            sst_info,
+            upload_join_handle,
         } in split_table_outputs
         {
-            let sst_info = SstableInfo {
-                id: sst_id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: meta.smallest_key.clone(),
-                    right: meta.largest_key.clone(),
-                    inf: false,
-                }),
-                file_size: meta.estimated_size as u64,
-                table_ids,
-            };
-
             // Bloom filter occuppy per thousand keys.
             self.context
                 .filter_key_extractor_manager
@@ -687,21 +674,13 @@ impl Compactor {
             let sst_size = sst_info.file_size;
             ssts.push(sst_info);
 
-            // Upload metadata.
-            let sstable_store_cloned = self.context.sstable_store.clone();
             let tracker_cloned = task_progress_tracker.clone();
-            let upload_join_handle = async move {
-                let upload_data_result = upload_join_handle.await;
-                upload_data_result.map_err(|e| {
-                    HummockError::other(format!("fail to upload sst data: {:?}", e))
-                })??;
-                let ret = sstable_store_cloned.put_sst_meta(sst_id, meta).await;
+            upload_join_handles.push(upload_join_handle.and_then(|_| async move {
                 if let Some(tracker) = tracker_cloned {
                     tracker.inc_ssts_uploaded();
                 }
-                ret
-            };
-            upload_join_handles.push(upload_join_handle);
+                Ok(())
+            }));
 
             if self.context.is_share_buffer_compact {
                 self.context
@@ -713,7 +692,9 @@ impl Compactor {
             }
         }
 
-        try_join_all(upload_join_handles).await?;
+        try_join_all(upload_join_handles)
+            .await
+            .map_err(|e| HummockError::other(format!("fail to upload sst data: {:?}", e)))?;
 
         self.context
             .stats

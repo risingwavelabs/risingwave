@@ -257,7 +257,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             self.add_bloom_filter_key_counts
         );
 
-        let writer_output = self.writer.finish(meta.block_metas.len() as u32)?;
+        let writer_output = self.writer.finish(&meta)?;
         Ok(SstableBuilderOutput::<W::Output> {
             sstable_id: self.sstable_id,
             meta,
