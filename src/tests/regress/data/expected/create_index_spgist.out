@@ -331,7 +331,7 @@ SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
 FROM quad_point_tbl;
                         QUERY PLAN                         
 -----------------------------------------------------------
- OverAgg
+ WindowAgg
    ->  Index Only Scan using sp_quad_ind on quad_point_tbl
          Order By: (p <-> '(0,0)'::point)
 (3 rows)
@@ -351,7 +351,7 @@ SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
 FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)';
                         QUERY PLAN                         
 -----------------------------------------------------------
- OverAgg
+ WindowAgg
    ->  Index Only Scan using sp_quad_ind on quad_point_tbl
          Index Cond: (p <@ '(1000,1000),(200,200)'::box)
          Order By: (p <-> '(0,0)'::point)
@@ -372,7 +372,7 @@ SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
 FROM quad_point_tbl WHERE p IS NOT NULL;
                         QUERY PLAN                         
 -----------------------------------------------------------
- OverAgg
+ WindowAgg
    ->  Index Only Scan using sp_quad_ind on quad_point_tbl
          Index Cond: (p IS NOT NULL)
          Order By: (p <-> '(333,400)'::point)
@@ -498,7 +498,7 @@ SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
 FROM kd_point_tbl;
                       QUERY PLAN                       
 -------------------------------------------------------
- OverAgg
+ WindowAgg
    ->  Index Only Scan using sp_kd_ind on kd_point_tbl
          Order By: (p <-> '(0,0)'::point)
 (3 rows)
@@ -518,7 +518,7 @@ SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
 FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)';
                        QUERY PLAN                        
 ---------------------------------------------------------
- OverAgg
+ WindowAgg
    ->  Index Only Scan using sp_kd_ind on kd_point_tbl
          Index Cond: (p <@ '(1000,1000),(200,200)'::box)
          Order By: (p <-> '(0,0)'::point)
@@ -539,7 +539,7 @@ SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
 FROM kd_point_tbl WHERE p IS NOT NULL;
                       QUERY PLAN                       
 -------------------------------------------------------
- OverAgg
+ WindowAgg
    ->  Index Only Scan using sp_kd_ind on kd_point_tbl
          Index Cond: (p IS NOT NULL)
          Order By: (p <-> '(333,400)'::point)

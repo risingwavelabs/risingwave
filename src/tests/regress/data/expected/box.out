@@ -596,7 +596,7 @@ SELECT rank() OVER (ORDER BY b <-> point '123,456') n, b <-> point '123,456' dis
 FROM quad_box_tbl;
                        QUERY PLAN                        
 ---------------------------------------------------------
- OverAgg
+ WindowAgg
    ->  Index Scan using quad_box_tbl_idx on quad_box_tbl
          Order By: (b <-> '(123,456)'::point)
 (3 rows)
@@ -618,7 +618,7 @@ SELECT rank() OVER (ORDER BY b <-> point '123,456') n, b <-> point '123,456' dis
 FROM quad_box_tbl WHERE b <@ box '((200,300),(500,600))';
                        QUERY PLAN                        
 ---------------------------------------------------------
- OverAgg
+ WindowAgg
    ->  Index Scan using quad_box_tbl_idx on quad_box_tbl
          Index Cond: (b <@ '(500,600),(200,300)'::box)
          Order By: (b <-> '(123,456)'::point)

@@ -1012,7 +1012,7 @@ explain (costs off, verbose)
                      Output: a.unique1, a.two
          ->  Hash
                Output: b.unique1, (row_number() OVER (?))
-               ->  OverAgg
+               ->  WindowAgg
                      Output: b.unique1, row_number() OVER (?)
                      ->  Gather
                            Output: b.unique1

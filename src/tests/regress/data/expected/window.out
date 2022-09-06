@@ -651,7 +651,7 @@ select first_value(max(x)) over (), y
   group by y;
                  QUERY PLAN                  
 ---------------------------------------------
- OverAgg
+ WindowAgg
    ->  HashAggregate
          Group Key: (tenk1.ten + tenk1.four)
          ->  Seq Scan on tenk1
@@ -3145,7 +3145,7 @@ select f1, sum(f1) over (partition by f1 order by f2
 from t1 where f1 = f2;
            QUERY PLAN            
 ---------------------------------
- OverAgg
+ WindowAgg
    ->  Sort
          Sort Key: f1
          ->  Seq Scan on t1
@@ -3191,7 +3191,7 @@ select f1, sum(f1) over (partition by f1 order by f2
 from t1 where f1 = f2;
            QUERY PLAN            
 ---------------------------------
- OverAgg
+ WindowAgg
    ->  Sort
          Sort Key: f1
          ->  Seq Scan on t1
@@ -3307,8 +3307,8 @@ WHERE depname = 'sales';
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Subquery Scan on emp
-   ->  OverAgg
-         ->  OverAgg
+   ->  WindowAgg
+         ->  WindowAgg
                ->  Sort
                      Sort Key: (((empsalary.depname)::text || 'A'::text))
                      ->  Seq Scan on empsalary
@@ -3327,10 +3327,10 @@ WHERE depname = 'sales';
 -------------------------------------------------------
  Subquery Scan on emp
    Filter: ((emp.depname)::text = 'sales'::text)
-   ->  OverAgg
+   ->  WindowAgg
          ->  Sort
                Sort Key: empsalary.enroll_date
-               ->  OverAgg
+               ->  WindowAgg
                      ->  Sort
                            Sort Key: empsalary.depname
                            ->  Seq Scan on empsalary
@@ -3347,8 +3347,8 @@ WHERE depname = 'sales';
                               QUERY PLAN                              
 ----------------------------------------------------------------------
  Subquery Scan on emp
-   ->  OverAgg
-         ->  OverAgg
+   ->  WindowAgg
+         ->  WindowAgg
                ->  Sort
                      Sort Key: empsalary.empno, empsalary.enroll_date
                      ->  Seq Scan on empsalary
@@ -3363,8 +3363,8 @@ SELECT
 FROM empsalary;
                          QUERY PLAN                          
 -------------------------------------------------------------
- OverAgg
-   ->  OverAgg
+ WindowAgg
+   ->  WindowAgg
          ->  Sort
                Sort Key: depname, salary, enroll_date, empno
                ->  Seq Scan on empsalary
@@ -3385,11 +3385,11 @@ WHERE first_emp = 1 OR last_emp = 1;
 -----------------------------------------------------------------------------------
  Subquery Scan on emp
    Filter: ((emp.first_emp = 1) OR (emp.last_emp = 1))
-   ->  OverAgg
+   ->  WindowAgg
          ->  Incremental Sort
                Sort Key: empsalary.depname, empsalary.enroll_date
                Presorted Key: empsalary.depname
-               ->  OverAgg
+               ->  WindowAgg
                      ->  Sort
                            Sort Key: empsalary.depname, empsalary.enroll_date DESC
                            ->  Seq Scan on empsalary
@@ -4187,7 +4187,7 @@ EXPLAIN (costs off) SELECT * FROM pg_temp.f(2);
                       QUERY PLAN                      
 ------------------------------------------------------
  Subquery Scan on f
-   ->  OverAgg
+   ->  WindowAgg
          ->  Sort
                Sort Key: s.s
                ->  Function Scan on generate_series s

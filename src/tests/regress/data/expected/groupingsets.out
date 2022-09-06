@@ -1344,7 +1344,7 @@ explain (costs off)
 ---------------------------------------------
  Sort
    Sort Key: (sum((sum(c))) OVER (?)), a, b
-   ->  OverAgg
+   ->  WindowAgg
          ->  Sort
                Sort Key: a, b
                ->  MixedAggregate

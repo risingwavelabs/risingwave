@@ -285,7 +285,7 @@ SELECT rank() OVER (ORDER BY p <-> point '123,456') n, p <-> point '123,456' dis
 FROM quad_poly_tbl WHERE p <@ polygon '((300,300),(400,600),(600,500),(700,200))';
                                    QUERY PLAN                                    
 ---------------------------------------------------------------------------------
- OverAgg
+ WindowAgg
    ->  Index Scan using quad_poly_tbl_idx on quad_poly_tbl
          Index Cond: (p <@ '((300,300),(400,600),(600,500),(700,200))'::polygon)
          Order By: (p <-> '(123,456)'::point)
