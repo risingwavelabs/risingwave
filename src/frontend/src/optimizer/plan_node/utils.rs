@@ -22,6 +22,7 @@ use risingwave_common::util::sort_util::OrderType;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::{FragmentId, TableCatalog, TableId};
 use crate::optimizer::property::{Direction, FieldOrder};
+use crate::utils::WithOptions;
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
@@ -76,6 +77,10 @@ impl TableCatalogBuilder {
     /// Add `properties` for `TableCatalog`
     pub fn add_properties(&mut self, properties: HashMap<String, String>) {
         self.properties = properties;
+    }
+
+    pub fn set_properties(&mut self, properties: WithOptions) {
+        self.properties = properties.inner().clone();
     }
 
     /// Check the column name whether exist before. if true, record occurrence and change the name

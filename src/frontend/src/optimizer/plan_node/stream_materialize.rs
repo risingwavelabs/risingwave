@@ -162,11 +162,10 @@ impl StreamMaterialize {
         let ctx = input.ctx();
         let properties: HashMap<_, _> = ctx
             .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+            .with_options
+            .internal_table_subset()
+            .inner()
+            .clone();
 
         let table = TableCatalog {
             id: TableId::placeholder(),

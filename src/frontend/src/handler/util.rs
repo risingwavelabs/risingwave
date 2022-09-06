@@ -99,24 +99,6 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
     }
 }
 
-pub fn handle_with_properties(
-    ctx: &str,
-    options: Vec<SqlOption>,
-) -> Result<HashMap<String, String>> {
-    options
-        .into_iter()
-        .map(|x| match x.value {
-            Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
-            Value::Number(n) => Ok((x.name.real_value(), n)),
-            Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
-            _ => Err(RwError::from(ProtocolError(format!(
-                "{} with properties only support single quoted string value",
-                ctx
-            )))),
-        })
-        .collect()
-}
-
 /// Check whether need to force query mode to local.
 pub fn force_local_mode(bound: &BoundStatement) -> bool {
     if let BoundStatement::Query(query) = bound {

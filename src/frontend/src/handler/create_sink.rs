@@ -23,7 +23,6 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::CreateSinkStatement;
 
 use super::privilege::check_privileges;
-use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::handler::privilege::ObjectCheckItem;
@@ -57,8 +56,6 @@ pub fn gen_sink_plan(
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
 ) -> Result<(PlanRef, ProstSink)> {
-    let with_properties = handle_with_properties("create_sink", stmt.with_properties.0)?;
-
     let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
 
     let (database_id, schema_id) = {
@@ -96,6 +93,8 @@ pub fn gen_sink_plan(
             table.table_desc(),
         )
     };
+
+    let with_properties = context.inner().with_options.inner().clone();
 
     let sink = make_prost_sink(
         database_id,
