@@ -78,16 +78,16 @@ async fn test_failpoints_table_read() {
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_failpoints_vacuum_and_metadata() {
-    let metadata_upload_err = "metadata_upload_err";
+    let data_upload_err = "data_upload_err";
     let mem_upload_err = "mem_upload_err";
     let mem_delete_err = "mem_delete_err";
     let sstable_store = mock_sstable_store();
     // when upload data is successful, but upload meta is fail and delete is fail
 
-    fail::cfg_callback(metadata_upload_err, move || {
+    fail::cfg_callback(data_upload_err, move || {
         fail::cfg(mem_upload_err, "return").unwrap();
         fail::cfg(mem_delete_err, "return").unwrap();
-        fail::remove(metadata_upload_err);
+        fail::remove(data_upload_err);
     })
     .unwrap();
 
@@ -105,7 +105,7 @@ async fn test_failpoints_vacuum_and_metadata() {
     .await;
     assert!(result.is_err());
 
-    fail::remove(metadata_upload_err);
+    fail::remove(data_upload_err);
     fail::remove(mem_delete_err);
     fail::remove(mem_upload_err);
 

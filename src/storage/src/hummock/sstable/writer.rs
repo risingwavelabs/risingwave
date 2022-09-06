@@ -103,7 +103,7 @@ mod tests {
             key_count: 0,
             smallest_key: Vec::new(),
             largest_key: Vec::new(),
-            meta_offset: 0,
+            meta_offset: data.len() as u64,
             version: VERSION,
         };
 
@@ -120,7 +120,8 @@ mod tests {
             .for_each(|(block, meta)| {
                 writer.write_block(&block[..], meta).unwrap();
             });
+        let meta_offset = meta.meta_offset as usize;
         let (output_data, _) = writer.finish(meta).unwrap();
-        assert_eq!(output_data, data);
+        assert_eq!(output_data.slice(0..meta_offset), data);
     }
 }

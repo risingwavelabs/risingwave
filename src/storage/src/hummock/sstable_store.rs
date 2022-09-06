@@ -501,6 +501,7 @@ impl SstableWriter for BatchUploadWriter {
     }
 
     fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
+        fail_point!("data_upload_err");
         let join_handle = tokio::spawn(async move {
             meta.encode_to(&mut self.buf);
             let data = Bytes::from(self.buf);
