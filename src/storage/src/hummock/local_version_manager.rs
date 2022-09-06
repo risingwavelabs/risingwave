@@ -742,7 +742,7 @@ impl LocalVersionManager {
             let mut versions_to_unpin = vec![];
             'collect: loop {
                 match rx.try_recv() {
-                    Ok(version) => match version {
+                    Ok(version_action) => match version_action {
                         PinVersionAction::Pin(version_id) => {
                             version_ids_in_use.insert(version_id);
                         }
