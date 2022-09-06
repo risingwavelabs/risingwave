@@ -72,6 +72,16 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .collect_vec()
     }
 
+    pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
+        self.inner
+            .read()
+            .await
+            .compaction_groups
+            .values()
+            .map(|cg| cg.group_id)
+            .collect_vec()
+    }
+
     pub async fn compaction_group(&self, id: CompactionGroupId) -> Option<CompactionGroup> {
         self.inner.read().await.compaction_groups.get(&id).cloned()
     }
@@ -359,7 +369,6 @@ impl CompactionGroupManagerInner {
 
 #[cfg(test)]
 mod tests {
-
     use std::collections::{BTreeMap, HashMap};
     use std::ops::Deref;
 
