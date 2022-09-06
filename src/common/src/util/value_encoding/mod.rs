@@ -49,15 +49,13 @@ pub fn deserialize_cell(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
 }
 
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
-pub fn serialize_datum(cell: &Datum) -> Result<Vec<u8>> {
-    let mut buf: Vec<u8> = vec![];
+pub fn serialize_datum(cell: &Datum, mut buf: impl BufMut) {
     if let Some(datum) = cell {
         buf.put_u8(1);
         serialize_value(datum.as_scalar_ref_impl(), &mut buf)
     } else {
         buf.put_u8(0);
     }
-    Ok(buf)
 }
 
 /// Deserialize bytes into a datum (Not order guarantee, used in value encoding).
