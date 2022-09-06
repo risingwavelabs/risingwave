@@ -24,7 +24,7 @@ impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
             payload: message.payload().map(Bytes::copy_from_slice),
             offset: message.offset().to_string(),
-            split_id: message.partition().to_string(),
+            split_id: message.partition().to_string().into(),
         }
     }
 }

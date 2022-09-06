@@ -23,8 +23,7 @@ use risingwave_pb::user::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::error::meta_error_to_tonic;
-use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, UserInfoManagerRef};
+use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -34,22 +33,16 @@ pub struct UserServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     catalog_manager: CatalogManagerRef<S>,
-    user_manager: UserInfoManagerRef<S>,
 }
 
 impl<S> UserServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(
-        env: MetaSrvEnv<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        user_manager: UserInfoManagerRef<S>,
-    ) -> Self {
+    pub fn new(env: MetaSrvEnv<S>, catalog_manager: CatalogManagerRef<S>) -> Self {
         Self {
             env,
             catalog_manager,
-            user_manager,
         }
     }
 
@@ -76,7 +69,7 @@ where
                     expanded_privileges.push(privilege);
                 }
             } else if let Some(Object::AllSourcesSchemaId(source_id)) = &privilege.object {
-                let sources = self.catalog_manager.list_sources(*source_id).await?;
+                let sources = self.catalog_manager.list_source_ids(*source_id).await?;
                 for source_id in sources {
                     let mut privilege = privilege.clone();
                     privilege.object = Some(Object::SourceId(source_id));
@@ -114,11 +107,10 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::User }>()
-            .await
-            .map_err(meta_error_to_tonic)? as u32;
-        let mut user = req.get_user().map_err(meta_error_to_tonic)?.clone();
+            .await? as u32;
+        let mut user = req.get_user()?.clone();
         user.id = id;
-        let version = self.user_manager.create_user(&user).await?;
+        let version = self.catalog_manager.create_user(&user).await?;
 
         Ok(Response::new(CreateUserResponse {
             status: None,
@@ -132,7 +124,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         request: Request<DropUserRequest>,
     ) -> Result<Response<DropUserResponse>, Status> {
         let req = request.into_inner();
-        let version = self.user_manager.drop_user(req.user_id).await?;
+        let version = self.catalog_manager.drop_user(req.user_id).await?;
 
         Ok(Response::new(DropUserResponse {
             status: None,
@@ -151,8 +143,11 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .iter()
             .map(|i| UpdateField::from_i32(*i).unwrap())
             .collect_vec();
-        let user = req.get_user().map_err(meta_error_to_tonic)?.clone();
-        let version = self.user_manager.update_user(&user, &update_fields).await?;
+        let user = req.get_user()?.clone();
+        let version = self
+            .catalog_manager
+            .update_user(&user, &update_fields)
+            .await?;
 
         Ok(Response::new(UpdateUserResponse {
             status: None,
@@ -170,7 +165,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .expand_privilege(req.get_privileges(), Some(req.with_grant_option))
             .await?;
         let version = self
-            .user_manager
+            .catalog_manager
             .grant_privilege(&req.user_ids, &new_privileges, req.granted_by)
             .await?;
 
@@ -189,7 +184,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         let privileges = self.expand_privilege(req.get_privileges(), None).await?;
         let revoke_grant_option = req.revoke_grant_option;
         let version = self
-            .user_manager
+            .catalog_manager
             .revoke_privilege(
                 &req.user_ids,
                 &privileges,

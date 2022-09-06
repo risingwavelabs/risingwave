@@ -49,6 +49,11 @@ impl<B: Buf> Deserializer<B> {
         self.input.input
     }
 
+    /// Check if the inner buffer still has remaining data.
+    pub fn has_remaining(&self) -> bool {
+        self.input.input.has_remaining()
+    }
+
     /// Return the position of inner buffer from the `Deserializer`.
     pub fn position(&self) -> usize {
         self.input_len - self.input.input.remaining()

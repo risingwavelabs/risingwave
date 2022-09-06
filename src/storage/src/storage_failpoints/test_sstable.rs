@@ -21,11 +21,11 @@ use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::{
-    default_builder_opt_for_test, gen_test_sstable_data, test_key_of, test_value_of,
-    TEST_KEYS_COUNT,
+    default_builder_opt_for_test, default_writer_opt_for_test, gen_test_sstable,
+    gen_test_sstable_data, put_sst, test_key_of, test_value_of, TEST_KEYS_COUNT,
 };
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, Sstable, SstableIterator, SstableIteratorType};
+use crate::hummock::{SstableIterator, SstableIteratorType};
 use crate::monitor::StoreLocalStatistic;
 
 #[tokio::test]
@@ -38,16 +38,13 @@ async fn test_failpoints_table_read() {
     // We should close buffer, so that table iterator must read in object_stores
     let kv_iter =
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-    let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-    let table = Sstable {
-        id: 0,
-        meta,
-        blocks: vec![],
-    };
-    sstable_store
-        .put(table, data, CachePolicy::NotFill)
-        .await
-        .unwrap();
+    let _ = gen_test_sstable(
+        default_builder_opt_for_test(),
+        0,
+        kv_iter,
+        sstable_store.clone(),
+    )
+    .await;
 
     let mut stats = StoreLocalStatistic::default();
     let mut sstable_iter = SstableIterator::create(
@@ -91,33 +88,33 @@ async fn test_failpoints_vacuum_and_metadata() {
     })
     .unwrap();
 
+    let table_id = 0;
     let kv_iter =
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
     let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-    let table = Sstable {
-        id: 0,
-        meta: meta.clone(),
-        blocks: vec![],
-    };
-    let result = sstable_store
-        .put(table, data.clone(), CachePolicy::NotFill)
-        .await;
+    let result = put_sst(
+        table_id,
+        data.clone(),
+        meta.clone(),
+        sstable_store.clone(),
+        default_writer_opt_for_test(),
+    )
+    .await;
     assert!(result.is_err());
 
     fail::remove(metadata_upload_err);
     fail::remove(mem_delete_err);
     fail::remove(mem_upload_err);
 
-    let table = Sstable {
-        id: 0,
+    put_sst(
+        table_id,
+        data,
         meta,
-        blocks: vec![],
-    };
-    let table_id = table.id;
-    sstable_store
-        .put(table, data, CachePolicy::NotFill)
-        .await
-        .unwrap();
+        sstable_store.clone(),
+        default_writer_opt_for_test(),
+    )
+    .await
+    .unwrap();
 
     let mut stats = StoreLocalStatistic::default();
 

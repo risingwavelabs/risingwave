@@ -23,7 +23,6 @@ use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use io::StreamReader;
 use itertools::Itertools;
-use log::{error, info};
 use mpsc::Sender;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -31,6 +30,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
+use tracing::{error, info};
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2, AwsCredentialV2};
 use crate::source::base::{SourceMessage, SplitReader};
@@ -40,7 +40,7 @@ use crate::source::filesystem::s3::s3_dir::{
     AwsCustomConfig, S3SourceBasicConfig, S3SourceConfig, SqsReceiveMsgConfig,
 };
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{Column, ConnectorState, SplitMetaData};
+use crate::source::{Column, ConnectorState, SplitId, SplitMetaData};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const READ_CHUNK_SIZE: usize = 1024;
@@ -116,8 +116,9 @@ impl S3FileSplit {
 }
 
 impl SplitMetaData for S3FileSplit {
-    fn id(&self) -> String {
-        format!("{}/{}", self.bucket, self.s3_file.object.path)
+    fn id(&self) -> SplitId {
+        // TODO: should avoid constructing a string every time
+        format!("{}/{}", self.bucket, self.s3_file.object.path).into()
     }
 
     fn encode_to_bytes(&self) -> Bytes {
@@ -363,7 +364,7 @@ impl SplitReader for S3FileReader {
                     SourceMessage {
                         payload: Some(msg.payload),
                         offset: new_offset.to_string(),
-                        split_id: msg_id,
+                        split_id: msg_id.into(),
                     }
                 })
                 .collect_vec(),

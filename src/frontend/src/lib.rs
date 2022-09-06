@@ -38,25 +38,26 @@
 #![feature(lint_reasons)]
 
 #[macro_use]
-pub mod catalog;
-pub mod binder;
+mod catalog;
+pub use catalog::TableCatalog;
+mod binder;
+pub use binder::{bind_data_type, Binder};
 pub mod expr;
 pub mod handler;
-pub mod observer;
-pub mod optimizer;
-pub mod planner;
+mod observer;
+mod optimizer;
+pub use optimizer::PlanRef;
+mod planner;
+pub use planner::Planner;
 #[expect(dead_code)]
-pub mod scheduler;
+mod scheduler;
 pub mod session;
-pub mod stream_fragmenter;
-pub mod utils;
-extern crate log;
+mod stream_fragmenter;
+mod utils;
+extern crate tracing;
 mod meta_client;
 pub mod test_utils;
-extern crate core;
-extern crate risingwave_common;
-
-pub mod user;
+mod user;
 
 use std::ffi::OsString;
 use std::iter;
@@ -64,6 +65,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use pgwire::pg_server::pg_serve;
+use serde::{Deserialize, Serialize};
 use session::SessionManagerImpl;
 
 #[derive(Parser, Clone, Debug)]
@@ -97,6 +99,8 @@ impl Default for FrontendOpts {
 use std::future::Future;
 use std::pin::Pin;
 
+use risingwave_common::config::ServerConfig;
+
 /// Start frontend
 pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
@@ -105,4 +109,11 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
         pg_serve(&opts.host, session_mgr).await.unwrap();
     })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct FrontendConfig {
+    // For connection
+    #[serde(default)]
+    pub server: ServerConfig,
 }

@@ -19,6 +19,7 @@ use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
 };
 
+use crate::binder::bind_context::BindContext;
 use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
 use crate::expr::{Expr as _, ExprImpl};
 
@@ -57,7 +58,7 @@ impl Binder {
         Ok(Some(root))
     }
 
-    fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
+    pub(crate) fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
             let (constraint, join_type) = match join.join_operator {
@@ -109,7 +110,6 @@ impl Binder {
                 // Bind this table factor to an empty context
                 self.push_lateral_context();
                 let table_factor = table_factor.unwrap();
-                let right_table = get_table_name(&table_factor);
                 let relation = self.bind_table_factor(table_factor)?;
 
                 let using_columns = match c {
@@ -117,10 +117,10 @@ impl Binder {
                     JoinConstraint::Using(cols) => {
                         // sanity check
                         for col in &cols {
-                            if old_context.indexs_of.get(&col.value).is_none() {
+                            if old_context.indices_of.get(&col.value).is_none() {
                                 return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in left table", col.value)).into());
                             }
-                            if self.context.indexs_of.get(&col.value).is_none() {
+                            if self.context.indices_of.get(&col.value).is_none() {
                                 return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in right table", col.value)).into());
                             }
                         }
@@ -131,7 +131,7 @@ impl Binder {
 
                 let mut columns = self
                     .context
-                    .indexs_of
+                    .indices_of
                     .iter()
                     .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
                     .map(|(s, idxes)| (Ident::new(s.to_owned()), idxes))
@@ -142,14 +142,14 @@ impl Binder {
                 let mut binary_expr = Expr::Value(Value::Boolean(true));
 
                 // Walk the RHS cols, checking to see if any share a name with any LHS cols
-                for (column, idxes) in columns {
+                for (column, indices_r) in columns {
                     // TODO: is it ok to ignore quote style?
                     // If we have a `USING` constraint, we only bind the columns appearing in the
                     // constraint.
                     if let Some(cols) = &using_columns && !cols.contains(&column) {
                         continue;
                     }
-                    let indices = match old_context.get_unqualified_indices(&column.value) {
+                    let indices_l = match old_context.get_unqualified_indices(&column.value) {
                         Err(e) => {
                             if let ErrorCode::ItemNotFound(_) = e.inner() {
                                 continue;
@@ -160,40 +160,17 @@ impl Binder {
                         Ok(idxs) => idxs,
                     };
                     // Select at most one column from each natural column group from left and right
-                    col_indices.push((indices[0], idxes[0] + l_len));
-                    let left_expr = if indices.len() == 1 {
-                        let left_table = old_context.columns[indices[0]].table_name.clone();
-                        Expr::CompoundIdentifier(vec![
-                            Ident::new(left_table.clone()),
-                            column.clone(),
-                        ])
-                    } else {
-                        let group_id = old_context
-                            .column_group_context
-                            .mapping
-                            .get(&indices[0])
-                            .unwrap();
-                        Expr::CompoundIdentifier(vec![
-                            Ident::new(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
-                            column.clone(),
-                        ])
-                    };
-                    let right_expr = if idxes.len() == 1 {
-                        let mut right_table_clone = right_table.clone().unwrap();
-                        right_table_clone.push(column.clone());
-                        Expr::CompoundIdentifier(right_table_clone)
-                    } else {
-                        let group_id = self
-                            .context
-                            .column_group_context
-                            .mapping
-                            .get(&idxes[0])
-                            .unwrap();
-                        Expr::CompoundIdentifier(vec![
-                            Ident::new(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
-                            column.clone(),
-                        ])
-                    };
+                    col_indices.push((indices_l[0], indices_r[0] + l_len));
+                    let left_expr = Self::get_identifier_from_indices(
+                        &old_context,
+                        &indices_l,
+                        column.clone(),
+                    )?;
+                    let right_expr = Self::get_identifier_from_indices(
+                        &self.context,
+                        indices_r,
+                        column.clone(),
+                    )?;
                     binary_expr = Expr::BinaryOp {
                         left: Box::new(binary_expr),
                         op: BinaryOperator::And,
@@ -232,23 +209,25 @@ impl Binder {
             }
         })
     }
-}
 
-fn get_table_name(table_factor: &TableFactor) -> Option<Vec<Ident>> {
-    match table_factor {
-        TableFactor::Table { name, alias, .. } => {
-            if let Some(table_alias) = alias {
-                Some(vec![table_alias.name.clone()])
-            } else {
-                Some(name.0.clone())
-            }
+    fn get_identifier_from_indices(
+        context: &BindContext,
+        indices: &[usize],
+        column: Ident,
+    ) -> Result<Expr> {
+        if indices.len() == 1 {
+            let right_table = context.columns[indices[0]].table_name.clone();
+            Ok(Expr::CompoundIdentifier(vec![
+                Ident::new(right_table),
+                column,
+            ]))
+        } else if let Some(group_id) = context.column_group_context.mapping.get(&indices[0]) {
+            Ok(Expr::CompoundIdentifier(vec![
+                Ident::new(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
+                column,
+            ]))
+        } else {
+            Err(ErrorCode::InternalError(format!("Ambiguous column name: {}", column.value)).into())
         }
-        TableFactor::Derived { alias, .. } => alias
-            .as_ref()
-            .map(|table_alias| vec![table_alias.name.clone()]),
-        TableFactor::TableFunction { expr: _, alias } => alias
-            .as_ref()
-            .map(|table_alias| vec![table_alias.name.clone()]),
-        TableFactor::NestedJoin(table_with_joins) => get_table_name(&table_with_joins.relation),
     }
 }

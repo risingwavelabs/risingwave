@@ -14,20 +14,17 @@
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ParallelUnitId};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::{Binder, BoundTableSource};
-use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{ExprImpl, InputRef};
 
 #[derive(Debug)]
 pub struct BoundInsert {
     /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
-
-    /// Used for scheduling.
-    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 
     pub source: BoundQuery,
 
@@ -43,7 +40,6 @@ impl Binder {
         _columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
-        let (schema_name, table_name) = Self::resolve_table_name(source_name.clone())?;
         let table_source = self.bind_table_source(source_name)?;
 
         let expected_types = table_source
@@ -51,12 +47,6 @@ impl Binder {
             .iter()
             .map(|c| c.data_type.clone())
             .collect();
-
-        let vnode_mapping = self
-            .catalog
-            .get_table_by_name(&self.db_name, &schema_name, &table_name)?
-            .vnode_mapping
-            .clone();
 
         // When the column types of `source` query does not match `expected_types`, casting is
         // needed.
@@ -122,7 +112,6 @@ impl Binder {
 
         let insert = BoundInsert {
             table_source,
-            vnode_mapping,
             source,
             cast_exprs,
         };
@@ -141,56 +130,12 @@ impl Binder {
                 return exprs
                     .into_iter()
                     .zip_eq(expected_types)
-                    .map(|(mut e, t)| {
-                        e = Self::change_null_struct_type(e, t.clone())?;
-                        e.cast_assign(t)
-                    })
+                    .map(|(e, t)| e.cast_assign(t))
                     .try_collect();
             }
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
             std::cmp::Ordering::Greater => "INSERT has more target columns than expressions",
         };
         Err(ErrorCode::BindError(msg.into()).into())
-    }
-
-    /// If expr is struct type function and some inputs are null,
-    /// we need to change the data type of these fields to target type.
-    pub fn change_null_struct_type(expr: ExprImpl, target: DataType) -> Result<ExprImpl> {
-        if let ExprImpl::FunctionCall(func) = &expr {
-            if func.get_expr_type() == ExprType::Row {
-                if let DataType::Struct { fields } = target {
-                    let inputs = func
-                        .inputs()
-                        .iter()
-                        .zip_eq(fields.iter())
-                        .map(|(e, d)| {
-                            if e.is_null() {
-                                Ok(ExprImpl::Literal(Literal::new(None, d.clone()).into()))
-                            } else if let DataType::Struct { fields: _ } = d {
-                                Self::change_null_struct_type(e.clone(), d.clone())
-                            } else {
-                                Ok(e.clone())
-                            }
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    let data_type = inputs.iter().map(|i| i.return_type()).collect_vec();
-                    return Ok(ExprImpl::FunctionCall(
-                        FunctionCall::new_unchecked(
-                            func.get_expr_type(),
-                            inputs,
-                            DataType::Struct {
-                                fields: data_type.into(),
-                            },
-                        )
-                        .into(),
-                    ));
-                }
-                return Err(ErrorCode::BindError(
-                    "target type of struct function is not struct type".to_string(),
-                )
-                .into());
-            }
-        }
-        Ok(expr)
     }
 }

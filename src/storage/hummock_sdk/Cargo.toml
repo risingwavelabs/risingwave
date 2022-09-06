@@ -7,15 +7,13 @@ edition = "2021"
 bytes = "1"
 hex = "0.4"
 itertools = "0.10"
-log = "0.4"
-madsim = "=0.2.0-alpha.6"
 num-derive = "0.3"
 num-traits = "0.2"
 parking_lot = "0.12"
 prost = "0.11"
 risingwave_common = { path = "../../common" }
 risingwave_pb = { path = "../../prost" }
-tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -23,4 +21,6 @@ tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }

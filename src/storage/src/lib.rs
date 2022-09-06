@@ -24,28 +24,33 @@
 #![warn(clippy::await_holding_lock)]
 #![deny(unused_must_use)]
 #![deny(rustdoc::broken_intra_doc_links)]
-#![feature(trait_alias)]
-#![feature(generic_associated_types)]
-#![feature(binary_heap_drain_sorted)]
-#![feature(drain_filter)]
-#![feature(bound_map)]
-#![feature(backtrace)]
-#![feature(map_first_last)]
-#![feature(type_alias_impl_trait)]
-#![feature(test)]
-#![feature(custom_test_frameworks)]
-#![feature(result_option_inspect)]
-#![feature(generators)]
-#![feature(lint_reasons)]
 #![feature(allocator_api)]
-#![feature(strict_provenance)]
-#![feature(let_else)]
-#![feature(proc_macro_hygiene)]
-#![feature(stmt_expr_attributes)]
-#![feature(type_changing_struct_update)]
-#![feature(build_hasher_simple_hash_one)]
+#![feature(backtrace)]
+#![feature(binary_heap_drain_sorted)]
 #![feature(bound_as_ref)]
+#![feature(bound_map)]
+#![feature(build_hasher_simple_hash_one)]
+#![feature(custom_test_frameworks)]
+#![feature(drain_filter)]
+#![feature(generators)]
+#![feature(generic_associated_types)]
+#![feature(hash_drain_filter)]
+#![feature(let_else)]
+#![feature(lint_reasons)]
+#![feature(map_first_last)]
+#![feature(proc_macro_hygiene)]
+#![feature(result_option_inspect)]
+#![feature(stmt_expr_attributes)]
+#![feature(strict_provenance)]
+#![feature(test)]
+#![feature(trait_alias)]
+#![feature(type_alias_impl_trait)]
+#![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+#![feature(assert_matches)]
+#![feature(is_sorted)]
+#![feature(btree_drain_filter)]
+
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
@@ -65,7 +70,6 @@ pub mod write_batch;
 mod storage_failpoints;
 
 pub use keyspace::Keyspace;
-extern crate test;
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 

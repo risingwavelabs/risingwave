@@ -21,23 +21,21 @@ pub struct ProjectSetExecutorBuilder;
 
 impl ExecutorBuilder for ProjectSetExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::ProjectSet)?;
+        let [input]: [_; 1] = params.input.try_into().unwrap();
         let select_list: Vec<_> = node
             .get_select_list()
             .iter()
             .map(ProjectSetSelectItem::from_prost)
             .try_collect()?;
-        Ok(ProjectSetExecutor::new(
-            params.input.remove(0),
-            params.pk_indices,
-            select_list,
-            params.executor_id,
+        Ok(
+            ProjectSetExecutor::new(input, params.pk_indices, select_list, params.executor_id)
+                .boxed(),
         )
-        .boxed())
     }
 }

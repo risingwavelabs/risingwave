@@ -15,7 +15,7 @@
 use std::fmt;
 
 use risingwave_common::catalog::{ColumnId, Schema, TableDesc};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LookupJoinNode;
 
@@ -64,10 +64,7 @@ impl BatchLookupJoin {
     }
 
     fn derive_dist(left: &Distribution) -> Distribution {
-        match left {
-            Distribution::Single => Distribution::Single,
-            _ => unreachable!(),
-        }
+        left.clone()
     }
 
     fn eq_join_predicate(&self) -> &EqJoinPredicate {
@@ -143,7 +140,10 @@ impl_plan_tree_node_for_unary! { BatchLookupJoin }
 
 impl ToDistributedBatch for BatchLookupJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
-        Err(ErrorCode::NotImplemented("Lookup Join in MPP mode".to_string(), None.into()).into())
+        let input = self
+            .input()
+            .to_distributed_with_required(&Order::any(), &RequiredDist::Any)?;
+        Ok(self.clone_with_input(input).into())
     }
 }
 
@@ -163,12 +163,7 @@ impl ToBatchProst for BatchLookupJoin {
                 .map(|a| a as _)
                 .collect(),
             probe_side_table_desc: Some(self.right_table_desc.to_protobuf()),
-            probe_side_vnode_mapping: self
-                .right_table_desc
-                .vnode_mapping
-                .as_ref()
-                .unwrap_or(&vec![])
-                .clone(),
+            probe_side_vnode_mapping: vec![], // To be filled in at local.rs
             probe_side_column_ids: self
                 .right_output_column_ids
                 .iter()
@@ -181,6 +176,7 @@ impl ToBatchProst for BatchLookupJoin {
                 .map(|&x| x as u32)
                 .collect(),
             worker_nodes: vec![], // To be filled in at local.rs
+            null_safe: self.eq_join_predicate.null_safes(),
         })
     }
 }

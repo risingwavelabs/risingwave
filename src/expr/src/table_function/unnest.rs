@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayRef, DataChunk, ListArray, ListRef};
-use risingwave_common::ensure;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
 use super::*;
@@ -80,10 +79,9 @@ impl TableFunction for Unnest {
 }
 
 pub fn new_unnest(prost: &TableFunctionProst) -> Result<BoxedTableFunction> {
-    ensure!(prost.args.len() == 1);
     let return_type = DataType::from(prost.get_return_type().unwrap());
     let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
-    let list = args.into_iter().next().unwrap();
+    let [list]: [_; 1] = args.try_into().unwrap();
 
     Ok(Unnest { return_type, list }.boxed())
 }

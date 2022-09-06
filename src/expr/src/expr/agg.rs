@@ -14,11 +14,13 @@
 
 use std::convert::TryFrom;
 
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::bail;
 use risingwave_pb::expr::agg_call::Type;
 
+use crate::{ExprError, Result};
+
 /// Kind of aggregation function
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum AggKind {
     Min,
     Max,
@@ -26,8 +28,14 @@ pub enum AggKind {
     Count,
     Avg,
     StringAgg,
+    // This is an internal Agg operation.
+    // It was introduced by our legacy java frontend to handle
+    // scalar subqueries which may return more than one row.
+    // FIXME: This is currently unused by our codebase.
+    // Tracked: <https://github.com/risingwavelabs/risingwave/issues/4866>
     SingleValue,
     ApproxCountDistinct,
+    ArrayAgg,
 }
 
 impl std::fmt::Display for AggKind {
@@ -41,12 +49,13 @@ impl std::fmt::Display for AggKind {
             AggKind::StringAgg => write!(f, "string_agg"),
             AggKind::SingleValue => write!(f, "single_value"),
             AggKind::ApproxCountDistinct => write!(f, "approx_count_distinct"),
+            AggKind::ArrayAgg => write!(f, "array_agg"),
         }
     }
 }
 
 impl TryFrom<Type> for AggKind {
-    type Error = RwError;
+    type Error = ExprError;
 
     fn try_from(prost: Type) -> Result<Self> {
         match prost {
@@ -58,7 +67,8 @@ impl TryFrom<Type> for AggKind {
             Type::StringAgg => Ok(AggKind::StringAgg),
             Type::SingleValue => Ok(AggKind::SingleValue),
             Type::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
-            _ => Err(ErrorCode::InternalError("Unrecognized agg.".into()).into()),
+            Type::ArrayAgg => Ok(AggKind::ArrayAgg),
+            Type::Unspecified => bail!("Unrecognized agg."),
         }
     }
 }
@@ -74,6 +84,7 @@ impl AggKind {
             Self::StringAgg => Type::StringAgg,
             Self::SingleValue => Type::SingleValue,
             Self::ApproxCountDistinct => Type::ApproxCountDistinct,
+            Self::ArrayAgg => Type::ArrayAgg,
         }
     }
 }

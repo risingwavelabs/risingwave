@@ -21,7 +21,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::HummockStorage;
+use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
 };
@@ -111,6 +111,7 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
+            "",
             Arc::new(config),
             Arc::new(MonitoredHummockMetaClient::new(
                 meta_client.clone(),
@@ -119,6 +120,7 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
             metrics.state_store_metrics.clone(),
             metrics.object_store_metrics.clone(),
             filter_key_extractor_manager.clone(),
+            TieredCacheMetricsBuilder::unused(),
         )
         .await?;
 

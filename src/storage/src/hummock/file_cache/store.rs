@@ -20,15 +20,19 @@ use itertools::Itertools;
 use nix::sys::statfs::{statfs, FsType as NixFsType, EXT4_SUPER_MAGIC};
 use parking_lot::RwLock;
 use risingwave_common::cache::{LruCache, LruCacheEventListener};
+use tokio::sync::RwLock as AsyncRwLock;
 
 use super::error::{Error, Result};
 use super::file::{CacheFile, CacheFileOptions};
 use super::meta::{BlockLoc, MetaFile, SlotId};
+use super::metrics::FileCacheMetricsRef;
 use super::{utils, DioBuffer, DIO_BUFFER_ALLOCATOR};
 use crate::hummock::{HashBuilder, TieredCacheKey, TieredCacheValue};
 
 const META_FILE_FILENAME: &str = "meta";
 const CACHE_FILE_FILENAME: &str = "cache";
+
+const FREELIST_DEFAULT_CAPACITY: usize = 64;
 
 #[derive(Clone, Copy, Debug)]
 pub enum FsType {
@@ -104,20 +108,49 @@ where
     }
 
     pub async fn finish(mut self) -> Result<(Vec<K>, Vec<SlotId>)> {
-        debug_assert!(!self.buffer.is_empty());
+        // First free slots during last batch.
+
+        let mut freelist = Vec::with_capacity(FREELIST_DEFAULT_CAPACITY);
+        std::mem::swap(&mut *self.store.freelist.write(), &mut freelist);
+
+        if !freelist.is_empty() {
+            let mut guard = self.store.meta_file.write().await;
+            for slot in freelist {
+                if let Some(bloc) = guard.free(slot) {
+                    let offset = bloc.bidx as u64 * self.block_size as u64;
+                    let len = bloc.blen(self.block_size as u32) as usize;
+                    self.store.cache_file.punch_hole(offset, len)?;
+                }
+            }
+            drop(guard);
+        }
+
+        if self.is_empty() {
+            return Ok((vec![], vec![]));
+        }
+
+        // Write new cache entries.
 
         let mut slots = Vec::with_capacity(self.blocs.len());
 
-        let boff = self.store.cache_file.append(self.buffer).await? as u32 / self.block_size as u32;
+        self.store
+            .metrics
+            .disk_write_throughput
+            .inc_by(self.buffer.len() as f64);
+        let timer = self.store.metrics.disk_write_latency.start_timer();
+        let boff = self.store.cache_file.append(self.buffer).await? / self.block_size as u64;
+        let boff: u32 = boff.try_into().unwrap();
+        timer.observe_duration();
 
         for bloc in &mut self.blocs {
             bloc.bidx += boff;
         }
 
-        let mut mf = self.store.meta_file.write();
+        // Write guard is only needed when updating meta file, for data file is append-only.
+        let mut guard = self.store.meta_file.write().await;
 
         for (key, bloc) in self.keys.iter().zip_eq(self.blocs.iter()) {
-            slots.push(mf.insert(key, bloc)?);
+            slots.push(guard.insert(key, bloc)?);
         }
 
         Ok((self.keys, slots))
@@ -129,6 +162,8 @@ pub struct StoreOptions {
     pub capacity: usize,
     pub buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
+
+    pub metrics: FileCacheMetricsRef,
 }
 
 pub struct Store<K, V>
@@ -144,8 +179,12 @@ where
     block_size: usize,
     buffer_capacity: usize,
 
-    meta_file: Arc<RwLock<MetaFile<K>>>,
+    meta_file: Arc<AsyncRwLock<MetaFile<K>>>,
     cache_file: CacheFile,
+
+    freelist: Arc<RwLock<Vec<SlotId>>>,
+
+    metrics: FileCacheMetricsRef,
 
     _phantom: PhantomData<V>,
 }
@@ -194,8 +233,12 @@ where
             block_size: fs_block_size,
             buffer_capacity: options.buffer_capacity,
 
-            meta_file: Arc::new(RwLock::new(mf)),
+            meta_file: Arc::new(AsyncRwLock::new(mf)),
             cache_file: cf,
+
+            freelist: Arc::new(RwLock::new(Vec::with_capacity(FREELIST_DEFAULT_CAPACITY))),
+
+            metrics: options.metrics,
 
             _phantom: PhantomData::default(),
         })
@@ -205,12 +248,12 @@ where
         self.block_size
     }
 
-    pub fn size(&self) -> usize {
-        self.cache_file.size() + self.meta_file.read().size()
+    pub async fn size(&self) -> usize {
+        self.cache_file.size() + self.meta_file.read().await.size()
     }
 
-    pub fn meta_file_size(&self) -> usize {
-        self.meta_file.read().size()
+    pub async fn meta_file_size(&self) -> usize {
+        self.meta_file.read().await.size()
     }
 
     pub fn cache_file_size(&self) -> usize {
@@ -229,16 +272,16 @@ where
         PathBuf::from(&self.dir).join(CACHE_FILE_FILENAME)
     }
 
-    pub fn restore<S: HashBuilder>(
+    pub async fn restore<S: HashBuilder>(
         &self,
         indices: &Arc<LruCache<K, SlotId>>,
         hash_builder: &S,
     ) -> Result<()> {
-        let slots = self.meta_file.read().slots();
+        let slots = self.meta_file.read().await.slots();
 
         for slot in 0..slots {
             // Wrap the read guard, or there will be deadlock when evicting entries.
-            let res = { self.meta_file.read().get(slot) };
+            let res = { self.meta_file.read().await.get(slot) };
             if let Some((block_loc, key)) = res {
                 indices.insert(
                     key.clone(),
@@ -257,14 +300,20 @@ where
     }
 
     pub async fn get(&self, slot: SlotId) -> Result<Vec<u8>> {
-        let (bloc, _key) = self
-            .meta_file
-            .read()
-            .get(slot)
-            .ok_or(Error::InvalidSlot(slot))?;
+        // Read guard should be held during reading meta and loading data.
+        let guard = self.meta_file.read().await;
+
+        let (bloc, _key) = guard.get(slot).ok_or(Error::InvalidSlot(slot))?;
         let offset = bloc.bidx as u64 * self.block_size as u64;
         let blen = bloc.blen(self.block_size as u32) as usize;
+
+        let timer = self.metrics.disk_read_latency.start_timer();
         let buf = self.cache_file.read(offset, blen).await?;
+        timer.observe_duration();
+        self.metrics.disk_read_throughput.inc_by(buf.len() as f64);
+
+        drop(guard);
+
         Ok(buf[..bloc.len as usize].to_vec())
     }
 
@@ -273,13 +322,12 @@ where
     }
 
     fn free(&self, slot: SlotId) -> Result<()> {
-        let bloc = match self.meta_file.write().free(slot) {
-            None => return Ok(()),
-            Some(bloc) => bloc,
-        };
-        let offset = bloc.bidx as u64 * self.block_size as u64;
-        let len = bloc.blen(self.block_size as u32) as usize;
-        self.cache_file.punch_hole(offset, len)
+        // `free` is called by `CacheableEntry::drop` which cannot be async, so delay actual free
+        // until next batch write.
+
+        // TODO(MrCroxx): Optimize freelist to use lock-free queue with batching read.
+        self.freelist.write().push(slot);
+        Ok(())
     }
 }
 

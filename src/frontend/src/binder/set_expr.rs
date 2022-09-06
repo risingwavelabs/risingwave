@@ -17,7 +17,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::SetExpr;
 
 use crate::binder::{Binder, BoundSelect, BoundValues};
-use crate::expr::CorrelatedId;
+use crate::expr::{CorrelatedId, Depth};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
 /// `BoundSetExpr`s via set operators (e.g. union).
@@ -40,19 +40,22 @@ impl BoundSetExpr {
     pub fn is_correlated(&self) -> bool {
         match self {
             BoundSetExpr::Select(s) => s.is_correlated(),
-            BoundSetExpr::Values(_) => false,
+            BoundSetExpr::Values(v) => v.is_correlated(),
         }
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         match self {
             BoundSetExpr::Select(s) => {
-                s.collect_correlated_indices_by_depth_and_assign_id(correlated_id)
+                s.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
             }
-            BoundSetExpr::Values(_) => vec![],
+            BoundSetExpr::Values(v) => {
+                v.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+            }
         }
     }
 }

@@ -146,5 +146,21 @@ drop materialized view mv_hop_agg_1;
 statement ok
 drop materialized view mv_hop_agg_2;
 
+statement error
+create materialized view invalid_hop as
+select * from hop(t1, created_at, interval '0', interval '1');
+
+statement error
+create materialized view invalid_hop as
+select * from hop(t1, created_at, interval '1', interval '-1');
+
+statement error
+create materialized view invalid_hop as
+select * from hop(t1, created_at, interval '-1', interval '1');
+
+statement error
+create materialized view invalid_hop as
+select * from hop(t1, created_at, interval '-1', interval '-1');
+
 statement ok
 drop table t1;

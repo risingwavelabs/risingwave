@@ -1,0 +1,70 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (a int[]);
+
+statement ok
+insert into t values (array[1]), (array[2]), (array[1, 2, 3]), (NULL), (array[1, NULL]);
+
+query T
+select * from t order by 1;
+----
+{1}
+{1,2,3}
+{1,NULL}
+{2}
+NULL
+
+statement ok
+drop table t;
+
+statement ok
+create table t (a int[][]);
+
+statement ok
+insert into t values (array[array[1, 2, 3], array[2]]), (array[array[1], array[2, 3, 2]]), (array[array[2], array[1]]);
+
+query T
+select * from t order by 1;
+----
+{{1},{2,3,2}}
+{{1,2,3},{2}}
+{{2},{1}}
+
+statement ok
+drop table t;
+
+statement ok
+create table t (a int[], b int);
+
+statement ok
+insert into t values (array[1, 2], 3), (array[1], NULL), (array[1], 3), (array[2], 1);
+
+query TI
+select * from t order by 1 ASC, 2 DESC;
+----
+{1} NULL
+{1} 3
+{1,2} 3
+{2} 1
+
+statement ok
+drop table t;
+
+statement ok
+create table t (a varchar[][]);
+
+statement ok
+insert into t values (array[array['abc', 'd'], array['ef']]), (array[array['a', 'bcd'], array['e', 'f']]), (array[array['abc', 'd'], array['e', 'f']]), (array[array['b'], array['c']]);
+
+query T
+select * from t order by 1 DESC;
+----
+{{b},{c}}
+{{abc,d},{ef}}
+{{abc,d},{e,f}}
+{{a,bcd},{e,f}}
+
+statement ok
+drop table t;

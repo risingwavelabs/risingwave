@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::source::pulsar::topic::Topic;
 use crate::source::pulsar::PulsarEnumeratorOffset;
-use crate::source::SplitMetaData;
+use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
 pub struct PulsarSplit {
@@ -41,8 +41,9 @@ impl PulsarSplit {
 }
 
 impl SplitMetaData for PulsarSplit {
-    fn id(&self) -> String {
-        self.topic.to_string()
+    fn id(&self) -> SplitId {
+        // TODO: should avoid constructing a string every time
+        self.topic.to_string().into()
     }
 
     fn encode_to_bytes(&self) -> Bytes {

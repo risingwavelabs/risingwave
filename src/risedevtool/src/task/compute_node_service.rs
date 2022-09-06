@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -41,7 +41,7 @@ impl ComputeNodeService {
         }
     }
 
-    /// Apply command args accroding to config
+    /// Apply command args according to config
     pub fn apply_command_args(
         cmd: &mut Command,
         config: &ComputeNodeConfig,
@@ -58,6 +58,10 @@ impl ComputeNodeService {
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
             .arg("1");
+
+        if config.enable_async_stack_trace {
+            cmd.arg("--enable-async-stack-trace");
+        }
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {
@@ -123,9 +127,26 @@ impl Task for ComputeNodeService {
                 Path::new(&env::var("PREFIX_LOG")?).join(format!("profile-{}", self.id())),
             );
         }
+
+        if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
+            // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
+            cmd.env(
+                "_RJEM_MALLOC_CONF",
+                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node",
+            );
+        }
+
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
+        if self.config.enable_tiered_cache {
+            let prefix_data = env::var("PREFIX_DATA")?;
+            cmd.arg("--file-cache-dir").arg(
+                PathBuf::from(prefix_data)
+                    .join("filecache")
+                    .join(self.config.port.to_string()),
+            );
+        }
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

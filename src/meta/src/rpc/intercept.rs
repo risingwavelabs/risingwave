@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use futures::Future;
 use hyper::Body;
 use tower::{Layer, Service};
 
@@ -54,8 +55,9 @@ where
     S::Future: Send + 'static,
 {
     type Error = S::Error;
-    type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
     type Response = S::Response;
+
+    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -70,8 +72,7 @@ where
 
         let metrics = self.metrics.clone();
 
-        // TODO: use GAT to avoid static future and Box::pin
-        Box::pin(async move {
+        async move {
             let path = req.uri().path();
             let timer = metrics
                 .grpc_latency
@@ -83,6 +84,6 @@ where
             timer.observe_duration();
 
             Ok(response)
-        })
+        }
     }
 }

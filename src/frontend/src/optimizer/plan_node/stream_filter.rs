@@ -17,9 +17,10 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::FilterNode;
 
-use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::PlanBase;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::Condition;
 
 /// `StreamFilter` implements [`super::LogicalFilter`]
@@ -33,13 +34,14 @@ impl StreamFilter {
     pub fn new(logical: LogicalFilter) -> Self {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
-        let pk_indices = logical.base.pk_indices.to_vec();
+        let pk_indices = logical.base.logical_pk.to_vec();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             pk_indices,
+            logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
         );
@@ -69,8 +71,8 @@ impl PlanTreeNodeUnary for StreamFilter {
 
 impl_plan_tree_node_for_unary! { StreamFilter }
 
-impl ToStreamProst for StreamFilter {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamFilter {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Filter(FilterNode {
             search_condition: Some(ExprImpl::from(self.predicate().clone()).to_expr_proto()),
         })

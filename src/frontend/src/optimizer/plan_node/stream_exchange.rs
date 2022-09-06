@@ -17,8 +17,9 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.
@@ -31,12 +32,13 @@ pub struct StreamExchange {
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
         let ctx = input.ctx();
-        let pk_indices = input.pk_indices().to_vec();
+        let pk_indices = input.logical_pk().to_vec();
         // Dispatch executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
             input.schema().clone(),
             pk_indices,
+            input.functional_dependency().clone(),
             dist,
             input.append_only(),
         );
@@ -73,8 +75,8 @@ impl PlanTreeNodeUnary for StreamExchange {
 }
 impl_plan_tree_node_for_unary! {StreamExchange}
 
-impl ToStreamProst for StreamExchange {
-    fn to_stream_prost_body(&self) -> NodeBody {
+impl StreamNode for StreamExchange {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
         NodeBody::Exchange(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: match &self.base.dist {

@@ -38,11 +38,7 @@ pub struct SinkExecutor<S: StateStore> {
 }
 
 async fn build_sink(config: SinkConfig) -> StreamExecutorResult<Box<SinkImpl>> {
-    Ok(Box::new(
-        SinkImpl::new(config)
-            .await
-            .map_err(StreamExecutorError::sink_error)?,
-    ))
+    Ok(Box::new(SinkImpl::new(config).await?))
 }
 
 impl<S: StateStore> SinkExecutor<S> {
@@ -68,12 +64,8 @@ impl<S: StateStore> SinkExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let sink_config = SinkConfig::from_hashmap(self.properties.clone())
-            .map_err(StreamExecutorError::sink_error)?;
-
-        let mut sink = build_sink(sink_config.clone())
-            .await
-            .map_err(StreamExecutorError::sink_error)?;
+        let sink_config = SinkConfig::from_hashmap(self.properties.clone())?;
+        let mut sink = build_sink(sink_config.clone()).await?;
 
         // the flag is required because kafka transaction requires at least one
         // message, so we should abort the transaction if the flag is true.
@@ -83,6 +75,11 @@ impl<S: StateStore> SinkExecutor<S> {
 
         let schema = self.schema().clone();
 
+        // prepare the external sink before writing if needed.
+        if sink.needs_preparation() {
+            sink.prepare(&schema).await?;
+        }
+
         let input = self.input.execute();
 
         #[for_await]
@@ -90,22 +87,14 @@ impl<S: StateStore> SinkExecutor<S> {
             match msg? {
                 Message::Chunk(chunk) => {
                     if !in_transaction {
-                        sink.begin_epoch(epoch)
-                            .await
-                            .map_err(StreamExecutorError::sink_error)?;
+                        sink.begin_epoch(epoch).await?;
                         in_transaction = true;
                     }
 
                     let visible_chunk = chunk.clone().compact()?;
-                    if let Err(e) = sink
-                        .write_batch(visible_chunk, &schema)
-                        .await
-                        .map_err(StreamExecutorError::sink_error)
-                    {
-                        sink.abort()
-                            .await
-                            .map_err(StreamExecutorError::sink_error)?;
-                        return Err(e);
+                    if let Err(e) = sink.write_batch(visible_chunk, &schema).await {
+                        sink.abort().await?;
+                        return Err(e.into());
                     }
                     empty_epoch_flag = false;
 
@@ -114,18 +103,14 @@ impl<S: StateStore> SinkExecutor<S> {
                 Message::Barrier(barrier) => {
                     if in_transaction {
                         if empty_epoch_flag {
-                            sink.abort()
-                                .await
-                                .map_err(StreamExecutorError::sink_error)?;
+                            sink.abort().await?;
                             tracing::debug!(
                                 "transaction abort due to empty epoch, epoch: {:?}",
                                 epoch
                             );
                         } else {
                             let start_time = Instant::now();
-                            sink.commit()
-                                .await
-                                .map_err(StreamExecutorError::sink_error)?;
+                            sink.commit().await?;
                             self.metrics
                                 .sink_commit_duration
                                 .with_label_values(&[
@@ -165,27 +150,62 @@ impl<S: StateStore> Executor for SinkExecutor<S> {
 
 #[cfg(test)]
 mod test {
-
-    use risingwave_connector::sink::mysql::{MySQLConfig, MySQLSink};
-
     use super::*;
     use crate::executor::test_utils::*;
 
-    #[test]
-    fn test_mysqlsink() {
-        let cfg = MySQLConfig {
-            endpoint: String::from("127.0.0.1:3306"),
-            table: String::from("<table_name>"),
-            database: Some(String::from("<database_name>")),
-            user: Some(String::from("<user_name>")),
-            password: Some(String::from("<password>")),
+    #[ignore]
+    #[tokio::test]
+    async fn test_mysqlsink() {
+        use risingwave_common::array::stream_chunk::StreamChunk;
+        use risingwave_common::array::StreamChunkTestExt;
+        use risingwave_common::catalog::Field;
+        use risingwave_common::types::DataType;
+        use risingwave_storage::memory::MemoryStateStore;
+
+        use crate::executor::Barrier;
+
+        let properties = maplit::hashmap! {
+        "connector".into() => "mysql".into(),
+        "endpoint".into() => "127.0.0.1:3306".into(),
+        "database".into() => "db".into(),
+        "table".into() => "t".into(),
+        "user".into() => "root".into()
         };
 
-        let _mysql_sink = MySQLSink::new(cfg);
-
         // Mock `child`
-        let _mock = MockSource::with_messages(Schema::default(), PkIndices::new(), vec![]);
+        let mock = MockSource::with_messages(
+            Schema::new(vec![
+                Field::with_name(DataType::Int32, "v1"),
+                Field::with_name(DataType::Int32, "v2"),
+                Field::with_name(DataType::Int32, "v3"),
+            ]),
+            PkIndices::new(),
+            vec![
+                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                    " I I I
+            +  3 2 1",
+                ))),
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                    " I I I
+            +  6 5 4",
+                ))),
+            ],
+        );
 
-        // let _sink_executor = SinkExecutor::_new(Box::new(mock), mysql_sink);
+        let sink_executor = SinkExecutor::new(
+            Box::new(mock),
+            MemoryStateStore::new(),
+            Arc::new(StreamingMetrics::unused()),
+            properties,
+            0,
+        );
+
+        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+
+        executor.next().await.unwrap().unwrap();
+        executor.next().await.unwrap().unwrap();
+        executor.next().await.unwrap().unwrap();
+        executor.next().await.unwrap().unwrap();
     }
 }

@@ -34,6 +34,16 @@ SELECT interval '6 second';
 00:00:06
 
 query T
+SELECT '6'::interval;
+----
+00:00:06
+
+query T
+SELECT concat(5, 'minute')::interval;
+----
+00:05:00
+
+query T
 SELECT interval '1' month = interval '30' day;
 ----
 t
@@ -62,3 +72,19 @@ query T
 SELECT INTERVAL '3 mins' * 1.5;
 ----
 00:04:30
+
+# https://github.com/risingwavelabs/risingwave/issues/3873
+query TTTTT
+select distinct * from (values (interval '1' month), (interval '30' day)) as t;
+----
+30 days 00:00:00
+
+query TTTTT
+select distinct * from (values (interval '30' day), (interval '1' month)) as t;
+----
+30 days 00:00:00
+
+query TTTTT
+select distinct * from (values (interval '720' hour), (interval '1' month)) as t;
+----
+30 days 00:00:00

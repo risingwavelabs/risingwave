@@ -26,6 +26,7 @@ use super::{
 };
 use crate::expr::{InputRef, InputRefDisplay};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
@@ -65,33 +66,51 @@ impl LogicalHopWindow {
             .iter()
             .map(|&idx| original_schema[idx].clone())
             .collect();
-        let pk_indices = (|| {
-            let input_pk = input
-                .pk_indices()
-                .iter()
-                .filter_map(|&pk_idx| output_indices.iter().position(|&idx| idx == pk_idx));
-            let window_pk = if output_indices.contains(&input.schema().len()) {
-                std::iter::once(
-                    output_indices
-                        .iter()
-                        .position(|&idx| idx == input.schema().len())
-                        .unwrap(),
-                )
-            } else if output_indices.contains(&(input.schema().len() + 1)) {
-                std::iter::once(
-                    output_indices
-                        .iter()
-                        .position(|&idx| idx == input.schema().len() + 1)
-                        .unwrap(),
-                )
+        let window_start_index = output_indices
+            .iter()
+            .position(|&idx| idx == input.schema().len());
+        let window_end_index = output_indices
+            .iter()
+            .position(|&idx| idx == input.schema().len() + 1);
+        let pk_indices = {
+            if window_start_index.is_none() && window_end_index.is_none() {
+                None
             } else {
-                // If neither `window_start` or `window_end` is in `output_indices`, pk cannot be
-                // derived. In this situation, return empty vec.
-                return Vec::new();
-            };
-            input_pk.chain(window_pk).collect_vec()
-        })();
-        let base = PlanBase::new_logical(ctx, actual_schema, pk_indices);
+                let mut pk = input
+                    .logical_pk()
+                    .iter()
+                    .filter_map(|&pk_idx| output_indices.iter().position(|&idx| idx == pk_idx))
+                    .collect_vec();
+                if let Some(start_idx) = window_start_index {
+                    pk.push(start_idx);
+                };
+                if let Some(end_idx) = window_end_index {
+                    pk.push(end_idx);
+                };
+                Some(pk)
+            }
+        };
+        let functional_dependency = {
+            let mut fd_set =
+                ColIndexMapping::identity_or_none(input.schema().len(), original_schema.len())
+                    .composite(&ColIndexMapping::with_remaining_columns(
+                        &output_indices,
+                        original_schema.len(),
+                    ))
+                    .rewrite_functional_dependency_set(input.functional_dependency().clone());
+            if let Some(start_idx) = window_start_index && let Some(end_idx) = window_end_index {
+                fd_set.add_functional_dependency_by_column_indices(&[start_idx], &[end_idx]);
+                fd_set.add_functional_dependency_by_column_indices(&[end_idx], &[start_idx]);
+            }
+            fd_set
+        };
+        let pk_indices = match pk_indices {
+            Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
+                functional_dependency.minimize_key(&pk_indices)
+            }
+            _ => pk_indices.unwrap_or_default(),
+        };
+        let base = PlanBase::new_logical(ctx, actual_schema, pk_indices, functional_dependency);
         LogicalHopWindow {
             base,
             input,
@@ -212,6 +231,12 @@ impl LogicalHopWindow {
                 )
             },
         )
+    }
+
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
     }
 }
 
@@ -375,7 +400,7 @@ impl ToStream for LogicalHopWindow {
         let i2o = self.i2o_col_mapping();
         output_indices.extend(
             input
-                .pk_indices()
+                .logical_pk()
                 .iter()
                 .cloned()
                 .filter(|i| i2o.try_map(*i).is_none()),
@@ -393,12 +418,15 @@ impl ToStream for LogicalHopWindow {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
+
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
     use super::*;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::LogicalValues;
+    use crate::optimizer::property::FunctionalDependency;
     use crate::session::OptimizerContext;
     #[tokio::test]
     /// Pruning
@@ -451,5 +479,49 @@ mod test {
         assert_eq!(values.schema().fields().len(), 2);
         assert_eq!(values.schema().fields()[0], fields[0]);
         assert_eq!(values.schema().fields()[1], fields[2]);
+    }
+
+    #[tokio::test]
+    async fn fd_derivation_hop_window() {
+        // input: [date, v1, v2]
+        // FD: { date, v1 } --> { v2 }
+        // output: [date, v1, v2, window_start, window_end],
+        // FD: { date, v1 } --> { v2 }
+        //     window_start --> window_end
+        //     window_end --> window_start
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(DataType::Date, "date"),
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+        ];
+        let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        // 0, 1 --> 2
+        values
+            .base
+            .functional_dependency
+            .add_functional_dependency_by_column_indices(&[0, 1], &[2]);
+        let hop_window: PlanRef = LogicalHopWindow::new(
+            values.into(),
+            InputRef::new(0, DataType::Date),
+            IntervalUnit::new(0, 1, 0),
+            IntervalUnit::new(0, 3, 0),
+            None,
+        )
+        .into();
+        let fd_set: HashSet<_> = hop_window
+            .functional_dependency()
+            .as_dependencies()
+            .iter()
+            .cloned()
+            .collect();
+        let expected_fd_set: HashSet<_> = [
+            FunctionalDependency::with_indices(5, &[0, 1], &[2]),
+            FunctionalDependency::with_indices(5, &[3], &[4]),
+            FunctionalDependency::with_indices(5, &[4], &[3]),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(fd_set, expected_fd_set);
     }
 }

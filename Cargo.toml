@@ -30,14 +30,23 @@ members = [
   "src/tests/regress",
   "src/tests/simulation",
   "src/tests/sqlsmith",
+  "src/tests/sync_point",
+  "src/tracing",
+  "src/utils/async_stack_trace",
   "src/utils/memcomparable",
   "src/utils/pgwire",
   "src/utils/runtime",
   "src/utils/static-link",
   "src/utils/stats_alloc",
-  "src/utils/value-encoding",
+  "src/utils/sync-point",
   "src/workspace-hack",
 ]
+
+[profile.dev]
+lto = 'off'
+
+[profile.release]
+debug = true
 
 [profile.bench]
 opt-level = 3
@@ -49,5 +58,29 @@ debug-assertions = false
 overflow-checks = false
 rpath = false
 
-[profile.release]
+# The profile used for CI in main branch.
+# This profile inherits from the release profile, but turns on some checks and assertions for us to
+# better catch bugs in CI.
+[profile.ci-release]
+inherits = "release"
 debug = true
+debug-assertions = true
+overflow-checks = true
+
+# The profile used for CI in pull requests.
+# External dependencies are built with optimization enabled, while crates in this workspace are built
+# with `dev` profile and full debug info. This is a trade-off between build time and e2e test time.
+[profile.ci-dev]
+inherits = "dev"
+incremental = false
+lto = 'off'
+[profile.ci-dev.package."*"] # external dependencies
+opt-level = 1
+
+# Patch third-party crates for deterministic simulation.
+[patch.crates-io]
+quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "a819877" }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3" }
+tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
+tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
+postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }

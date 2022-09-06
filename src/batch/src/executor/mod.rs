@@ -33,6 +33,7 @@ mod table_function;
 pub mod test_utils;
 mod top_n;
 mod trace;
+mod union;
 mod update;
 mod values;
 
@@ -62,6 +63,7 @@ pub use sort_agg::*;
 pub use table_function::*;
 pub use top_n::*;
 pub use trace::*;
+pub use union::*;
 pub use update::*;
 pub use values::*;
 
@@ -90,6 +92,12 @@ pub trait Executor: Send + 'static {
     ///
     /// The implementation should guaranteed that each `DataChunk`'s cardinality is not zero.
     fn execute(self: Box<Self>) -> BoxedDataChunkStream;
+}
+
+impl std::fmt::Debug for BoxedExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.identity())
+    }
 }
 
 /// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor`
@@ -193,6 +201,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Expand => ExpandExecutor,
             NodeBody::LookupJoin => LookupJoinExecutorBuilder,
             NodeBody::ProjectSet => ProjectSetExecutor,
+            NodeBody::Union => UnionExecutor,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();
@@ -202,6 +211,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 
 #[cfg(test)]
 mod tests {
+
     use risingwave_pb::batch_plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;

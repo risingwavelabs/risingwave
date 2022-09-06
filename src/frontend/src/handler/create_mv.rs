@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -26,7 +27,7 @@ use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
+use crate::stream_fragmenter::build_graph;
 
 /// Generate create MV plan, return plan and mv table info.
 pub fn gen_create_mv_plan(
@@ -40,15 +41,18 @@ pub fn gen_create_mv_plan(
     let (database_id, schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
-        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
-        check_privileges(
-            session,
-            &vec![ObjectCheckItem::new(
-                schema.owner(),
-                Action::Create,
-                Object::SchemaId(schema.id()),
-            )],
-        )?;
+        if schema_name != DEFAULT_SCHEMA_NAME {
+            let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+            check_privileges(
+                session,
+                &vec![ObjectCheckItem::new(
+                    schema.owner(),
+                    Action::Create,
+                    Object::SchemaId(schema.id()),
+                )],
+            )?;
+        }
+
         catalog_reader.check_relation_name_duplicated(
             session.database(),
             &schema_name,
@@ -103,8 +107,7 @@ pub async fn handle_create_mv(
 
     let (table, graph) = {
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
-        let stream_plan = plan.to_stream_prost();
-        let graph = StreamFragmenter::build_graph(stream_plan);
+        let graph = build_graph(plan);
 
         (table, graph)
     };
@@ -123,7 +126,6 @@ pub async fn handle_create_mv(
 pub mod tests {
     use std::collections::HashMap;
 
-    use itertools::Itertools;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
@@ -164,30 +166,23 @@ pub mod tests {
             .clone();
         assert_eq!(table.name(), "mv1");
 
-        // Get all column descs
         let columns = table
             .columns
             .iter()
-            .flat_map(|c| c.column_desc.flatten())
-            .collect_vec();
-
-        let columns = columns
-            .iter()
-            .map(|col| (col.name.as_str(), col.data_type.clone()))
+            .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let city_type = DataType::Struct {
-            fields: vec![DataType::Varchar, DataType::Varchar].into(),
-        };
+        let city_type = DataType::new_struct(
+            vec![DataType::Varchar, DataType::Varchar],
+            vec!["address".to_string(), "zipcode".to_string()],
+        );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
-            "country.zipcode" => DataType::Varchar,
-            "country.city.address" => DataType::Varchar,
-            "country.address" => DataType::Varchar,
-            "country.city" => city_type.clone(),
-            "country.city.zipcode" => DataType::Varchar,
-            "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
+            "country" => DataType::new_struct(
+                 vec![DataType::Varchar,city_type,DataType::Varchar],
+                 vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
+            )
         };
         assert_eq!(columns, expected_columns);
     }

@@ -192,6 +192,8 @@ mod tests {
     async fn test_psql_extended_mode_explicit_simple() {
         let session_mgr = Arc::new(MockSessionManager {});
         tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
+        // wait for server to start
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         // Connect to the database.
         let (mut client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)

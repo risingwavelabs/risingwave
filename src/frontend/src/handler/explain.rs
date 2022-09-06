@@ -17,9 +17,9 @@ use std::sync::atomic::Ordering;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::QueryMode;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
@@ -28,17 +28,29 @@ use super::create_table::gen_create_table_plan;
 use crate::binder::Binder;
 use crate::handler::util::force_local_mode;
 use crate::planner::Planner;
+use crate::scheduler::BatchPlanFragmenter;
 use crate::session::OptimizerContext;
 
 pub(super) fn handle_explain(
     context: OptimizerContext,
     stmt: Statement,
-    verbose: bool,
-    trace: bool,
+    options: ExplainOptions,
+    analyze: bool,
 ) -> Result<PgResponse> {
+    if analyze {
+        return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
+    }
+    if options.explain_type == ExplainType::Logical {
+        return Err(ErrorCode::NotImplemented("explain logical".to_string(), 4856.into()).into());
+    }
+
     let session = context.session_ctx.clone();
-    context.explain_verbose.store(verbose, Ordering::Release);
-    context.explain_trace.store(trace, Ordering::Release);
+    context
+        .explain_verbose
+        .store(options.verbose, Ordering::Release);
+    context
+        .explain_trace
+        .store(options.trace, Ordering::Release);
     // bind, plan, optimize, and serialize here
     let mut planner = Planner::new(context.into());
     let plan = match stmt {
@@ -52,16 +64,20 @@ pub(super) fn handle_explain(
 
         Statement::CreateSink { stmt } => gen_sink_plan(&session, planner.ctx(), stmt)?.0,
 
-        Statement::CreateTable { name, columns, .. } => {
-            gen_create_table_plan(&session, planner.ctx(), name, columns)?.0
-        }
+        Statement::CreateTable {
+            name,
+            columns,
+            constraints,
+            ..
+        } => gen_create_table_plan(&session, planner.ctx(), name, columns, constraints)?.0,
 
         Statement::CreateIndex {
             name,
             table_name,
             columns,
+            include,
             ..
-        } => gen_create_index_plan(&session, planner.ctx(), name, table_name, columns)?.0,
+        } => gen_create_index_plan(&session, planner.ctx(), name, table_name, columns, include)?.0,
 
         stmt => {
             let bound = {
@@ -75,12 +91,43 @@ pub(super) fn handle_explain(
                 session.config().get_query_mode()
             };
             let logical = planner.plan(bound)?;
-            match query_mode {
+            let plan = match query_mode {
                 QueryMode::Local => logical.gen_batch_local_plan()?,
-                QueryMode::Distributed => logical.gen_batch_query_plan()?,
+                QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
+            };
+
+            if options.explain_type == ExplainType::DistSQL {
+                let plan_fragmenter = BatchPlanFragmenter::new(
+                    session.env().worker_node_manager_ref(),
+                    session.env().catalog_reader().clone(),
+                );
+                let query = plan_fragmenter.split(plan)?;
+                let stage_graph_json = serde_json::to_string_pretty(&query.stage_graph).unwrap();
+                let rows = vec![stage_graph_json]
+                    .iter()
+                    .flat_map(|s| s.lines())
+                    .map(|s| Row::new(vec![Some(s.to_string().into())]))
+                    .collect::<Vec<_>>();
+
+                return Ok(PgResponse::new(
+                    StatementType::EXPLAIN,
+                    rows.len() as i32,
+                    rows,
+                    vec![PgFieldDescriptor::new(
+                        "QUERY PLAN".to_owned(),
+                        TypeOid::Varchar,
+                    )],
+                    true,
+                ));
             }
+
+            plan
         }
     };
+
+    if options.explain_type == ExplainType::DistSQL {
+        return Err(ErrorCode::NotImplemented("explain distsql".to_string(), 4856.into()).into());
+    }
 
     let ctx = plan.plan_base().ctx.clone();
     let explain_trace = ctx.is_explain_trace();

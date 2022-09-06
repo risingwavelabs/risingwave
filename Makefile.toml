@@ -59,6 +59,7 @@ script = '''
 rm -rf "${PREFIX_DATA}"
 rm -rf "${PREFIX_LOG}"
 rm -rf "${PREFIX_CONFIG}"
+rm -rf "${PREFIX_PROFILING}"
 '''
 
 
@@ -111,12 +112,23 @@ if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 2000 )) ; then
 fi
 '''
 
+[tasks.doc]
+category = "Misc"
+description = "Open rustdoc for risingwave"
+dependencies = ["build-docs"]
+script = '''
+#!/bin/bash
+set -e
+
+python -mwebbrowser file://$(pwd)/target/doc/index.html
+'''
+
 [tasks.link-standalone-binaries]
 category = "RiseDev - Build"
 description = "Link standalone cmds to RiseDev bin"
 condition = { env_not_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
@@ -133,7 +145,7 @@ category = "RiseDev - Build"
 description = "Link all-in-one cmds to RiseDev bin"
 condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 
 rm -rf "${PREFIX_BIN}/risingwave"
@@ -151,7 +163,7 @@ category = "RiseDev - Build"
 description = "Link all binaries to .bin"
 condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 
 rm -rf "${PREFIX_USR_BIN}"
@@ -184,7 +196,7 @@ category = "RiseDev - Build"
 description = "Extract dashboard artifact"
 condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
 script = '''
-#!@shell
+#!/bin/bash
 
 # we allow this script to fail
 
@@ -200,7 +212,7 @@ category = "RiseDev - Build"
 description = "Build dashboard v2"
 condition = { env_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
 script = """
-#!@shell
+#!/bin/bash
 set -e
 
 rm -rf "${PREFIX_UI}"
@@ -231,7 +243,7 @@ category = "RiseDev - Build"
 description = "Clean Rust targets"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 cargo clean
 '''
@@ -240,8 +252,9 @@ cargo clean
 category = "RiseDev - Build"
 description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
+env = { RUSTDOCFLAGS = "--enable-index-page -Zunstable-options" }
 script = '''
-#!@shell
+#!/bin/bash
 
 set -e
 
@@ -252,7 +265,7 @@ cargo doc --workspace --no-deps --document-private-items
 category = "RiseDev - Prepare"
 description = "Copy necessary configuration files to RiseDev"
 script = '''
-#!@shell
+#!/bin/bash
 
 set -e
 
@@ -261,9 +274,9 @@ cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
-[tasks.pre-start-playground]
+[tasks.pre-start-dev]
 category = "RiseDev - Prepare"
-description = "Prepare playground by downloading necessary tools and build required components"
+description = "Prepare dev cluster by downloading necessary tools and build required components"
 dependencies = [
   "download-minio",
   "download-mcli",
@@ -301,7 +314,7 @@ alias = "playground"
 category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
 script = '''
-#!@shell
+#!/bin/bash
 
 set -e
 
@@ -316,7 +329,7 @@ RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISI
 category = "RiseDev - Start"
 description = "Start RiseCtl"
 script = '''
-#!@shell
+#!/bin/bash
 
 RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
 
@@ -336,10 +349,10 @@ alias = "dev"
 
 [tasks.dev]
 category = "RiseDev - Start"
-dependencies = ["pre-start-playground"]
-command = "target/${BUILD_MODE_DIR}/risedev-playground"
+dependencies = ["pre-start-dev"]
+command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
-description = "Start a full RisingWave dev cluster using risedev-playground"
+description = "Start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.kafka]
 category = "RiseDev - Start"
@@ -372,7 +385,7 @@ dependencies = ["k", "clean-data"]
 [tasks.install-tools]
 category = "RiseDev - Check"
 script = """
-#!@shell
+#!/bin/bash
 
 set -e
 
@@ -384,7 +397,7 @@ do
 done
 
 echo "install: $(tput setaf 4)risinglightdb/sqllogictest-rs$(tput sgr0)"
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
+cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
 echo
 
 echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
@@ -443,7 +456,19 @@ script = """
 #!/bin/bash
 set -e
 
-cargo build "$@"
+cargo build \
+  -p risingwave_batch \
+  -p risingwave_common \
+  -p risingwave_compute \
+  -p risingwave_connector \
+  -p risingwave_frontend \
+  -p risingwave_meta \
+  -p risingwave_object_store \
+  -p risingwave_source \
+  -p risingwave_storage \
+  -p risingwave_stream \
+  -p pgwire \
+  "$@"
 """
 
 [tasks.stest]
@@ -455,14 +480,38 @@ script = """
 #!/bin/bash
 set -e
 
-cargo nextest run "$@"
+cargo nextest run \
+  -p risingwave_batch \
+  -p risingwave_common \
+  -p risingwave_compute \
+  -p risingwave_connector \
+  -p risingwave_frontend \
+  -p risingwave_meta \
+  -p risingwave_object_store \
+  -p risingwave_source \
+  -p risingwave_storage \
+  -p risingwave_stream \
+  -p pgwire \
+  "$@"
+"""
+
+[tasks.sslt]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Run e2e tests in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo run -p risingwave_simulation "$@"
 """
 
 [tasks.check-hakari]
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"
 script = """
-#!@shell
+#!/bin/bash
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
 
@@ -476,7 +525,7 @@ test $? -eq 0 || exit 1
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
 script = """
-#!@shell
+#!/bin/bash
 
 echo "Running $(tput setaf 4)cargo sort$(tput sgr0) checks and attempting to fix"
 
@@ -489,7 +538,7 @@ test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)car
 category = "RiseDev - Check"
 description = "Run cargo fmt check and attempt to fix"
 script = """
-#!@shell
+#!/bin/bash
 
 echo "Running $(tput setaf 4)cargo fmt$(tput sgr0) checks and attempting to fix"
 cargo fmt --all
@@ -500,10 +549,10 @@ test $? -eq 0 || exit 1
 category = "RiseDev - Check"
 description = "Run cargo clippy check"
 script = """
-#!@shell
+#!/bin/bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --all-targets --features failpoints --locked -- -D warnings
+cargo clippy --all-targets --all-features
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 """
 
@@ -517,7 +566,7 @@ dependencies = [
   "check-clippy",
 ]
 script = """
-#!@shell
+#!/bin/bash
 
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
@@ -559,10 +608,10 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 
 [tasks.ci-start]
 category = "RiseDev - CI"
-dependencies = ["clean-data", "pre-start-playground"]
-command = "target/${BUILD_MODE_DIR}/risedev-playground"
+dependencies = ["clean-data", "pre-start-dev"]
+command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
-description = "Clean data and start a full RisingWave dev cluster using risedev-playground"
+description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.ci-kill]
 category = "RiseDev - CI"
@@ -572,19 +621,32 @@ description = "Kill cluster, dump logs and check logs"
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
 dependencies = ["warn-on-missing-tools"]
-script = """
-#!/bin/bash
-set -e
-
-sqllogictest "$@"
-"""
+command = "sqllogictest"
+args = ["${@}"]
 description = "Run SQLLogicTest"
+
+[tasks.slt-streaming]
+category = "RiseDev - SQLLogicTest"
+extend = "slt"
+args = ["${@}", "./e2e_test/streaming/**/*.slt"]
+description = "Run all streaming e2e tests"
+
+[tasks.slt-batch]
+category = "RiseDev - SQLLogicTest"
+extend = "slt"
+args = ["${@}", "./e2e_test/batch/**/*.slt"]
+description = "Run all batch e2e tests"
+
+[tasks.slt-all]
+category = "RiseDev - SQLLogicTest"
+run_task = { name = ["slt-streaming", "slt-batch"] }
+description = "Run all batch and streaming e2e tests"
 
 [tasks.compose]
 category = "RiseDev - Compose"
 description = "Compose a docker-compose.yaml file"
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 rm -rf ${PREFIX_DOCKER}/*
 mkdir -p "${PREFIX_DOCKER}"
@@ -596,7 +658,7 @@ echo docker-compose file generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0
 category = "RiseDev - Compose"
 description = "Compose a docker-compose.yaml deploy directory"
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 rm -rf "${PREFIX_DOCKER}"/*
 mkdir -p "${PREFIX_DOCKER}"
@@ -609,7 +671,7 @@ echo If you are ready, run $(tput setaf 4)./risedev apply-compose-deploy$(tput s
 category = "RiseDev - Compose"
 description = "Run deploy.sh"
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 
 .risingwave/rw-docker/deploy.sh "$@"
@@ -624,7 +686,7 @@ cat .risingwave/rw-docker/_message.partial.sh
 category = "RiseDev - Compose"
 description = "Run deploy.sh"
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 
 cp -a .risingwave/rw-docker/* docker

@@ -59,11 +59,11 @@ message TableFragments {
     repeated stream_plan.StreamActor actors = 4;
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
     common.ParallelUnitMapping vnode_mapping = 5;
+    repeated uint32 state_table_ids = 6;
   }
   uint32 table_id = 1;
   map<uint32, Fragment> fragments = 2;
   map<uint32, ActorStatus> actor_status = 3;
-  repeated uint32 internal_table_ids = 4;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -76,6 +76,7 @@ message FlushRequest {}
 
 message FlushResponse {
   common.Status status = 1;
+  hummock.HummockSnapshot snapshot = 2;
 }
 
 message ListTableFragmentsRequest {
@@ -158,13 +159,16 @@ message SubscribeRequest {
 
 message MetaSnapshot {
   repeated common.WorkerNode nodes = 1;
-  repeated catalog.Database database = 2;
-  repeated catalog.Schema schema = 3;
-  repeated catalog.Source source = 4;
-  repeated catalog.Sink sink = 5;
-  repeated catalog.Table table = 6;
-  repeated user.UserInfo users = 7;
-  hummock.HummockVersion hummock_version = 8;
+  repeated catalog.Database databases = 2;
+  repeated catalog.Schema schemas = 3;
+  repeated catalog.Source sources = 4;
+  repeated catalog.Sink sinks = 5;
+  repeated catalog.Table tables = 6;
+  repeated catalog.Index indexes = 7;
+  repeated user.UserInfo users = 8;
+  hummock.HummockVersion hummock_version = 9;
+  repeated common.ParallelUnitMapping parallel_unit_mappings = 10;
+  hummock.HummockSnapshot hummock_snapshot = 11;
 }
 
 message SubscribeResponse {
@@ -184,10 +188,13 @@ message SubscribeResponse {
     catalog.Schema schema = 6;
     catalog.Table table = 7;
     catalog.Source source = 8;
-    catalog.Sink sink = 12;
+    catalog.Sink sink = 9;
+    catalog.Index index = 10;
     user.UserInfo user = 11;
-    MetaSnapshot snapshot = 9;
-    hummock.HummockSnapshot hummock_snapshot = 10;
+    hummock.HummockSnapshot hummock_snapshot = 12;
+    common.ParallelUnitMapping parallel_unit_mapping = 13;
+    hummock.HummockVersionDeltas hummock_version_deltas = 14;
+    MetaSnapshot snapshot = 20;
   }
 }
 
@@ -223,9 +230,23 @@ message GetClusterInfoResponse {
   map<uint32, catalog.StreamSourceInfo> stream_source_infos = 4;
 }
 
+message RescheduleRequest {
+  message Reschedule {
+    repeated uint32 added_parallel_units = 1;
+    repeated uint32 removed_parallel_units = 2;
+  }
+  // reschedule plan for each fragment
+  map<uint32, Reschedule> reschedules = 1;
+}
+
+message RescheduleResponse {
+  bool success = 1;
+}
+
 service ScaleService {
   // TODO(Kexiang): delete them when config change interface is finished
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
+  rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
 }

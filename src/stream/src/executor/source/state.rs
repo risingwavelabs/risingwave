@@ -15,14 +15,13 @@
 use std::fmt::Debug;
 
 use bytes::Bytes;
-use log::error;
 use risingwave_common::bail;
-use risingwave_connector::source::{SplitImpl, SplitMetaData};
+use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::{Keyspace, StateStore};
+use tracing::error;
 
-use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
 /// `SourceState` Represents an abstraction of state,
@@ -64,18 +63,16 @@ impl<S: StateStore> SourceStateHandler<S> {
             // TODO should be a clear Error Code
             bail!("states require not null");
         } else {
-            let mut write_batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local_batch = self.keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: self.keyspace.table_id(),
             });
-            let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
                 let value = state.encode_to_bytes();
-                // TODO(Yuanxin): Implement value meta
-                local_batch.put(state.id(), StorageValue::new_default_put(value));
+                local_batch.put(state.id().as_str(), StorageValue::new_default_put(value));
             });
             // If an error is returned, the underlying state should be rollback
-            write_batch.ingest().await.inspect_err(|e| {
+            local_batch.ingest().await.inspect_err(|e| {
                 error!(
                     "SourceStateHandler take_snapshot() batch.ingest Error,cause by {:?}",
                     e
@@ -92,16 +89,17 @@ impl<S: StateStore> SourceStateHandler<S> {
     /// The function returns the serialized state.
     pub async fn restore_states(
         &self,
-        state_identifier: String,
+        state_identifier: SplitId,
         epoch: u64,
     ) -> StreamExecutorResult<Option<Bytes>> {
         self.keyspace
             .get(
-                state_identifier,
+                state_identifier.as_str(),
+                true,
                 ReadOptions {
                     epoch,
                     table_id: Some(self.keyspace.table_id()),
-                    ttl: None,
+                    retention_seconds: None,
                 },
             )
             .await
@@ -117,9 +115,7 @@ impl<S: StateStore> SourceStateHandler<S> {
         let s = self.restore_states(stream_source_split.id(), epoch).await?;
 
         let split = match s {
-            Some(s) => {
-                Some(SplitImpl::restore_from_bytes(&s).map_err(StreamExecutorError::source_error)?)
-            }
+            Some(s) => Some(SplitImpl::restore_from_bytes(&s)?),
             None => None,
         };
 
@@ -152,8 +148,8 @@ mod tests {
     }
 
     impl SplitMetaData for TestSourceState {
-        fn id(&self) -> String {
-            self.partition.clone()
+        fn id(&self) -> SplitId {
+            self.partition.clone().into()
         }
 
         fn encode_to_bytes(&self) -> Bytes {
@@ -219,7 +215,7 @@ mod tests {
                 ReadOptions {
                     epoch: current_epoch,
                     table_id: Some(state_store_handler.keyspace.table_id()),
-                    ttl: None,
+                    retention_seconds: None,
                 },
             )
             .await
@@ -229,7 +225,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_state_restore() {
-        let partition = "p01".to_string();
+        let partition = SplitId::new("p01".into());
         let state_store_handler = SourceStateHandler::new(new_test_keyspace());
         let list_states = state_store_handler
             .restore_states(partition, u64::MAX)

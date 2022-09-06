@@ -104,12 +104,12 @@ mod tests {
 
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilder, ArrayImpl, DataChunk, DecimalArrayBuilder};
-    use risingwave_common::error::Result;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Decimal};
 
     use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
     use crate::expr::{BoxedExpression, InputRefExpression};
+    use crate::Result;
 
     fn do_test(
         expr: BoxedExpression,

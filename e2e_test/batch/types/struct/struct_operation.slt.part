@@ -1,0 +1,48 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation 
+
+statement ok
+CREATE TABLE a(id INTEGER, b STRUCT<i INTEGER, j INTEGER>);
+
+statement ok
+INSERT INTO a VALUES (1, ROW(1, 2));
+
+statement ok
+CREATE TABLE b(id INTEGER, j VARCHAR);
+
+statement ok
+INSERT INTO b VALUES (1, 'hello');
+
+# inequality join
+query IIII
+SELECT * FROM a LEFT JOIN b ON a.id<>b.id
+----
+1	(1,2)	NULL	NULL
+
+query IIII
+SELECT * FROM a RIGHT JOIN b ON a.id<>b.id
+----
+NULL	NULL	1	hello
+
+# range join
+query IIII
+SELECT * FROM a LEFT JOIN b ON a.id>b.id
+----
+1	(1,2)	NULL	NULL
+
+query IIII
+SELECT * FROM a RIGHT JOIN b ON a.id>b.id
+----
+NULL	NULL	1	hello
+
+# subquery
+query I
+SELECT * FROM (SELECT b FROM a)
+----
+(1,2)
+
+statement ok
+DROP TABLE a;
+
+statement ok
+DROP TABLE b;

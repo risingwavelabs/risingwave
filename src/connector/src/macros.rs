@@ -37,7 +37,7 @@ macro_rules! impl_split_enumerator {
                                 .map(SplitImpl::$variant_name)
                                 .collect_vec()
                         })
-                        .map_err(|e| ErrorCode::ConnectorError(e.to_string()).into()),
+                        .map_err(|e| ErrorCode::ConnectorError(e.into()).into()),
                     )*
                 }
              }
@@ -70,7 +70,7 @@ macro_rules! impl_split {
         }
 
         impl SplitMetaData for SplitImpl {
-            fn id(&self) -> String {
+            fn id(&self) -> SplitId {
                 match self {
                     $( Self::$variant_name(inner) => inner.id(), )*
                 }

@@ -12,21 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use bytes::Bytes;
+use futures_async_stream::try_stream;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use serde_json::{Map, Value};
-use tokio::time::{sleep, Duration, Instant};
 
 use super::DEFAULT_DATAGEN_INTERVAL;
-use crate::source::SourceMessage;
+use crate::source::{SourceMessage, SplitId};
 
 pub struct DatagenEventGenerator {
     pub fields_map: HashMap<String, FieldGeneratorImpl>,
     pub events_so_far: u64,
     pub rows_per_second: u64,
-    pub split_id: String,
+    pub split_id: SplitId,
     pub partition_size: u64,
 }
 
@@ -35,7 +36,7 @@ impl DatagenEventGenerator {
         fields_map: HashMap<String, FieldGeneratorImpl>,
         rows_per_second: u64,
         events_so_far: u64,
-        split_id: String,
+        split_id: SplitId,
         split_num: u64,
         split_index: u64,
     ) -> Result<Self> {
@@ -53,7 +54,14 @@ impl DatagenEventGenerator {
         })
     }
 
-    pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    pub async fn into_stream(mut self) {
+        loop {
+            yield self.next().await?
+        }
+    }
+
+    pub async fn next(&mut self) -> Result<Vec<SourceMessage>> {
         let now = Instant::now();
         let mut res = vec![];
         let mut generated_count: u64 = 0;
@@ -83,13 +91,13 @@ impl DatagenEventGenerator {
 
         // if left time < 1s then wait
         if now.elapsed().as_millis() < DEFAULT_DATAGEN_INTERVAL {
-            sleep(Duration::from_millis(
+            tokio::time::sleep(Duration::from_millis(
                 (DEFAULT_DATAGEN_INTERVAL - now.elapsed().as_millis()) as u64,
             ))
             .await;
         }
 
-        Ok(Some(res))
+        Ok(res)
     }
 }
 
@@ -103,7 +111,7 @@ mod tests {
         rows_per_second: u64,
         expected_length: usize,
     ) {
-        let split_id = format!("{}-{}", split_num, split_index);
+        let split_id = format!("{}-{}", split_num, split_index).into();
         let mut fields_map = HashMap::new();
         fields_map.insert(
             "v1".to_string(),
@@ -139,7 +147,7 @@ mod tests {
         )
         .unwrap();
 
-        let chunk = generator.next().await.unwrap().unwrap();
+        let chunk = generator.next().await.unwrap();
         assert_eq!(expected_length, chunk.len());
     }
 

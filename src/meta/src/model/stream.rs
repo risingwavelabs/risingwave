@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
-use risingwave_pb::common::ParallelUnit;
+use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -25,8 +25,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::cluster::WorkerId;
-use crate::manager::SourceId;
+use crate::manager::{SourceId, WorkerId};
 use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for table fragments.
@@ -46,9 +45,6 @@ pub struct TableFragments {
 
     /// The status of actors
     pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
-
-    /// Internal TableIds from all Fragment
-    internal_table_ids: Vec<u32>,
 }
 
 impl MetadataModel for TableFragments {
@@ -64,7 +60,6 @@ impl MetadataModel for TableFragments {
             table_id: self.table_id.table_id(),
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
-            internal_table_ids: self.internal_table_ids.clone(),
         }
     }
 
@@ -73,7 +68,6 @@ impl MetadataModel for TableFragments {
             table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
-            internal_table_ids: prost.internal_table_ids,
         }
     }
 
@@ -83,17 +77,16 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    pub fn new(
-        table_id: TableId,
-        fragments: BTreeMap<FragmentId, Fragment>,
-        internal_table_id_set: HashSet<u32>,
-    ) -> Self {
+    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
             fragments,
             actor_status: BTreeMap::default(),
-            internal_table_ids: Vec::from_iter(internal_table_id_set),
         }
+    }
+
+    pub fn fragment_ids(&self) -> impl Iterator<Item = FragmentId> + '_ {
+        self.fragments.keys().cloned()
     }
 
     pub fn fragments(&self) -> Vec<&Fragment> {
@@ -108,6 +101,16 @@ impl TableFragments {
     /// Returns the table id.
     pub fn table_id(&self) -> TableId {
         self.table_id
+    }
+
+    /// Returns sink fragment vnode mapping.
+    /// Note that: the real sink fragment is also stored as `TableFragments`, it's possible that
+    /// there's no fragment with `FragmentType::Sink` exists.
+    pub fn sink_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
+        self.fragments
+            .values()
+            .find(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
+            .and_then(|fragment| fragment.vnode_mapping.clone())
     }
 
     /// Update state of all actors
@@ -177,7 +180,7 @@ impl TableFragments {
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
         if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
-                return Some(s.table_id);
+                return Some(s.source_id);
             }
         }
 
@@ -191,7 +194,7 @@ impl TableFragments {
     }
 
     /// Returns actors that contains Chain node.
-    pub fn chain_actor_ids(&self) -> Vec<ActorId> {
+    pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
         self.fragments
             .values()
             .flat_map(|fragment| {
@@ -244,6 +247,15 @@ impl TableFragments {
         for (&actor_id, actor_status) in &self.actor_status {
             let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
+        }
+        map
+    }
+
+    pub fn actor_to_worker(&self) -> HashMap<ActorId, WorkerId> {
+        let mut map = HashMap::default();
+        for (&actor_id, actor_status) in &self.actor_status {
+            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
+            map.insert(actor_id, node_id);
         }
         map
     }
@@ -308,20 +320,46 @@ impl TableFragments {
         actor_map
     }
 
-    pub fn parallel_unit_sink_actor_id(&self) -> BTreeMap<ParallelUnitId, ActorId> {
+    /// Returns fragment vnode mapping.
+    pub fn fragment_vnode_mapping(&self, fragment_id: FragmentId) -> Option<ParallelUnitMapping> {
+        if let Some(fragment) = self.fragments.get(&fragment_id) {
+            fragment.vnode_mapping.clone()
+        } else {
+            None
+        }
+    }
+
+    /// Returns sink actor vnode bitmap infos.
+    pub fn sink_vnode_bitmap_info(&self) -> Vec<(ActorId, Option<Buffer>)> {
+        self.fragments
+            .values()
+            .filter(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
+            .flat_map(|fragment| {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|actor| (actor.actor_id, actor.vnode_bitmap.clone()))
+            })
+            .collect_vec()
+    }
+
+    pub fn sink_actor_parallel_units(&self) -> BTreeMap<ActorId, ParallelUnit> {
         let sink_actor_ids = self.sink_actor_ids();
         sink_actor_ids
             .iter()
             .map(|actor_id| {
                 (
-                    self.actor_status[actor_id].get_parallel_unit().unwrap().id,
                     *actor_id,
+                    self.actor_status[actor_id]
+                        .get_parallel_unit()
+                        .unwrap()
+                        .clone(),
                 )
             })
             .collect()
     }
 
-    /// Generate toplogical order of fragments. If `index(a) < index(b)` in vec, then a is the
+    /// Generate topological order of fragments. If `index(a) < index(b)` in vec, then a is the
     /// downstream of b.
     pub fn generate_topological_order(&self) -> Vec<FragmentId> {
         let mut actionable_fragment_id = VecDeque::new();
@@ -402,7 +440,19 @@ impl TableFragments {
         result
     }
 
+    /// Returns the internal table ids without the mview table.
     pub fn internal_table_ids(&self) -> Vec<u32> {
-        self.internal_table_ids.clone()
+        self.fragments
+            .values()
+            .flat_map(|f| f.state_table_ids.clone())
+            .filter(|&t| t != self.table_id.table_id)
+            .collect_vec()
+    }
+
+    /// Returns all internal table ids including the mview table.
+    pub fn all_table_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.fragments
+            .values()
+            .flat_map(|f| f.state_table_ids.clone())
     }
 }

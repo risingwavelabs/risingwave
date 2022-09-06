@@ -50,8 +50,10 @@ message UpdateMutation {
   map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
   // Merge updates for each downstream actor.
   map<uint32, MergeUpdate> actor_merge_update = 2;
-
-  repeated uint32 dropped_actors = 3;
+  // Vnode bitmap updates for each actor.
+  map<uint32, common.Buffer> actor_vnode_bitmap_update = 3;
+  // All actors to be dropped in this update.
+  repeated uint32 dropped_actors = 4;
 }
 
 message SourceChangeSplitMutation {
@@ -81,6 +83,11 @@ message Barrier {
   }
   // Used for tracing.
   bytes span = 2;
+  // Whether this barrier do checkpoint
+  bool checkpoint = 9;
+
+  // Record the actors that the barrier has passed. Only used for debugging.
+  repeated uint32 passed_actors = 255;
 }
 
 message StreamMessage {
@@ -103,9 +110,10 @@ message SourceNode {
     TABLE = 1;
     SOURCE = 2;
   }
-  uint32 table_id = 1;
+  uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
+  uint32 state_table_id = 4; // use state_table_id as state store prefix
 }
 
 message SinkNode {
@@ -164,14 +172,18 @@ message HashAggNode {
 }
 
 message TopNNode {
-  repeated plan_common.ColumnOrder column_orders = 1;
   // 0 means no limit as limit of 0 means this node should be optimized away
-  uint64 limit = 2;
-  uint64 offset = 3;
-  repeated uint32 distribution_key = 4;
-  // Used for internal table states
-  uint32 table_id_l = 5;
-  uint32 table_id_h = 6;
+  uint64 limit = 1;
+  uint64 offset = 2;
+  catalog.Table table = 3;
+}
+
+message GroupTopNNode {
+  // 0 means no limit as limit of 0 means this node should be optimized away
+  uint64 limit = 1;
+  uint64 offset = 2;
+  repeated uint32 group_key = 3;
+  catalog.Table table = 4;
 }
 
 message HashJoinNode {
@@ -179,10 +191,6 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
-  // Whether to use delta join for this hash join node. When enabled, arrangement will be created
-  // on-the-fly within the plan.
-  // TODO: remove this in the future when we have a separate DeltaHashJoin node.
-  bool is_delta_join = 5;
   // Used for internal table states.
   catalog.Table left_table = 6;
   // Used for internal table states.
@@ -192,6 +200,7 @@ message HashJoinNode {
   bool is_append_only = 8;
   // The output indices of current node
   repeated uint32 output_indices = 9;
+  repeated bool null_safe = 10;
 }
 
 message DynamicFilterNode {
@@ -367,13 +376,14 @@ message StreamNode {
     ExpandNode expand = 121;
     DynamicFilterNode dynamic_filter = 122;
     ProjectSetNode project_set = 123;
+    GroupTopNNode group_top_n = 124;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
   uint64 operator_id = 1;
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
-  repeated uint32 pk_indices = 2;
+  repeated uint32 stream_key = 2;
   bool append_only = 24;
   string identity = 18;
   // The schema of the plan node
@@ -442,6 +452,7 @@ enum FragmentType {
   FRAGMENT_UNSPECIFIED = 0;
   OTHERS = 1;
   SOURCE = 2;
+  // TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now.
   SINK = 3;
 }
 
@@ -456,6 +467,8 @@ message StreamFragmentGraph {
     bool is_singleton = 4;
     // Number of table ids (stateful states) for this fragment.
     uint32 table_ids_cnt = 5;
+    // Mark the upstream table ids of this fragment, Used for fragments with `Chain`s.
+    repeated uint32 upstream_table_ids = 6;
   }
 
   message StreamFragmentEdge {

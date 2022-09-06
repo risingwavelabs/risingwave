@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 bytes = "1"
+chrono = "0.4"
 clap = { version = "3", features = ["derive"] }
 comfy-table = "6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -18,7 +19,7 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 size = "0.2"
-tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -27,5 +28,7 @@ tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tracing = { version = "0.1" }
+tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

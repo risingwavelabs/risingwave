@@ -22,7 +22,7 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{CatalogError, TableId};
+use crate::catalog::{CatalogError, IndexCatalog, TableId};
 use crate::user::UserId;
 
 #[derive(Debug, Clone)]
@@ -30,7 +30,7 @@ pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
     pub table_catalog: TableCatalog,
-    pub table_indexes: Vec<Arc<TableCatalog>>,
+    pub table_indexes: Vec<Arc<IndexCatalog>>,
 }
 
 /// `BoundTableSource` is used by DML statement on table source like insert, update.
@@ -38,6 +38,7 @@ pub struct BoundBaseTable {
 pub struct BoundTableSource {
     pub name: String,       // explain-only
     pub source_id: TableId, // TODO: refactor to source id
+    pub associated_mview_id: TableId,
     pub columns: Vec<ColumnDesc>,
     pub append_only: bool,
     pub owner: UserId,
@@ -139,13 +140,13 @@ impl Binder {
         &mut self,
         schema_name: &str,
         table_id: TableId,
-    ) -> Result<Vec<Arc<TableCatalog>>> {
+    ) -> Result<Vec<Arc<IndexCatalog>>> {
         Ok(self
             .catalog
             .get_schema_by_name(&self.db_name, schema_name)?
             .iter_index()
-            .filter(|x| x.is_index_on == Some(table_id))
-            .map(|table| table.clone().into())
+            .filter(|index| index.primary_table.id == table_id)
+            .map(|index| index.clone().into())
             .collect())
     }
 
@@ -183,6 +184,11 @@ impl Binder {
 
     pub(crate) fn bind_table_source(&mut self, name: ObjectName) -> Result<BoundTableSource> {
         let (schema_name, source_name) = Self::resolve_table_name(name)?;
+        let associate_table_id = self
+            .catalog
+            .get_table_by_name(&self.db_name, &schema_name, &source_name)?
+            .id();
+
         let source = self
             .catalog
             .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
@@ -204,6 +210,7 @@ impl Binder {
         Ok(BoundTableSource {
             name: source_name,
             source_id,
+            associated_mview_id: associate_table_id,
             columns,
             append_only,
             owner,

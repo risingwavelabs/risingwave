@@ -15,9 +15,10 @@
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -59,6 +60,7 @@ where
 
         // wait for iterator creation (e.g. seek)
         let iter = iter
+            .stack_trace("store_create_iter")
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
@@ -90,12 +92,18 @@ where
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        check_bloom_filter: bool,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_> {
         async move {
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
-                .get(key, read_options)
+                .get(key, check_bloom_filter, read_options)
+                .stack_trace("store_get")
                 .await
                 .inspect_err(|e| error!("Failed in get: {:?}", e))?;
             timer.observe_duration();
@@ -125,6 +133,7 @@ where
             let result = self
                 .inner
                 .scan(prefix_hint, key_range, limit, read_options)
+                .stack_trace("store_scan")
                 .await
                 .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
             timer.observe_duration();
@@ -152,6 +161,7 @@ where
             let result = self
                 .inner
                 .scan(None, key_range, limit, read_options)
+                .stack_trace("store_backward_scan")
                 .await
                 .inspect_err(|e| error!("Failed in backward_scan: {:?}", e))?;
             timer.observe_duration();
@@ -181,6 +191,7 @@ where
             let batch_size = self
                 .inner
                 .ingest_batch(kv_pairs, write_options)
+                .stack_trace("store_ingest_batch")
                 .await
                 .inspect_err(|e| error!("Failed in ingest_batch: {:?}", e))?;
             timer.observe_duration();
@@ -221,28 +232,32 @@ where
         }
     }
 
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             self.inner
                 .wait_epoch(epoch)
+                .stack_trace("store_wait_epoch")
                 .await
                 .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
         }
     }
 
-    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
-            let size = self
+            let sync_result = self
                 .inner
                 .sync(epoch)
+                .stack_trace("store_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
-            if size != 0 {
-                self.stats.write_l0_size_per_epoch.observe(size as _);
+            if sync_result.sync_size != 0 {
+                self.stats
+                    .write_l0_size_per_epoch
+                    .observe(sync_result.sync_size as _);
             }
-            Ok(size)
+            Ok(sync_result)
         }
     }
 
@@ -258,19 +273,17 @@ where
         async move {
             self.inner
                 .replicate_batch(kv_pairs, write_options)
+                .stack_trace("store_replicate_batch")
                 .await
                 .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
         }
-    }
-
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
-        self.inner.get_uncommitted_ssts(epoch)
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move {
             self.inner
                 .clear_shared_buffer()
+                .stack_trace("store_clear_shared_buffer")
                 .await
                 .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
         }

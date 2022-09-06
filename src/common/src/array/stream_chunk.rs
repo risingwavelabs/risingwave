@@ -139,6 +139,11 @@ impl StreamChunk {
         self.data.capacity()
     }
 
+    /// Get the reference of the underlying data chunk.
+    pub fn data_chunk(&self) -> &DataChunk {
+        &self.data
+    }
+
     pub fn columns(&self) -> &[Column] {
         self.data.columns()
     }

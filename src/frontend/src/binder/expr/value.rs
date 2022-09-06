@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, Decimal, IntervalUnit, ScalarImpl};
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::{DataType, DateTimeField, Decimal, IntervalUnit, ScalarImpl};
 use risingwave_expr::vector_op::cast::str_parse;
-use risingwave_sqlparser::ast::{DateTimeField, Expr, Value};
+use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 
 use crate::binder::Binder;
 use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
@@ -24,7 +24,7 @@ use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Lite
 impl Binder {
     pub fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
-            Value::Number(s, b) => self.bind_number(s, b),
+            Value::Number(s) => self.bind_number(s),
             Value::SingleQuotedString(s) => self.bind_string(s),
             Value::Boolean(b) => self.bind_bool(b),
             // Both null and string literal will be treated as `unknown` during type inference.
@@ -50,7 +50,7 @@ impl Binder {
         Ok(Literal::new(Some(ScalarImpl::Bool(b)), DataType::Boolean))
     }
 
-    fn bind_number(&mut self, s: String, _b: bool) -> Result<Literal> {
+    fn bind_number(&mut self, s: String) -> Result<Literal> {
         let (data, data_type) = if let Ok(int_32) = s.parse::<i32>() {
             (Some(ScalarImpl::Int32(int_32)), DataType::Int32)
         } else if let Ok(int_64) = s.parse::<i64>() {
@@ -66,61 +66,27 @@ impl Binder {
     fn bind_interval(
         &mut self,
         s: String,
-        leading_field: Option<DateTimeField>,
+        leading_field: Option<AstDateTimeField>,
     ) -> Result<Literal> {
-        // > INTERVAL '1' means 1 second.
-        // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-INTERVAL-INPUT
-        let unit = leading_field.unwrap_or(DateTimeField::Second);
-        use DateTimeField::*;
-        let tokens = parse_interval(&s)?;
-        // Todo: support more syntax
-        if tokens.len() > 2 {
-            return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
-        }
-        let num = match tokens.get(0) {
-            Some(TimeStrToken::Num(num)) => *num,
-            _ => {
-                return Err(
-                    ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
-                );
-            }
-        };
-        let interval_unit = match tokens.get(1) {
-            Some(TimeStrToken::TimeUnit(unit)) => unit,
-            _ => &unit,
-        };
-
-        let interval = (|| match interval_unit {
-            Year => {
-                let months = num.checked_mul(12)?;
-                Some(IntervalUnit::from_month(months as i32))
-            }
-            Month => Some(IntervalUnit::from_month(num as i32)),
-            Day => Some(IntervalUnit::from_days(num as i32)),
-            Hour => {
-                let ms = num.checked_mul(3600 * 1000)?;
-                Some(IntervalUnit::from_millis(ms))
-            }
-            Minute => {
-                let ms = num.checked_mul(60 * 1000)?;
-                Some(IntervalUnit::from_millis(ms))
-            }
-            Second => {
-                let ms = num.checked_mul(1000)?;
-                Some(IntervalUnit::from_millis(ms))
-            }
-        })()
-        .ok_or_else(|| {
-            RwError::from(ErrorCode::InvalidInputSyntax(format!(
-                "Invalid interval {}.",
-                s
-            )))
-        })?;
-
+        let interval =
+            IntervalUnit::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))?;
         let datum = Some(ScalarImpl::Interval(interval));
         let literal = Literal::new(datum, DataType::Interval);
 
         Ok(literal)
+    }
+
+    fn bind_date_time_field(field: AstDateTimeField) -> DateTimeField {
+        // This is a binder function rather than `impl From<AstDateTimeField> for DateTimeField`,
+        // so that the `sqlparser` crate and the `common` crate are kept independent.
+        match field {
+            AstDateTimeField::Year => DateTimeField::Year,
+            AstDateTimeField::Month => DateTimeField::Month,
+            AstDateTimeField::Day => DateTimeField::Day,
+            AstDateTimeField::Hour => DateTimeField::Hour,
+            AstDateTimeField::Minute => DateTimeField::Minute,
+            AstDateTimeField::Second => DateTimeField::Second,
+        }
     }
 
     /// `ARRAY[...]` is represented as an function call at the binder stage.
@@ -141,23 +107,22 @@ impl Binder {
         Ok(expr)
     }
 
-    pub(super) fn bind_array_index(&mut self, obj: Expr, indexs: Vec<Expr>) -> Result<ExprImpl> {
+    pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr(obj)?;
         match obj.return_type() {
             DataType::List {
                 datatype: return_type,
-            } => {
-                let mut indexs = indexs
-                    .into_iter()
-                    .map(|e| self.bind_expr(e))
-                    .collect::<Result<Vec<ExprImpl>>>()?;
-                indexs.insert(0, obj);
-
-                let expr: ExprImpl =
-                    FunctionCall::new_unchecked(ExprType::ArrayAccess, indexs, *return_type).into();
-                Ok(expr)
-            }
-            _ => panic!("Should be a List"),
+            } => Ok(FunctionCall::new_unchecked(
+                ExprType::ArrayAccess,
+                vec![obj, self.bind_expr(index)?],
+                *return_type,
+            )
+            .into()),
+            data_type => Err(ErrorCode::BindError(format!(
+                "array index applied to type {}, which is not a composite type",
+                data_type
+            ))
+            .into()),
         }
     }
 
@@ -167,79 +132,11 @@ impl Binder {
             .into_iter()
             .map(|e| self.bind_expr(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
-        let data_type = DataType::Struct {
-            fields: exprs.iter().map(|e| e.return_type()).collect_vec().into(),
-        };
+        let data_type =
+            DataType::new_struct(exprs.iter().map(|e| e.return_type()).collect_vec(), vec![]);
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum TimeStrToken {
-    Num(i64),
-    TimeUnit(DateTimeField),
-}
-
-fn convert_digit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
-    if !c.is_empty() {
-        match c.parse::<i64>() {
-            Ok(num) => {
-                t.push(TimeStrToken::Num(num));
-            }
-            Err(_) => {
-                return Err(
-                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", c)).into(),
-                );
-            }
-        }
-        c.clear();
-    }
-    Ok(())
-}
-
-fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
-    if !c.is_empty() {
-        t.push(TimeStrToken::TimeUnit(c.parse()?));
-        c.clear();
-    }
-    Ok(())
-}
-
-pub fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
-    let s = s.trim();
-    let mut tokens = Vec::new();
-    let mut num_buf = "".to_string();
-    let mut char_buf = "".to_string();
-    for (i, c) in s.chars().enumerate() {
-        match c {
-            '-' => {
-                num_buf.push(c);
-            }
-            c if c.is_ascii_digit() => {
-                convert_unit(&mut char_buf, &mut tokens)?;
-                num_buf.push(c);
-            }
-            c if c.is_ascii_alphabetic() => {
-                convert_digit(&mut num_buf, &mut tokens)?;
-                char_buf.push(c);
-            }
-            chr if chr.is_ascii_whitespace() => {
-                convert_unit(&mut char_buf, &mut tokens)?;
-                convert_digit(&mut num_buf, &mut tokens)?;
-            }
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "Invalid character at offset {} in {}: {:?}. Only support digit or alphabetic now",
-                    i, s, c
-                )).into());
-            }
-        }
-    }
-    convert_digit(&mut num_buf, &mut tokens)?;
-    convert_unit(&mut char_buf, &mut tokens)?;
-
-    Ok(tokens)
 }
 
 #[cfg(test)]
@@ -287,7 +184,7 @@ mod tests {
         ];
 
         for i in 0..values.len() {
-            let value = Value::Number(String::from(values[i]), false);
+            let value = Value::Number(String::from(values[i]));
             let res = binder.bind_value(value).unwrap();
             let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);

@@ -13,9 +13,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
 use core::fmt;
-use core::str::FromStr;
 
-use risingwave_common::error::{ErrorCode, RwError};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +22,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Value {
     /// Numeric literal
-    Number(String, bool),
+    Number(String),
     /// 'string value'
     SingleQuotedString(String),
     /// N'string value'
@@ -61,7 +59,7 @@ pub enum Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Value::Number(v, l) => write!(f, "{}{long}", v, long = if *l { "L" } else { "" }),
+            Value::Number(v) => write!(f, "{}", v),
             Value::DoubleQuotedString(v) => write!(f, "\"{}\"", v),
             Value::SingleQuotedString(v) => write!(f, "'{}'", escape_single_quote_string(v)),
             Value::NationalStringLiteral(v) => write!(f, "N'{}'", v),
@@ -133,22 +131,6 @@ impl fmt::Display for DateTimeField {
             DateTimeField::Minute => "MINUTE",
             DateTimeField::Second => "SECOND",
         })
-    }
-}
-
-impl FromStr for DateTimeField {
-    type Err = RwError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "years" | "year" | "yrs" | "yr" | "y" => Ok(Self::Year),
-            "days" | "day" | "d" => Ok(Self::Day),
-            "hours" | "hour" | "hrs" | "hr" | "h" => Ok(Self::Hour),
-            "minutes" | "minute" | "mins" | "min" | "m" => Ok(Self::Minute),
-            "months" | "month" | "mons" | "mon" => Ok(Self::Month),
-            "seconds" | "second" | "secs" | "sec" | "s" => Ok(Self::Second),
-            _ => Err(ErrorCode::InvalidInputSyntax(format!("unknown unit {}", s)).into()),
-        }
     }
 }
 

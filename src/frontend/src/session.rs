@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -30,14 +29,15 @@ use rand::RngCore;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::FrontendConfig;
+use risingwave_common::config::load_config;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_rpc_client::{ComputeClientPool, MetaClient};
+use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
@@ -56,12 +56,11 @@ use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
-use crate::test_utils::MockUserInfoWriter;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::FrontendOpts;
+use crate::{FrontendConfig, FrontendOpts};
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
@@ -178,15 +177,6 @@ impl std::fmt::Debug for OptimizerContext {
     }
 }
 
-fn load_config(opts: &FrontendOpts) -> FrontendConfig {
-    if opts.config_path.is_empty() {
-        return FrontendConfig::default();
-    }
-
-    let config_path = PathBuf::from(opts.config_path.to_owned());
-    FrontendConfig::init(config_path).unwrap()
-}
-
 /// The global environment for the frontend server.
 #[derive(Clone)]
 pub struct FrontendEnv {
@@ -201,6 +191,7 @@ pub struct FrontendEnv {
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     server_addr: HostAddr,
+    client_pool: ComputeClientPoolRef,
 }
 
 impl FrontendEnv {
@@ -212,7 +203,7 @@ impl FrontendEnv {
     }
 
     pub fn mock() -> Self {
-        use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient};
+        use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
@@ -228,8 +219,10 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
             compute_client_pool,
+            catalog_reader.clone(),
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
+        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
         Self {
             meta_client,
             catalog_writer,
@@ -240,6 +233,7 @@ impl FrontendEnv {
             query_manager,
             hummock_snapshot_manager,
             server_addr,
+            client_pool,
         }
     }
 
@@ -247,15 +241,20 @@ impl FrontendEnv {
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(opts);
+        let config: FrontendConfig = load_config(&opts.config_path).unwrap();
         tracing::info!("Starting frontend node with config {:?}", config);
 
         let frontend_address: HostAddr = opts
             .client_address
             .as_ref()
-            .unwrap_or(&opts.host)
+            .unwrap_or_else(|| {
+                tracing::warn!("Client address is not specified, defaulting to host address");
+                &opts.host
+            })
             .parse()
             .unwrap();
+        tracing::info!("Client address is {}", frontend_address);
+
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client
             .register(WorkerType::Frontend, &frontend_address, 0)
@@ -285,6 +284,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
             compute_client_pool,
+            catalog_reader.clone(),
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
@@ -314,6 +314,8 @@ impl FrontendEnv {
 
         meta_client.activate(&frontend_address).await?;
 
+        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+
         Ok((
             Self {
                 catalog_reader,
@@ -325,6 +327,7 @@ impl FrontendEnv {
                 query_manager,
                 hummock_snapshot_manager,
                 server_addr: frontend_address,
+                client_pool,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -382,6 +385,10 @@ impl FrontendEnv {
 
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
+    }
+
+    pub fn client_pool(&self) -> ComputeClientPoolRef {
+        self.client_pool.clone()
     }
 }
 
@@ -469,8 +476,8 @@ impl SessionImpl {
 
 pub struct SessionManagerImpl {
     env: FrontendEnv,
-    observer_join_handle: JoinHandle<()>,
-    heartbeat_join_handle: JoinHandle<()>,
+    _observer_join_handle: JoinHandle<()>,
+    _heartbeat_join_handle: JoinHandle<()>,
     _heartbeat_shutdown_sender: Sender<()>,
 }
 
@@ -484,12 +491,15 @@ impl SessionManager for SessionManagerImpl {
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        if reader.get_database_by_name(database).is_err() {
-            return Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Not found database name: {}", database),
-            )));
-        }
+        let database_id = reader
+            .get_database_by_name(database)
+            .map_err(|_| {
+                Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Not found database name: {}", database),
+                ))
+            })?
+            .id();
         let user_reader = self.env.user_info_reader();
         let reader = user_reader.read_guard();
         if let Some(user) = reader.get_user_by_name(user_name) {
@@ -497,6 +507,19 @@ impl SessionManager for SessionManagerImpl {
                 return Err(Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("User {} is not allowed to login", user_name),
+                )));
+            }
+            let has_privilege = user.grant_privileges.iter().any(|privilege| {
+                privilege.object == Some(Object::DatabaseId(database_id))
+                    && privilege
+                        .action_with_opts
+                        .iter()
+                        .any(|ao| ao.action == Action::Connect as i32)
+            });
+            if !user.is_super && !has_privilege {
+                return Err(Box::new(Error::new(
+                    ErrorKind::PermissionDenied,
+                    "User does not have CONNECT privilege.",
                 )));
             }
             let user_authenticator = match &user.auth_info {
@@ -549,16 +572,10 @@ impl SessionManagerImpl {
             FrontendEnv::init(opts).await?;
         Ok(Self {
             env,
-            observer_join_handle: join_handle,
-            heartbeat_join_handle,
+            _observer_join_handle: join_handle,
+            _heartbeat_join_handle: heartbeat_join_handle,
             _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
         })
-    }
-
-    /// Used in unit test. Called before `LocalMeta::stop`.
-    pub fn terminate(&self) {
-        self.observer_join_handle.abort();
-        self.heartbeat_join_handle.abort();
     }
 }
 
@@ -568,7 +585,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         sql: &str,
 
-        // format: indicate the query PgReponse format (Only meaningful for SELECT queries).
+        // format: indicate the query PgResponse format (Only meaningful for SELECT queries).
         // false: TEXT
         // true: BINARY
         format: bool,

@@ -222,12 +222,9 @@ impl SortMergeJoinExecutor {
 impl BoxedExecutorBuilder for SortMergeJoinExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> risingwave_common::error::Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 2,
-            "SortMergeJoinExecutor should have 2 children!"
-        );
+        let [left_child, right_child]: [_; 2] = inputs.try_into().unwrap();
 
         let sort_merge_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -239,9 +236,6 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
         ensure!(sort_order == OrderTypeProst::Ascending);
         let sort_order = OrderType::Ascending;
         let join_type = JoinType::from_prost(sort_merge_join_node.get_join_type()?);
-
-        let left_child = inputs.remove(0);
-        let right_child = inputs.remove(0);
 
         let output_indices: Vec<usize> = sort_merge_join_node
             .output_indices
@@ -267,7 +261,7 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
             build_key_idxs,
             left_child,
             right_child,
-            "SortMergeJoinExecutor".into(),
+            source.plan_node().get_identity().clone(),
         )))
     }
 }

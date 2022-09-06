@@ -35,6 +35,7 @@ pub enum StatementType {
     CREATE_DATABASE,
     CREATE_SCHEMA,
     CREATE_USER,
+    CREATE_INDEX,
     DESCRIBE_TABLE,
     GRANT_PRIVILEGE,
     DROP_TABLE,
@@ -89,6 +90,13 @@ impl StatementType {
                 | StatementType::COPY
                 | StatementType::FETCH
                 | StatementType::SELECT
+        )
+    }
+
+    pub fn is_dml(&self) -> bool {
+        matches!(
+            self,
+            StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE
         )
     }
 }

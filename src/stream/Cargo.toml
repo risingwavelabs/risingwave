@@ -8,6 +8,8 @@ edition = "2021"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
+auto_enums = { version = "0.7", features = ["futures"] }
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -16,16 +18,16 @@ dyn-clone = "1"
 either = "1"
 enum-as-inner = "0.5"
 farmhash = "1"
+fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hyper = "0.14"
 iter-chunks = "0.1"
 itertools = "0.10"
 lazy_static = "1"
-log = "0.4"
-madsim = "=0.2.0-alpha.6"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
+minitrace = "0.4"
 minstant = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -33,6 +35,7 @@ paste = "1"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
+rand = "0.8"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
@@ -49,7 +52,7 @@ smallvec = "1"
 static_assertions = "1"
 stats_alloc = { path = "../utils/stats_alloc" }
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -60,13 +63,15 @@ tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
 ] }
 tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
-tonic = { version = "=0.2.0-alpha.6", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
-tracing = { version = "0.1" }
+tracing = "0.1"
 tracing-futures = "0.2"
 twox-hash = "1"
 url = "2"
-value-encoding = { path = "../utils/value-encoding" }
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
 [dev-dependencies]
 assert_matches = "1"

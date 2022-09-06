@@ -32,7 +32,6 @@ pub mod create_source;
 pub mod create_table;
 pub mod create_user;
 mod describe;
-pub mod dml;
 mod drop_database;
 mod drop_index;
 pub mod drop_mv;
@@ -48,7 +47,7 @@ pub mod privilege;
 pub mod query;
 mod show;
 pub mod util;
-mod variable;
+pub mod variable;
 
 pub async fn handle(
     session: Arc<SessionImpl>,
@@ -60,9 +59,9 @@ pub async fn handle(
     match stmt {
         Statement::Explain {
             statement,
-            verbose,
-            trace,
-            ..
+            describe_alias: _,
+            analyze,
+            options,
         } => {
             match statement.as_ref() {
                 Statement::CreateTable { with_options, .. }
@@ -74,7 +73,7 @@ pub async fn handle(
                 _ => {}
             }
 
-            explain::handle_explain(context, *statement, verbose, trace)
+            explain::handle_explain(context, *statement, options, analyze)
         }
         Statement::CreateSource {
             is_materialized,
@@ -85,10 +84,11 @@ pub async fn handle(
             name,
             columns,
             with_options,
+            constraints,
             ..
         } => {
             context.with_properties = handle_with_properties("handle_create_table", with_options)?;
-            create_table::handle_create_table(context, name, columns).await
+            create_table::handle_create_table(context, name, columns, constraints).await
         }
         Statement::CreateDatabase {
             db_name,
@@ -138,10 +138,10 @@ pub async fn handle(
                     .into(),
             ),
         },
-        Statement::Query(_) => query::handle_query(context, stmt, format).await,
-        Statement::Insert { .. } | Statement::Delete { .. } | Statement::Update { .. } => {
-            dml::handle_dml(context, stmt).await
-        }
+        Statement::Query(_)
+        | Statement::Insert { .. }
+        | Statement::Delete { .. }
+        | Statement::Update { .. } => query::handle_query(context, stmt, format).await,
         Statement::CreateView {
             materialized: true,
             or_replace: false,
@@ -164,6 +164,7 @@ pub async fn handle(
             name,
             table_name,
             columns,
+            include,
             unique,
             if_not_exists,
         } => {
@@ -179,7 +180,8 @@ pub async fn handle(
                 )
                 .into());
             }
-            create_index::handle_create_index(context, name, table_name, columns.to_vec()).await
+            create_index::handle_create_index(context, name, table_name, columns.to_vec(), include)
+                .await
         }
         // Ignore `StartTransaction` and `Abort` temporarily.Its not final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

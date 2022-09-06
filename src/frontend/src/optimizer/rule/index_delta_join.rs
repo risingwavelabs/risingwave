@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -20,6 +19,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// Use index scan and delta joins for supported queries.
 pub struct IndexDeltaJoinRule {}
@@ -55,49 +55,51 @@ impl Rule for IndexDeltaJoinRule {
             if table_scan.logical().indexes().is_empty() {
                 return None;
             }
-            let column_descs = table_scan.logical().column_descs();
-            // We assume column id of create index's MV is exactly the same as corresponding columns
-            // in the original table. We generate a list of column ids, and match them against
-            // prefixes of indexes.
-            let columns_to_match = join_indices
-                .iter()
-                .map(|idx| column_descs[*idx].column_id)
-                .collect_vec();
 
-            for (name, index) in table_scan.logical().indexes() {
+            for index in table_scan.logical().indexes() {
+                // Only full covering index can be used in delta join
+                if !index.full_covering() {
+                    continue;
+                }
+
+                let p2s_mapping = index.primary_to_secondary_mapping();
+
                 // 1. Check if distribution keys are the same.
                 // We don't assume the hash function we are using satisfies commutativity
                 // `Hash(A, B) == Hash(B, A)`, so we consider order of each item in distribution
                 // keys here.
-                if index
-                    .distribution_key
+                let join_indices_ref_to_index_table = join_indices
                     .iter()
-                    .map(|x| index.columns[*x].column_id)
-                    .collect_vec()
-                    != columns_to_match
-                {
+                    .map(|&i| *table_scan.logical().output_col_idx().get(i).unwrap())
+                    .map(|x| *p2s_mapping.get(&x).unwrap())
+                    .collect_vec();
+
+                if index.index_table.distribution_key != join_indices_ref_to_index_table {
                     continue;
                 }
 
-                // 2. Check if the join keys are prefix of order keys
+                // 2. Check join key is prefix of index order key
+                let index_order_key_prefix = index
+                    .index_table
+                    .order_key
+                    .iter()
+                    .map(|x| x.index)
+                    .take(index.index_table.distribution_key.len())
+                    .collect_vec();
 
-                // A HashSet containing remaining columns to match
-                let mut remaining_to_match =
-                    columns_to_match.iter().copied().collect::<HashSet<_>>();
-
-                // Begin match join columns with index prefix. e.g., if the join columns are `a, b,
-                // c`, and the index has `a, b, c` or `a, c, b` or any combination as prefix, then
-                // we can use this index.
-                for column_id in &index.order_column_ids() {
-                    match remaining_to_match.remove(column_id) {
-                        true => continue, // matched
-                        false => break,   // not matched
-                    }
+                if index_order_key_prefix != join_indices_ref_to_index_table {
+                    continue;
                 }
 
-                if remaining_to_match.is_empty() {
-                    return Some(table_scan.to_index_scan(name, index).into());
-                }
+                return Some(
+                    table_scan
+                        .to_index_scan(
+                            index.index_table.name.as_str(),
+                            index.index_table.table_desc().into(),
+                            p2s_mapping,
+                        )
+                        .into(),
+                );
             }
 
             None
@@ -107,6 +109,18 @@ impl Rule for IndexDeltaJoinRule {
             if let Some(right) = match_indexes(&right_indices, input_right) {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
+
+                fn upstream_hash_shard_to_hash_shard(plan: PlanRef) -> PlanRef {
+                    if let Distribution::UpstreamHashShard(key) = plan.distribution() {
+                        RequiredDist::hash_shard(key)
+                            .enforce_if_not_satisfies(plan, &Order::any())
+                            .unwrap()
+                    } else {
+                        plan
+                    }
+                }
+                let left = upstream_hash_shard_to_hash_shard(left);
+                let right = upstream_hash_shard_to_hash_shard(right);
 
                 Some(
                     join.to_delta_join()

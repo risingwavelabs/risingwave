@@ -89,11 +89,37 @@ impl From<&CastContext> for String {
 
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
 pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> bool {
-    cast_ok_base(source.into(), target.into(), allows)
+    cast_ok_array(source, target, allows) || cast_ok_base(source.into(), target.into(), allows)
 }
 
 pub fn cast_ok_base(source: DataTypeName, target: DataTypeName, allows: CastContext) -> bool {
     matches!(CAST_MAP.get(&(source, target)), Some(context) if *context <= allows)
+}
+
+fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> bool {
+    match (source, target) {
+        (
+            DataType::List {
+                datatype: source_elem,
+            },
+            DataType::List {
+                datatype: target_elem,
+            },
+        ) => cast_ok(source_elem, target_elem, allows),
+        (
+            DataType::Varchar,
+            DataType::List {
+                datatype: target_elem,
+            },
+        ) if target_elem == &Box::new(DataType::Varchar) => true,
+        (
+            DataType::Varchar,
+            DataType::List {
+                datatype: target_elem,
+            },
+        ) => cast_ok(&DataType::Varchar, target_elem, allows),
+        _ => false,
+    }
 }
 
 fn build_cast_map() -> CastMap {

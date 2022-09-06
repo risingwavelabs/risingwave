@@ -139,6 +139,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // MockServer is not supported in simulation.
     async fn test_list_splits_on_no_existing_pulsar() {
         let prop = PulsarProperties {
             topic: "t".to_string(),
@@ -152,6 +153,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // MockServer is not supported in simulation.
     async fn test_list_on_no_existing_topic() {
         let server = empty_mock_server().await;
 
@@ -167,6 +169,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // MockServer is not supported in simulation.
     async fn test_list_splits_with_partitioned_topic() {
         let server = mock_server(
             "/admin/v2/persistent/public/default/t/partitions",
@@ -193,6 +196,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // MockServer is not supported in simulation.
     async fn test_list_splits_with_non_partitioned_topic() {
         let server = mock_server(
             "/admin/v2/persistent/public/default/t/partitions",

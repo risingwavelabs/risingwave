@@ -90,7 +90,7 @@ impl fmt::Debug for OrderDisplay<'_> {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FieldOrder {
     pub index: usize,
     pub direct: Direction,
@@ -199,7 +199,7 @@ impl fmt::Display for Direction {
 }
 
 impl Direction {
-    pub fn to_protobuf(&self) -> ProstOrderType {
+    pub fn to_protobuf(self) -> ProstOrderType {
         match self {
             Self::Asc => ProstOrderType::Ascending,
             Self::Desc => ProstOrderType::Descending,
@@ -216,7 +216,7 @@ impl Direction {
     }
 
     // TODO: unify them
-    pub fn to_order(&self) -> OrderType {
+    pub fn to_order(self) -> OrderType {
         match self {
             Self::Asc => OrderType::Ascending,
             Self::Desc => OrderType::Descending,

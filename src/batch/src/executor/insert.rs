@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::once;
-
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
@@ -27,7 +25,6 @@ use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
-use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -44,7 +41,12 @@ pub struct InsertExecutor {
 }
 
 impl InsertExecutor {
-    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
+    pub fn new(
+        table_id: TableId,
+        source_manager: SourceManagerRef,
+        child: BoxedExecutor,
+        identity: String,
+    ) -> Self {
         Self {
             table_id,
             source_manager,
@@ -52,7 +54,7 @@ impl InsertExecutor {
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
-            identity: "InsertExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -76,6 +78,7 @@ impl InsertExecutor {
     async fn do_execute(self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
         let source = source_desc.source.as_table_v2().expect("not table source");
+        let row_id_index = source_desc.row_id_index;
 
         let mut notifiers = Vec::new();
 
@@ -85,18 +88,16 @@ impl InsertExecutor {
             let len = data_chunk.cardinality();
             assert!(data_chunk.visibility().is_none());
 
-            // add row-id column as first column
-            let mut builder = I64ArrayBuilder::new(len);
-            for _ in 0..len {
-                builder.append(None).unwrap();
+            let (mut columns, _) = data_chunk.into_parts();
+
+            if let Some(row_id_index) = row_id_index {
+                let mut builder = I64ArrayBuilder::new(len);
+                for _ in 0..len {
+                    builder.append_null()?
+                }
+                columns.insert(row_id_index, Column::from(builder.finish()?))
             }
 
-            let rowid_column = once(Column::from(builder.finish().unwrap()));
-            let child_columns = data_chunk.into_parts().0.into_iter();
-
-            // Materialize plan is assembled manually with Rust frontend, so we put the row
-            // id column to the first.
-            let columns = rowid_column.chain(child_columns).collect();
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
             let notifier = source.write_chunk(chunk)?;
@@ -106,7 +107,7 @@ impl InsertExecutor {
         // Wait for all chunks to be taken / written.
         let rows_inserted = try_join_all(notifiers)
             .await
-            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))?
+            .context("failed to wait chunks to be written")?
             .into_iter()
             .sum::<usize>();
 
@@ -127,9 +128,10 @@ impl InsertExecutor {
 impl BoxedExecutorBuilder for InsertExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "Insert executor should 1 child!");
+        let [child]: [_; 1] = inputs.try_into().unwrap();
+
         let insert_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Insert
@@ -142,8 +144,9 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source
                 .context()
                 .source_manager_ref()
-                .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
-            inputs.remove(0),
+                .context("source manager not found")?,
+            child,
+            source.plan_node().get_identity().clone(),
         )))
     }
 }
@@ -158,7 +161,7 @@ mod tests {
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
+    use risingwave_source::{MemSourceManager, SourceManager};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::ReadOptions;
     use risingwave_storage::*;
@@ -173,9 +176,10 @@ mod tests {
         let store = MemoryStateStore::new();
 
         // Make struct field
-        let struct_field = Field::unnamed(DataType::Struct {
-            fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
-        });
+        let struct_field = Field::unnamed(DataType::new_struct(
+            vec![DataType::Int32, DataType::Int32, DataType::Int32],
+            vec![],
+        ));
 
         // Schema for mock executor.
         let mut schema = schema_test_utils::ii();
@@ -183,8 +187,9 @@ mod tests {
         let mut mock_executor = MockExecutor::new(schema.clone());
 
         // Schema of the table
-        let mut schema = schema_test_utils::iii();
+        let mut schema = schema_test_utils::ii();
         schema.fields.push(struct_field);
+        schema.fields.push(Field::unnamed(DataType::Int64)); // row_id column
         let table_columns: Vec<_> = schema
             .fields
             .iter()
@@ -215,15 +220,24 @@ mod tests {
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
 
+        // To match the row_id column in the schema
+        let row_id_index = Some(3);
+        let pk_column_ids = vec![3];
+
         // Create the table.
         let table_id = TableId::new(0);
-        source_manager.create_table_source(&table_id, table_columns.to_vec())?;
+        source_manager.create_table_source(
+            &table_id,
+            table_columns.to_vec(),
+            row_id_index,
+            pk_column_ids,
+        )?;
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2().unwrap();
         let mut reader = source
-            .stream_reader(vec![0.into(), 1.into(), 2.into(), 3.into()])
+            .stream_reader(vec![0.into(), 1.into(), 2.into()])
             .await?;
 
         // Insert
@@ -231,11 +245,9 @@ mod tests {
             table_id,
             source_manager.clone(),
             Box::new(mock_executor),
+            "InsertExecutor".to_string(),
         ));
         let handle = tokio::spawn(async move {
-            let fields = &insert_executor.schema().fields;
-            assert_eq!(fields[0].data_type, DataType::Int64);
-
             let mut stream = insert_executor.execute();
             let result = stream.next().await.unwrap().unwrap();
 
@@ -253,15 +265,8 @@ mod tests {
         // Read
         let chunk = reader.next().await?;
 
-        // Row id column
-        assert!(chunk.chunk.columns()[0]
-            .array()
-            .as_int64()
-            .iter()
-            .all(|x| x.is_none()));
-
         assert_eq!(
-            chunk.chunk.columns()[1]
+            chunk.columns()[0]
                 .array()
                 .as_int32()
                 .iter()
@@ -270,7 +275,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.chunk.columns()[2]
+            chunk.columns()[1]
                 .array()
                 .as_int32()
                 .iter()
@@ -289,7 +294,7 @@ mod tests {
         )
         .unwrap()
         .into();
-        assert_eq!(*chunk.chunk.columns()[3].array(), array);
+        assert_eq!(*chunk.columns()[2].array(), array);
 
         // There's nothing in store since `TableSourceV2` has no side effect.
         // Data will be materialized in associated streaming task.
@@ -303,7 +308,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
-                    ttl: None,
+                    retention_seconds: None,
                 },
             )
             .await?;

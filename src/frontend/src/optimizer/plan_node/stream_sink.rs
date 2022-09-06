@@ -18,8 +18,9 @@ use std::fmt;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanBase, PlanRef, ToStreamProst};
+use super::{PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone)]
@@ -34,12 +35,13 @@ impl StreamSink {
         let ctx = input.ctx();
 
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices();
+        let pk_indices = input.logical_pk();
 
         Ok(PlanBase::new_stream(
             ctx,
             schema,
             pk_indices.to_vec(),
+            input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
         ))
@@ -76,8 +78,8 @@ impl fmt::Display for StreamSink {
     }
 }
 
-impl ToStreamProst for StreamSink {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamSink {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
         let input = self.input.clone();

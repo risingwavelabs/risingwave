@@ -12,7 +12,7 @@
       BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id] }
-      StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+      StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
@@ -27,7 +27,7 @@
   stream_plan: |
     StreamMaterialize { columns: [t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
-        StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+        StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);
     select * from t where v1<1;
@@ -38,7 +38,7 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamFilter { predicate: (t.v1 < 1:Int32) }
-        StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+        StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* test boolean expression common factor extraction */
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
@@ -70,7 +70,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.a] }
       LogicalFilter { predicate: t.a }
-        LogicalScan { table: t, columns: [t._row_id, t.a] }
+        LogicalScan { table: t, columns: [t.a, t._row_id] }
 - sql: |
     /* constant folding for IS NOT TRUE, IS NOT FALSE */
     create table t(a Boolean);
@@ -78,7 +78,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.a] }
       LogicalFilter { predicate: IsNotTrue(t.a) }
-        LogicalScan { table: t, columns: [t._row_id, t.a] }
+        LogicalScan { table: t, columns: [t.a, t._row_id] }
 - sql: |
     /* constant folding IS NOT NULL */
     create table t(a double precision);
@@ -86,7 +86,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.a] }
       LogicalFilter { predicate: IsNotNull(t.a) }
-        LogicalScan { table: t, columns: [t._row_id, t.a] }
+        LogicalScan { table: t, columns: [t.a, t._row_id] }
 - sql: |
     create table t (v1 int, v2 int);
     select v1 from t;
@@ -95,7 +95,7 @@
       BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
-      StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+      StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: select 1
   batch_plan: |
     BatchProject { exprs: [1:Int32] }
@@ -110,15 +110,19 @@
     create table t (v1 int, v2 int);
     delete from t;
   batch_plan: |
-    BatchDelete { table: t }
-      BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: SomeShard }
+    BatchExchange { order: [], dist: Single }
+      BatchDelete { table: t }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
   batch_plan: |
-    BatchDelete { table: t }
-      BatchFilter { predicate: (t.v1 = 1:Int32) }
-        BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: SomeShard }
+    BatchExchange { order: [], dist: Single }
+      BatchDelete { table: t }
+        BatchExchange { order: [], dist: Single }
+          BatchFilter { predicate: (t.v1 = 1:Int32) }
+            BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     select * from generate_series('2'::INT,'10'::INT,'2'::INT);
   batch_plan: |
@@ -131,3 +135,48 @@
     select * from unnest(Array[Array[1,2,3], Array[4,5,6]]);
   batch_plan: |
     BatchTableFunction { Unnest(Array(Array(1:Int32, 2:Int32, 3:Int32), Array(4:Int32, 5:Int32, 6:Int32))) }
+- sql: |
+    create table t1 (x int);
+    select * from t1 where EXISTS(select * where t1.x=1);
+  binder_error: 'Bind error: SELECT * with no tables specified is not valid'
+- sql: |
+    select *;
+  binder_error: 'Bind error: SELECT * with no tables specified is not valid'
+- sql: |
+    select * where x = 1;
+  binder_error: 'Bind error: SELECT * with no tables specified is not valid'
+- sql: |
+    create table t ();
+    select * from t;
+  logical_plan: |
+    LogicalProject { exprs: [] }
+      LogicalScan { table: t, columns: [t._row_id] }
+- sql: |
+    /* disallow subquery in values */
+    values(1, (select 1));
+  binder_error: |-
+    Feature is not yet implemented: Subquery in VALUES
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* disallow correlated_input_ref in values */
+    create table t(v1 int);
+    select v1 from t where exists (values(v1));
+  binder_error: |-
+    Feature is not yet implemented: CorrelatedInputRef in VALUES
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from t limit 1
+  batch_plan: |
+    BatchLimit { limit: 1, offset: 0 }
+      BatchExchange { order: [], dist: Single }
+        BatchLimit { limit: 1, offset: 0 }
+          BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from t order by v1 limit 1
+  batch_plan: |
+    BatchTopN { order: "[t.v1 ASC]", limit: 1, offset: 0 }
+      BatchExchange { order: [], dist: Single }
+        BatchTopN { order: "[t.v1 ASC]", limit: 1, offset: 0 }
+          BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }

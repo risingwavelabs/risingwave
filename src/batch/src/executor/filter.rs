@@ -83,9 +83,9 @@ impl FilterExecutor {
 impl BoxedExecutorBuilder for FilterExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1);
+        let [input]: [_; 1] = inputs.try_into().unwrap();
 
         let filter_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -96,7 +96,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
         let expr = build_from_prost(expr_node)?;
         Ok(Box::new(Self::new(
             expr,
-            inputs.remove(0),
+            input,
             source.plan_node().get_identity().clone(),
         )))
     }
@@ -116,18 +116,147 @@ impl FilterExecutor {
 mod tests {
     use assert_matches::assert_matches;
     use futures::stream::StreamExt;
-    use risingwave_common::array::{Array, DataChunk};
+    use risingwave_common::array::{Array, DataChunk, ListValue};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, Scalar};
     use risingwave_expr::expr::build_from_prost;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type::InputRef;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{Executor, FilterExecutor};
+
+    #[tokio::test]
+    async fn test_list_filter_executor() {
+        use std::sync::Arc;
+
+        use risingwave_common::array::column::Column;
+        use risingwave_common::array::{
+            ArrayBuilder, ArrayImpl, ArrayMeta, ListArrayBuilder, ListRef, ListValue,
+        };
+        use risingwave_common::types::Scalar;
+
+        let mut builder = ListArrayBuilder::with_meta(
+            4,
+            ArrayMeta::List {
+                datatype: Box::new(DataType::Int32),
+            },
+        );
+
+        // Add 4 ListValues to ArrayBuilder
+        (1..=4).for_each(|i| {
+            builder
+                .append(Some(ListRef::ValueRef {
+                    val: &ListValue::new(vec![Some(i.to_scalar_value())]),
+                }))
+                .unwrap();
+        });
+
+        // Use builder to obtain a single (List) column DataChunk
+        let chunk = DataChunk::new(
+            vec![Column::new(Arc::new(ArrayImpl::from(
+                builder.finish().unwrap(),
+            )))],
+            4,
+        );
+
+        // Initialize mock executor
+        let mut mock_executor = MockExecutor::new(Schema {
+            fields: vec![Field::unnamed(DataType::List {
+                datatype: Box::new(DataType::Int32),
+            })],
+        });
+        mock_executor.add(chunk);
+
+        // Initialize filter executor
+        let expr = make_filter_expression(Type::GreaterThan);
+        let filter_executor = Box::new(FilterExecutor {
+            expr: build_from_prost(&expr).unwrap(),
+            child: Box::new(mock_executor),
+            identity: "FilterExecutor".to_string(),
+        });
+
+        let fields = &filter_executor.schema().fields;
+
+        assert!(fields.iter().all(|f| f.data_type
+            == DataType::List {
+                datatype: Box::new(DataType::Int32)
+            }));
+
+        let mut stream = filter_executor.execute();
+
+        let res = stream.next().await.unwrap();
+
+        assert_matches!(res, Ok(_));
+        if let Ok(res) = res {
+            let col1 = res.column_at(0);
+            let array = col1.array();
+            let col1 = array.as_list();
+            assert_eq!(col1.len(), 2);
+            // Assert that values 3 and 4 are bigger than 2
+            assert_eq!(
+                col1.value_at(0),
+                Some(ListRef::ValueRef {
+                    val: &ListValue::new(vec![Some(3.to_scalar_value())]),
+                })
+            );
+            assert_eq!(
+                col1.value_at(1),
+                Some(ListRef::ValueRef {
+                    val: &ListValue::new(vec![Some(4.to_scalar_value())]),
+                })
+            );
+        }
+        let res = stream.next().await;
+        assert_matches!(res, None);
+    }
+
+    fn make_filter_expression(kind: Type) -> ExprNode {
+        use risingwave_common::types::ScalarImpl;
+        let lhs = ExprNode {
+            expr_type: InputRef as i32,
+            return_type: Some(risingwave_pb::data::DataType {
+                type_name: TypeName::List as i32,
+                field_type: vec![risingwave_pb::data::DataType {
+                    type_name: TypeName::Int32 as i32,
+                    is_nullable: true,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
+        };
+        let rhs = ExprNode {
+            expr_type: Type::ConstantValue as i32,
+            return_type: Some(risingwave_pb::data::DataType {
+                type_name: TypeName::List as i32,
+                field_type: vec![risingwave_pb::data::DataType {
+                    type_name: TypeName::Int32 as i32,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::Constant(ConstantValue {
+                body: ScalarImpl::List(ListValue::new(vec![Some(2.to_scalar_value())]))
+                    .to_protobuf(),
+            })),
+        };
+        let function_call = FunctionCall {
+            children: vec![lhs, rhs],
+        };
+        let return_type = risingwave_pb::data::DataType {
+            type_name: risingwave_pb::data::data_type::TypeName::Boolean as i32,
+            ..Default::default()
+        };
+        ExprNode {
+            expr_type: kind as i32,
+            return_type: Some(return_type),
+            rex_node: Some(RexNode::FuncCall(function_call)),
+        }
+    }
 
     #[tokio::test]
     async fn test_filter_executor() {
@@ -149,7 +278,7 @@ mod tests {
         let filter_executor = Box::new(FilterExecutor {
             expr: build_from_prost(&expr).unwrap(),
             child: Box::new(mock_executor),
-            identity: "FilterExecutor2".to_string(),
+            identity: "FilterExecutor".to_string(),
         });
         let fields = &filter_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);

@@ -22,14 +22,16 @@ use super::generator::DatagenEventGenerator;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
 use crate::source::{
-    Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitMetaData, SplitReader,
+    spawn_data_generation_stream, Column, ConnectorState, DataGenerationReceiver, DataType,
+    SourceMessage, SplitId, SplitImpl, SplitMetaData, SplitReader,
 };
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct DatagenSplitReader {
-    pub generator: DatagenEventGenerator,
-    pub assigned_split: DatagenSplit,
+    generation_rx: DataGenerationReceiver,
+
+    assigned_split: DatagenSplit,
 }
 
 #[async_trait]
@@ -45,10 +47,10 @@ impl SplitReader for DatagenSplitReader {
         Self: Sized,
     {
         let mut assigned_split = DatagenSplit::default();
-        let mut split_id = String::new();
+        let mut split_id = SplitId::default();
         let mut events_so_far = u64::default();
         if let Some(splits) = state {
-            log::debug!("Splits for datagen found! {:?}", splits);
+            tracing::debug!("Splits for datagen found! {:?}", splits);
             for split in splits {
                 // TODO: currently, assume there's only on split in one reader
                 split_id = split.id();
@@ -74,8 +76,6 @@ impl SplitReader for DatagenSplitReader {
         // check columns
         assert!(columns.as_ref().is_some());
         let columns = columns.unwrap();
-        assert!(columns.len() > 1);
-        let columns = &columns[1..];
 
         // parse field connector option to build FieldGeneratorImpl
         // for example:
@@ -110,7 +110,7 @@ impl SplitReader for DatagenSplitReader {
                         // seed
                         Ok(seed) => seed ^ split_index,
                         Err(e) => {
-                            log::warn!("cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed", seed, e, split_index);
+                            tracing::warn!("cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed", seed, e, split_index);
                             split_index
                         }
                     }
@@ -195,14 +195,17 @@ impl SplitReader for DatagenSplitReader {
             split_index,
         )?;
 
+        // Spawn a new runtime for data generation since it's CPU intensive.
+        let generation_rx = spawn_data_generation_stream(generator.into_stream());
+
         Ok(DatagenSplitReader {
-            generator,
+            generation_rx,
             assigned_split,
         })
     }
 
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        self.generator.next().await
+        self.generation_rx.recv().await.transpose()
     }
 }
 
@@ -215,10 +218,6 @@ mod tests {
     #[tokio::test]
     async fn test_generator() -> Result<()> {
         let mock_datum = vec![
-            Column {
-                name: "_".to_string(),
-                data_type: DataType::Int64,
-            },
             Column {
                 name: "random_int".to_string(),
                 data_type: DataType::Int32,

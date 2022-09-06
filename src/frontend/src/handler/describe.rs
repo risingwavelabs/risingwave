@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -21,7 +23,7 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use crate::binder::Binder;
-use crate::catalog::table_catalog::TableCatalog;
+use crate::catalog::IndexCatalog;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
@@ -32,7 +34,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, indices): (Vec<ColumnDesc>, Vec<TableCatalog>) = {
+    let (columns, indices): (Vec<ColumnDesc>, Vec<IndexCatalog>) = {
         let (catalogs, indices) = match catalog_reader
             .get_schema_by_name(session.database(), &schema_name)?
             .get_table_by_name(&table_name)
@@ -42,7 +44,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
                 catalog_reader
                     .get_schema_by_name(session.database(), &schema_name)?
                     .iter_index()
-                    .filter(|x| x.is_index_on == Some(table.id))
+                    .filter(|index| index.primary_table.id == table.id)
                     .cloned()
                     .collect_vec(),
             ),
@@ -66,16 +68,46 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     // Convert all column descs to rows
     let mut rows = col_descs_to_rows(columns);
 
-    // Convert all indexs to rows
-    rows.extend(indices.iter().map(|i| {
-        let s = i
-            .distribution_key
+    // Convert all indexes to rows
+    rows.extend(indices.iter().map(|index| {
+        let index_table = index.index_table.clone();
+
+        let index_column_s = index_table
+            .order_key
             .iter()
-            .map(|c| i.columns[*c].name().to_string())
+            .filter(|x| !index_table.columns[x.index].is_hidden)
+            .map(|x| index_table.columns[x.index].name().to_string())
             .collect_vec();
+
+        let order_key_column_index_set = index_table
+            .order_key
+            .iter()
+            .map(|x| x.index)
+            .collect::<HashSet<_>>();
+
+        let include_column_s = index_table
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !order_key_column_index_set.contains(i))
+            .filter(|(_, x)| !x.is_hidden)
+            .map(|(_, x)| x.name().to_string())
+            .collect_vec();
+
         Row::new(vec![
-            Some(i.name.clone().into()),
-            Some(format!("index({})", display_comma_separated(&s)).into()),
+            Some(index.name.clone().into()),
+            if include_column_s.is_empty() {
+                Some(format!("index({})", display_comma_separated(&index_column_s)).into())
+            } else {
+                Some(
+                    format!(
+                        "index({}) include({})",
+                        display_comma_separated(&index_column_s),
+                        display_comma_separated(&include_column_s)
+                    )
+                    .into(),
+                )
+            },
         ])
     }));
 

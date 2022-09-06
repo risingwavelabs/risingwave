@@ -41,6 +41,22 @@ impl BatchTopN {
         );
         BatchTopN { base, logical }
     }
+
+    fn two_phase_topn(&self, input: PlanRef) -> Result<PlanRef> {
+        let new_limit = self.logical.limit() + self.logical.offset();
+        let new_offset = 0;
+        let logical_partial_topn = LogicalTopN::new(
+            input,
+            new_limit,
+            new_offset,
+            self.logical.topn_order().clone(),
+        );
+        let batch_partial_topn = Self::new(logical_partial_topn);
+        let ensure_single_dist = RequiredDist::single()
+            .enforce_if_not_satisfies(batch_partial_topn.into(), &Order::any())?;
+        let batch_global_topn = self.clone_with_input(ensure_single_dist);
+        Ok(batch_global_topn.into())
+    }
 }
 
 impl fmt::Display for BatchTopN {
@@ -63,19 +79,7 @@ impl_plan_tree_node_for_unary! {BatchTopN}
 
 impl ToDistributedBatch for BatchTopN {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_limit = self.logical.limit() + self.logical.offset();
-        let new_offset = 0;
-        let logical_partial_topn = LogicalTopN::new(
-            self.input().to_distributed()?,
-            new_limit,
-            new_offset,
-            self.logical.topn_order().clone(),
-        );
-        let batch_partial_topn = Self::new(logical_partial_topn);
-        let ensure_single_dist = RequiredDist::single()
-            .enforce_if_not_satisfies(batch_partial_topn.into(), &Order::any())?;
-        let batch_global_topn = self.clone_with_input(ensure_single_dist);
-        Ok(batch_global_topn.into())
+        self.two_phase_topn(self.input().to_distributed()?)
     }
 }
 
@@ -83,8 +87,8 @@ impl ToBatchProst for BatchTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_orders = self.logical.topn_order().to_protobuf(&self.base.schema);
         NodeBody::TopN(TopNNode {
-            limit: self.logical.limit() as u32,
-            offset: self.logical.offset() as u32,
+            limit: self.logical.limit() as u64,
+            offset: self.logical.offset() as u64,
             column_orders,
         })
     }
@@ -92,9 +96,6 @@ impl ToBatchProst for BatchTopN {
 
 impl ToLocalBatch for BatchTopN {
     fn to_local(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_local()?;
-        let new_input =
-            RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
-        Ok(self.clone_with_input(new_input).into())
+        self.two_phase_topn(self.input().to_local()?)
     }
 }

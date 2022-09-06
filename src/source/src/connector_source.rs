@@ -16,14 +16,14 @@ use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use futures::future::{try_join_all, Either};
+use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_connector::source::{
-    Column, ConnectorProperties, ConnectorState, SourceMessage, SplitMetaData, SplitReaderImpl,
+    Column, ConnectorProperties, ConnectorState, SourceMessage, SplitId, SplitMetaData,
+    SplitReaderImpl,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{mpsc, oneshot};
@@ -31,7 +31,7 @@ use tokio::task::JoinHandle;
 
 use crate::common::SourceChunkBuilder;
 use crate::monitor::SourceMetrics;
-use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSourceReader};
+use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState};
 
 #[derive(Clone, Debug)]
 pub struct SourceContext {
@@ -46,6 +46,10 @@ impl SourceContext {
             source_id,
         }
     }
+}
+
+lazy_static::lazy_static! {
+    static ref DEFAULT_SPLIT_ID: SplitId = SplitId::new("None".into());
 }
 
 struct InnerConnectorSourceReader {
@@ -74,11 +78,11 @@ pub struct ConnectorSourceReader {
     pub parser: Arc<SourceParserImpl>,
     pub columns: Vec<SourceColumnDesc>,
 
-    handles: Option<HashMap<String, InnerConnectorSourceReaderHandle>>,
-    message_rx: Receiver<Either<Vec<SourceMessage>, RwError>>,
+    handles: Option<HashMap<SplitId, InnerConnectorSourceReaderHandle>>,
+    message_rx: Receiver<Result<Vec<SourceMessage>>>,
     // We need to keep this tx, otherwise the channel will return none with 0 inner readers, and we
     // need to clone this tx when adding new inner readers in the future.
-    message_tx: Sender<Either<Vec<SourceMessage>, RwError>>,
+    message_tx: Sender<Result<Vec<SourceMessage>>>,
 
     metrics: Arc<SourceMetrics>,
     context: SourceContext,
@@ -127,15 +131,16 @@ impl InnerConnectorSourceReader {
     async fn run(
         &mut self,
         mut stop: oneshot::Receiver<()>,
-        output: mpsc::Sender<Either<Vec<SourceMessage>, RwError>>,
+        output: mpsc::Sender<Result<Vec<SourceMessage>>>,
     ) {
         let actor_id = self.context.actor_id.to_string();
         let source_id = self.context.source_id.to_string();
+        let id = match &self.split {
+            Some(splits) => splits[0].id(),
+            None => DEFAULT_SPLIT_ID.clone(),
+        };
+
         loop {
-            let id = match &self.split {
-                Some(splits) => splits[0].id(),
-                None => "None".to_string(),
-            };
             let chunk: anyhow::Result<Option<Vec<SourceMessage>>>;
             tokio::select! {
                 biased;
@@ -153,7 +158,7 @@ impl InnerConnectorSourceReader {
             match chunk.map_err(|e| internal_error(e.to_string())) {
                 Err(e) => {
                     tracing::error!("connector reader {} error happened {}", id, e.to_string());
-                    output.send(Either::Right(e)).await.ok();
+                    output.send(Err(e)).await.ok();
                     break;
                 }
                 Ok(None) => {
@@ -161,11 +166,19 @@ impl InnerConnectorSourceReader {
                     break;
                 }
                 Ok(Some(msg)) => {
+                    if msg.is_empty() {
+                        continue;
+                    }
+                    // Avoid occupying too much CPU time if the source is a data generator, like
+                    // DataGen or Nexmark.
+                    tokio::task::consume_budget().await;
+
                     self.metrics
                         .partition_input_count
                         .with_label_values(&[actor_id.as_str(), source_id.as_str(), id.as_str()])
                         .inc_by(msg.len() as u64);
-                    output.send(Either::Left(msg)).await.ok();
+
+                    output.send(Ok(msg)).await.ok();
                 }
             }
         }
@@ -174,24 +187,16 @@ impl InnerConnectorSourceReader {
 
 impl SourceChunkBuilder for ConnectorSourceReader {}
 
-#[async_trait]
-impl StreamSourceReader for ConnectorSourceReader {
-    async fn next(&mut self) -> Result<StreamChunkWithState> {
-        let batch = self.message_rx.recv().await.unwrap();
-
-        let batch = match batch {
-            Either::Left(batch) => batch,
-            Either::Right(e) => return Err(e),
-        };
+impl ConnectorSourceReader {
+    pub async fn next(&mut self) -> Result<StreamChunkWithState> {
+        let batch = self.message_rx.recv().await.unwrap()?;
 
         let mut events = Vec::with_capacity(batch.len());
-        let mut split_offset_mapping: HashMap<String, String> = HashMap::new();
+        let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
 
         for msg in batch {
             if let Some(content) = msg.payload {
-                *split_offset_mapping
-                    .entry(msg.split_id.clone())
-                    .or_insert_with(|| "".to_string()) = msg.offset.to_string();
+                split_offset_mapping.insert(msg.split_id, msg.offset);
                 match self.parser.parse(content.as_ref(), &self.columns) {
                     Err(e) => {
                         tracing::warn!("message parsing failed {}, skipping", e.to_string());
@@ -201,19 +206,12 @@ impl StreamSourceReader for ConnectorSourceReader {
                 }
             }
         }
-        let mut ops = Vec::with_capacity(events.iter().map(|e| e.ops.len()).sum());
-        let mut rows = Vec::with_capacity(events.iter().map(|e| e.rows.len()).sum());
 
-        for event in events {
-            rows.extend(event.rows);
-            ops.extend(event.ops);
-        }
+        let columns = Self::build_columns(&self.columns, events.iter().flat_map(|e| &e.rows))?;
+        let ops = events.into_iter().flat_map(|e| e.ops).collect();
+
         Ok(StreamChunkWithState {
-            chunk: StreamChunk::new(
-                ops,
-                Self::build_columns(&self.columns, rows.as_ref())?,
-                None,
-            ),
+            chunk: StreamChunk::new(ops, columns, None),
             split_offset_mapping: Some(split_offset_mapping),
         })
     }
@@ -262,7 +260,7 @@ impl ConnectorSourceReader {
         Ok(())
     }
 
-    pub async fn drop_split(&mut self, split_id: String) -> Result<()> {
+    pub async fn drop_split(&mut self, split_id: SplitId) -> Result<()> {
         let handle = self
             .handles
             .as_mut()
@@ -343,7 +341,7 @@ impl ConnectorSource {
         for mut reader in readers {
             let split_id = match &reader.split {
                 Some(s) => s[0].id(),
-                None => "None".to_string(),
+                None => DEFAULT_SPLIT_ID.clone(),
             };
             let (stop_tx, stop_rx) = oneshot::channel();
             let sender = tx.clone();

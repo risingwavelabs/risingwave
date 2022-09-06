@@ -32,8 +32,7 @@ pub struct MergeExecutor {
     /// Upstream channels.
     upstreams: Vec<BoxedInput>,
 
-    /// Belonged actor id.
-    actor_id: ActorId,
+    ctx: ActorContextRef,
 
     /// Belonged fragment id.
     fragment_id: FragmentId,
@@ -42,9 +41,6 @@ pub struct MergeExecutor {
     upstream_fragment_id: FragmentId,
 
     info: ExecutorInfo,
-
-    /// Actor operator context.
-    status: OperatorInfoStatus,
 
     /// Shared context of the stream manager.
     context: Arc<SharedContext>,
@@ -58,18 +54,17 @@ impl MergeExecutor {
     pub fn new(
         schema: Schema,
         pk_indices: PkIndices,
-        actor_id: ActorId,
+        ctx: ActorContextRef,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         inputs: Vec<BoxedInput>,
         context: Arc<SharedContext>,
-        actor_context: ActorContextRef,
-        receiver_id: u64,
+        _receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
             upstreams: inputs,
-            actor_id,
+            ctx,
             fragment_id,
             upstream_fragment_id,
             info: ExecutorInfo {
@@ -77,7 +72,6 @@ impl MergeExecutor {
                 pk_indices,
                 identity: "MergeExecutor".to_string(),
             },
-            status: OperatorInfoStatus::new(actor_context, receiver_id),
             context,
             metrics,
         }
@@ -90,30 +84,35 @@ impl MergeExecutor {
         Self::new(
             Schema::default(),
             vec![],
-            114,
+            ActorContext::create(233),
             514,
             1919,
             inputs.into_iter().map(LocalInput::for_test).collect(),
             SharedContext::for_test().into(),
-            ActorContext::create(),
             810,
             StreamingMetrics::unused().into(),
         )
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self: Box<Self>) {
+    async fn execute_inner(self: Box<Self>) {
         // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(self.actor_id, self.upstreams);
-        let actor_id_str = self.actor_id.to_string();
+        let select_all = SelectReceivers::new(self.ctx.id, self.upstreams);
+        let actor_id = self.ctx.id;
+        let actor_id_str = actor_id.to_string();
+        let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         // Channels that're blocked by the barrier to align.
+        let mut start_time = minstant::Instant::now();
         pin_mut!(select_all);
         while let Some(msg) = select_all.next().await {
-            let msg: Message = msg?;
-            self.status.next_message(&msg);
+            self.metrics
+                .actor_input_buffer_blocking_duration_ns
+                .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
+                .inc_by(start_time.elapsed().as_nanos() as u64);
+            let mut msg: Message = msg?;
 
-            match &msg {
+            match &mut msg {
                 Message::Chunk(chunk) => {
                     self.metrics
                         .actor_in_record_cnt
@@ -121,7 +120,15 @@ impl MergeExecutor {
                         .inc_by(chunk.cardinality() as _);
                 }
                 Message::Barrier(barrier) => {
-                    if let Some(update) = barrier.as_update_merge(self.actor_id) {
+                    tracing::trace!(
+                        target: "events::barrier::path",
+                        actor_id = actor_id,
+                        "receiver receives barrier from path: {:?}",
+                        barrier.passed_actors
+                    );
+                    barrier.passed_actors.push(actor_id);
+
+                    if let Some(update) = barrier.as_update_merge(self.ctx.id) {
                         // Create new upstreams receivers.
                         let new_upstreams = update
                             .added_upstream_actor_id
@@ -130,7 +137,7 @@ impl MergeExecutor {
                                 new_input(
                                     &self.context,
                                     self.metrics.clone(),
-                                    self.actor_id,
+                                    self.ctx.id,
                                     self.fragment_id,
                                     upstream_actor_id,
                                     self.upstream_fragment_id,
@@ -141,7 +148,7 @@ impl MergeExecutor {
 
                         // Poll the first barrier from the new upstreams. It must be the same as the
                         // one we polled from original upstreams.
-                        let mut select_new = SelectReceivers::new(self.actor_id, new_upstreams);
+                        let mut select_new = SelectReceivers::new(self.ctx.id, new_upstreams);
                         let new_barrier = expect_first_barrier(&mut select_new).await?;
                         assert_eq!(barrier, &new_barrier);
 
@@ -157,6 +164,7 @@ impl MergeExecutor {
             }
 
             yield msg;
+            start_time = minstant::Instant::now();
         }
     }
 }
@@ -409,12 +417,11 @@ mod tests {
         let merge = MergeExecutor::new(
             schema,
             vec![],
-            actor_id,
+            ActorContext::create(actor_id),
             0,
             0,
             inputs,
             ctx.clone(),
-            ActorContext::create(),
             233,
             metrics.clone(),
         )
@@ -458,6 +465,7 @@ mod tests {
         let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
             dispatchers: Default::default(),
             merges: merge_updates,
+            vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
         });
         send!([234, 235], Message::Barrier(b1.clone()));
@@ -525,7 +533,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_stream_exchange_client() {
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));

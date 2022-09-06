@@ -153,25 +153,38 @@ pub fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<(MemoryStateStore, Ta
     returned_vec
 }
 
-pub mod global_simple_agg {
-    /// Infer column desc for state table.
-    /// The column desc layout is
-    /// [ `group_key` (only for hash agg) / `sort_key` (only for extreme) /
-    /// `value`(the agg call return type)].
-    /// This is the Row layout insert into state table.
-    /// For different agg call, different executor (hash agg or simple agg), the layout will be
-    /// different.
-    pub fn generate_column_descs(
+pub mod agg_executor {
+    use itertools::Itertools;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::expr::AggKind;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::streaming_table::state_table::StateTable;
+    use risingwave_storage::StateStore;
+
+    use crate::executor::aggregation::AggCall;
+    use crate::executor::{
+        ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices,
+    };
+
+    /// Create state table for the given agg call.
+    /// Should infer the schema in the same way as `LogicalAgg::infer_internal_table_catalog`.
+    pub fn create_state_table<S: StateStore>(
+        store: S,
+        table_id: TableId,
         agg_call: &AggCall,
         group_key: &[usize],
         pk_indices: &[usize],
-        agg_schema: &Schema,
         input_ref: &dyn Executor,
-    ) -> Vec<ColumnDesc> {
-        let mut column_descs = Vec::with_capacity(group_key.len() + 1);
-        let mut next_column_id = 0;
+    ) -> (StateTable<S>, Vec<usize>) {
+        let input_fields = input_ref.schema().fields();
 
-        // Define a closure for DRY.
+        let mut column_descs = Vec::new();
+        let mut order_types = Vec::new();
+        let mut column_mapping = Vec::new();
+
+        let mut next_column_id = 0;
         let mut add_column_desc = |data_type: DataType| {
             column_descs.push(ColumnDesc::unnamed(
                 ColumnId::new(next_column_id),
@@ -180,78 +193,54 @@ pub mod global_simple_agg {
             next_column_id += 1;
         };
 
-        for (idx, _) in group_key.iter().enumerate() {
-            add_column_desc(agg_schema.fields[idx].data_type.clone());
+        for idx in group_key {
+            add_column_desc(input_fields[*idx].data_type());
+            column_mapping.push(*idx);
+            order_types.push(OrderType::Ascending);
         }
 
-        // For max, min, the table descs should include sort key.
-        // The added columns should be (sort_key, pk from input data).
-        if (agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min) && !agg_call.append_only
-        {
-            // Add value as part of sort key.
-            add_column_desc(agg_call.return_type.clone());
-
-            for pk_idx in pk_indices {
-                add_column_desc(input_ref.schema().fields[*pk_idx].data_type.clone());
-            }
-        } else {
-            // Agg value should also be part of state table.
-            add_column_desc(agg_call.return_type.clone());
-        }
-
-        column_descs
-    }
-
-    /// Generate state table for agg executor.
-    /// it's test only. This is a version of infer compared to
-    /// `LogicalAgg::infer_internal_table_catalog`. Currently do not include append only flag,
-    /// if you add, make sure you consider the relational pk change.
-    pub fn generate_state_table<S: StateStore>(
-        store: S,
-        table_id: TableId,
-        agg_call: &AggCall,
-        group_key: &[usize],
-        pk_indices: &[usize],
-        agg_schema: &Schema,
-        input_ref: &dyn Executor,
-    ) -> RowBasedStateTable<S> {
-        let table_desc =
-            generate_column_descs(agg_call, group_key, pk_indices, agg_schema, input_ref);
-        let relational_pk_len = if agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min {
-            table_desc.len()
-        } else {
-            table_desc.len() - 1
-        };
-
-        RowBasedStateTable::new_without_distribution(
-            store,
-            table_id,
-            table_desc,
-            vec![
-                // Now we only infer order type for min/max in a naive way.
-                if agg_call.kind == AggKind::Max {
+        match agg_call.kind {
+            AggKind::Min | AggKind::Max if !agg_call.append_only => {
+                add_column_desc(agg_call.args.arg_types()[0].clone());
+                column_mapping.push(agg_call.args.val_indices()[0]);
+                order_types.push(if agg_call.kind == AggKind::Max {
                     OrderType::Descending
                 } else {
                     OrderType::Ascending
-                };
-                relational_pk_len
-            ],
-            (0..relational_pk_len).collect(),
-        )
-    }
-    use itertools::Itertools;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::AggKind;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::RowBasedStateTable;
-    use risingwave_storage::StateStore;
+                });
+                for idx in pk_indices {
+                    add_column_desc(input_fields[*idx].data_type());
+                    column_mapping.push(*idx);
+                    order_types.push(OrderType::Ascending);
+                }
+            }
+            AggKind::Min /* append only */
+            | AggKind::Max /* append only */
+            | AggKind::Sum
+            | AggKind::Count
+            | AggKind::Avg
+            | AggKind::SingleValue
+            | AggKind::ApproxCountDistinct => {
+                add_column_desc(agg_call.return_type.clone());
+            }
+            _ => {
+                panic!("no need to mock other agg kinds here");
+            }
+        }
 
-    use crate::executor::aggregation::{generate_agg_schema, AggCall};
-    use crate::executor::{BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices};
+        let state_table = StateTable::new_without_distribution(
+            store,
+            table_id,
+            column_descs,
+            order_types.clone(),
+            (0..order_types.len()).collect(),
+        );
+
+        (state_table, column_mapping)
+    }
 
     pub fn new_boxed_simple_agg_executor(
+        ctx: ActorContextRef,
         keyspace_gen: Vec<(MemoryStateStore, TableId)>,
         input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
@@ -259,27 +248,24 @@ pub mod global_simple_agg {
         executor_id: u64,
         key_indices: Vec<usize>,
     ) -> Box<dyn Executor> {
-        let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
-        let state_tables: Vec<_> = keyspace_gen
+        let (state_tables, state_table_col_mappings) = keyspace_gen
             .iter()
             .zip_eq(agg_calls.iter())
             .map(|(ks, agg_call)| {
-                generate_state_table(
+                create_state_table(
                     ks.0.clone(),
                     ks.1,
                     agg_call,
                     &key_indices,
                     &pk_indices,
-                    &agg_schema,
                     input.as_ref(),
                 )
             })
-            .collect();
-        // TODO(yuchao): We are not using col_mappings in agg calls generated in unittest,
-        // so it's ok to fake it. Later we should generate real column mapping for state tables.
-        let state_table_col_mappings = (0..state_tables.len()).map(|_| vec![]).collect();
+            .unzip();
+
         Box::new(
             GlobalSimpleAggExecutor::new(
+                ctx,
                 input,
                 agg_calls,
                 pk_indices,
@@ -288,6 +274,34 @@ pub mod global_simple_agg {
                 state_table_col_mappings,
             )
             .unwrap(),
+        )
+    }
+}
+
+pub mod top_n_executor {
+    use itertools::Itertools;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::streaming_table::state_table::StateTable;
+
+    pub fn create_in_memory_state_table(
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+    ) -> StateTable<MemoryStateStore> {
+        let column_descs = data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
+            .collect_vec();
+        StateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            TableId::new(0),
+            column_descs,
+            order_types.to_vec(),
+            pk_indices.to_vec(),
         )
     }
 }

@@ -15,12 +15,12 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::RequiredDist;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Streaming local simple agg.
 /// Should only be used for stateless agg, including sum, count and append-only min/max.
@@ -35,7 +35,7 @@ pub struct StreamLocalSimpleAgg {
 impl StreamLocalSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.pk_indices.to_vec();
+        let pk_indices = logical.base.logical_pk.to_vec();
         let input = logical.input();
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
@@ -44,6 +44,7 @@ impl StreamLocalSimpleAgg {
             ctx,
             logical.schema().clone(),
             pk_indices,
+            logical.functional_dependency().clone(),
             input_dist.clone(),
             input.append_only(),
         );
@@ -73,10 +74,9 @@ impl PlanTreeNodeUnary for StreamLocalSimpleAgg {
 }
 impl_plan_tree_node_for_unary! { StreamLocalSimpleAgg }
 
-impl ToStreamProst for StreamLocalSimpleAgg {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamLocalSimpleAgg {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let (internal_tables, column_mappings) = self.logical.infer_internal_table_catalog();
         ProstStreamNode::LocalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
@@ -90,21 +90,8 @@ impl ToStreamProst for StreamLocalSimpleAgg {
                 .iter()
                 .map(|idx| *idx as u32)
                 .collect_vec(),
-            internal_tables: internal_tables
-                .into_iter()
-                .map(|table_catalog| {
-                    table_catalog.to_prost(
-                        SchemaId::placeholder() as u32,
-                        DatabaseId::placeholder() as u32,
-                    )
-                })
-                .collect_vec(),
-            column_mappings: column_mappings
-                .into_iter()
-                .map(|v| ColumnMapping {
-                    indices: v.iter().map(|x| *x as u32).collect(),
-                })
-                .collect(),
+            internal_tables: Vec::new(), // `LocalSimpleAgg` is stateless, so no internal tables.
+            column_mappings: Vec::new(), // no state tables, so no column mappings.
             is_append_only: self.input().append_only(),
         })
     }

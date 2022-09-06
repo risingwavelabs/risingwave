@@ -127,7 +127,7 @@
   let currentMvs = new Set
   let showAssociateMv = false
 
-  const types = new Set(["dynamicFilter", "source", "sink", "project", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin"]);
+  const types = new Set(["dynamicFilter", "source", "sink", "project", "projectSet", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin", "expand"]);
 
   const cluster = (type, cluster) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
@@ -532,11 +532,11 @@
     $(`#actor-wrapper-${nodeId}`).css("height", `${gHeight / 16}rem`)
   }
 
-  fetch('/api/clusters/0')
+  fetch('/api/clusters/1')
     .then(response => response.json())
     .then(data => data.forEach(
       data => $("#clusters").append(cluster("Frontend", data))))
-  fetch('/api/clusters/1')
+  fetch('/api/clusters/2')
     .then(response => response.json())
     .then(data => data.forEach(
       data => $("#clusters").append(cluster("Compute Node", data))))

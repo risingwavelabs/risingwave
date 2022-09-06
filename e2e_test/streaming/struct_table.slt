@@ -64,3 +64,21 @@ drop materialized view mv1;
 statement ok
 drop table st;
 
+# More tests to ensure `>>` in struct types can be parsed correctly
+statement ok
+create table t(v2 struct<v1 int, v2 struct<v1 int, v2 int>>, v1 int);
+
+statement ok
+drop table t;
+
+statement ok
+create table t(v2 struct<v1 int, v2 struct<v1 int, v2 struct <v1 int, v2 int>>>, v1 int);
+
+statement ok
+drop table t;
+
+statement ok
+create table t(v2 struct<v1 int, v2 struct<v1 int, v2 struct <v1 int, v2 int>>, v3 int>, v1 int);
+
+statement ok
+drop table t;

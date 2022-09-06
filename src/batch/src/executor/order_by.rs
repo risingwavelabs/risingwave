@@ -12,184 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-use std::iter::Iterator;
-use std::sync::Arc;
-use std::vec::Vec;
-
-use anyhow::anyhow;
-use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
-use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
-use risingwave_common::util::sort_util::{compare_rows_in_chunk, HeapElem, OrderPair};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::encoding_for_comparison::encode_chunk;
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::error::BatchError;
-use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-};
+use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
+
+/// Order By Executor
+///
+/// High-level idea:
+/// 1. Load data chunks from child executor
+/// 2. Serialize each row into memcomparable format
+/// 3. Sort the serialized rows by quicksort
+/// 4. Build and yield data chunks according to the row order
 pub struct OrderByExecutor {
-    child: Option<BoxedExecutor>,
-    sorted_indices: Vec<Vec<usize>>,
-    chunks: Vec<DataChunk>,
-    vis_indices: Vec<usize>,
-    min_heap: BinaryHeap<HeapElem>,
-    order_pairs: Arc<Vec<OrderPair>>,
-    encoded_keys: Vec<Arc<Vec<Vec<u8>>>>,
-    encodable: bool,
-    disable_encoding: bool,
+    child: BoxedExecutor,
+    order_pairs: Vec<OrderPair>,
     identity: String,
-    chunk_size: usize,
     schema: Schema,
-}
-
-#[expect(clippy::too_many_arguments)]
-impl OrderByExecutor {
-    pub fn new(
-        child: BoxedExecutor,
-        sorted_indices: Vec<Vec<usize>>,
-        chunks: Vec<DataChunk>,
-        vis_indices: Vec<usize>,
-        min_heap: BinaryHeap<HeapElem>,
-        order_pairs: Arc<Vec<OrderPair>>,
-        encoded_keys: Vec<Arc<Vec<Vec<u8>>>>,
-        encodable: bool,
-        disable_encoding: bool,
-        identity: String,
-        chunk_size: usize,
-    ) -> Self {
-        let schema = child.schema().clone();
-        Self {
-            child: Some(child),
-            sorted_indices,
-            chunks,
-            vis_indices,
-            min_heap,
-            order_pairs,
-            encoded_keys,
-            encodable,
-            disable_encoding,
-            identity,
-            chunk_size,
-            schema,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl BoxedExecutorBuilder for OrderByExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
-    ) -> Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 1,
-            "OrderByExecutor should have only 1 child!"
-        );
-
-        let order_by_node = try_match_expand!(
-            source.plan_node().get_node_body().unwrap(),
-            NodeBody::OrderBy
-        )?;
-
-        let order_pairs = order_by_node
-            .column_orders
-            .iter()
-            .map(OrderPair::from_prost)
-            .collect();
-        Ok(Box::new(OrderByExecutor::new(
-            inputs.remove(0),
-            vec![],
-            vec![],
-            vec![],
-            BinaryHeap::new(),
-            Arc::new(order_pairs),
-            vec![],
-            false,
-            false,
-            source.plan_node().get_identity().clone(),
-            DEFAULT_CHUNK_BUFFER_SIZE,
-        )))
-    }
-}
-
-impl OrderByExecutor {
-    fn push_heap_for_chunk(&mut self, idx: usize) {
-        while self.vis_indices[idx] < self.chunks[idx].capacity() {
-            let skip: bool = match self.chunks[idx].visibility() {
-                Some(visibility) => visibility
-                    .is_set(self.sorted_indices[idx][self.vis_indices[idx]])
-                    .map(|b| !b)
-                    .unwrap_or(false),
-                None => false,
-            };
-            if !skip {
-                let elem_idx = self.sorted_indices[idx][self.vis_indices[idx]];
-                let elem = HeapElem {
-                    order_pairs: self.order_pairs.clone(),
-                    chunk: self.chunks[idx].clone(),
-                    chunk_idx: idx,
-                    elem_idx,
-                    encoded_chunk: if self.encodable && !self.disable_encoding {
-                        Some(self.encoded_keys[idx].clone())
-                    } else {
-                        None
-                    },
-                };
-                self.min_heap.push(elem);
-                self.vis_indices[idx] += 1;
-                break;
-            }
-            self.vis_indices[idx] += 1;
-        }
-    }
-
-    fn get_order_index_from(&self, idx: usize) -> Vec<usize> {
-        let mut index: Vec<usize> = (0..self.chunks[idx].capacity()).collect();
-        index.sort_by(|ia, ib| {
-            if self.disable_encoding || !self.encodable {
-                compare_rows_in_chunk(
-                    &self.chunks[idx],
-                    *ia,
-                    &self.chunks[idx],
-                    *ib,
-                    self.order_pairs.as_ref(),
-                )
-                .unwrap_or(Ordering::Equal)
-            } else {
-                let lhs_key = self.encoded_keys[idx][*ia].as_slice();
-                let rhs_key = self.encoded_keys[idx][*ib].as_slice();
-                lhs_key.cmp(rhs_key)
-            }
-        });
-        index
-    }
-
-    async fn collect_child_data(&mut self) -> Result<()> {
-        let mut stream = self.child.take().unwrap().execute();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            if !self.disable_encoding && self.encodable {
-                self.encoded_keys
-                    .push(Arc::new(encode_chunk(&chunk, &self.order_pairs)));
-            }
-            self.chunks.push(chunk);
-            self.sorted_indices
-                .push(self.get_order_index_from(self.chunks.len() - 1));
-        }
-        self.vis_indices = vec![0usize; self.chunks.len()];
-        for idx in 0..self.chunks.len() {
-            self.push_heap_for_chunk(idx);
-        }
-        Ok(())
-    }
 }
 
 impl Executor for OrderByExecutor {
@@ -206,69 +52,76 @@ impl Executor for OrderByExecutor {
     }
 }
 
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for OrderByExecutor {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+        inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        let [child]: [_; 1] = inputs.try_into().unwrap();
+
+        let order_by_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::OrderBy
+        )?;
+
+        let order_pairs = order_by_node
+            .column_orders
+            .iter()
+            .map(OrderPair::from_prost)
+            .collect();
+        Ok(Box::new(OrderByExecutor::new(
+            child,
+            order_pairs,
+            source.plan_node().get_identity().clone(),
+        )))
+    }
+}
+
 impl OrderByExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
-        if !self.disable_encoding {
-            let schema = self.schema();
-            self.encodable = self
-                .order_pairs
-                .iter()
-                .map(|pair| schema.fields[pair.column_idx].data_type.clone())
-                .all(is_type_encodable)
+    async fn do_execute(self: Box<Self>) {
+        let mut chunk_builder = DataChunkBuilder::with_default_size(self.schema.data_types());
+        let mut chunks = Vec::new();
+        let mut encoded_rows = Vec::new();
+
+        #[for_await]
+        for chunk in self.child.execute() {
+            chunks.push(chunk?.compact()?);
         }
 
-        self.collect_child_data().await?;
+        for chunk in &chunks {
+            let encoded_chunk = encode_chunk(chunk, &self.order_pairs);
+            encoded_rows.extend(
+                encoded_chunk
+                    .into_iter()
+                    .enumerate()
+                    .map(|(row_id, row)| (chunk.row_at_unchecked_vis(row_id), row)),
+            );
+        }
 
-        loop {
-            let mut array_builders = self.schema().create_array_builders(self.chunk_size);
+        encoded_rows.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
 
-            let mut chunk_size = 0usize;
-            while !self.min_heap.is_empty() && chunk_size < self.chunk_size {
-                let top = self.min_heap.pop().unwrap();
-                for (idx, builder) in array_builders.iter_mut().enumerate() {
-                    let chunk_arr = self.chunks[top.chunk_idx].column_at(idx).array();
-                    let chunk_arr = chunk_arr.as_ref();
-                    macro_rules! gen_match {
-                        ($b: ident, $a: ident, [$( $tt: ident), *]) => {
-                            match ($b, $a) {
-                                $((ArrayBuilderImpl::$tt($b), ArrayImpl::$tt($a)) => Ok($b.append($a.value_at(top.elem_idx))),)*
-                                _ => Err(BatchError::Internal(anyhow!("Unmatched array and array builder types"))),
-                            }?
-                        }
-                    }
-                    let _ = gen_match!(
-                        builder,
-                        chunk_arr,
-                        [
-                            Int16,
-                            Int32,
-                            Int64,
-                            Float32,
-                            Float64,
-                            Utf8,
-                            Bool,
-                            Decimal,
-                            Interval,
-                            NaiveDate,
-                            NaiveTime,
-                            NaiveDateTime,
-                            Struct
-                        ]
-                    );
-                }
-                chunk_size += 1;
-                self.push_heap_for_chunk(top.chunk_idx);
+        for (row, _) in encoded_rows {
+            if let Some(spilled) = chunk_builder.append_one_row_ref(row)? {
+                yield spilled
             }
-            if chunk_size == 0 {
-                break;
-            }
-            let columns = array_builders
-                .into_iter()
-                .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
-                .collect::<Result<Vec<_>>>()?;
-            let chunk = DataChunk::new(columns, chunk_size);
-            yield chunk
+        }
+
+        if let Some(spilled) = chunk_builder.consume_all()? {
+            yield spilled
+        }
+    }
+}
+
+impl OrderByExecutor {
+    pub fn new(child: BoxedExecutor, order_pairs: Vec<OrderPair>, identity: String) -> Self {
+        let schema = child.schema().clone();
+        Self {
+            child,
+            order_pairs,
+            identity,
+            schema,
         }
     }
 }
@@ -277,10 +130,15 @@ impl OrderByExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::array::DataChunk;
+    use futures::StreamExt;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{
+        DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+        OrderedF32, Scalar,
+    };
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -314,16 +172,8 @@ mod tests {
 
         let order_by_executor = Box::new(OrderByExecutor::new(
             Box::new(mock_executor),
-            vec![],
-            vec![],
-            vec![],
-            BinaryHeap::new(),
-            Arc::new(order_pairs),
-            vec![],
-            false,
-            false,
+            order_pairs,
             "OrderByExecutor2".to_string(),
-            DEFAULT_CHUNK_BUFFER_SIZE,
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
@@ -370,16 +220,8 @@ mod tests {
         ];
         let order_by_executor = Box::new(OrderByExecutor::new(
             Box::new(mock_executor),
-            vec![],
-            vec![],
-            vec![],
-            BinaryHeap::new(),
-            Arc::new(order_pairs),
-            vec![],
-            false,
-            false,
+            order_pairs,
             "OrderByExecutor2".to_string(),
-            DEFAULT_CHUNK_BUFFER_SIZE,
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Float32);
@@ -426,16 +268,8 @@ mod tests {
         ];
         let order_by_executor = Box::new(OrderByExecutor::new(
             Box::new(mock_executor),
-            vec![],
-            vec![],
-            vec![],
-            BinaryHeap::new(),
-            Arc::new(order_pairs),
-            vec![],
-            false,
-            false,
+            order_pairs,
             "OrderByExecutor2".to_string(),
-            DEFAULT_CHUNK_BUFFER_SIZE,
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Varchar);
@@ -453,100 +287,436 @@ mod tests {
         }
     }
 
-    // TODO: enable benches
+    // TODO: write following tests in a more concise way
+    #[tokio::test]
+    async fn test_encoding_for_boolean_int32_float64() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Boolean),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Float64),
+            ],
+        };
+        // f   3    .
+        // t   3    .
+        // .   .    3.5
+        // .   .    -4.3
+        // .   .    .
+        let input_chunk = DataChunk::new(
+            vec![
+                column! { BoolArray, [Some(false), Some(true), None, None, None] },
+                column! { I32Array, [Some(3), Some(3), None, None, None] },
+                column! { F64Array, [None, None, Some(3.5), Some(-4.3), None] },
+            ],
+            5,
+        );
+        // .   .   -4.3
+        // .   .   3.5
+        // .   .   .
+        // f   3   .
+        // t   3   .
+        let output_chunk = DataChunk::new(
+            vec![
+                column! { BoolArray, [None, None, None, Some(false), Some(true)] },
+                column! { I32Array, [None, None, None, Some(3), Some(3)] },
+                column! { F64Array, [Some(-4.3), Some(3.5), None, None, None] },
+            ],
+            5,
+        );
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(input_chunk);
+        let order_pairs = vec![
+            OrderPair {
+                column_idx: 2,
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                column_idx: 1,
+                order_type: OrderType::Descending,
+            },
+            OrderPair {
+                column_idx: 0,
+                order_type: OrderType::Ascending,
+            },
+        ];
+        let order_by_executor = Box::new(OrderByExecutor::new(
+            Box::new(mock_executor),
+            order_pairs,
+            "OrderByExecutor".to_string(),
+        ));
 
-    // fn benchmark_1e4(b: &mut Bencher, enable_encoding: bool) {
-    //     // gen random vec for i16 float bool and str
-    //     let scale = 10000;
-    //     let width = 10;
-    //     let int_vec: Vec<Option<i16>> = rand::thread_rng()
-    //         .sample_iter(Standard)
-    //         .take(scale)
-    //         .map(Some)
-    //         .collect_vec();
-    //     let bool_vec: Vec<Option<bool>> = rand::thread_rng()
-    //         .sample_iter(Standard)
-    //         .take(scale)
-    //         .map(Some)
-    //         .collect_vec();
-    //     let float_vec: Vec<Option<f32>> = rand::thread_rng()
-    //         .sample_iter(Standard)
-    //         .take(scale)
-    //         .map(Some)
-    //         .collect_vec();
-    //     let mut str_vec = Vec::<Option<String>>::new();
-    //     for _ in 0..scale {
-    //         let len = rand::thread_rng().sample(Uniform::<usize>::new(1, width));
-    //         let s: String = rand::thread_rng()
-    //             .sample_iter(&Alphanumeric)
-    //             .take(len)
-    //             .map(char::from)
-    //             .collect();
-    //         str_vec.push(Some(s));
-    //     }
-    //     b.iter(|| {
-    //         let col0 = create_column_i16(int_vec.as_slice()).unwrap();
-    //         let col1 = create_column_bool(bool_vec.as_slice()).unwrap();
-    //         let col2 = create_column_f32(float_vec.as_slice()).unwrap();
-    //         let col3 = create_column_string(str_vec.as_slice()).unwrap();
-    //         let data_chunk = DataChunk::builder()
-    //             .columns([col0, col1, col2, col3].to_vec())
-    //             .build();
-    //         let schema = Schema {
-    //             fields: vec![
-    //                 Field::unnamed(DataType::Int16),
-    //                 Field::unnamed(DataType::Boolean),
-    //                 Field::unnamed(DataType::Float32),
-    //                 Field::unnamed(DataType::Varchar),
-    //             ],
-    //         };
-    //         let mut mock_executor = MockExecutor::new(schema);
-    //         mock_executor.add(data_chunk);
-    //         let order_pairs = vec![
-    //             OrderPair {
-    //                 column_idx: 1,
-    //                 order_type: OrderType::Ascending,
-    //             },
-    //             OrderPair {
-    //                 column_idx: 0,
-    //                 order_type: OrderType::Descending,
-    //             },
-    //             OrderPair {
-    //                 column_idx: 3,
-    //                 order_type: OrderType::Descending,
-    //             },
-    //             OrderPair {
-    //                 column_idx: 2,
-    //                 order_type: OrderType::Ascending,
-    //             },
-    //         ];
-    //         let mut order_by_executor = OrderByExecutor {
-    //             order_pairs: Arc::new(order_pairs),
-    //             child: Box::new(mock_executor),
-    //             vis_indices: vec![],
-    //             chunks: vec![],
-    //             sorted_indices: vec![],
-    //             min_heap: BinaryHeap::new(),
-    //             encoded_keys: vec![],
-    //             encodable: false,
-    //             disable_encoding: !enable_encoding,
-    //             identity: "OrderByExecutor".to_string(),
-    //         };
-    //         let future = order_by_executor.open();
-    //         tokio_test::block_on(future).unwrap();
-    //         let future = order_by_executor.next();
-    //         let res = tokio_test::block_on(future).unwrap();
-    //         assert!(matches!(res, Some(_)));
-    //     });
-    // }
+        let mut stream = order_by_executor.execute();
+        let res = stream.next().await;
+        assert_eq!(res.unwrap().unwrap(), output_chunk)
+    }
 
-    // #[bench]
-    // fn benchmark_bsc_1e4(b: &mut Bencher) {
-    //     benchmark_1e4(b, true);
-    // }
+    #[tokio::test]
+    async fn test_encoding_for_decimal_date_varchar() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Varchar),
+                Field::unnamed(DataType::Decimal),
+                Field::unnamed(DataType::Date),
+            ],
+        };
+        // abc       .     123
+        // b         -3    789
+        // abc       .     456
+        // abcdefgh  .     .
+        // b         7     345
+        let input_chunk = DataChunk::new(
+            vec![
+                column! { Utf8Array, [Some("abc"), Some("b"), Some("abc"), Some("abcdefgh"), Some("b")] },
+                column! { DecimalArray, [None, Some(-3), None, None, Some(7)] },
+                column! { NaiveDateArray, [
+                Some(NaiveDateWrapper::with_days(123).unwrap()),
+                Some(NaiveDateWrapper::with_days(789).unwrap()),
+                Some(NaiveDateWrapper::with_days(456).unwrap()),
+                None,
+                Some(NaiveDateWrapper::with_days(345).unwrap())] },
+            ],
+            5,
+        );
+        // b         7     345
+        // b         -3    789
+        // abcdefgh  .     .
+        // abc       .     123
+        // abc       .     456
+        let output_chunk = DataChunk::new(
+            vec![
+                column! { Utf8Array, [Some("b"), Some("b"), Some("abcdefgh"), Some("abc"), Some("abc")] },
+                column! { DecimalArray, [Some(7), Some(-3), None, None, None] },
+                column! { NaiveDateArray, [
+                Some(NaiveDateWrapper::with_days(345).unwrap()),
+                Some(NaiveDateWrapper::with_days(789).unwrap()),
+                None,
+                Some(NaiveDateWrapper::with_days(123).unwrap()),
+                Some(NaiveDateWrapper::with_days(456).unwrap())] },
+            ],
+            5,
+        );
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(input_chunk);
+        let order_pairs = vec![
+            OrderPair {
+                column_idx: 0,
+                order_type: OrderType::Descending,
+            },
+            OrderPair {
+                column_idx: 1,
+                order_type: OrderType::Descending,
+            },
+            OrderPair {
+                column_idx: 2,
+                order_type: OrderType::Ascending,
+            },
+        ];
+        let order_by_executor = Box::new(OrderByExecutor::new(
+            Box::new(mock_executor),
+            order_pairs,
+            "OrderByExecutor".to_string(),
+        ));
 
-    // #[bench]
-    // fn benchmark_baseline_1e4(b: &mut Bencher) {
-    //     benchmark_1e4(b, false);
-    // }
+        let mut stream = order_by_executor.execute();
+        let res = stream.next().await;
+        assert_eq!(res.unwrap().unwrap(), output_chunk)
+    }
+
+    #[tokio::test]
+    async fn test_encoding_for_time_timestamp_interval() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Time),
+                Field::unnamed(DataType::Timestamp),
+                Field::unnamed(DataType::Interval),
+            ],
+        };
+        // .     1:23  .
+        // 4:56  4:56  1:2:3
+        // .     7:89  .
+        // 4:56  4:56  4:5:6
+        // 7:89  .     .
+        let input_chunk = DataChunk::new(
+            vec![
+                column! { NaiveTimeArray, [
+                None,
+                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
+                None,
+                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
+                Some(NaiveTimeWrapper::with_secs_nano(7, 89).unwrap())] },
+                column! { NaiveDateTimeArray, [
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap()),
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                None] },
+                column! { IntervalArray, [
+                None,
+                Some(IntervalUnit::new(1, 2, 3)),
+                None,
+                Some(IntervalUnit::new(4, 5, 6)),
+                None] },
+            ],
+            5,
+        );
+        // 4:56  4:56  4:5:6
+        // 4:56  4:56  1:2:3
+        // 7:89  .     .
+        // .     1:23  .
+        // .     7:89  .
+        let output_chunk = DataChunk::new(
+            vec![
+                column! { NaiveTimeArray, [
+                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
+                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
+                Some(NaiveTimeWrapper::with_secs_nano(7, 89).unwrap()),
+                None,
+                None] },
+                column! { NaiveDateTimeArray, [
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                None,
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap())] },
+                column! { IntervalArray, [
+                Some(IntervalUnit::new(4, 5, 6)),
+                Some(IntervalUnit::new(1, 2, 3)),
+                None,
+                None,
+                None] },
+            ],
+            5,
+        );
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(input_chunk);
+        let order_pairs = vec![
+            OrderPair {
+                column_idx: 0,
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                column_idx: 1,
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                column_idx: 2,
+                order_type: OrderType::Descending,
+            },
+        ];
+        let order_by_executor = Box::new(OrderByExecutor::new(
+            Box::new(mock_executor),
+            order_pairs,
+            "OrderByExecutor".to_string(),
+        ));
+
+        let mut stream = order_by_executor.execute();
+        let res = stream.next().await;
+        assert_eq!(res.unwrap().unwrap(), output_chunk)
+    }
+
+    #[tokio::test]
+    async fn test_encoding_for_struct_list() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::new_struct(
+                    vec![DataType::Varchar, DataType::Float32],
+                    vec![],
+                )),
+                Field::unnamed(DataType::List {
+                    datatype: Box::new(DataType::Int64),
+                }),
+            ],
+        };
+        let mut struct_builder = StructArrayBuilder::with_meta(
+            0,
+            ArrayMeta::Struct {
+                children: Arc::new([DataType::Varchar, DataType::Float32]),
+            },
+        );
+        let mut list_builder = ListArrayBuilder::with_meta(
+            0,
+            ArrayMeta::List {
+                datatype: Box::new(DataType::Int64),
+            },
+        );
+        // {abcd, -1.2}   .
+        // {c, 0}         [1, ., 3]
+        // {c, .}         .
+        // {c, 0}         [2]
+        // {., 3.4}       .
+        let input_chunk = DataChunk::new(
+            vec![
+                Column::new(Arc::new({
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("abcd".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(-1.2).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(0.0).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                None,
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(0.0).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                None,
+                                Some(OrderedF32::from(3.4).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder.finish().unwrap().into()
+                })),
+                Column::new(Arc::new({
+                    list_builder.append(None).unwrap();
+                    list_builder
+                        .append(Some(ListRef::ValueRef {
+                            val: &ListValue::new(vec![
+                                Some(1i64.to_scalar_value()),
+                                None,
+                                Some(3i64.to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    list_builder.append(None).unwrap();
+                    list_builder
+                        .append(Some(ListRef::ValueRef {
+                            val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
+                        }))
+                        .unwrap();
+                    list_builder.append(None).unwrap();
+                    list_builder.finish().unwrap().into()
+                })),
+            ],
+            5,
+        );
+        let mut struct_builder = StructArrayBuilder::with_meta(
+            0,
+            ArrayMeta::Struct {
+                children: Arc::new([DataType::Varchar, DataType::Float32]),
+            },
+        );
+        let mut list_builder = ListArrayBuilder::with_meta(
+            0,
+            ArrayMeta::List {
+                datatype: Box::new(DataType::Int64),
+            },
+        );
+        // {abcd, -1.2}   .
+        // {c, 0}         [2]
+        // {c, 0}         [1, ., 3]
+        // {c, .}         .
+        // {., 3.4}       .
+        let output_chunk = DataChunk::new(
+            vec![
+                Column::new(Arc::new({
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("abcd".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(-1.2).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(0.0).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(0.0).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                None,
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                None,
+                                Some(OrderedF32::from(3.4).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder.finish().unwrap().into()
+                })),
+                Column::new(Arc::new({
+                    list_builder.append(None).unwrap();
+                    list_builder
+                        .append(Some(ListRef::ValueRef {
+                            val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
+                        }))
+                        .unwrap();
+                    list_builder
+                        .append(Some(ListRef::ValueRef {
+                            val: &ListValue::new(vec![
+                                Some(1i64.to_scalar_value()),
+                                None,
+                                Some(3i64.to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    list_builder.append(None).unwrap();
+                    list_builder.append(None).unwrap();
+                    list_builder.finish().unwrap().into()
+                })),
+            ],
+            5,
+        );
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(input_chunk);
+        let order_pairs = vec![
+            OrderPair {
+                column_idx: 0,
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                column_idx: 1,
+                order_type: OrderType::Descending,
+            },
+        ];
+        let order_by_executor = Box::new(OrderByExecutor::new(
+            Box::new(mock_executor),
+            order_pairs,
+            "OrderByExecutor".to_string(),
+        ));
+
+        let mut stream = order_by_executor.execute();
+        let res = stream.next().await;
+        assert_eq!(res.unwrap().unwrap(), output_chunk)
+    }
 }

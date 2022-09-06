@@ -26,8 +26,9 @@ In root directory, simply run:
 The default scene contains a MinIO, compute-node, meta-node and a frontend. RiseDev will automatically download and configure those services for you.
 
 RiseDev also provides several other modes:
-- ci-3cn-1fe: 3 compute node + meta node + frontend + MinIO
-- ci-1cn-1fe: 1 compute node + meta node + frontend + MinIO
+- ci-3cn-1fe: 3 compute node + meta node + 1 frontend + MinIO
+- ci-3cn-3fe: 3 compute node + meta node + 3 frontend + MinIO
+- ci-1cn-1fe: 1 compute node + meta node + 1 frontend + MinIO
 - dev-compute-node: 1 compute-node (user managed) + MinIO + prometheus + meta + frontend
 
 #### Debug compute node
@@ -44,7 +45,7 @@ And you will see:
 ✅ tmux: session risedev
 ✅ minio: api http://127.0.0.1:9301/, console http://127.0.0.1:9400/
 .. compute-node-5688: waiting for user-managed service online... (you should start it!)
-.. playground: starting 5 services for dev-compute-node...
+.. dev cluster: starting 5 services for dev-compute-node...
 ```
 
 Then, you need simply start compute-node by yourself -- either in command line by cargo run or use debuggers such as CLion to start this component.
@@ -69,7 +70,7 @@ risedev:
     - use: frontend
 ```
 
-The RiseDev playground will start these 5 services in sequence. The service type is set with `use`. `port: 5687` overrides the default config for compute-node.
+The RiseDev development cluster will start these 5 services in sequence. The service type is set with `use`. `port: 5687` overrides the default config for compute-node.
 If you don't want one service, or want them to start in different order, simply remove or switch them. For example, if we only need two compute nodes:
 
 ```yaml
@@ -120,11 +121,11 @@ This environment file will then be read by cargo-make, which decides whether or 
 ```
 
 As `ENABLE_PROMETHEUS_GRAFANA` is not set, download-grafana step is skipped.
-All steps for downloading components, copying config, and building RisingWave are described as cargo-make's toml config. See `risedev/*.toml` and `Makefile.toml` for more information.
+All steps for downloading components, copying config, and building RisingWave are described as cargo-make's toml config. See `risedevtool/*.toml` and `Makefile.toml` for more information.
 
 ### Config Expander
 
-`risedev.yml` is powerful yet simple. If you want to make changes to the configuration format, you may need to understand how it works. Source code is in `risedev/src/config`.
+`risedev.yml` is powerful yet simple. If you want to make changes to the configuration format, you may need to understand how it works. Source code is in `risedevtool/src/config`.
 
 #### Template Expanding
 
@@ -266,7 +267,7 @@ This expanded config will serve as a base config for the following config genera
 
 ### Config Generator
 
-RiseDev will generate config of each service using modules in risedev/src/config_gen. Given the above frontend meta-config, the server.properties will be generated (`risingwave.leader.computenodes` is no longer used):
+RiseDev will generate config of each service using modules in risedevtool/src/config_gen. Given the above frontend meta-config, the server.properties will be generated (`risingwave.leader.computenodes` is no longer used):
 
 ```apache
 risingwave.pgserver.ip=127.0.0.1
@@ -280,6 +281,6 @@ risingwave.meta.node=127.0.0.1:5690
 
 ### RiseDev Service
 
-The RiseDev playground will read the config and start all the services in sequence. The tasks will be started in tmux. All commands run by playground can be found in `risedev.log` in `.risingwave/log`. After starting each service, it will check liveness and return code of the program, so as to ensure a service is running.
+The RiseDev development cluster will read the config and start all the services in sequence. The tasks will be started in tmux. All commands run by RiseDev can be found in `risedev.log` in `.risingwave/log`. After starting each service, it will check liveness and return code of the program, so as to ensure a service is running.
 
 These components conclude the internal implementation of RiseDev.

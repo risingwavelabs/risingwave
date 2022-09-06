@@ -13,6 +13,9 @@
 // limitations under the License.
 
 use std::hash::{BuildHasher, Hash};
+use std::marker::PhantomData;
+
+use risingwave_common::cache::CacheableEntry;
 
 pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;
 
@@ -40,7 +43,7 @@ where
     K: TieredCacheKey,
     V: TieredCacheValue,
 {
-    Cache(CachableEntry<K, V>),
+    Cache(CacheableEntry<K, V>),
     Owned(Box<V>),
 }
 
@@ -58,7 +61,7 @@ where
     K: TieredCacheKey,
     V: TieredCacheValue,
 {
-    pub fn from_cached_value(entry: CachableEntry<K, V>) -> Self {
+    pub fn from_cached_value(entry: CacheableEntry<K, V>) -> Self {
         let ptr = entry.value() as *const _;
         Self {
             handle: TieredCacheEntry::Cache(entry),
@@ -100,9 +103,8 @@ where
     }
 }
 
-use std::marker::PhantomData;
-
-use risingwave_common::cache::CachableEntry;
+unsafe impl<K: TieredCacheKey, V: TieredCacheValue> Send for TieredCacheEntryHolder<K, V> {}
+unsafe impl<K: TieredCacheKey, V: TieredCacheValue> Sync for TieredCacheEntryHolder<K, V> {}
 
 #[cfg(target_os = "linux")]
 pub use super::file_cache;
@@ -116,10 +118,21 @@ pub enum TieredCacheError {
 
 pub type Result<T> = core::result::Result<T, TieredCacheError>;
 
-pub enum TieredCacheOptions {
-    NoneCache,
+pub struct TieredCacheMetricsBuilder(Option<prometheus::Registry>);
+
+impl TieredCacheMetricsBuilder {
+    pub fn new(registry: prometheus::Registry) -> Self {
+        Self(Some(registry))
+    }
+
+    pub fn unused() -> Self {
+        Self(None)
+    }
+
     #[cfg(target_os = "linux")]
-    FileCache(file_cache::cache::FileCacheOptions),
+    pub fn file(self) -> file_cache::metrics::FileCacheMetrics {
+        file_cache::metrics::FileCacheMetrics::new(self.0.unwrap())
+    }
 }
 
 pub enum TieredCache<K, V>
@@ -151,16 +164,17 @@ where
     K: TieredCacheKey,
     V: TieredCacheValue,
 {
-    #[allow(clippy::unused_async)]
-    pub async fn open(options: TieredCacheOptions) -> Result<Self> {
-        match options {
-            TieredCacheOptions::NoneCache => Ok(Self::NoneCache(PhantomData::default())),
-            #[cfg(target_os = "linux")]
-            TieredCacheOptions::FileCache(options) => {
-                let file_cache = file_cache::cache::FileCache::open(options).await?;
-                Ok(Self::FileCache(file_cache))
-            }
-        }
+    pub fn none() -> Self {
+        Self::NoneCache(PhantomData::default())
+    }
+
+    #[cfg(target_os = "linux")]
+    pub async fn file(
+        options: file_cache::cache::FileCacheOptions,
+        metrics: file_cache::metrics::FileCacheMetricsRef,
+    ) -> Result<Self> {
+        let cache = file_cache::cache::FileCache::open(options, metrics).await?;
+        Ok(Self::FileCache(cache))
     }
 
     #[allow(unused_variables)]

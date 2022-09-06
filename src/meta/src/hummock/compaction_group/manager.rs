@@ -72,6 +72,16 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .collect_vec()
     }
 
+    pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
+        self.inner
+            .read()
+            .await
+            .compaction_groups
+            .values()
+            .map(|cg| cg.group_id)
+            .collect_vec()
+    }
+
     pub async fn compaction_group(&self, id: CompactionGroupId) -> Option<CompactionGroup> {
         self.inner.read().await.compaction_groups.get(&id).cloned()
     }
@@ -108,15 +118,13 @@ impl<S: MetaStore> CompactionGroupManager<S> {
 
     /// Unregisters `table_fragments` from compaction groups
     pub async fn unregister_table_fragments(&self, table_fragments: &TableFragments) -> Result<()> {
-        let table_ids = table_fragments
-            .internal_table_ids()
-            .into_iter()
-            .chain(std::iter::once(table_fragments.table_id().table_id))
-            .collect_vec();
         self.inner
             .write()
             .await
-            .unregister(&table_ids, self.env.meta_store())
+            .unregister(
+                &table_fragments.all_table_ids().collect_vec(),
+                self.env.meta_store(),
+            )
             .await
     }
 
@@ -170,14 +178,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .collect_vec();
         let valid_ids = table_fragments_list
             .iter()
-            .flat_map(|table_fragments| {
-                table_fragments
-                    .internal_table_ids()
-                    .iter()
-                    .cloned()
-                    .chain(std::iter::once(table_fragments.table_id().table_id))
-                    .collect_vec()
-            })
+            .flat_map(|table_fragments| table_fragments.all_table_ids())
             .chain(source_ids.iter().cloned())
             .chain(source_ids_in_fragments.iter().cloned())
             .dedup()
@@ -368,12 +369,13 @@ impl CompactionGroupManagerInner {
 
 #[cfg(test)]
 mod tests {
-
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_pb::meta::table_fragments::Fragment;
 
     use crate::hummock::compaction_group::manager::{
         CompactionGroupManager, CompactionGroupManagerInner,
@@ -406,7 +408,10 @@ mod tests {
         assert!(inner.read().await.index.is_empty());
         assert_eq!(registered_number(inner.read().await.deref()), 0);
 
-        let table_properties = HashMap::from([(String::from("ttl"), String::from("300"))]);
+        let table_properties = HashMap::from([(
+            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from("300"),
+        )]);
         let table_option = TableOption::build_table_option(&table_properties);
 
         // Test register
@@ -471,7 +476,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 1u32)
                 .unwrap();
-            assert_eq!(300, table_option.ttl.unwrap());
+            assert_eq!(300, table_option.retention_seconds.unwrap());
         }
 
         {
@@ -481,7 +486,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 2u32);
             assert!(table_option_default.is_ok());
-            assert_eq!(None, table_option_default.unwrap().ttl);
+            assert_eq!(None, table_option_default.unwrap().retention_seconds);
         }
     }
 
@@ -489,10 +494,28 @@ mod tests {
     async fn test_manager() {
         let (env, ..) = setup_compute_env(8080).await;
         let compaction_group_manager = CompactionGroupManager::new(env.clone()).await.unwrap();
-        let table_fragment_1 =
-            TableFragments::new(TableId::new(10), Default::default(), [11, 12, 13].into());
-        let table_fragment_2 =
-            TableFragments::new(TableId::new(20), Default::default(), [21, 22, 23].into());
+        let table_fragment_1 = TableFragments::new(
+            TableId::new(10),
+            BTreeMap::from([(
+                1,
+                Fragment {
+                    fragment_id: 1,
+                    state_table_ids: vec![10, 11, 12, 13],
+                    ..Default::default()
+                },
+            )]),
+        );
+        let table_fragment_2 = TableFragments::new(
+            TableId::new(20),
+            BTreeMap::from([(
+                2,
+                Fragment {
+                    fragment_id: 2,
+                    state_table_ids: vec![20, 21, 22, 23],
+                    ..Default::default()
+                },
+            )]),
+        );
         let source_1 = 100;
         let source_2 = 200;
         let source_3 = 300;
@@ -507,7 +530,10 @@ mod tests {
                 .sum::<usize>()
         };
         assert_eq!(registered_number().await, 0);
-        let table_properties = HashMap::from([(String::from("ttl"), String::from("300"))]);
+        let table_properties = HashMap::from([(
+            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from("300"),
+        )]);
 
         compaction_group_manager
             .register_table_fragments(&table_fragment_1, &table_properties)

@@ -126,10 +126,10 @@ impl<'a> HummockValue<&'a [u8]> {
         }
     }
 
-    /// Copies `self` into [`HummockValue<Vec<u8>>`].
-    pub fn to_owned_value(&self) -> HummockValue<Vec<u8>> {
+    /// Copies `self` into [`HummockValue<Bytes>`].
+    pub fn to_bytes(&self) -> HummockValue<Bytes> {
         match self {
-            HummockValue::Put(value) => HummockValue::Put(value.to_vec()),
+            HummockValue::Put(value) => HummockValue::Put(Bytes::copy_from_slice(value)),
             HummockValue::Delete => HummockValue::Delete,
         }
     }

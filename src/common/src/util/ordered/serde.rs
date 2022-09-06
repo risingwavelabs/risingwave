@@ -29,9 +29,6 @@ use crate::types::{
 };
 use crate::util::sort_util::{OrderPair, OrderType};
 
-/// The sentinel cell id is `-1_i32`, which is ensured to be the first kv pair in the row.
-pub const SENTINEL_CELL_ID: ColumnId = ColumnId::new(-1_i32);
-
 /// We can use memcomparable serialization to serialize data
 /// and flip the bits if the order of that datum is descending.
 /// As this is normally used for sorted keys, deserialization is

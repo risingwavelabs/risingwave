@@ -22,22 +22,23 @@ use crate::error::{ErrorCode, RwError};
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 7] = [
+const CONFIG_KEYS: [&str; 6] = [
     "RW_IMPLICIT_FLUSH",
     "QUERY_MODE",
-    "RW_FORCE_DELTA_JOIN",
     "EXTRA_FLOAT_DIGITS",
     "APPLICATION_NAME",
-    "DATE_STYLE",
+    "DATESTYLE",
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
 ];
+
+// MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
+// "RW_IMPLICIT_FLUSH".
 const IMPLICIT_FLUSH: usize = 0;
 const QUERY_MODE: usize = 1;
-const DELTA_JOIN: usize = 2;
-const EXTRA_FLOAT_DIGITS: usize = 3;
-const APPLICATION_NAME: usize = 4;
-const DATE_STYLE: usize = 5;
-const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
+const EXTRA_FLOAT_DIGITS: usize = 2;
+const APPLICATION_NAME: usize = 3;
+const DATE_STYLE: usize = 4;
+const BATCH_ENABLE_LOOKUP_JOIN: usize = 5;
 
 trait ConfigEntry: Default + FromStr<Err = RwError> {
     fn entry_name() -> &'static str;
@@ -151,7 +152,6 @@ pub struct VariableInfo {
 }
 
 type ImplicitFlush = ConfigBool<IMPLICIT_FLUSH, false>;
-type DeltaJoin = ConfigBool<DELTA_JOIN, false>;
 type ApplicationName = ConfigString<APPLICATION_NAME>;
 type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 // TODO: We should use more specified type here.
@@ -164,9 +164,6 @@ pub struct ConfigMap {
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
     implicit_flush: ImplicitFlush,
-
-    /// To force the usage of delta join in streaming execution.
-    delta_join: DeltaJoin,
 
     /// A temporary config variable to force query running in either local or distributed mode.
     /// It will be removed in the future.
@@ -189,8 +186,6 @@ impl ConfigMap {
     pub fn set(&mut self, key: &str, val: &str) -> Result<(), RwError> {
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
             self.implicit_flush = val.parse()?;
-        } else if key.eq_ignore_ascii_case(DeltaJoin::entry_name()) {
-            self.delta_join = val.parse()?;
         } else if key.eq_ignore_ascii_case(QueryMode::entry_name()) {
             self.query_mode = val.parse()?;
         } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
@@ -211,8 +206,6 @@ impl ConfigMap {
     pub fn get(&self, key: &str) -> Result<String, RwError> {
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
             Ok(self.implicit_flush.to_string())
-        } else if key.eq_ignore_ascii_case(DeltaJoin::entry_name()) {
-            Ok(self.delta_join.to_string())
         } else if key.eq_ignore_ascii_case(QueryMode::entry_name()) {
             Ok(self.query_mode.to_string())
         } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
@@ -234,11 +227,6 @@ impl ConfigMap {
                 name : ImplicitFlush::entry_name().to_lowercase(),
                 setting : self.implicit_flush.to_string(),
                 description : String::from("If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block until the entire dataflow is refreshed.")
-            },
-            VariableInfo{
-                name : DeltaJoin::entry_name().to_lowercase(),
-                setting : self.delta_join.to_string(),
-                description : String::from("To force the usage of delta join in streaming execution.")
             },
             VariableInfo{
                 name : QueryMode::entry_name().to_lowercase(),
@@ -270,10 +258,6 @@ impl ConfigMap {
 
     pub fn get_implicit_flush(&self) -> bool {
         *self.implicit_flush
-    }
-
-    pub fn get_delta_join(&self) -> bool {
-        *self.delta_join
     }
 
     pub fn get_query_mode(&self) -> QueryMode {

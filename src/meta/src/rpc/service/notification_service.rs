@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
+use itertools::Itertools;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -21,20 +24,19 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::{ClusterManagerRef, WorkerKey};
-use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification, WorkerKey,
+};
 use crate::storage::MetaStore;
-use crate::MetaError;
 
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     catalog_manager: CatalogManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
-    user_manager: UserInfoManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -45,64 +47,16 @@ where
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
-        user_manager: UserInfoManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         Self {
             env,
             catalog_manager,
             cluster_manager,
-            user_manager,
             hummock_manager,
+            fragment_manager,
         }
-    }
-
-    async fn build_snapshot_by_type(
-        &self,
-        worker_type: WorkerType,
-    ) -> Result<MetaSnapshot, MetaError> {
-        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let (database, schema, table, source, sink) = catalog_guard.get_catalog().await?;
-
-        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
-        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
-
-        let user_guard = self.user_manager.get_user_core_guard().await;
-        let users = user_guard
-            .get_user_info()
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        let hummock_version = Some(self.hummock_manager.get_current_version().await);
-
-        // Send the snapshot on subscription. After that we will send only updates.
-        let result = match worker_type {
-            WorkerType::Frontend => MetaSnapshot {
-                nodes,
-                database,
-                schema,
-                source,
-                sink,
-                table,
-                users,
-                hummock_version: None,
-            },
-
-            WorkerType::Compactor => MetaSnapshot {
-                table,
-                ..Default::default()
-            },
-
-            WorkerType::ComputeNode => MetaSnapshot {
-                table,
-                hummock_version,
-                ..Default::default()
-            },
-
-            _ => unreachable!(),
-        };
-
-        Ok(result)
     }
 }
 
@@ -119,12 +73,67 @@ where
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
-        let host_address = req.get_host().map_err(meta_error_to_tonic)?.clone();
+        let worker_type = req.get_worker_type()?;
+        let host_address = req.get_host()?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        let meta_snapshot = self.build_snapshot_by_type(worker_type).await?;
+        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+        let (databases, schemas, mut tables, sources, sinks, indexes) =
+            catalog_guard.database.get_catalog().await?;
+        let creating_tables = catalog_guard.database.list_creating_tables();
+        let users = catalog_guard.user.list_users();
+
+        let fragment_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.fragment_id));
+        let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
+        let parallel_unit_mappings = fragment_guard
+            .all_fragment_mappings()
+            .filter(|mapping| fragment_ids.contains(&mapping.fragment_id))
+            .collect_vec();
+        let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
+
+        let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
+
+        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
+        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+
+        // Send the snapshot on subscription. After that we will send only updates.
+        let meta_snapshot = match worker_type {
+            WorkerType::Frontend => MetaSnapshot {
+                nodes,
+                databases,
+                schemas,
+                sources,
+                sinks,
+                tables,
+                indexes,
+                users,
+                parallel_unit_mappings,
+                hummock_version: None,
+                hummock_snapshot,
+            },
+
+            WorkerType::Compactor => {
+                tables.extend(creating_tables);
+
+                MetaSnapshot {
+                    tables,
+                    ..Default::default()
+                }
+            }
+
+            WorkerType::ComputeNode => {
+                tables.extend(creating_tables);
+
+                MetaSnapshot {
+                    tables,
+                    hummock_version: Some(hummock_manager_guard.current_version.clone()),
+                    ..Default::default()
+                }
+            }
+
+            _ => unreachable!(),
+        };
 
         tx.send(Ok(SubscribeResponse {
             status: None,

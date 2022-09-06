@@ -1,14 +1,14 @@
 statement ok
-create table t1 (v1 int not null, v2 int not null, v3 int not null);
+create table t1 (v1 int, v2 int, v3 int);
 
 statement ok
-create table t2 (v1 int not null, v2 int not null, v3 int not null);
+create table t2 (v1 int, v2 int, v3 int);
 
 statement ok
-create table t3 (v1 int not null, v2 int not null, v3 int not null);
+create table t3 (v1 int, v2 int, v3 int);
 
 statement ok
-create table t4 (v1 real not null, v2 int not null, v3 real not null);
+create table t4 (v1 real, v2 int, v3 real);
 
 statement ok
 create table t5 (d decimal);

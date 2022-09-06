@@ -26,7 +26,7 @@ statement ok
 flush;
 
 statement ok
-create index iii_index on iii_mv1(v4);
+create index iii_index on iii_mv1(v4) include(v3, v5);
 
 # TODO: disable direct select from index
 

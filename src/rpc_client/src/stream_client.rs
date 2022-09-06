@@ -13,19 +13,60 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use async_trait::async_trait;
+use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
+use risingwave_pb::stream_service::*;
+use tonic::transport::{Channel, Endpoint};
 
-use crate::{Channel, RpcClient, RpcClientPool};
+use crate::error::Result;
+use crate::{rpc_client_method_impl, RpcClient, RpcClientPool};
 
-pub type StreamClient = StreamServiceClient<Channel>;
+#[derive(Clone)]
+pub struct StreamClient(StreamServiceClient<Channel>);
 
+#[async_trait]
 impl RpcClient for StreamClient {
-    fn new_client(_host_addr: HostAddr, channel: Channel) -> Self {
-        Self::new(channel)
+    async fn new_client(host_addr: HostAddr) -> Result<Self> {
+        Self::new(host_addr).await
+    }
+}
+
+impl StreamClient {
+    async fn new(host_addr: HostAddr) -> Result<Self> {
+        let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await?;
+        Ok(Self(StreamServiceClient::new(channel)))
     }
 }
 
 pub type StreamClientPool = RpcClientPool<StreamClient>;
 pub type StreamClientPoolRef = Arc<StreamClientPool>;
+
+macro_rules! for_all_stream_rpc {
+    ($macro:ident $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*]
+            ,{ 0, update_actors, UpdateActorsRequest, UpdateActorsResponse }
+            ,{ 0, build_actors, BuildActorsRequest, BuildActorsResponse }
+            ,{ 0, broadcast_actor_info_table, BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse }
+            ,{ 0, drop_actors, DropActorsRequest, DropActorsResponse }
+            ,{ 0, force_stop_actors, ForceStopActorsRequest, ForceStopActorsResponse}
+            ,{ 0, inject_barrier, InjectBarrierRequest, InjectBarrierResponse }
+            ,{ 0, create_source, CreateSourceRequest, CreateSourceResponse }
+            ,{ 0, sync_sources, SyncSourcesRequest, SyncSourcesResponse }
+            ,{ 0, drop_source, DropSourceRequest, DropSourceResponse }
+            ,{ 0, barrier_complete, BarrierCompleteRequest, BarrierCompleteResponse }
+        }
+    };
+}
+
+impl StreamClient {
+    for_all_stream_rpc! { rpc_client_method_impl }
+}

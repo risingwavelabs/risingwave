@@ -16,12 +16,14 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
+use minitrace::prelude::*;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
+use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, ToRwResult};
@@ -38,20 +40,20 @@ use risingwave_pb::stream_plan::{
     UpdateMutation,
 };
 use smallvec::SmallVec;
-use tracing::trace_span;
 
-use crate::task::{ActorId, ENABLE_BARRIER_AGGREGATION};
+use crate::task::ActorId;
 
 mod actor;
-pub mod aggregation;
 mod barrier_align;
+pub mod exchange;
+pub mod monitor;
+
+pub mod aggregation;
 mod batch_query;
 mod chain;
-mod debug;
 mod dispatch;
 mod dynamic_filter;
 mod error;
-pub mod exchange;
 mod expand;
 mod filter;
 mod global_simple_agg;
@@ -64,7 +66,6 @@ mod lookup;
 mod lookup_union;
 mod managed_state;
 mod merge;
-pub mod monitor;
 mod mview;
 mod project;
 mod project_set;
@@ -77,22 +78,23 @@ mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
 mod union;
+mod wrapper;
 
 #[cfg(test)]
 mod integration_tests;
 #[cfg(test)]
 mod test_utils;
 
-pub use actor::{Actor, ActorContext, ActorContextRef, OperatorInfo, OperatorInfoStatus};
+pub use actor::{Actor, ActorContext, ActorContextRef};
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
-pub use debug::DebugExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::StreamExecutorResult;
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::GlobalSimpleAggExecutor;
+pub use group_top_n::GroupTopNExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
@@ -112,6 +114,7 @@ pub use source::*;
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use union::UnionExecutor;
+pub use wrapper::WrapperExecutor;
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
@@ -174,6 +177,12 @@ pub trait Executor: Send + 'static {
     }
 }
 
+impl std::fmt::Debug for BoxedExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.identity())
+    }
+}
+
 pub const INVALID_EPOCH: u64 = 0;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
@@ -185,6 +194,7 @@ pub enum Mutation {
     Update {
         dispatchers: HashMap<ActorId, DispatcherUpdate>,
         merges: HashMap<ActorId, MergeUpdate>,
+        vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
     },
     Add {
@@ -232,21 +242,13 @@ impl Default for Epoch {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
-    pub span: tracing::Span,
-}
+    pub checkpoint: bool,
 
-impl Default for Barrier {
-    fn default() -> Self {
-        Self {
-            span: tracing::Span::none(),
-            epoch: Epoch::default(),
-            mutation: None,
-        }
-    }
+    pub passed_actors: Vec<ActorId>,
 }
 
 impl Barrier {
@@ -254,6 +256,7 @@ impl Barrier {
     pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
             epoch: Epoch::new_test_epoch(epoch),
+            checkpoint: true,
             ..Default::default()
         }
     }
@@ -271,11 +274,9 @@ impl Barrier {
         self.with_mutation(Mutation::Stop(HashSet::default()))
     }
 
-    // TODO: The barrier should always contain trace info after we migrated barrier generation to
-    // meta service.
-    #[must_use]
-    pub fn with_span(self, span: tracing::span::Span) -> Self {
-        Self { span, ..self }
+    /// Whether this barrier carries stop mutation.
+    pub fn is_with_stop_mutation(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Stop(_)))
     }
 
     /// Whether this barrier is to stop the actor with `actor_id`.
@@ -308,6 +309,20 @@ impl Barrier {
                 _ => None,
             })
     }
+
+    /// Returns the new vnode bitmap if this barrier is to update the vnode bitmap for the actor
+    /// with `actor_id`.
+    ///
+    /// Actually, this vnode bitmap update is only useful for the record accessing validation for
+    /// distributed executors, since the read/write pattern will never be across multiple vnodes.
+    pub fn as_update_vnode_bitmap(&self, actor_id: ActorId) -> Option<Arc<Bitmap>> {
+        self.mutation
+            .as_deref()
+            .and_then(|mutation| match mutation {
+                Mutation::Update { vnode_bitmaps, .. } => vnode_bitmaps.get(&actor_id).cloned(),
+                _ => None,
+            })
+    }
 }
 
 impl PartialEq for Barrier {
@@ -333,10 +348,15 @@ impl Mutation {
             Mutation::Update {
                 dispatchers,
                 merges,
+                vnode_bitmaps,
                 dropped_actors,
             } => ProstMutation::Update(UpdateMutation {
                 actor_dispatcher_update: dispatchers.clone(),
                 actor_merge_update: merges.clone(),
+                actor_vnode_bitmap_update: vnode_bitmaps
+                    .iter()
+                    .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
+                    .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
             }),
             Mutation::Add { adds, .. } => ProstMutation::Add(AddMutation {
@@ -387,6 +407,11 @@ impl Mutation {
             ProstMutation::Update(update) => Mutation::Update {
                 dispatchers: update.actor_dispatcher_update.clone(),
                 merges: update.actor_merge_update.clone(),
+                vnode_bitmaps: update
+                    .actor_vnode_bitmap_update
+                    .iter()
+                    .map(|(&actor_id, bitmap)| (actor_id, Arc::new(bitmap.into())))
+                    .collect(),
                 dropped_actors: update.dropped_actors.iter().cloned().collect(),
             },
 
@@ -450,7 +475,11 @@ impl Mutation {
 impl Barrier {
     pub fn to_protobuf(&self) -> ProstBarrier {
         let Barrier {
-            epoch, mutation, ..
+            epoch,
+            mutation,
+            checkpoint,
+            passed_actors,
+            ..
         }: Barrier = self.clone();
         ProstBarrier {
             epoch: Some(ProstEpoch {
@@ -459,6 +488,8 @@ impl Barrier {
             }),
             mutation: mutation.map(|mutation| mutation.to_protobuf()),
             span: vec![],
+            checkpoint,
+            passed_actors,
         }
     }
 
@@ -471,13 +502,10 @@ impl Barrier {
             .map(Arc::new);
         let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {
-            span: if ENABLE_BARRIER_AGGREGATION {
-                trace_span!("barrier", epoch = ?epoch, mutation = ?mutation)
-            } else {
-                tracing::Span::none()
-            },
+            checkpoint: prost.checkpoint,
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
+            passed_actors: prost.get_passed_actors().clone(),
         })
     }
 }
@@ -550,31 +578,13 @@ pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
-/// Get clones of inputs by given `pk_indices` from `columns`.
-pub fn pk_input_arrays(pk_indices: PkIndicesRef, columns: &[Column]) -> Vec<ArrayRef> {
-    pk_indices
-        .iter()
-        .map(|pk_idx| columns[*pk_idx].array())
-        .collect()
-}
-
-/// Get references to inputs by given `pk_indices` from `columns`.
-pub fn pk_input_array_refs<'a>(
-    pk_indices: PkIndicesRef,
-    columns: &'a [Column],
-) -> Vec<&'a ArrayImpl> {
-    pk_indices
-        .iter()
-        .map(|pk_idx| columns[*pk_idx].array_ref())
-        .collect()
-}
-
 /// Expect the first message of the given `stream` as a barrier.
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
     let message = stream
         .next()
+        .stack_trace("expect_first_barrier")
         .await
         .expect("failed to extract the first message: stream closed unexpectedly")?;
     let barrier = message

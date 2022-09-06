@@ -15,15 +15,13 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableDesc;
-use risingwave_common::types::ParallelUnitId;
-use risingwave_common::util::compress::decompress_data;
+use risingwave_common::catalog::{TableDesc, TableId};
+use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, SchemaId};
-use crate::catalog::TableId;
+use super::{DatabaseId, FragmentId, SchemaId};
 use crate::optimizer::property::FieldOrder;
 
 /// Includes full information about a table.
@@ -52,7 +50,7 @@ use crate::optimizer::property::FieldOrder;
 ///
 /// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableCatalog {
     pub id: TableId,
 
@@ -63,11 +61,11 @@ pub struct TableCatalog {
     /// All columns in this table
     pub columns: Vec<ColumnCatalog>,
 
-    /// Key used as materialize's storage key prefix, including MV order columns and pk.
+    /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
     pub order_key: Vec<FieldOrder>,
 
-    /// Primary key columns indices.
-    pub pk: Vec<usize>,
+    /// pk_indices of the corresponding materialize operator's output.
+    pub stream_key: Vec<usize>,
 
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
@@ -82,19 +80,24 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: u32,
 
-    /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
-    /// table.
-    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
-
     pub properties: HashMap<String, String>,
 
-    pub read_pattern_prefix_column: u32,
+    pub fragment_id: FragmentId,
+
+    /// an optional column index which is the vnode of each row computed by the table's consistent
+    /// hash distribution
+    pub vnode_col_idx: Option<usize>,
 }
 
 impl TableCatalog {
     /// Get a reference to the table catalog's table id.
     pub fn id(&self) -> TableId {
         self.id
+    }
+
+    pub fn with_id(mut self, id: TableId) -> Self {
+        self.id = id;
+        self
     }
 
     /// Get the table catalog's associated source id.
@@ -115,6 +118,10 @@ impl TableCatalog {
 
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
+        use risingwave_common::catalog::TableOption;
+
+        let table_options = TableOption::build_table_option(&self.properties);
+
         TableDesc {
             table_id: self.id,
             order_key: self
@@ -122,11 +129,13 @@ impl TableCatalog {
                 .iter()
                 .map(FieldOrder::to_order_pair)
                 .collect(),
-            pk: self.pk.clone(),
+            stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
-            vnode_mapping: self.vnode_mapping.clone(),
+            retention_seconds: table_options
+                .retention_seconds
+                .unwrap_or(TABLE_OPTION_DUMMY_RETAINTION_SECOND),
         }
     }
 
@@ -139,6 +148,14 @@ impl TableCatalog {
         self.distribution_key.as_ref()
     }
 
+    pub fn to_state_table_prost(&self) -> ProstTable {
+        use risingwave_common::catalog::{DatabaseId, SchemaId};
+        self.to_prost(
+            SchemaId::placeholder() as u32,
+            DatabaseId::placeholder() as u32,
+        )
+    }
+
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
         ProstTable {
             id: self.id.table_id as u32,
@@ -147,7 +164,7 @@ impl TableCatalog {
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
             order_key: self.order_key.iter().map(|o| o.to_protobuf()).collect(),
-            pk: self.pk.iter().map(|x| *x as _).collect(),
+            stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
                 .associated_source_id
@@ -161,9 +178,11 @@ impl TableCatalog {
                 .collect_vec(),
             appendonly: self.appendonly,
             owner: self.owner,
-            mapping: None,
-            properties: HashMap::default(),
-            read_pattern_prefix_column: self.read_pattern_prefix_column,
+            properties: self.properties.clone(),
+            fragment_id: self.fragment_id,
+            vnode_col_idx: self
+                .vnode_col_idx
+                .map(|i| ProstColumnIndex { index: i as _ }),
         }
     }
 }
@@ -179,11 +198,9 @@ impl From<ProstTable> for TableCatalog {
         let mut col_index: HashMap<i32, usize> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
-            for col_desc in catalog.column_desc.flatten() {
-                let col_name = col_desc.name.clone();
-                if !col_names.insert(col_name.clone()) {
-                    panic!("duplicated column name {} in table {} ", col_name, tb.name)
-                }
+            let col_name = catalog.name();
+            if !col_names.insert(col_name.to_string()) {
+                panic!("duplicated column name {} in table {} ", col_name, tb.name)
             }
 
             let col_id = catalog.column_desc.column_id.get_id();
@@ -191,12 +208,6 @@ impl From<ProstTable> for TableCatalog {
         }
 
         let order_key = tb.order_key.iter().map(FieldOrder::from_protobuf).collect();
-
-        let vnode_mapping = if let Some(mapping) = tb.mapping.as_ref() {
-            decompress_data(&mapping.original_indices, &mapping.data)
-        } else {
-            vec![]
-        };
 
         Self {
             id: id.into(),
@@ -214,12 +225,12 @@ impl From<ProstTable> for TableCatalog {
                 .iter()
                 .map(|k| *k as usize)
                 .collect_vec(),
-            pk: tb.pk.iter().map(|x| *x as _).collect(),
+            stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
-            vnode_mapping: Some(vnode_mapping),
             properties: tb.properties,
-            read_pattern_prefix_column: tb.read_pattern_prefix_column,
+            fragment_id: tb.fragment_id,
+            vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
         }
     }
 }
@@ -235,12 +246,11 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
-    use risingwave_common::util::compress::compress_data;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::common::ParallelUnitMapping;
     use risingwave_pb::plan_common::{
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
     };
@@ -252,8 +262,6 @@ mod tests {
 
     #[test]
     fn test_into_table_catalog() {
-        let mapping = [1, 1, 2, 2, 3, 3, 4, 4].to_vec();
-        let (original_indices, data) = compress_data(&mapping);
         let table: TableCatalog = ProstTable {
             is_index: false,
             index_on_id: 0,
@@ -263,7 +271,7 @@ mod tests {
             name: "test".to_string(),
             columns: vec![
                 ProstColumnCatalog {
-                    column_desc: Some((&row_id_column_desc()).into()),
+                    column_desc: Some((&row_id_column_desc(ColumnId::new(0))).into()),
                     is_hidden: true,
                 },
                 ProstColumnCatalog {
@@ -274,12 +282,12 @@ mod tests {
                         vec![
                             ProstColumnDesc::new_atomic(
                                 DataType::Varchar.to_protobuf(),
-                                "country.address",
+                                "address",
                                 2,
                             ),
                             ProstColumnDesc::new_atomic(
                                 DataType::Varchar.to_protobuf(),
-                                "country.zipcode",
+                                "zipcode",
                                 3,
                             ),
                         ],
@@ -292,20 +300,19 @@ mod tests {
                 direct: Direction::Asc,
             }
             .to_protobuf()],
-            pk: vec![0],
+            stream_key: vec![0],
             dependent_relations: vec![],
             distribution_key: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            mapping: Some(ParallelUnitMapping {
-                table_id: 0,
-                original_indices,
-                data,
-            }),
-            properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
-            read_pattern_prefix_column: 0,
+            properties: HashMap::from([(
+                String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                String::from("300"),
+            )]),
+            fragment_id: 0,
+            vnode_col_idx: None,
         }
         .into();
 
@@ -317,26 +324,27 @@ mod tests {
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
                 columns: vec![
-                    ColumnCatalog::row_id_column(),
+                    ColumnCatalog::row_id_column(ColumnId::new(0)),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
-                            data_type: DataType::Struct {
-                                fields: vec![DataType::Varchar, DataType::Varchar].into()
-                            },
+                            data_type: DataType::new_struct(
+                                vec![DataType::Varchar, DataType::Varchar],
+                                vec!["address".to_string(), "zipcode".to_string()]
+                            ),
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
                                 ColumnDesc {
                                     data_type: DataType::Varchar,
                                     column_id: ColumnId::new(2),
-                                    name: "country.address".to_string(),
+                                    name: "address".to_string(),
                                     field_descs: vec![],
                                     type_name: String::new(),
                                 },
                                 ColumnDesc {
                                     data_type: DataType::Varchar,
                                     column_id: ColumnId::new(3),
-                                    name: "country.zipcode".to_string(),
+                                    name: "zipcode".to_string(),
                                     field_descs: vec![],
                                     type_name: String::new(),
                                 }
@@ -346,7 +354,7 @@ mod tests {
                         is_hidden: false
                     }
                 ],
-                pk: vec![0],
+                stream_key: vec![0],
                 order_key: vec![FieldOrder {
                     index: 0,
                     direct: Direction::Asc,
@@ -354,10 +362,14 @@ mod tests {
                 distribution_key: vec![],
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-                vnode_mapping: Some(mapping),
-                properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
-                read_pattern_prefix_column: 0,
+                properties: HashMap::from([(
+                    String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                    String::from("300")
+                )]),
+                fragment_id: 0,
+                vnode_col_idx: None,
             }
         );
+        assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
     }
 }

@@ -25,7 +25,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::rpc::service::exchange::GrpcExchangeWriter;
-use crate::task::{BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext};
+use crate::task::{
+    self, BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, TaskId,
+};
 
 const LOCAL_EXECUTE_BUFFER_SIZE: usize = 64;
 
@@ -40,16 +42,17 @@ impl BatchServiceImpl {
         BatchServiceImpl { mgr, env }
     }
 }
-
+pub(crate) type TaskInfoResponseResult = std::result::Result<TaskInfoResponse, Status>;
 #[async_trait::async_trait]
 impl TaskService for BatchServiceImpl {
+    type CreateTaskStream = ReceiverStream<TaskInfoResponseResult>;
     type ExecuteStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
 
     #[cfg_attr(coverage, no_coverage)]
     async fn create_task(
         &self,
         request: Request<CreateTaskRequest>,
-    ) -> Result<Response<TaskInfoResponse>, Status> {
+    ) -> Result<Response<Self::CreateTaskStream>, Status> {
         let CreateTaskRequest {
             task_id,
             plan,
@@ -59,17 +62,25 @@ impl TaskService for BatchServiceImpl {
         let res = self
             .mgr
             .fire_task(
-                &task_id.expect("no task id found"),
+                task_id.as_ref().expect("no task id found"),
                 plan.expect("no plan found").clone(),
                 epoch,
-                ComputeNodeContext::new(self.env.clone()),
+                ComputeNodeContext::new(
+                    self.env.clone(),
+                    TaskId::from(task_id.as_ref().expect("no task id found")),
+                ),
             )
             .await;
         match res {
-            Ok(_) => Ok(Response::new(TaskInfoResponse {
-                status: None,
-                task_info: None,
-            })),
+            Ok(_) => Ok(Response::new(ReceiverStream::new(
+                // Create receiver stream from state receiver.
+                // The state receiver is init in `.async_execute()`.
+                // Will be used for receive task status update.
+                // Note: we introduce this hack cuz `.execute()` do not produce a status stream,
+                // but still share `.async_execute()` and `.try_execute()`.
+                self.mgr
+                    .get_task_receiver(&task::TaskId::from(&task_id.unwrap())),
+            ))),
             Err(e) => {
                 error!("failed to fire task {}", e);
                 Err(e.into())
@@ -83,16 +94,9 @@ impl TaskService for BatchServiceImpl {
         req: Request<AbortTaskRequest>,
     ) -> Result<Response<AbortTaskResponse>, Status> {
         let req = req.into_inner();
-        let res = self
-            .mgr
+        self.mgr
             .abort_task(req.get_task_id().expect("no task id found"));
-        match res {
-            Ok(_) => Ok(Response::new(AbortTaskResponse { status: None })),
-            Err(e) => {
-                error!("failed to abort task {}", e);
-                Err(e.into())
-            }
-        }
+        Ok(Response::new(AbortTaskResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]
@@ -107,7 +111,7 @@ impl TaskService for BatchServiceImpl {
         } = req.into_inner();
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
-        let context = ComputeNodeContext::new(self.env.clone());
+        let context = ComputeNodeContext::new(self.env.clone(), TaskId::from(&task_id));
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
             plan,

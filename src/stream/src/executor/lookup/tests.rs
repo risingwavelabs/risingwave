@@ -19,14 +19,9 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
-use risingwave_common::util::ordered::SENTINEL_CELL_ID;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::row_serde::row_serde_util::deserialize_column_id;
-use risingwave_storage::store::ReadOptions;
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
-use risingwave_storage::table::Distribution;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::lookup::impl_::LookupExecutorParams;
@@ -213,15 +208,13 @@ fn build_state_table_helper<S: StateStore>(
     columns: Vec<ColumnDesc>,
     order_types: Vec<OrderPair>,
     pk_indices: Vec<usize>,
-) -> RowBasedStorageTable<S, READ_ONLY> {
-    RowBasedStorageTable::new_partial(
+) -> StateTable<S> {
+    StateTable::new_without_distribution(
         s,
         table_id,
-        columns.clone(),
-        columns.iter().map(|col| col.column_id).collect(),
+        columns,
         order_types.iter().map(|pair| pair.order_type).collect_vec(),
         pk_indices,
-        Distribution::fallback(),
     )
 }
 #[tokio::test]
@@ -248,7 +241,7 @@ async fn test_lookup_this_epoch() {
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
         ]),
-        storage_table: build_state_table_helper(
+        state_table: build_state_table_helper(
             store.clone(),
             table_id,
             arrangement_col_descs(),
@@ -264,30 +257,6 @@ async fn test_lookup_this_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
-
-    for (k, v) in store
-        .scan::<_, Vec<u8>>(
-            None,
-            ..,
-            None,
-            ReadOptions {
-                epoch: u64::MAX,
-                table_id: Default::default(),
-                ttl: None,
-            },
-        )
-        .await
-        .unwrap()
-    {
-        // Do not deserialize datum for SENTINEL_CELL_ID cuz the value length is 0.
-        if deserialize_column_id(&k[k.len() - 4..]).unwrap() != SENTINEL_CELL_ID {
-            println!(
-                "{:?} => {:?}",
-                k,
-                deserialize_cell(v, &DataType::Int64).unwrap()
-            );
-        }
-    }
 
     println!("{:#?}", msgs);
 
@@ -335,7 +304,7 @@ async fn test_lookup_last_epoch() {
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
-        storage_table: build_state_table_helper(
+        state_table: build_state_table_helper(
             store.clone(),
             table_id,
             arrangement_col_descs(),

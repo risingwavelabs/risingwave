@@ -22,7 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
-use log::debug;
+use tracing::debug;
 
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
@@ -229,7 +229,7 @@ impl Parser {
 
         match self.next_token() {
             Token::Word(w) if self.peek_token() == Token::Period => {
-                // Since there's no parentesis, `w` must be a column or a table
+                // Since there's no parenthesis, `w` must be a column or a table
                 // So what follows must be dot-delimited identifiers, e.g. `a.b.c.*`
                 let wildcard_expr = self.parse_simple_wildcard_expr(index)?;
                 return self.word_concat_wildcard_expr(w.to_ident(), wildcard_expr);
@@ -242,7 +242,7 @@ impl Parser {
             Token::LParen => {
                 let mut expr = self.parse_expr()?;
                 if self.consume_token(&Token::RParen) {
-                    // Cast off nested expression to avoid interface by parentesis.
+                    // Cast off nested expression to avoid interface by parenthesis.
                     while let Expr::Nested(expr1) = expr {
                         expr = *expr1;
                     }
@@ -436,9 +436,7 @@ impl Parser {
                     UnaryOperator::Minus
                 };
                 let mut sub_expr = self.parse_subexpr(Self::PLUS_MINUS_PREC)?;
-                // TODO: Deal with nested unary exp: -(-(-(1))) => -1
-                // Tracked by: <https://github.com/singularity-data/risingwave/issues/4344>
-                if let Expr::Value(Value::Number(ref mut s, _)) = sub_expr {
+                if let Expr::Value(Value::Number(ref mut s)) = sub_expr {
                     if tok == Token::Minus {
                         *s = format!("-{}", s);
                     }
@@ -467,7 +465,7 @@ impl Parser {
                     expr: Box::new(self.parse_subexpr(Self::PLUS_MINUS_PREC)?),
                 })
             }
-            Token::Number(_, _)
+            Token::Number(_)
             | Token::SingleQuotedString(_)
             | Token::NationalStringLiteral(_)
             | Token::HexStringLiteral(_) => {
@@ -495,14 +493,6 @@ impl Parser {
                     Ok(expr)
                 }
             }
-
-            Token::LBrace => {
-                self.prev_token();
-                Ok(Expr::Array(self.parse_token_wrapped_exprs(
-                    &Token::LBrace,
-                    &Token::RBrace,
-                )?))
-            }
             unexpected => self.expected("an expression:", unexpected),
         }?;
 
@@ -520,7 +510,7 @@ impl Parser {
     pub fn parse_struct_selection(&mut self, expr: Expr) -> Result<Expr, ParserError> {
         if let Expr::Nested(compound_expr) = expr.clone() {
             let mut nested_expr = *compound_expr;
-            // Cast off nested expression to avoid interface by parentesis.
+            // Cast off nested expression to avoid interface by parenthesis.
             while let Expr::Nested(expr1) = nested_expr {
                 nested_expr = *expr1;
             }
@@ -936,7 +926,7 @@ impl Parser {
         // of the duration specified in the string literal.
         //
         // Note that PostgreSQL allows omitting the qualifier, so we provide
-        // this more general implemenation.
+        // this more general implementation.
         let leading_field = match self.peek_token() {
             Token::Word(kw)
                 if [
@@ -1103,18 +1093,21 @@ impl Parser {
     }
 
     pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
-        let index = self.parse_expr()?;
+        let index = Box::new(self.parse_expr()?);
         self.expect_token(&Token::RBracket)?;
-        let mut indexs: Vec<Expr> = vec![index];
-        while self.consume_token(&Token::LBracket) {
-            let index = self.parse_expr()?;
-            self.expect_token(&Token::RBracket)?;
-            indexs.push(index);
-        }
-        Ok(Expr::ArrayIndex {
+
+        // Create ArrayIndex
+        let array_index = Expr::ArrayIndex {
             obj: Box::new(expr),
-            indexs,
-        })
+            index,
+        };
+
+        // Return ArrayIndex Expr after after recursively checking for more indices
+        if self.consume_token(&Token::LBracket) {
+            self.parse_array_index(array_index)
+        } else {
+            Ok(array_index)
+        }
     }
 
     /// Parses the parens following the `[ NOT ] IN` operator
@@ -1549,10 +1542,17 @@ impl Parser {
         self.expect_token(&Token::LParen)?;
         let columns = self.parse_comma_separated(Parser::parse_order_by_expr)?;
         self.expect_token(&Token::RParen)?;
+        let mut include = vec![];
+        if self.parse_keyword(Keyword::INCLUDE) {
+            self.expect_token(&Token::LParen)?;
+            include = self.parse_comma_separated(Parser::parse_identifier)?;
+            self.expect_token(&Token::RParen)?;
+        }
         Ok(Statement::CreateIndex {
             name: index_name,
             table_name,
             columns,
+            include,
             unique,
             if_not_exists,
         })
@@ -1973,7 +1973,7 @@ impl Parser {
                 },
                 _ => self.expected("a concrete value", Token::Word(w)),
             },
-            Token::Number(ref n, l) => Ok(Value::Number(n.clone(), l)),
+            Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
@@ -1981,9 +1981,9 @@ impl Parser {
         }
     }
 
-    pub fn parse_number_value(&mut self) -> Result<Value, ParserError> {
+    pub fn parse_number_value(&mut self) -> Result<String, ParserError> {
         match self.parse_value()? {
-            v @ Value::Number(_, _) => Ok(v),
+            Value::Number(v) => Ok(v),
             _ => {
                 self.prev_token();
                 self.expected("literal number", self.peek_token())
@@ -1994,7 +1994,7 @@ impl Parser {
     /// Parse an unsigned literal integer/long
     pub fn parse_literal_uint(&mut self) -> Result<u64, ParserError> {
         match self.next_token() {
-            Token::Number(s, _) => s.parse::<u64>().map_err(|e| {
+            Token::Number(s) => s.parse::<u64>().map_err(|e| {
                 ParserError::ParserError(format!("Could not parse '{}' as u64: {}", s, e))
             }),
             unexpected => self.expected("literal int", unexpected),
@@ -2020,7 +2020,7 @@ impl Parser {
                 Ok(Expr::Value(Value::SingleQuotedString(value)))
             }
             Token::SingleQuotedString(s) => Ok(Expr::Value(Value::SingleQuotedString(s))),
-            Token::Number(s, _) => Ok(Expr::Value(Value::Number(s, false))),
+            Token::Number(s) => Ok(Expr::Value(Value::Number(s))),
             unexpected => self.expected("literal string, number or function", unexpected),
         }
     }
@@ -2052,7 +2052,6 @@ impl Parser {
             } else {
                 return self.expected("struct field name", self.peek_token());
             }
-            let comma = self.consume_token(&Token::Comma);
             if self.angle_brackets_num == 0 {
                 break;
             } else if self.consume_token(&Token::Gt) {
@@ -2065,7 +2064,7 @@ impl Parser {
                 } else {
                     return parser_err!("too much '>'");
                 }
-            } else if !comma {
+            } else if !self.consume_token(&Token::Comma) {
                 return self.expected("',' or '>' after column definition", self.peek_token());
             }
         }
@@ -2353,23 +2352,71 @@ impl Parser {
         })
     }
 
+    pub fn parse_optional_boolean(&mut self, default: bool) -> bool {
+        if let Some(keyword) = self.parse_one_of_keywords(&[Keyword::TRUE, Keyword::FALSE]) {
+            match keyword {
+                Keyword::TRUE => true,
+                Keyword::FALSE => false,
+                _ => unreachable!(),
+            }
+        } else {
+            default
+        }
+    }
+
     pub fn parse_explain(&mut self, describe_alias: bool) -> Result<Statement, ParserError> {
+        let mut options = ExplainOptions::default();
+        let parse_explain_option = |parser: &mut Parser| -> Result<(), ParserError> {
+            while let Some(keyword) = parser.parse_one_of_keywords(&[
+                Keyword::VERBOSE,
+                Keyword::TRACE,
+                Keyword::TYPE,
+                Keyword::LOGICAL,
+                Keyword::PHYSICAL,
+                Keyword::DISTSQL,
+            ]) {
+                match keyword {
+                    Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
+                    Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
+                    Keyword::TYPE => {
+                        let explain_type = parser.expect_one_of_keywords(&[
+                            Keyword::LOGICAL,
+                            Keyword::PHYSICAL,
+                            Keyword::DISTSQL,
+                        ])?;
+                        match explain_type {
+                            Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
+                            Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
+                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                            _ => unreachable!("{}", keyword),
+                        }
+                    }
+                    Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
+                    Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
+                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                    _ => unreachable!("{}", keyword),
+                }
+            }
+            Ok(())
+        };
+
         let analyze = self.parse_keyword(Keyword::ANALYZE);
-        let verbose = self.parse_keyword(Keyword::VERBOSE);
-        let trace = self.parse_keyword(Keyword::TRACE);
+        if self.consume_token(&Token::LParen) {
+            self.parse_comma_separated(parse_explain_option)?;
+            self.expect_token(&Token::RParen)?;
+        }
 
         let statement = self.parse_statement()?;
         Ok(Statement::Explain {
             describe_alias,
             analyze,
-            verbose,
-            trace,
             statement: Box::new(statement),
+            options,
         })
     }
 
     /// Parse a query expression, i.e. a `SELECT` statement optionally
-    /// preceeded with some `WITH` CTE declarations and optionally followed
+    /// preceded with some `WITH` CTE declarations and optionally followed
     /// by `ORDER BY`. Unlike some other parse_... methods, this one doesn't
     /// expect the initial keyword to be already consumed
     pub fn parse_query(&mut self) -> Result<Query, ParserError> {
@@ -2404,7 +2451,16 @@ impl Parser {
             };
 
             let fetch = if self.parse_keyword(Keyword::FETCH) {
-                Some(self.parse_fetch()?)
+                if limit.is_some() {
+                    return parser_err!("Cannot specify both LIMIT and FETCH".to_string());
+                }
+                let fetch = self.parse_fetch()?;
+                if fetch.with_ties && order_by.is_empty() {
+                    return parser_err!(
+                        "WITH TIES cannot be specified without ORDER BY clause".to_string()
+                    );
+                }
+                Some(fetch)
             } else {
                 None
             };
@@ -2670,6 +2726,11 @@ impl Parser {
                     return Ok(Statement::ShowObjects(ShowObject::Source {
                         schema: self.parse_from_and_identifier()?,
                     }));
+                }
+                Keyword::SINKS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Sink {
+                        schema: self.parse_from_and_identifier()?,
+                    }))
                 }
                 Keyword::DATABASES => {
                     return Ok(Statement::ShowObjects(ShowObject::Database));
@@ -3178,40 +3239,33 @@ impl Parser {
     }
 
     /// Parse a LIMIT clause
-    pub fn parse_limit(&mut self) -> Result<Option<Expr>, ParserError> {
+    pub fn parse_limit(&mut self) -> Result<Option<String>, ParserError> {
         if self.parse_keyword(Keyword::ALL) {
             Ok(None)
         } else {
-            Ok(Some(Expr::Value(self.parse_number_value()?)))
+            Ok(Some(self.parse_number_value()?))
         }
     }
 
     /// Parse an OFFSET clause
-    pub fn parse_offset(&mut self) -> Result<Offset, ParserError> {
-        let value = Expr::Value(self.parse_number_value()?);
-        let rows = if self.parse_keyword(Keyword::ROW) {
-            OffsetRows::Row
-        } else if self.parse_keyword(Keyword::ROWS) {
-            OffsetRows::Rows
-        } else {
-            OffsetRows::None
-        };
-        Ok(Offset { value, rows })
+    pub fn parse_offset(&mut self) -> Result<String, ParserError> {
+        let value = self.parse_number_value()?;
+        _ = self.parse_one_of_keywords(&[Keyword::ROW, Keyword::ROWS]);
+        Ok(value)
     }
 
     /// Parse a FETCH clause
     pub fn parse_fetch(&mut self) -> Result<Fetch, ParserError> {
         self.expect_one_of_keywords(&[Keyword::FIRST, Keyword::NEXT])?;
-        let (quantity, percent) = if self
+        let quantity = if self
             .parse_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])
             .is_some()
         {
-            (None, false)
+            None
         } else {
-            let quantity = Expr::Value(self.parse_value()?);
-            let percent = self.parse_keyword(Keyword::PERCENT);
+            let quantity = self.parse_number_value()?;
             self.expect_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])?;
-            (Some(quantity), percent)
+            Some(quantity)
         };
         let with_ties = if self.parse_keyword(Keyword::ONLY) {
             false
@@ -3222,7 +3276,6 @@ impl Parser {
         };
         Ok(Fetch {
             with_ties,
-            percent,
             quantity,
         })
     }
@@ -3408,6 +3461,17 @@ mod tests {
             assert_eq!(parser.next_token(), Token::EOF);
             assert_eq!(parser.next_token(), Token::EOF);
             parser.prev_token();
+        });
+    }
+
+    #[test]
+    fn test_parse_integer_min() {
+        let min_bigint = "-9223372036854775808";
+        run_parser_method(min_bigint, |parser| {
+            assert_eq!(
+                parser.parse_expr().unwrap(),
+                Expr::Value(Value::Number("-9223372036854775808".to_string()))
+            )
         });
     }
 }

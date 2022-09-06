@@ -18,6 +18,7 @@ pub mod cache;
 pub mod error;
 pub mod file;
 pub mod meta;
+pub mod metrics;
 pub mod store;
 pub mod utils;
 

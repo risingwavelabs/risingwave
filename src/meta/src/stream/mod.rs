@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod meta;
+mod scale;
 mod scheduler;
 mod source_manager;
 mod stream_graph;
@@ -20,68 +20,8 @@ mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
 
-pub use meta::*;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::StreamNode;
+pub use scale::*;
 pub use scheduler::*;
 pub use source_manager::*;
 pub use stream_graph::*;
 pub use stream_manager::*;
-
-use crate::manager::HashMappingManagerRef;
-use crate::model::FragmentId;
-use crate::MetaResult;
-
-/// Record vnode mapping for stateful operators in meta.
-pub fn record_table_vnode_mappings(
-    hash_mapping_manager: &HashMappingManagerRef,
-    stream_node: &StreamNode,
-    fragment_id: FragmentId,
-) -> MetaResult<()> {
-    // We only consider stateful operators with multiple parallel degrees here. Singleton stateful
-    // operators will not have vnode mappings, so that compactors could omit the unnecessary probing
-    // on vnode mappings.
-    match stream_node.get_node_body()? {
-        NodeBody::Materialize(node) => {
-            let table_id = node.get_table_id();
-            hash_mapping_manager.set_fragment_state_table(fragment_id, table_id);
-        }
-        NodeBody::Arrange(node) => {
-            let table_id = node.table.as_ref().unwrap().id;
-            hash_mapping_manager.set_fragment_state_table(fragment_id, table_id);
-        }
-        NodeBody::HashAgg(node) => {
-            for table in &node.internal_tables {
-                hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
-            }
-        }
-        NodeBody::LocalSimpleAgg(node) => {
-            for table in &node.internal_tables {
-                hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
-            }
-        }
-        NodeBody::GlobalSimpleAgg(node) => {
-            for table in &node.internal_tables {
-                hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
-            }
-        }
-        NodeBody::HashJoin(node) => {
-            hash_mapping_manager
-                .set_fragment_state_table(fragment_id, node.left_table.as_ref().unwrap().id);
-            hash_mapping_manager
-                .set_fragment_state_table(fragment_id, node.right_table.as_ref().unwrap().id);
-        }
-        NodeBody::DynamicFilter(node) => {
-            hash_mapping_manager
-                .set_fragment_state_table(fragment_id, node.left_table.as_ref().unwrap().id);
-            hash_mapping_manager
-                .set_fragment_state_table(fragment_id, node.right_table.as_ref().unwrap().id);
-        }
-        _ => {}
-    }
-    let input_nodes = stream_node.get_input();
-    for input_node in input_nodes {
-        record_table_vnode_mappings(hash_mapping_manager, input_node, fragment_id)?;
-    }
-    Ok(())
-}

@@ -1,0 +1,52 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation
+
+query T
+SELECT case when 1=1 then ARRAY[1] else ARRAY[2] end
+----
+{1}
+
+query T
+SELECT case when 1=0 then ARRAY[1] else ARRAY[2] end
+----
+{2}
+
+query T
+SELECT case when i%2=0 then ARRAY[i] else ARRAY[-i] end from (select generate_series as i from generate_series(0,4,1)) as t;
+----
+{0}
+{-1}
+{2}
+{-3}
+{4}
+
+query I
+SELECT case when i%2=0 then NULL else ARRAY[i] end from (select generate_series as i from generate_series(0,9,1)) as t;
+----
+NULL
+{1}
+NULL
+{3}
+NULL
+{5}
+NULL
+{7}
+NULL
+{9}
+
+query I
+with a as (
+    SELECT (case when i%2=0 then NULL else ARRAY[i] end) as i from (select generate_series as i from generate_series(0,9,1)) as t
+)
+select case when i=ARRAY[1] then ARRAY[3] else ARRAY[4] end from a;
+----
+{4}
+{3}
+{4}
+{4}
+{4}
+{4}
+{4}
+{4}
+{4}
+{4}

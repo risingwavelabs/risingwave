@@ -14,25 +14,21 @@
 
 use aws_sdk_kinesis::model::Record;
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 
-use crate::source::SourceMessage;
+use crate::source::{SourceMessage, SplitId};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct KinesisMessage {
-    pub shard_id: String,
+    pub shard_id: SplitId,
     pub sequence_number: String,
     pub partition_key: String,
-    pub payload: Option<Vec<u8>>,
+    pub payload: Bytes,
 }
 
 impl From<KinesisMessage> for SourceMessage {
     fn from(msg: KinesisMessage) -> Self {
         SourceMessage {
-            payload: msg
-                .payload
-                .as_ref()
-                .map(|payload| Bytes::copy_from_slice(payload)),
+            payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
             split_id: msg.shard_id,
         }
@@ -40,12 +36,12 @@ impl From<KinesisMessage> for SourceMessage {
 }
 
 impl KinesisMessage {
-    pub fn new(shard_id: String, message: Record) -> Self {
+    pub fn new(shard_id: SplitId, message: Record) -> Self {
         KinesisMessage {
             shard_id,
             sequence_number: message.sequence_number.unwrap(),
             partition_key: message.partition_key.unwrap(),
-            payload: Some(message.data.unwrap().into_inner()),
+            payload: message.data.unwrap().into_inner().into(),
         }
     }
 }

@@ -15,6 +15,7 @@
 use std::fmt;
 
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
@@ -24,7 +25,7 @@ use super::{
 use crate::expr::{
     Expr, ExprDisplay, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
 };
-use crate::risingwave_common::error::Result;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
@@ -51,8 +52,13 @@ impl LogicalProjectSet {
 
         let ctx = input.ctx();
         let schema = Self::derive_schema(&select_list, input.schema());
-        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &select_list);
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let pk_indices = Self::derive_pk(input.schema(), input.logical_pk(), &select_list);
+        let functional_dependency = Self::derive_fd(
+            input.schema().len(),
+            input.functional_dependency(),
+            &select_list,
+        );
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalProjectSet {
             base,
             select_list,
@@ -212,6 +218,15 @@ impl LogicalProjectSet {
         pk
     }
 
+    fn derive_fd(
+        input_len: usize,
+        input_fd_set: &FunctionalDependencySet,
+        select_list: &[ExprImpl],
+    ) -> FunctionalDependencySet {
+        let i2o = Self::i2o_col_mapping_inner(input_len, select_list);
+        i2o.rewrite_functional_dependency_set(input_fd_set.clone())
+    }
+
     pub fn select_list(&self) -> &[ExprImpl] {
         &self.select_list
     }
@@ -251,6 +266,12 @@ impl LogicalProjectSet {
 
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         Self::i2o_col_mapping_inner(self.input.schema().len(), self.select_list())
+    }
+
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
     }
 }
 
@@ -320,7 +341,7 @@ impl ToStream for LogicalProjectSet {
             self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.pk_indices();
+        let input_pk = input.logical_pk();
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), project_set.select_list());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
         let input_schema = input.schema();
@@ -348,5 +369,68 @@ impl ToStream for LogicalProjectSet {
         let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
         Ok(StreamProjectSet::new(new_logical).into())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::HashSet;
+
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::expr::{ExprImpl, InputRef, TableFunction};
+    use crate::optimizer::plan_node::LogicalValues;
+    use crate::optimizer::property::FunctionalDependency;
+    use crate::session::OptimizerContext;
+
+    #[tokio::test]
+    async fn fd_derivation_project_set() {
+        // input: [v1, v2, v3]
+        // FD: v2 --> v3
+        // output: [projected_row_id, v3, v2, generate_series(v1, v2, v3)],
+        // FD: v2 --> v3
+
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
+        ];
+        let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        values
+            .base
+            .functional_dependency
+            .add_functional_dependency_by_column_indices(&[1], &[2]);
+        let project_set = LogicalProjectSet::new(
+            values.into(),
+            vec![
+                ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
+                ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                ExprImpl::TableFunction(Box::new(
+                    TableFunction::new(
+                        crate::expr::TableFunctionType::Generate,
+                        vec![
+                            ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
+                            ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                            ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
+                        ],
+                    )
+                    .unwrap(),
+                )),
+            ],
+        );
+        let fd_set: HashSet<FunctionalDependency> = project_set
+            .base
+            .functional_dependency
+            .into_dependencies()
+            .into_iter()
+            .collect();
+        let expected_fd_set: HashSet<FunctionalDependency> =
+            [FunctionalDependency::with_indices(4, &[2], &[1])]
+                .into_iter()
+                .collect();
+        assert_eq!(fd_set, expected_fd_set);
     }
 }

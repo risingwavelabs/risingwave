@@ -74,7 +74,7 @@ macro_rules! gen_atm_impl {
 /// This macro helps create comparison expression. Its output array is a bool array
 /// Similar to `gen_atm_impl`.
 macro_rules! gen_cmp_impl {
-    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),*) => {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),* $(,)?) => {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
@@ -155,15 +155,17 @@ macro_rules! gen_binary_expr_cmp {
                     gen_str_cmp($op),
                 ))
             }
-            (DataType::Struct { fields: _ }, DataType::Struct { fields: _ }) => Box::new(
-                BinaryExpression::<StructArray, StructArray, BoolArray, _>::new(
-                    $l,
-                    $r,
-                    $ret,
-                    gen_struct_cmp($op),
-                ),
-            ),
-            (DataType::List { datatype: _ }, DataType::List { datatype: _ }) => {
+            (DataType::Struct { .. }, DataType::Struct { .. }) => {
+                Box::new(
+                    BinaryExpression::<StructArray, StructArray, BoolArray, _>::new(
+                        $l,
+                        $r,
+                        $ret,
+                        gen_struct_cmp($op),
+                    ),
+                )
+            }
+            (DataType::List { .. }, DataType::List { .. }) => {
                 Box::new(BinaryExpression::<ListArray, ListArray, BoolArray, _>::new(
                     $l,
                     $r,

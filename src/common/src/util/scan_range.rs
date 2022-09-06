@@ -19,13 +19,14 @@ use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
 use crate::row::Row;
-use crate::types::{ScalarImpl, VirtualNode};
+use crate::types::{Datum, ScalarImpl, VirtualNode};
 use crate::util::hash_util::CRC32FastBuilder;
+use crate::util::value_encoding::serialize_datum;
 
 /// See also [`ScanRangeProst`]
 #[derive(Debug, Clone)]
 pub struct ScanRange {
-    pub eq_conds: Vec<ScalarImpl>,
+    pub eq_conds: Vec<Datum>,
     pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
 }
 
@@ -46,7 +47,15 @@ fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundProst> {
 impl ScanRange {
     pub fn to_protobuf(&self) -> ScanRangeProst {
         ScanRangeProst {
-            eq_conds: self.eq_conds.iter().map(|lit| lit.to_protobuf()).collect(),
+            eq_conds: self
+                .eq_conds
+                .iter()
+                .map(|datum| {
+                    let mut encoded = vec![];
+                    serialize_datum(datum, &mut encoded);
+                    encoded
+                })
+                .collect(),
             lower_bound: bound_to_proto(&self.range.0),
             upper_bound: bound_to_proto(&self.range.1),
         }
@@ -91,11 +100,7 @@ impl ScanRange {
             return None;
         }
 
-        let pk_prefix_value = Row(self
-            .eq_conds
-            .iter()
-            .map(|scalar| Some(scalar.clone()))
-            .collect());
+        let pk_prefix_value = Row(self.eq_conds.clone());
         let vnode = pk_prefix_value
             .hash_by_indices(&dist_key_in_pk_indices, &CRC32FastBuilder {})
             .to_vnode();
@@ -125,10 +130,10 @@ mod tests {
         let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
-        scan_range.eq_conds.push(ScalarImpl::from(114));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
-        scan_range.eq_conds.push(ScalarImpl::from(514));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
         let vnode = Row(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
@@ -147,13 +152,13 @@ mod tests {
         let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
-        scan_range.eq_conds.push(ScalarImpl::from(114));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
-        scan_range.eq_conds.push(ScalarImpl::from(514));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
-        scan_range.eq_conds.push(ScalarImpl::from(114514));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(114514)));
         let vnode = Row(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),

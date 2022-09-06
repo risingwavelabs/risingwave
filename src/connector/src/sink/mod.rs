@@ -22,13 +22,13 @@ use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use risingwave_common::error::{ErrorCode, RwError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 pub use tracing;
 
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
-use crate::sink::mysql::{MySQLConfig, MySQLSink};
+pub use crate::sink::mysql::{MySQLConfig, MySQLSink, MYSQL_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 
 #[async_trait]
@@ -62,16 +62,14 @@ pub enum SinkState {
 }
 
 impl SinkConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> RwResult<Self> {
+    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
         const SINK_TYPE_KEY: &str = "connector";
-        let sink_type = properties.get(SINK_TYPE_KEY).ok_or_else(|| {
-            RwError::from(ErrorCode::InvalidConfigValue {
-                config_entry: SINK_TYPE_KEY.to_string(),
-                config_value: "".to_string(),
-            })
-        })?;
+        let sink_type = properties
+            .get(SINK_TYPE_KEY)
+            .ok_or_else(|| SinkError::Config(format!("missing config: {}", SINK_TYPE_KEY)))?;
         match sink_type.to_lowercase().as_str() {
             KAFKA_SINK => Ok(SinkConfig::Kafka(KafkaConfig::from_hashmap(properties)?)),
+            MYSQL_SINK => Ok(SinkConfig::Mysql(MySQLConfig::from_hashmap(properties)?)),
             _ => unimplemented!(),
         }
     }
@@ -93,18 +91,27 @@ pub enum SinkImpl {
 }
 
 impl SinkImpl {
-    pub async fn new(cfg: SinkConfig) -> RwResult<Self> {
+    pub async fn new(cfg: SinkConfig) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Mysql(cfg) => {
-                SinkImpl::MySQL(Box::new(MySQLSink::new(cfg).await.map_err(RwError::from)?))
-            }
-            SinkConfig::Redis(cfg) => {
-                SinkImpl::Redis(Box::new(RedisSink::new(cfg).map_err(RwError::from)?))
-            }
-            SinkConfig::Kafka(cfg) => {
-                SinkImpl::Kafka(Box::new(KafkaSink::new(cfg).map_err(RwError::from)?))
-            }
+            SinkConfig::Mysql(cfg) => SinkImpl::MySQL(Box::new(MySQLSink::new(cfg).await?)),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg)?)),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg)?)),
         })
+    }
+
+    pub fn needs_preparation(&self) -> bool {
+        match self {
+            SinkImpl::MySQL(_) => true,
+            SinkImpl::Redis(_) => false,
+            SinkImpl::Kafka(_) => false,
+        }
+    }
+
+    pub async fn prepare(&mut self, schema: &Schema) -> Result<()> {
+        match self {
+            SinkImpl::MySQL(sink) => sink.prepare(schema).await,
+            _ => unreachable!(),
+        }
     }
 }
 

@@ -19,8 +19,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-extern crate bytesize;
-
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::Client;
@@ -30,11 +28,11 @@ use clap::Parser;
 use futures::stream::{self, StreamExt};
 use futures::{future, Future, FutureExt};
 use itertools::Itertools;
-use log::debug;
 use rand::{Rng, SeedableRng};
 use risingwave_common::error::RwError;
 use tokio::join;
 use tokio::sync::RwLock;
+use tracing::debug;
 
 // Avoid regenerate objs in the same size with `rand`.
 #[derive(Default)]
@@ -628,7 +626,7 @@ struct Analysis {
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    tracing_subscriber::fmt::init();
 
     let cfg = Arc::new(Config::parse());
     let shared_config = aws_config::load_from_env().await;

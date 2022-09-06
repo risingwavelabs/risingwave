@@ -48,7 +48,7 @@ impl BatchNestedLoopJoin {
     fn derive_dist(left: &Distribution, right: &Distribution) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (_, _) => unreachable!(),
+            (_, _) => unreachable!("{}{}", left, right),
         }
     }
 }

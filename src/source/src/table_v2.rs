@@ -14,14 +14,12 @@
 
 use std::sync::RwLock;
 
-use async_trait::async_trait;
+use anyhow::Context;
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use tokio::sync::{mpsc, oneshot};
-
-use crate::{StreamChunkWithState, StreamSourceReader};
 
 #[derive(Debug)]
 struct TableSourceV2Core {
@@ -66,34 +64,34 @@ impl TableSourceV2 {
     pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
         let tx = {
             let core = self.core.read().unwrap();
+
+            // The `changes_txs` should not be empty normally, since we ensured that the channels
+            // between the `TableSourceV2` and the `SourceExecutor`s are ready before we making the
+            // table catalog visible to the users. However, when we're recovering, it's possible
+            // that the streaming executors are not ready when the frontend is able to schedule DML
+            // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
+            // error instead of asserting here.
+            // TODO: may reject DML when streaming executors are not recovered.
             core.changes_txs
                 .choose(&mut rand::thread_rng())
-                .expect("no table reader exists")
+                .context("no available table reader in streaming source executors")?
                 .clone()
         };
 
+        #[cfg(debug_assertions)]
+        risingwave_common::util::schema_check::schema_check(
+            self.column_descs.iter().map(|c| &c.data_type),
+            chunk.columns(),
+        )
+        .expect("table source write chunk schema check failed");
+
         let (notifier_tx, notifier_rx) = oneshot::channel();
         tx.send((chunk, notifier_tx))
-            .expect("write chunk to table reader failed");
+            .expect("table reader in streaming source executor closed");
 
         Ok(notifier_rx)
     }
-
-    /// Write stream chunk into table using `write_chunk`, and then block until a reader consumes
-    /// the chunk.
-    ///
-    /// Returns the cardinality of this chunk.
-    pub async fn blocking_write_chunk(&self, chunk: StreamChunk) -> Result<usize> {
-        let rx = self.write_chunk(chunk)?;
-        let written_cardinality = rx.await.unwrap();
-        Ok(written_cardinality)
-    }
 }
-
-// TODO: Currently batch read directly calls api from `ScannableTable` instead of using
-// `BatchReader`.
-#[derive(Debug)]
-pub struct TableV2BatchReader;
 
 /// [`TableV2StreamReader`] reads changes from a certain table continuously.
 /// This struct should be only used for associated materialize task, thus the reader should be
@@ -108,9 +106,8 @@ pub struct TableV2StreamReader {
     column_indices: Vec<usize>,
 }
 
-#[async_trait]
-impl StreamSourceReader for TableV2StreamReader {
-    async fn next(&mut self) -> Result<StreamChunkWithState> {
+impl TableV2StreamReader {
+    pub async fn next(&mut self) -> Result<StreamChunk> {
         let (chunk, notifier) = self
             .rx
             .recv()
@@ -132,10 +129,7 @@ impl StreamSourceReader for TableV2StreamReader {
         // Notify about that we've taken the chunk.
         notifier.send(chunk.cardinality()).ok();
 
-        Ok(StreamChunkWithState {
-            chunk,
-            split_offset_mapping: None,
-        })
+        Ok(chunk)
     }
 }
 
@@ -198,9 +192,7 @@ mod tests {
                     vec![column_nonnull!(I64Array, [$i])],
                     None,
                 );
-                tokio::spawn(async move {
-                    source.blocking_write_chunk(chunk).await.unwrap();
-                })
+                source.write_chunk(chunk).unwrap();
             }};
         }
 
@@ -209,7 +201,7 @@ mod tests {
         macro_rules! check_next_chunk {
             ($i: expr) => {
                 assert_matches!(reader.next().await?, chunk => {
-                    assert_eq!(chunk.chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
+                    assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
             }
         }

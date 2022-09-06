@@ -38,6 +38,21 @@ select unnest(array[1,2,3]) * unnest(array[10, 100]);
 200
 NULL
 
+query I
+select a from unnest(array[1,2,3]) as u(a);
+----
+1
+2
+3
+
+query II
+select u1.a, u2.b from unnest(array[1,2]) as u1(a), unnest(array['a','b']) as u2(b);
+----
+1 a
+1 b
+2 a
+2 b
+
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 

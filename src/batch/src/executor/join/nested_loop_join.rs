@@ -135,12 +135,9 @@ impl NestedLoopJoinExecutor {
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 2,
-            "NestedLoopJoinExecutor should have 2 children!"
-        );
+        let [left_child, right_child]: [_; 2] = inputs.try_into().unwrap();
 
         let nested_loop_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -149,9 +146,6 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
 
         let join_type = JoinType::from_prost(nested_loop_join_node.get_join_type()?);
         let join_expr = expr_build_from_prost(nested_loop_join_node.get_join_cond()?)?;
-
-        let left_child = inputs.remove(0);
-        let right_child = inputs.remove(0);
 
         let output_indices = nested_loop_join_node
             .output_indices
@@ -165,7 +159,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             output_indices,
             left_child,
             right_child,
-            "NestedLoopExecutor".into(),
+            source.plan_node().get_identity().clone(),
         )))
     }
 }

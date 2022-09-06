@@ -18,16 +18,13 @@ message TaskId {
 
 message TaskInfo {
   enum TaskStatus {
+    // Note: Requirement of proto3: first enum must be 0.
     UNSPECIFIED = 0;
-    NOT_FOUND = 1;
     PENDING = 2;
     RUNNING = 3;
-    FAILING = 4;
-    CANCELLING = 5;
     FINISHED = 6;
     FAILED = 7;
     ABORTED = 8;
-    ABORTING = 9;
   }
   batch_plan.TaskId task_id = 1;
   TaskStatus task_status = 2;
@@ -75,7 +72,8 @@ message ExecuteRequest {
 }
 
 service TaskService {
-  rpc CreateTask(CreateTaskRequest) returns (TaskInfoResponse);
+  rpc CreateTask(CreateTaskRequest) returns (stream TaskInfoResponse);
+  // Abort an already-died (self execution-failure, previous aborted, completed) task will still succeed.
   rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
 }

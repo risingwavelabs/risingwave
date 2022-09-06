@@ -38,8 +38,12 @@ impl BatchHopWindow {
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(logical.input().distribution());
-        // TODO: Derive order from input
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), distribution, Order::any());
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            distribution,
+            logical.get_out_column_index_order(),
+        );
         BatchHopWindow { base, logical }
     }
 }
@@ -64,8 +68,7 @@ impl_plan_tree_node_for_unary! { BatchHopWindow }
 
 impl ToDistributedBatch for BatchHopWindow {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed()?;
-        Ok(self.clone_with_input(new_input).into())
+        self.to_distributed_with_required(&Order::any(), &RequiredDist::Any)
     }
 
     fn to_distributed_with_required(
@@ -73,6 +76,10 @@ impl ToDistributedBatch for BatchHopWindow {
         required_order: &Order,
         required_dist: &RequiredDist,
     ) -> Result<PlanRef> {
+        // The hop operator will generate a multiplication of its input rows,
+        // so shuffling its input instead of its output will reduce the shuffling data
+        // communication.
+        // We pass the required dist to its input.
         let input_required = self
             .logical
             .o2i_col_mapping()

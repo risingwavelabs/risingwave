@@ -15,7 +15,7 @@ insert into t1 values
     (7, 1, '2022-01-01 10:52:00'),
     (8, 3, '2022-01-01 11:02:00');
 
-query IT
+query IT rowsort
 select sum(v), created_at from t1 group by created_at;
 ----
 3 2022-01-01 11:02:00

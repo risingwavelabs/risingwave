@@ -48,6 +48,12 @@ enum HummockErrorInner {
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
     #[error("CompactionExecutor error {0}.")]
     CompactionExecutor(String),
+    #[error("TieredCache error {0}.")]
+    TieredCache(String),
+    #[error("SstIdTracker error {0}.")]
+    SstIdTrackerError(String),
+    #[error("CompactionGroup error {0}.")]
+    CompactionGroupError(String),
     #[error("Other error {0}.")]
     Other(String),
 }
@@ -113,6 +119,18 @@ impl HummockError {
         HummockErrorInner::CompactionExecutor(error.to_string()).into()
     }
 
+    pub fn sst_id_tracker_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::SstIdTrackerError(error.to_string()).into()
+    }
+
+    pub fn compaction_group_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::CompactionGroupError(error.to_string()).into()
+    }
+
+    pub fn tiered_cache(error: impl ToString) -> HummockError {
+        HummockErrorInner::TieredCache(error.to_string()).into()
+    }
+
     pub fn other(error: impl ToString) -> HummockError {
         HummockErrorInner::Other(error.to_string()).into()
     }
@@ -121,6 +139,12 @@ impl HummockError {
 impl From<prost::DecodeError> for HummockError {
     fn from(error: prost::DecodeError) -> Self {
         HummockErrorInner::DecodeError(error.to_string()).into()
+    }
+}
+
+impl From<ObjectError> for HummockError {
+    fn from(error: ObjectError) -> Self {
+        HummockErrorInner::ObjectIoError(error).into()
     }
 }
 

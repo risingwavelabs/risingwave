@@ -671,8 +671,8 @@ mod tests {
 
     use crate::pg_message::FeQueryMessage;
 
-    #[tokio::test]
-    async fn test_get_sql() {
+    #[test]
+    fn test_get_sql() {
         let fe = FeQueryMessage {
             sql_bytes: Bytes::from(vec![255, 255, 255, 255, 255, 255, 0]),
         };

@@ -17,8 +17,9 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
-use super::{LogicalSource, PlanBase, ToStreamProst};
+use super::{LogicalSource, PlanBase, StreamNode};
 use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone)]
@@ -32,7 +33,8 @@ impl StreamSource {
         let base = PlanBase::new_stream(
             logical.ctx(),
             logical.schema().clone(),
-            logical.pk_indices().to_vec(),
+            logical.logical_pk().to_vec(),
+            logical.functional_dependency().clone(),
             Distribution::SomeShard,
             logical.source_catalog().append_only,
         );
@@ -63,10 +65,10 @@ impl fmt::Display for StreamSource {
     }
 }
 
-impl ToStreamProst for StreamSource {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamSource {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Source(SourceNode {
-            table_id: self.logical.source_catalog.id,
+            source_id: self.logical.source_catalog.id,
             column_ids: self
                 .logical
                 .source_catalog
@@ -75,6 +77,7 @@ impl ToStreamProst for StreamSource {
                 .map(|c| c.column_id().into())
                 .collect(),
             source_type: self.logical.source_catalog.source_type as i32,
+            state_table_id: state.gen_table_id(),
         })
     }
 }

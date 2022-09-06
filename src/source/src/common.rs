@@ -24,9 +24,9 @@ use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use crate::SourceColumnDesc;
 
 pub(crate) trait SourceChunkBuilder {
-    fn build_columns(
+    fn build_columns<'a>(
         column_descs: &[SourceColumnDesc],
-        rows: &[Vec<Datum>],
+        rows: impl IntoIterator<Item = &'a Vec<Datum>>,
     ) -> Result<Vec<Column>> {
         let mut builders: Vec<_> = column_descs
             .iter()

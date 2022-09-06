@@ -17,11 +17,12 @@ use std::collections::HashMap;
 use bytes::{Buf, Bytes};
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_cell;
-use risingwave_frontend::catalog::TableCatalog;
+use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_object_store::object::{BlockLocation, ObjectStore};
+use risingwave_object_store::object::BlockLocation;
+use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -41,7 +42,12 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     let sstable_store = &*hummock.sstable_store();
 
     // Retrieves the latest HummockVersion from the meta client so we can access the SstableInfo
-    let version = meta_client.pin_version(u64::MAX).await?.2.unwrap();
+    let version = match meta_client.pin_version(u64::MAX).await? {
+        Payload::VersionDeltas(_) => {
+            unreachable!("should get full version")
+        }
+        Payload::PinnedVersion(version) => version,
+    };
 
     // SST's timestamp info is only available in object store
 
@@ -140,17 +146,25 @@ async fn print_blocks(
             block_meta.offset, block_meta.len, checksum, compression
         );
 
-        print_kv_pairs(block_data, table_data)?;
+        print_kv_pairs(
+            block_data,
+            table_data,
+            block_meta.uncompressed_size as usize,
+        )?;
     }
 
     Ok(())
 }
 
 /// Prints the data of KV-Pairs of a given block out to the terminal.
-fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<()> {
+fn print_kv_pairs(
+    block_data: Bytes,
+    table_data: &TableData,
+    uncompressed_capacity: usize,
+) -> anyhow::Result<()> {
     println!("\tKV-Pairs:");
 
-    let block = Box::new(Block::decode(block_data).unwrap());
+    let block = Box::new(Block::decode(block_data, uncompressed_capacity).unwrap());
     let holder = BlockHolder::from_owned_block(block);
     let mut block_iter = BlockIterator::new(holder);
     block_iter.seek_to_first();

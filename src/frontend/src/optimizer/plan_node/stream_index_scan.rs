@@ -18,9 +18,11 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNodeId, StreamNode};
 use crate::catalog::ColumnId;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamIndexScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -42,7 +44,8 @@ impl StreamIndexScan {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.clone(),
+            logical.base.logical_pk.clone(),
+            logical.functional_dependency().clone(),
             Distribution::HashShard(logical.distribution_key().unwrap()),
             false, // TODO: determine the `append-only` field of table scan
         );
@@ -67,29 +70,51 @@ impl_plan_tree_node_for_leaf! { StreamIndexScan }
 impl fmt::Display for StreamIndexScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
-        write!(
-            f,
-            "StreamIndexScan {{ index: {}, columns: [{}], pk_indices: {:?} }}",
-            self.logical.table_name(),
-            if verbose {
-                self.logical.column_names_with_table_prefix()
-            } else {
-                self.logical.column_names()
-            }
-            .join(", "),
-            self.base.pk_indices,
-        )
+        let mut builder = f.debug_struct("StreamIndexScan");
+
+        builder
+            .field("index", &format_args!("{}", self.logical.table_name()))
+            .field(
+                "columns",
+                &format_args!(
+                    "[{}]",
+                    match verbose {
+                        false => self.logical.column_names(),
+                        true => self.logical.column_names_with_table_prefix(),
+                    }
+                    .join(", ")
+                ),
+            );
+
+        if verbose {
+            builder.field(
+                "pk",
+                &IndicesDisplay {
+                    indices: self.logical_pk(),
+                    input_schema: &self.base.schema,
+                },
+            );
+            builder.field(
+                "distribution",
+                &DistributionDisplay {
+                    distribution: self.distribution(),
+                    input_schema: &self.base.schema,
+                },
+            );
+        }
+
+        builder.finish()
     }
 }
 
-impl ToStreamProst for StreamIndexScan {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamIndexScan {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         unreachable!("stream index scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
 
 impl StreamIndexScan {
-    pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
         use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
 
@@ -103,7 +128,7 @@ impl StreamIndexScan {
                 .collect(),
         };
 
-        let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
+        let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),
@@ -115,13 +140,9 @@ impl StreamIndexScan {
                 },
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
-                    operator_id: if auto_fields {
-                        self.batch_plan_id.0 as u64
-                    } else {
-                        0
-                    },
-                    identity: if auto_fields { "BatchPlanNode" } else { "" }.into(),
-                    pk_indices: pk_indices.clone(),
+                    operator_id: self.batch_plan_id.0 as u64,
+                    identity: "BatchPlanNode".into(),
+                    stream_key: stream_key.clone(),
                     input: vec![],
                     fields: vec![], // TODO: fill this later
                     append_only: true,
@@ -151,17 +172,9 @@ impl StreamIndexScan {
                     .collect(),
                 is_singleton: false,
             })),
-            pk_indices,
-            operator_id: if auto_fields {
-                self.base.id.0 as u64
-            } else {
-                0
-            },
-            identity: if auto_fields {
-                format!("{}", self)
-            } else {
-                "".into()
-            },
+            stream_key,
+            operator_id: self.base.id.0 as u64,
+            identity: format!("{}", self),
             append_only: self.append_only(),
         }
     }

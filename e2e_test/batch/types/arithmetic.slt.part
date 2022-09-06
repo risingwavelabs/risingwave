@@ -179,6 +179,11 @@ select interval '849884' * real '86';
 2 years 4 mons 5 days 22:47:04
 
 query T
+select '12:30:00'::time * 2;
+----
+25:00:00
+
+query T
 select interval '1' / 10;
 ----
 00:00:00.1

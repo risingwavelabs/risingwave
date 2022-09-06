@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use md5;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::AuthInfo;
 use sha2::{Digest, Sha256};

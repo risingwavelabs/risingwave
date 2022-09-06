@@ -24,7 +24,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::try_match_expand;
 use risingwave_connector::source::{
-    ConnectorProperties, SplitEnumeratorImpl, SplitImpl, SplitMetaData,
+    ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::source::Info::StreamSource;
@@ -49,14 +49,14 @@ use tokio::{select, time};
 use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::ClusterManagerRef;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId,
+};
 use crate::model::{
     ActorId, FragmentId, MetadataModel, MetadataModelResult, TableFragments, Transactional,
 };
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::FragmentManagerRef;
 use crate::MetaResult;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
@@ -74,7 +74,7 @@ pub struct SourceManager<S: MetaStore> {
 }
 
 pub struct SharedSplitMap {
-    splits: Option<BTreeMap<String, SplitImpl>>,
+    splits: Option<BTreeMap<SplitId, SplitImpl>>,
 }
 
 type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
@@ -163,7 +163,7 @@ impl ConnectorSourceWorker {
                 }
                 _ = interval.tick() => {
                     if let Err(e) = self.tick().await {
-                        log::error!("error happened when tick from connector source worker: {}", e.to_string());
+                        tracing::error!("error happened when tick from connector source worker: {}", e.to_string());
                     }
                 }
             }
@@ -362,7 +362,7 @@ pub(crate) fn fetch_source_fragments(
 // todo use min heap to optimize
 fn diff_splits(
     mut prev_actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    discovered_splits: &BTreeMap<String, SplitImpl>,
+    discovered_splits: &BTreeMap<SplitId, SplitImpl>,
 ) -> Option<HashMap<ActorId, Vec<SplitImpl>>> {
     let prev_split_ids: HashSet<_> = prev_actor_splits
         .values()
@@ -423,8 +423,7 @@ where
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
-            let catalog_guard = catalog_manager.get_catalog_core_guard().await;
-            let sources = catalog_guard.list_sources().await?;
+            let sources = catalog_manager.list_sources().await?;
 
             for source in sources {
                 if let Some(StreamSource(_)) = source.info {
@@ -610,23 +609,19 @@ where
                 tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
             }
         }));
-        let futures = self
-            .all_stream_clients()
-            .await?
-            .into_iter()
-            .map(|mut client| {
-                let request = ComputeNodeCreateSourceRequest {
-                    source: Some(source.clone()),
-                };
-                async move { client.create_source(request).await }
-            });
+        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
+            let request = ComputeNodeCreateSourceRequest {
+                source: Some(source.clone()),
+            };
+            async move { client.create_source(request).await }
+        });
 
         // ignore response body, always none
         let _ = try_join_all(futures).await?;
 
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
-            log::warn!("source {} already registered", source.get_id());
+            tracing::warn!("source {} already registered", source.get_id());
             revert_funcs.clear();
             return Ok(());
         }
@@ -645,7 +640,7 @@ where
     ) -> MetaResult<()> {
         let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
         let current_splits_ref = worker.current_splits.clone();
-        log::info!("spawning new watcher for source {}", source.id);
+        tracing::info!("spawning new watcher for source {}", source.id);
 
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -663,14 +658,10 @@ where
     }
 
     pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<()> {
-        let futures = self
-            .all_stream_clients()
-            .await?
-            .into_iter()
-            .map(|mut client| {
-                let request = ComputeNodeDropSourceRequest { source_id };
-                async move { client.drop_source(request).await }
-            });
+        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
+            let request = ComputeNodeDropSourceRequest { source_id };
+            async move { client.drop_source(request).await }
+        });
         let _responses: Vec<_> = try_join_all(futures).await?;
 
         let mut core = self.core.lock().await;
@@ -679,7 +670,7 @@ where
         }
 
         if core.source_fragments.contains_key(&source_id) {
-            log::warn!(
+            tracing::warn!(
                 "dropping source {}, but associated fragments still exists",
                 source_id
             );
@@ -693,7 +684,7 @@ where
                 .await
             {
                 tracing::warn!(
-                    "Failed to unregister source {}. It wll be unregistered eventually.\n{:#?}",
+                    "Failed to unregister source {}. It will be unregistered eventually.\n{:#?}",
                     source_id,
                     e
                 );
@@ -723,7 +714,7 @@ where
                     })
                     .collect(),
             })));
-            log::debug!("pushing down mutation {:#?}", command);
+            tracing::debug!("pushing down mutation {:#?}", command);
 
             tokio_retry::Retry::spawn(FixedInterval::new(Self::SOURCE_RETRY_INTERVAL), || async {
                 let command = command.clone();
@@ -746,7 +737,7 @@ where
         loop {
             ticker.tick().await;
             if let Err(e) = self.tick().await {
-                log::error!(
+                tracing::error!(
                     "error happened while running source manager tick: {}",
                     e.to_string()
                 );

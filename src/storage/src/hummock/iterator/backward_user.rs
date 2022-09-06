@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::ops::Bound::{self, *};
-use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key};
+use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
@@ -25,7 +25,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BackwardSstableIterator, HummockResult};
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::StoreLocalStatistic;
 
 /// [`BackwardUserIterator`] can be used by user directly.
 pub struct BackwardUserIterator {
@@ -52,13 +52,16 @@ pub struct BackwardUserIterator {
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 
     /// Only reads values if `epoch <= self.read_epoch`.
-    read_epoch: Epoch,
+    read_epoch: HummockEpoch,
 
     /// Only reads values if `ts > self.min_epoch`. use for ttl
-    min_epoch: Epoch,
+    min_epoch: HummockEpoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Option<Arc<PinnedVersion>>,
+    _version: Option<PinnedVersion>,
+
+    /// Store scan statistic
+    stats: StoreLocalStatistic,
 }
 
 impl BackwardUserIterator {
@@ -70,7 +73,7 @@ impl BackwardUserIterator {
         >,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::with_epoch(iterator, key_range, Epoch::MAX, 0, None)
+        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
 
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
@@ -81,7 +84,7 @@ impl BackwardUserIterator {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> Self {
         Self {
             iterator,
@@ -93,6 +96,7 @@ impl BackwardUserIterator {
             last_delete: true,
             read_epoch,
             min_epoch,
+            stats: StoreLocalStatistic::default(),
             _version: version,
         }
     }
@@ -166,6 +170,7 @@ impl BackwardUserIterator {
                         // We remark that we don't check `out_of_range` here as the other two cases
                         // covered all situation. 2(a)
                         self.just_met_new_key = true;
+                        self.stats.processed_key_count += 1;
                         return Ok(());
                     } else {
                         // 2(b)
@@ -177,6 +182,8 @@ impl BackwardUserIterator {
                             break;
                         }
                     }
+                } else {
+                    self.stats.skip_key_count += 1;
                 }
                 // TODO: Since the real world workload may follow power law or 20/80 rule, or
                 // whatever name. We may directly seek to the next key if we have
@@ -269,6 +276,11 @@ impl BackwardUserIterator {
         let has_enough_input = self.iterator.is_valid() || !self.last_delete;
         has_enough_input && (!self.out_of_range)
     }
+
+    pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
+        self.iterator.collect_local_statistic(stats);
+    }
 }
 
 impl DirectedUserIteratorBuilder for BackwardUserIterator {
@@ -279,13 +291,12 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator {
         iterator_iter: impl IntoIterator<
             Item = UserIteratorPayloadType<Backward, BackwardSstableIterator>,
         >,
-        stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> DirectedUserIterator {
-        let iterator = UnorderedMergeIteratorInner::new(iterator_iter, stats);
+        let iterator = UnorderedMergeIteratorInner::new(iterator_iter);
         DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
             iterator, key_range, read_epoch, min_epoch, version,
         ))
@@ -298,7 +309,6 @@ mod tests {
     use std::cmp::Reverse;
     use std::collections::BTreeMap;
     use std::ops::Bound::*;
-    use std::sync::Arc;
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
@@ -316,7 +326,6 @@ mod tests {
     use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BackwardSstableIterator, SstableStoreRef};
-    use crate::monitor::StateStoreMetrics;
 
     #[tokio::test]
     async fn test_backward_user_basic() {
@@ -362,8 +371,7 @@ mod tests {
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(handle0, sstable_store)),
         ];
 
-        let mi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let mi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut ui = BackwardUserIterator::new(mi, (Unbounded, Unbounded));
         let mut i = 3 * TEST_KEYS_COUNT;
         ui.rewind().await.unwrap();
@@ -424,8 +432,7 @@ mod tests {
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(handle2, sstable_store)),
         ];
 
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut bui = BackwardUserIterator::new(bmi, (Unbounded, Unbounded));
 
         // right edge case
@@ -506,8 +513,7 @@ mod tests {
                 sstable_store,
             )),
         ];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut bui = BackwardUserIterator::new(bmi, (Unbounded, Unbounded));
 
         bui.rewind().await.unwrap();
@@ -555,8 +561,7 @@ mod tests {
             handle,
             sstable_store,
         ))];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
         let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
         let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
@@ -638,8 +643,7 @@ mod tests {
             handle,
             sstable_store,
         ))];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
         let begin_key = Excluded(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
         let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
@@ -721,8 +725,7 @@ mod tests {
             cache.insert(sstable.id, sstable.id, 1, Box::new(sstable)),
             sstable_store,
         ))];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
 
         let mut bui = BackwardUserIterator::new(bmi, (Unbounded, end_key));
@@ -804,8 +807,7 @@ mod tests {
             handle,
             sstable_store,
         ))];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
 
         let mut bui = BackwardUserIterator::new(bmi, (begin_key, Unbounded));
@@ -899,8 +901,7 @@ mod tests {
             handle,
             sstable_store,
         ))];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut bui = BackwardUserIterator::new(bmi, (start_bound, end_bound));
         let num_puts: usize = truth
             .iter()
@@ -938,7 +939,7 @@ mod tests {
         assert_eq!(num_kvs, num_puts);
     }
 
-    type ChaosTestTruth = BTreeMap<Vec<u8>, BTreeMap<Reverse<Epoch>, HummockValue<Vec<u8>>>>;
+    type ChaosTestTruth = BTreeMap<Vec<u8>, BTreeMap<Reverse<HummockEpoch>, HummockValue<Vec<u8>>>>;
 
     async fn generate_chaos_test_data() -> (usize, Sstable, ChaosTestTruth, SstableStoreRef) {
         // We first generate the key value pairs.
@@ -953,7 +954,7 @@ mod tests {
             let mut prev_time = 500;
             let num_updates = rng.gen_range(1..10usize);
             for _ in 0..num_updates {
-                let time: Epoch = rng.gen_range(prev_time..=(prev_time + 1000));
+                let time: HummockEpoch = rng.gen_range(prev_time..=(prev_time + 1000));
                 let is_delete = rng.gen_range(0..=1usize) < 1usize;
                 match is_delete {
                     true => {
@@ -1125,7 +1126,6 @@ mod tests {
         Sstable {
             id: sst.id,
             meta: sst.meta.clone(),
-            blocks: vec![],
         }
     }
 
@@ -1151,8 +1151,7 @@ mod tests {
         ))];
 
         let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
-        let mi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let mi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut ui =
             BackwardUserIterator::with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch, None);
         ui.rewind().await.unwrap();

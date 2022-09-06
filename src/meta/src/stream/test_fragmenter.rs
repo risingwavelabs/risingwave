@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::vec;
 
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
@@ -36,7 +35,7 @@ use risingwave_pb::stream_plan::{
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::{CreateMaterializedViewContext, FragmentManager};
+use crate::stream::CreateMaterializedViewContext;
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -116,7 +115,7 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
             index: 0,
             order_type: 2,
         }],
-        pk: vec![2],
+        stream_key: vec![2],
         ..Default::default()
     }
 }
@@ -131,11 +130,12 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     // table source node
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
-            table_id: 1,
+            source_id: 1,
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
+            state_table_id: 1,
         })),
-        pk_indices: vec![2],
+        stream_key: vec![2],
         ..Default::default()
     };
     fragments.push(StreamFragment {
@@ -144,6 +144,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_type: FragmentType::Source as i32,
         is_singleton: false,
         table_ids_cnt: 0,
+        upstream_table_ids: vec![],
     });
 
     // exchange node
@@ -160,7 +161,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             make_field(TypeName::Int64),
         ],
         input: vec![],
-        pk_indices: vec![2],
+        stream_key: vec![2],
         operator_id: 1,
         identity: "ExchangeExecutor".to_string(),
         ..Default::default()
@@ -183,7 +184,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node],
-        pk_indices: vec![0, 1],
+        stream_key: vec![0, 1],
         operator_id: 2,
         identity: "FilterExecutor".to_string(),
         ..Default::default()
@@ -204,7 +205,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
-        pk_indices: vec![0, 1],
+        stream_key: vec![0, 1],
         operator_id: 3,
         identity: "GlobalSimpleAggExecutor".to_string(),
         ..Default::default()
@@ -216,6 +217,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_type: FragmentType::Others as i32,
         is_singleton: false,
         table_ids_cnt: 0,
+        upstream_table_ids: vec![],
     });
 
     // exchange node
@@ -228,7 +230,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         fields: vec![make_field(TypeName::Int64), make_field(TypeName::Int64)],
         input: vec![],
-        pk_indices: vec![0, 1],
+        stream_key: vec![0, 1],
         operator_id: 4,
         identity: "ExchangeExecutor".to_string(),
         ..Default::default()
@@ -249,7 +251,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
-        pk_indices: vec![0, 1],
+        stream_key: vec![0, 1],
         operator_id: 5,
         identity: "GlobalSimpleAggExecutor".to_string(),
         ..Default::default()
@@ -276,7 +278,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
-        pk_indices: vec![1, 2],
+        stream_key: vec![1, 2],
         operator_id: 6,
         identity: "ProjectExecutor".to_string(),
         ..Default::default()
@@ -285,7 +287,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     // mview node
     let mview_node = StreamNode {
         input: vec![project_node],
-        pk_indices: vec![],
+        stream_key: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
             table_id: 1,
             table: Some(make_internal_table(4, true)),
@@ -303,6 +305,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_type: FragmentType::Sink as i32,
         is_singleton: true,
         table_ids_cnt: 0,
+        upstream_table_ids: vec![],
     });
 
     fragments
@@ -344,33 +347,25 @@ fn make_stream_graph() -> StreamFragmentGraph {
 }
 
 // TODO: enable this test with madsim
-// NOTE: frontend is not yet available with madsim
-#[cfg(not(madsim))]
 #[tokio::test]
 async fn test_fragmenter() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = make_stream_graph();
 
-    let mut actor_graph_builder =
-        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, parallel_degree, &mut ctx).await?;
+    let actor_graph_builder =
+        ActorGraphBuilder::new(env.id_gen_manager_ref(), graph, parallel_degree, &mut ctx).await?;
 
     let graph = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), fragment_manager, &mut ctx)
+        .generate_graph(env.id_gen_manager_ref(), &mut ctx)
         .await?;
 
-    let internal_table_id_set = ctx
-        .internal_table_id_map
-        .iter()
-        .map(|(table_id, _)| *table_id)
-        .collect::<HashSet<u32>>();
-    let table_fragments = TableFragments::new(TableId::default(), graph, internal_table_id_set);
+    let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
-    let internal_table_ids = table_fragments.internal_table_ids();
+    let internal_table_ids = ctx.internal_table_ids();
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);

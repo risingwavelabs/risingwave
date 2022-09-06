@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -20,10 +21,11 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, StreamNode};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -48,14 +50,14 @@ impl StreamTableScan {
             if distribution_key.is_empty() {
                 Distribution::Single
             } else {
-                // Follows upstream distribution from TableCatalog
-                Distribution::HashShard(distribution_key)
+                Distribution::UpstreamHashShard(distribution_key)
             }
         };
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.clone(),
+            logical.base.logical_pk.clone(),
+            logical.functional_dependency().clone(),
             distribution,
             logical.table_desc().appendonly,
         );
@@ -74,8 +76,17 @@ impl StreamTableScan {
         &self.logical
     }
 
-    pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> StreamIndexScan {
-        StreamIndexScan::new(self.logical.to_index_scan(index_name, index))
+    pub fn to_index_scan(
+        &self,
+        index_name: &str,
+        index_table_desc: Rc<TableDesc>,
+        primary_to_secondary_mapping: &HashMap<usize, usize>,
+    ) -> StreamIndexScan {
+        StreamIndexScan::new(self.logical.to_index_scan(
+            index_name,
+            index_table_desc,
+            primary_to_secondary_mapping,
+        ))
     }
 }
 
@@ -104,7 +115,7 @@ impl fmt::Display for StreamTableScan {
             builder.field(
                 "pk",
                 &IndicesDisplay {
-                    indices: self.pk_indices(),
+                    indices: self.logical_pk(),
                     input_schema: &self.base.schema,
                 },
             );
@@ -121,14 +132,14 @@ impl fmt::Display for StreamTableScan {
     }
 }
 
-impl ToStreamProst for StreamTableScan {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamTableScan {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
         use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
 
@@ -142,7 +153,7 @@ impl StreamTableScan {
                 .collect(),
         };
 
-        let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
+        let stream_key = self.logical_pk().iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),
@@ -154,13 +165,9 @@ impl StreamTableScan {
                 },
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
-                    operator_id: if auto_fields {
-                        self.batch_plan_id.0 as u64
-                    } else {
-                        0
-                    },
-                    identity: if auto_fields { "BatchPlanNode" } else { "" }.into(),
-                    pk_indices: pk_indices.clone(),
+                    operator_id: self.batch_plan_id.0 as u64,
+                    identity: "BatchPlanNode".into(),
+                    stream_key: stream_key.clone(),
                     input: vec![],
                     fields: vec![], // TODO: fill this later
                     append_only: true,
@@ -181,7 +188,7 @@ impl StreamTableScan {
                         name: x.name.clone(),
                     })
                     .collect(),
-                // The column idxs need to be forwarded to the downstream
+                // The column indices need to be forwarded to the downstream
                 upstream_column_indices: self
                     .logical
                     .output_column_indices()
@@ -190,17 +197,9 @@ impl StreamTableScan {
                     .collect(),
                 is_singleton: *self.distribution() == Distribution::Single,
             })),
-            pk_indices,
-            operator_id: if auto_fields {
-                self.base.id.0 as u64
-            } else {
-                0
-            },
-            identity: if auto_fields {
-                format!("{}", self)
-            } else {
-                "".into()
-            },
+            stream_key,
+            operator_id: self.base.id.0 as u64,
+            identity: format!("{}", self),
             append_only: self.append_only(),
         }
     }

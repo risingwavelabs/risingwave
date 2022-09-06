@@ -20,6 +20,7 @@ pub(crate) mod catalog_service;
 
 pub(crate) mod column_catalog;
 pub(crate) mod database_catalog;
+pub(crate) mod index_catalog;
 pub(crate) mod pg_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
@@ -28,6 +29,7 @@ pub(crate) mod source_catalog;
 pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
 
+pub use index_catalog::IndexCatalog;
 pub use table_catalog::TableCatalog;
 
 pub(crate) type SourceId = u32;
@@ -37,6 +39,7 @@ pub(crate) type DatabaseId = u32;
 pub(crate) type SchemaId = u32;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
+pub(crate) type FragmentId = u32;
 
 /// Check if the column name does not conflict with the internally reserved column name.
 pub fn check_valid_column_name(column_name: &str) -> Result<()> {
@@ -73,14 +76,12 @@ pub fn is_row_id_column_name(name: &str) -> bool {
     name.starts_with(ROWID_PREFIX)
 }
 
-pub const TABLE_SOURCE_PK_COLID: ColumnId = ColumnId::new(0);
-pub const TABLE_SINK_PK_COLID: ColumnId = ColumnId::new(0);
-
 /// Creates a row ID column (for implicit primary key).
-pub fn row_id_column_desc() -> ColumnDesc {
+pub fn row_id_column_desc(column_id: ColumnId) -> ColumnDesc {
     ColumnDesc {
         data_type: DataType::Int64,
-        column_id: ColumnId::new(0),
+        // We should not assume the first column (i.e., column_id == 0) is `_row_id`.
+        column_id,
         name: row_id_column_name(),
         field_descs: vec![],
         type_name: "".to_string(),

@@ -25,7 +25,7 @@ use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
-use crate::hummock::{HummockStorage, SstableStore};
+use crate::hummock::{HummockStorage, SstableStore, TieredCache, TieredCacheMetricsBuilder};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
 use crate::StateStore;
@@ -87,14 +87,40 @@ macro_rules! dispatch_state_store {
 }
 
 impl StateStoreImpl {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         s: &str,
+        #[allow(unused)] file_cache_dir: &str,
         config: Arc<StorageConfig>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        #[allow(unused)] tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
     ) -> StorageResult<Self> {
+        #[cfg(not(target_os = "linux"))]
+        let tiered_cache = TieredCache::none();
+
+        #[cfg(target_os = "linux")]
+        let tiered_cache = if file_cache_dir.is_empty() {
+            TieredCache::none()
+        } else {
+            use crate::hummock::file_cache::cache::FileCacheOptions;
+            use crate::hummock::HummockError;
+
+            let options = FileCacheOptions {
+                dir: file_cache_dir.to_string(),
+                capacity: config.file_cache.capacity,
+                total_buffer_capacity: config.file_cache.total_buffer_capacity,
+                cache_file_fallocate_unit: config.file_cache.cache_file_fallocate_unit,
+                flush_buffer_hooks: vec![],
+            };
+            let metrics = Arc::new(tiered_cache_metrics_builder.file());
+            TieredCache::file(options, metrics)
+                .await
+                .map_err(HummockError::tiered_cache)?
+        };
+
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
                 let remote_object_store = parse_remote_object_store(
@@ -118,6 +144,7 @@ impl StateStoreImpl {
                     config.data_directory.to_string(),
                     config.block_cache_capacity_mb * (1 << 20),
                     config.meta_cache_capacity_mb * (1 << 20),
+                    tiered_cache,
                 ));
                 let compaction_group_client =
                     Arc::new(CompactionGroupClientImpl::new(hummock_meta_client.clone()));

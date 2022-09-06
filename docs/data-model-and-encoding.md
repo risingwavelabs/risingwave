@@ -51,7 +51,7 @@ RisingWave stores user data in shared key-value storage called 'Hummock'. Tables
 
 ![row-format](./images/data-model-and-encoding/row-format.svg)
 
-Considering that ordering matters in some cases, e.g. result set of an order-by query, fields of keys must preserve the order of original values after being encoded into bytes. This is what `memcomparable` is used for. For example, integers must be encoded in big-endien and the sign bit must be flipped to preserve order. In contrast, the encoding of values does not need to preserve order.
+Considering that ordering matters in some cases, e.g. result set of an order-by query, fields of keys must preserve the order of original values after being encoded into bytes. This is what `memcomparable` is used for. For example, integers must be encoded in big-endian and the sign bit must be flipped to preserve order. In contrast, the encoding of values does not need to preserve order.
 
 
 

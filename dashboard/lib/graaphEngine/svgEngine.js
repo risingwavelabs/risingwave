@@ -14,80 +14,79 @@
  * limitations under the License.
  *
  */
-import * as d3 from "d3";
-import { svg } from "d3";
+import * as d3 from "d3"
 
 export class DrawElement {
   /**
-   * @param {{svgElement: d3.Selection<any, any, any, any>}} props 
+   * @param {{svgElement: d3.Selection<any, any, any, any>}} props
    */
   constructor(props) {
     /**
      * @type {{svgElement: d3.Selection<any, any, any, any>}}
      */
-    this.props = props;
+    this.props = props
     this.appendFunc = {
-      "g": this._appendGroup,
-      "circle": this._appendCircle,
-      "rect": this._appendRect,
-      "text": this._appendText,
-      "path": this._appendPath,
-      "polygon": this._appendPolygan,
+      g: this._appendGroup,
+      circle: this._appendCircle,
+      rect: this._appendRect,
+      text: this._appendText,
+      path: this._appendPath,
+      polygon: this._appendPolygan,
     }
   }
 
   _appendGroup = () => {
-    return new Group({ svgElement: this.props.svgElement.append("g") });
+    return new Group({ svgElement: this.props.svgElement.append("g") })
   }
 
   _appendCircle = () => {
-    return new Circle({ svgElement: this.props.svgElement.append("circle") });
+    return new Circle({ svgElement: this.props.svgElement.append("circle") })
   }
 
   _appendRect = () => {
-    return new Rectangle({ svgElement: this.props.svgElement.append("rect") });
+    return new Rectangle({ svgElement: this.props.svgElement.append("rect") })
   }
 
   _appendText = () => {
-    return new Text({ svgElement: this.props.svgElement.append("text") });
+    return new Text({ svgElement: this.props.svgElement.append("text") })
   }
 
   _appendPath = () => {
-    return new Path({ svgElement: this.props.svgElement.append("path") });
+    return new Path({ svgElement: this.props.svgElement.append("path") })
   }
 
   _appendPolygan = () => {
-    return new Polygan({ svgElement: this.props.svgElement.append("polygon") });
+    return new Polygan({ svgElement: this.props.svgElement.append("polygon") })
   }
 
   on = (event, callback) => {
-    this.props.svgElement.on(event, callback);
-    return this;
+    this.props.svgElement.on(event, callback)
+    return this
   }
 
   style = (key, value) => {
-    this.props.svgElement.style(key, value);
-    return this;
+    this.props.svgElement.style(key, value)
+    return this
   }
 
   classed = (clazz, flag) => {
-    this.props.svgElement.classed(clazz, flag);
-    return this;
+    this.props.svgElement.classed(clazz, flag)
+    return this
   }
 
   attr = (key, value) => {
-    this.props.svgElement.attr(key, value);
-    return this;
+    this.props.svgElement.attr(key, value)
+    return this
   }
 
   append = (type) => {
-    return this.appendFunc[type]();
+    return this.appendFunc[type]()
   }
 }
 
 export class Group extends DrawElement {
   /**
-   * @param {{svgElement: d3.Selection<SVGGElement, any, null, undefined>}} props 
+   * @param {{svgElement: d3.Selection<SVGGElement, any, null, undefined>}} props
    */
   constructor(props) {
     super(props)
@@ -96,7 +95,7 @@ export class Group extends DrawElement {
 
 export class Rectangle extends DrawElement {
   /**
-   * @param {{svgElement: d3.Selection<SVGRectElement, any, null, any>}} props 
+   * @param {{svgElement: d3.Selection<SVGRectElement, any, null, any>}} props
    */
   constructor(props) {
     super(props)
@@ -105,7 +104,7 @@ export class Rectangle extends DrawElement {
 
 export class Circle extends DrawElement {
   /**
-   * @param {{svgElement: d3.Selection<SVGCircleElement, any, any, any>}} props 
+   * @param {{svgElement: d3.Selection<SVGCircleElement, any, any, any>}} props
    */
   constructor(props) {
     super(props)
@@ -114,88 +113,86 @@ export class Circle extends DrawElement {
 
 export class Text extends DrawElement {
   /**
-   * @param {{svgElement: d3.Selection<d3.Selection<any, any, any, any>, any, null, undefined>}} props 
+   * @param {{svgElement: d3.Selection<d3.Selection<any, any, any, any>, any, null, undefined>}} props
    */
   constructor(props) {
     super(props)
-    this.props = props;
+    this.props = props
   }
 
   text(content) {
-    this.props.svgElement.text(content);
-    return this;
+    this.props.svgElement.text(content)
+    return this
   }
 
   getWidth() {
-    return this.props.svgElement.node().getComputedTextLength();
+    return this.props.svgElement.node().getComputedTextLength()
   }
 }
 
 export class Polygan extends DrawElement {
   constructor(props) {
-    super(props);
-    this.props = props;
+    super(props)
+    this.props = props
   }
 }
 
 export class Path extends DrawElement {
   constructor(props) {
-    super(props);
+    super(props)
   }
 }
 
-const orginalZoom = new d3.ZoomTransform(0.5, 0, 0);
+const originalZoom = new d3.ZoomTransform(0.5, 0, 0)
 
 export class SvgEngine {
   /**
-   * @param {{g: d3.Selection<SVGGElement, any, null, undefined>}} props 
+   * @param {{g: d3.Selection<SVGGElement, any, null, undefined>}} props
    */
   constructor(svgRef, height, width) {
+    this.height = height
+    this.width = width
+    this.svgRef = svgRef
 
-    this.height = height;
-    this.width = width;
-    this.svgRef = svgRef;
+    d3.select(svgRef).selectAll("*").remove()
+    this.svg = d3.select(svgRef).attr("viewBox", [0, 0, width, height])
 
-    d3.select(svgRef).selectAll("*").remove();
-    this.svg = d3
-      .select(svgRef)
-      .attr("viewBox", [0, 0, width, height]);
+    this._g = this.svg.append("g").attr("class", "top")
+    this.topGroup = new Group({ svgElement: this._g })
 
-    this._g = this.svg.append("g").attr("class", "top");
-    this.topGroup = new Group({ svgElement: this._g });
+    this.transform
+    this.zoom = d3.zoom().on("zoom", (e) => {
+      this.transform = e.transform
+      this._g.attr("transform", e.transform)
+    })
 
-    this.transform;
-    this.zoom = d3.zoom().on("zoom", e => {
-      this.transform = e.transform;
-      this._g.attr("transform", e.transform);
-    });
-
-    this.svg.call(this.zoom)
-      .call(this.zoom.transform, orginalZoom)
-    this.svg.on("pointermove", event => {
+    this.svg.call(this.zoom).call(this.zoom.transform, originalZoom)
+    this.svg.on("pointermove", (event) => {
       this.transform.invert(d3.pointer(event))
-    });
-
+    })
   }
 
   locateTo(selector) {
-    let selection = d3.select(selector);
+    let selection = d3.select(selector)
     if (!selection.empty()) {
       this.svg
         .call(this.zoom)
         .call(
           this.zoom.transform,
-          new d3.ZoomTransform(0.7, - 0.7 * selection.attr("x"), 0.7 * (-selection.attr("y") + this.height / 2))
-        );
+          new d3.ZoomTransform(
+            0.7,
+            -0.7 * selection.attr("x"),
+            0.7 * (-selection.attr("y") + this.height / 2)
+          )
+        )
     }
   }
 
   resetCamera() {
-    this.svg.call(this.zoom.transform, orginalZoom);
+    this.svg.call(this.zoom.transform, originalZoom)
   }
 
   cleanGraph() {
-    d3.select(this.svgRef).selectAll("*").remove();
+    d3.select(this.svgRef).selectAll("*").remove()
   }
-
 }

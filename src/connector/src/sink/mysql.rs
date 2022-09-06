@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -21,9 +22,12 @@ use mysql_async::*;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{Datum, Decimal, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
+use strum_macros;
 
 use crate::sink::{Result, Sink, SinkError};
+
+pub const MYSQL_SINK: &str = "mysql";
 
 #[derive(Clone, Debug)]
 pub struct MySQLConfig {
@@ -32,6 +36,24 @@ pub struct MySQLConfig {
     pub database: Option<String>,
     pub user: Option<String>,
     pub password: Option<String>,
+}
+
+impl MySQLConfig {
+    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+        let endpoint = values.get("endpoint").expect("endpoint must be set");
+        let table = values.get("table").expect("table must be set");
+        let database = values.get("database");
+        let user = values.get("user");
+        let password = values.get("password");
+
+        Ok(MySQLConfig {
+            endpoint: endpoint.to_string(),
+            table: table.to_string(),
+            database: database.cloned(),
+            user: user.cloned(),
+            password: password.cloned(),
+        })
+    }
 }
 
 // Primitive design of MySQLSink
@@ -47,25 +69,32 @@ pub struct MySQLSink {
 impl MySQLSink {
     pub async fn new(cfg: MySQLConfig) -> Result<Self> {
         // Build a connection and start transaction
-        let endpoint = cfg.endpoint.clone();
-        let mut endpoint = endpoint.split(':');
-        let mut builder = OptsBuilder::default()
-            .user(cfg.user.clone())
-            .pass(cfg.password.clone())
-            .ip_or_hostname(endpoint.next().unwrap())
-            .db_name(cfg.database.clone());
-        // TODO(nanderstabel): Fix ParseIntError
-        if let Some(port) = endpoint.next() {
-            builder = builder.tcp_port(port.parse().unwrap());
-        }
-
-        let conn = Conn::new(builder).await?;
-
+        let conn = Conn::new(get_builder(&cfg)).await?;
         Ok(Self {
             cfg,
             conn,
             chunk_cache: vec![],
         })
+    }
+
+    pub async fn prepare(&mut self, schema: &Schema) -> Result<()> {
+        // Create a table
+        let create_table = format!(
+            r"CREATE TABLE IF NOT EXISTS `{}`.`{}` ( {} );",
+            self.cfg.database.clone().unwrap(),
+            self.cfg.table,
+            join(
+                schema
+                    .names()
+                    .iter()
+                    .zip_eq(schema.data_types().iter())
+                    .map(|(n, dt)| format!("`{}` {}", n, MySQLDataType::from(dt)))
+                    .collect_vec(),
+                ", ",
+            )
+        );
+        self.conn.query_drop(create_table).await?;
+        Ok(())
     }
 
     fn endpoint(&self) -> String {
@@ -87,6 +116,21 @@ impl MySQLSink {
     fn password(&self) -> Option<String> {
         self.cfg.password.clone()
     }
+}
+
+fn get_builder(cfg: &MySQLConfig) -> OptsBuilder {
+    let endpoint = cfg.endpoint.clone();
+    let mut endpoint = endpoint.split(':');
+    let mut builder = OptsBuilder::default()
+        .user(cfg.user.clone())
+        .pass(cfg.password.clone())
+        .ip_or_hostname(endpoint.next().unwrap())
+        .db_name(cfg.database.clone());
+    // TODO(nanderstabel): Fix ParseIntError
+    if let Some(port) = endpoint.next() {
+        builder = builder.tcp_port(port.parse().unwrap());
+    }
+    builder
 }
 
 #[derive(Debug)]
@@ -121,6 +165,35 @@ impl TryFrom<Datum> for MySQLValue {
             }
         } else {
             Ok(MySQLValue(Value::NULL))
+        }
+    }
+}
+
+#[allow(clippy::upper_case_acronyms)]
+#[derive(strum_macros::Display)]
+enum MySQLDataType {
+    BOOL,
+    SMALLINT,
+    INT,
+    BIGINT,
+    FLOAT,
+    DOUBLE,
+    // TODO(nanderstabel): find solution for varchar length.
+    #[strum(serialize = "VARCHAR(255)")]
+    VARCHAR,
+}
+
+impl From<&DataType> for MySQLDataType {
+    fn from(data_type: &DataType) -> MySQLDataType {
+        match data_type {
+            DataType::Boolean => MySQLDataType::BOOL,
+            DataType::Int16 => MySQLDataType::SMALLINT,
+            DataType::Int32 => MySQLDataType::INT,
+            DataType::Int64 => MySQLDataType::BIGINT,
+            DataType::Float32 => MySQLDataType::FLOAT,
+            DataType::Float64 => MySQLDataType::DOUBLE,
+            DataType::Varchar => MySQLDataType::VARCHAR,
+            _ => unimplemented!(),
         }
     }
 }
@@ -292,17 +365,68 @@ mod test {
         );
     }
 
+    impl Default for MySQLConfig {
+        fn default() -> Self {
+            MySQLConfig {
+                endpoint: "127.0.0.1:3306".to_string(),
+                table: "t".to_string(),
+                database: Some("test".into()),
+                user: Some("root".into()),
+                password: None,
+            }
+        }
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_create_table() -> Result<()> {
+        let cfg = MySQLConfig::default();
+        let mut sink = MySQLSink::new(cfg.clone()).await?;
+
+        let schema = Schema::new(vec![Field {
+            data_type: DataType::Int32,
+            name: "v1".into(),
+            sub_fields: vec![],
+            type_name: "".into(),
+        }]);
+
+        let chunk = StreamChunk::new(
+            vec![Op::Insert, Op::Insert],
+            vec![Column::new(Arc::new(ArrayImpl::from(array!(
+                I32Array,
+                [Some(1), Some(2)]
+            ))))],
+            None,
+        );
+
+        sink.prepare(&schema).await?;
+        sink.begin_epoch(1000).await?;
+        sink.write_batch(chunk, &schema).await?;
+        sink.commit().await?;
+
+        #[derive(Debug, PartialEq, Eq, Clone)]
+        struct Res(i32);
+
+        let builder = get_builder(&cfg);
+
+        let mut conn = Conn::new(builder).await?;
+        let res = "SELECT v1 FROM `test`.`t`"
+            .with(())
+            .map(&mut conn, Res)
+            .await?;
+
+        assert_eq!(res, vec![Res(1), Res(2)]);
+
+        "DROP TABLE `test`.`t`".ignore(conn).await?;
+
+        Ok(())
+    }
+
     #[ignore]
     #[tokio::test]
     async fn test_drop() -> Result<()> {
-        let config = MySQLConfig {
-            endpoint: "127.0.0.1:3306".to_string(),
-            table: "t_drop".to_string(),
-            database: Some("test".into()),
-            user: Some("root".into()),
-            password: None,
-        };
-        let mut sink = MySQLSink::new(config.clone()).await?;
+        let cfg = MySQLConfig::default();
+        let mut sink = MySQLSink::new(cfg.clone()).await?;
 
         let schema = Schema::new(vec![
             Field {
@@ -334,9 +458,15 @@ mod test {
             None,
         );
 
+        sink.prepare(&schema).await?;
         sink.begin_epoch(1000).await?;
         sink.write_batch(chunk, &schema).await?;
         sink.commit().await?;
+
+        let builder = get_builder(&cfg);
+
+        let conn = Conn::new(builder).await?;
+        "DROP TABLE `test`.`t`".ignore(conn).await?;
 
         Ok(())
     }

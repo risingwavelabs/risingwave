@@ -20,43 +20,25 @@ use serde::{Deserialize, Serialize};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
-/// TODO(TaoWu): The configs here may be preferable to be managed under corresponding module
-/// separately.
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ComputeNodeConfig {
-    // For connection
-    #[serde(default)]
-    pub server: ServerConfig,
+pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 
-    // Below for batch query.
-    #[serde(default)]
-    pub batch: BatchConfig,
-
-    // Below for streaming.
-    #[serde(default)]
-    pub streaming: StreamingConfig,
-
-    // Below for Hummock.
-    #[serde(default)]
-    pub storage: StorageConfig,
-}
-
-pub fn load_config(path: &str) -> ComputeNodeConfig {
+pub fn load_config<S>(path: &str) -> Result<S>
+where
+    for<'a> S: Deserialize<'a> + Default,
+{
     if path.is_empty() {
         tracing::warn!("risingwave.toml not found, using default config.");
-        return ComputeNodeConfig::default();
+        return Ok(S::default());
     }
-
-    ComputeNodeConfig::init(path.to_owned().into()).unwrap()
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct FrontendConfig {
-    // For connection
-    #[serde(default)]
-    pub server: ServerConfig,
+    let config_str = fs::read_to_string(PathBuf::from(path.to_owned())).map_err(|e| {
+        RwError::from(InternalError(format!(
+            "failed to open config file '{}': {}",
+            path, e
+        )))
+    })?;
+    let config: S = toml::from_str(config_str.as_str())
+        .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
+    Ok(config)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -97,6 +79,9 @@ pub struct StreamingConfig {
 
     #[serde(default = "default::worker_node_parallelism")]
     pub worker_node_parallelism: usize,
+
+    #[serde(default)]
+    pub actor_runtime_worker_threads_num: Option<usize>,
 }
 
 impl Default for StreamingConfig {
@@ -130,9 +115,6 @@ pub struct StorageConfig {
     #[serde(default = "default::share_buffer_compaction_worker_threads_number")]
     pub share_buffer_compaction_worker_threads_number: u32,
 
-    // /// Size threshold to trigger shared buffer flush.
-    // #[serde(default = "default::shared_buffer_threshold")]
-    // pub shared_buffer_threshold: u32,
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
     #[serde(default = "default::shared_buffer_capacity_mb")]
@@ -175,6 +157,13 @@ pub struct StorageConfig {
     /// Number of SST ids fetched from meta per RPC
     #[serde(default = "default::sstable_id_remote_fetch_number")]
     pub sstable_id_remote_fetch_number: u32,
+
+    #[serde(default)]
+    pub file_cache: FileCacheConfig,
+
+    /// Whether to enable streaming upload for sstable.
+    #[serde(default = "default::min_sst_size_for_streaming_upload")]
+    pub min_sst_size_for_streaming_upload: u64,
 }
 
 impl Default for StorageConfig {
@@ -183,33 +172,22 @@ impl Default for StorageConfig {
     }
 }
 
-impl ComputeNodeConfig {
-    pub fn init(path: PathBuf) -> Result<ComputeNodeConfig> {
-        let config_str = fs::read_to_string(path.clone()).map_err(|e| {
-            RwError::from(InternalError(format!(
-                "failed to open config file '{}': {}",
-                path.to_string_lossy(),
-                e
-            )))
-        })?;
-        let config: ComputeNodeConfig = toml::from_str(config_str.as_str())
-            .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
-        Ok(config)
-    }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileCacheConfig {
+    #[serde(default = "default::file_cache_capacity")]
+    pub capacity: usize,
+
+    #[serde(default = "default::file_cache_total_buffer_capacity")]
+    pub total_buffer_capacity: usize,
+
+    #[serde(default = "default::file_cache_cache_file_fallocate_unit")]
+    pub cache_file_fallocate_unit: usize,
 }
 
-impl FrontendConfig {
-    pub fn init(path: PathBuf) -> Result<Self> {
-        let config_str = fs::read_to_string(path.clone()).map_err(|e| {
-            RwError::from(InternalError(format!(
-                "failed to open config file '{}': {}",
-                path.to_string_lossy(),
-                e
-            )))
-        })?;
-        let config: FrontendConfig = toml::from_str(config_str.as_str())
-            .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
-        Ok(config)
+impl Default for FileCacheConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
     }
 }
 
@@ -242,12 +220,6 @@ mod default {
 
     pub fn share_buffer_compaction_worker_threads_number() -> u32 {
         4
-    }
-
-    #[expect(dead_code)]
-    pub fn shared_buffer_threshold() -> u32 {
-        // 192MB
-        201326592
     }
 
     pub fn shared_buffer_capacity_mb() -> u32 {
@@ -295,7 +267,7 @@ mod default {
     }
 
     pub fn worker_node_parallelism() -> usize {
-        num_cpus::get()
+        std::thread::available_parallelism().unwrap().get()
     }
 
     pub fn compactor_memory_limit_mb() -> usize {
@@ -304,6 +276,26 @@ mod default {
 
     pub fn sstable_id_remote_fetch_number() -> u32 {
         10
+    }
+
+    pub fn file_cache_capacity() -> usize {
+        // 1 GiB
+        1024 * 1024 * 1024
+    }
+
+    pub fn file_cache_total_buffer_capacity() -> usize {
+        // 128 MiB
+        128 * 1024 * 1024
+    }
+
+    pub fn file_cache_cache_file_fallocate_unit() -> usize {
+        // 96 MiB
+        96 * 1024 * 1024
+    }
+
+    pub fn min_sst_size_for_streaming_upload() -> u64 {
+        // 32MB
+        32 * 1024 * 1024
     }
 }
 
@@ -326,7 +318,7 @@ pub mod constant {
             }
         }
 
-        pub const TABLE_OPTION_DUMMY_TTL: u32 = 0;
-        pub const PROPERTIES_TTL_KEY: &str = "ttl";
+        pub const TABLE_OPTION_DUMMY_RETAINTION_SECOND: u32 = 0;
+        pub const PROPERTIES_RETAINTION_SECOND_KEY: &str = "retention_seconds";
     }
 }

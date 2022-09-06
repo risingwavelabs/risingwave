@@ -199,13 +199,7 @@ impl Bitmap {
     }
 
     fn num_bytes(num_bits: usize) -> usize {
-        let num_bytes = num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 };
-        let r = num_bytes % 64;
-        if r == 0 {
-            num_bytes
-        } else {
-            num_bytes + 64 - r
-        }
+        num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 }
     }
 
     /// Returns the number of valid bits in the bitmap,
@@ -230,6 +224,11 @@ impl Bitmap {
     pub fn is_set(&self, idx: usize) -> ArrayResult<bool> {
         ensure!(idx < self.len());
         Ok(unsafe { self.is_set_unchecked(idx) })
+    }
+
+    /// Check if the bitmap is all set to 1.
+    pub fn is_all_set(&self) -> bool {
+        self.num_high_bits == self.len()
     }
 
     pub fn iter(&self) -> BitmapIter<'_> {
@@ -417,6 +416,19 @@ mod tests {
         let byte1 = 0b0101_0110_u8;
         let expected = Bitmap::from_bytes(Bytes::copy_from_slice(&[byte1]));
         assert_eq!(bitmap2, expected);
+    }
+
+    #[test]
+    fn test_bitmap_all_high() {
+        let num_bits = 3;
+        let bitmap = Bitmap::all_high_bits(num_bits);
+        assert_eq!(bitmap.len(), num_bits);
+        assert!(bitmap.is_all_set());
+        for i in 0..num_bits {
+            assert!(bitmap.is_set(i).unwrap());
+        }
+        // Test to and from protobuf is OK.
+        assert_eq!(bitmap, Bitmap::from(&bitmap.to_protobuf()));
     }
 
     #[test]

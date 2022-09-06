@@ -87,7 +87,8 @@ impl LocalQueryExecution {
             .front_env
             .hummock_snapshot_manager()
             .get_epoch(query_id)
-            .await?;
+            .await?
+            .committed_epoch;
         self.epoch = Some(epoch);
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
@@ -302,11 +303,30 @@ impl LocalQueryExecution {
             }
             PlanNodeType::BatchLookupJoin => {
                 let mut node_body = execution_plan_node.node.clone();
-                let worker_nodes = match &mut node_body {
-                    NodeBody::LookupJoin(node) => &mut node.worker_nodes,
+                match &mut node_body {
+                    NodeBody::LookupJoin(node) => {
+                        let side_table_desc = node
+                            .probe_side_table_desc
+                            .as_ref()
+                            .expect("no side table desc");
+                        node.probe_side_vnode_mapping = self
+                            .front_env
+                            .catalog_reader()
+                            .read_guard()
+                            .get_table_by_id(&side_table_desc.table_id.into())
+                            .map(|table| {
+                                self.front_env
+                                    .worker_node_manager()
+                                    .get_fragment_mapping(&table.fragment_id)
+                            })
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+                        node.worker_nodes =
+                            self.front_env.worker_node_manager().list_worker_nodes();
+                    }
                     _ => unreachable!(),
-                };
-                *worker_nodes = self.front_env.worker_node_manager().list_worker_nodes();
+                }
 
                 let left_child = self.convert_plan_node(
                     &execution_plan_node.children[0],

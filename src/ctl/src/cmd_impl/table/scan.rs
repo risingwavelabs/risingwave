@@ -14,11 +14,11 @@
 
 use anyhow::{anyhow, Result};
 use futures::{pin_mut, StreamExt};
-use risingwave_frontend::catalog::TableCatalog;
+use risingwave_frontend::TableCatalog;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -45,9 +45,7 @@ pub async fn get_table_catalog_by_id(meta: MetaClient, table_id: u32) -> Result<
 }
 
 pub fn print_table_catalog(table: &TableCatalog) {
-    let mut catalog = table.clone();
-    catalog.vnode_mapping = None;
-    println!("{:#?}", catalog);
+    println!("{:#?}", table);
 }
 
 pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
@@ -64,7 +62,7 @@ pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> Stat
             .iter()
             .map(|x| x.direct.to_order())
             .collect(),
-        table.pk.clone(), // FIXME: should use order keys
+        table.stream_key.clone(), // FIXME: should use order keys
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
     )
 }

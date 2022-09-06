@@ -14,11 +14,18 @@
 
 use std::ffi::OsStr;
 
-use libtest_mimic::{run_tests, Arguments, Outcome, Test};
+use libtest_mimic::{Arguments, Trial};
 use risingwave_frontend_test_runner::run_test_file;
+use tokio::runtime::Runtime;
 use walkdir::WalkDir;
 
-#[cfg(not(madsim))]
+fn build_runtime() -> Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
 fn main() {
     let run_tests_args = &Arguments::from_args();
     let mut tests = vec![];
@@ -38,15 +45,19 @@ fn main() {
                 .to_string_lossy()
                 .contains(".apply.yaml")
         {
-            let file_name = path.file_name().unwrap().to_string_lossy();
-            let test_case_name = file_name.split('.').next().unwrap();
-            tests.push(Test {
-                name: format!("{test_case_name}_test"),
-                kind: "".into(),
-                is_ignored: false,
-                is_bench: false,
-                data: (test_case_name.to_string(), file_name.to_string()),
-            });
+            let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+            let test_case_name = file_name.split('.').next().unwrap().to_string();
+
+            tests.push(Trial::test(format!("{test_case_name}_test"), move || {
+                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("testdata")
+                    .join(file_name);
+
+                let file_content = std::fs::read_to_string(path).unwrap();
+                build_runtime().block_on(run_test_file(&test_case_name, &file_content))?;
+                Ok(())
+            }));
         }
     }
 
@@ -54,29 +65,5 @@ fn main() {
         panic!("no test case found in planner test!");
     }
 
-    run_tests(run_tests_args, tests, |test| {
-        let (test_case_name, file_name): (String, String) = test.clone().data;
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("testdata")
-            .join(file_name);
-
-        let file_content = std::fs::read_to_string(path).unwrap();
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(run_test_file(&test_case_name, &file_content));
-        Outcome::Passed
-    })
-    .exit();
-}
-
-#[cfg(madsim)]
-fn main() {
-    // println!("planner test is not supported yet in simulation");
-    run_tests(&Arguments::from_args(), vec![], |_: &Test<()>| {
-        Outcome::Passed
-    })
-    .exit();
+    libtest_mimic::run(run_tests_args, tests).exit();
 }

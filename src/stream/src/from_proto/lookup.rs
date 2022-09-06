@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::storage_table::RowBasedStorageTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::executor::{LookupExecutor, LookupExecutorParams};
@@ -25,15 +25,14 @@ pub struct LookupExecutorBuilder;
 
 impl ExecutorBuilder for LookupExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let lookup = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Lookup)?;
 
-        let arrangement = params.input.remove(1);
-        let stream = params.input.remove(0);
+        let [stream, arrangement]: [_; 2] = params.input.try_into().unwrap();
 
         let arrangement_order_rules = lookup
             .get_arrangement_table_info()?
@@ -48,7 +47,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .iter()
             .map(ColumnDesc::from)
             .collect();
-        let storage_table = RowBasedStorageTable::from_table_catalog(
+        let state_table = StateTable::from_table_catalog(
             lookup.arrangement_table.as_ref().unwrap(),
             store,
             params.vnode_bitmap.map(Arc::new),
@@ -65,7 +64,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             stream_join_key_indices: lookup.stream_key.iter().map(|x| *x as usize).collect(),
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
-            storage_table,
+            state_table,
         })))
     }
 }

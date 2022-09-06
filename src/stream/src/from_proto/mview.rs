@@ -23,12 +23,13 @@ pub struct MaterializeExecutorBuilder;
 
 impl ExecutorBuilder for MaterializeExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
+        let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let order_key = node
             .column_orders
@@ -38,7 +39,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let table = node.get_table()?;
         let executor = MaterializeExecutor::new(
-            params.input.remove(0),
+            input,
             store,
             order_key,
             params.executor_id,
@@ -54,12 +55,13 @@ pub struct ArrangeExecutorBuilder;
 
 impl ExecutorBuilder for ArrangeExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;
+        let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let keys = arrange_node
             .get_table_info()?
@@ -74,14 +76,8 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
         let vnodes = params.vnode_bitmap.map(Arc::new);
 
-        let executor = MaterializeExecutor::new(
-            params.input.remove(0),
-            store,
-            keys,
-            params.executor_id,
-            vnodes,
-            table,
-        );
+        let executor =
+            MaterializeExecutor::new(input, store, keys, params.executor_id, vnodes, table);
 
         Ok(executor.boxed())
     }

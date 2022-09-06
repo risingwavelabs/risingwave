@@ -32,7 +32,7 @@ steps:
   - wait
 
   - label: "build"
-    command: "ci/scripts/build.sh -t debug -p dev"
+    command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -44,7 +44,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test"
-    command: "ci/scripts/e2e-test.sh -p dev"
+    command: "ci/scripts/e2e-test.sh -p ci-dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -57,7 +57,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (parallel)"
-    command: "ci/scripts/e2e-test-parallel.sh -p dev"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -68,10 +68,9 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
-    soft_fail: true
 
   - label: "end-to-end source test"
-    command: "ci/scripts/e2e-source-test.sh"
+    command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -84,7 +83,7 @@ steps:
     retry: *auto-retry
 
   - label: "regress test"
-    command: "ci/scripts/regress-test.sh"
+    command: "ci/scripts/regress-test.sh -p ci-dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -123,7 +122,18 @@ steps:
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
-    command: "ci/scripts/deterministic-simulation-test.sh"
+    command: "ci/scripts/deterministic-unit-test.sh"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end test (deterministic simulation)"
+    command: "timeout 14m ci/scripts/deterministic-e2e-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
@@ -131,7 +141,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
-    soft_fail: true
     retry: *auto-retry
 
   - label: "misc check"

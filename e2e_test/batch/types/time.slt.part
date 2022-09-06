@@ -18,6 +18,11 @@ select TIME '19:46:41' >= TIME '11:33:43';
 ----
 t
 
+query T
+select time '12:30:00' < interval '1 day';
+----
+t
+
 statement ok
 create table t (v1 time, v2 timestamp, v3 date);
 

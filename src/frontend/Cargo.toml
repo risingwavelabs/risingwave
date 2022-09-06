@@ -17,12 +17,10 @@ downcast-rs = "1.2"
 dyn-clone = "1.0.4"
 enum-as-inner = "0.5"
 fixedbitset = "0.4.1"
-futures = "0.3"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
 lazy_static = "1"
-log = "0.4"
-madsim = "=0.2.0-alpha.6"
 maplit = "1"
 md5 = "0.7.0"
 num-integer = "0.1"
@@ -30,6 +28,7 @@ num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
 pgwire = { path = "../utils/pgwire" }
+prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"
 risingwave_batch = { path = "../batch" }
@@ -41,12 +40,14 @@ risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_sqlparser = { path = "../sqlparser" }
 risingwave_storage = { path = "../storage" }
+serde = { version = "1", features = ["derive"] }
+serde_derive = "1"
 serde_json = "1"
 sha2 = "0.10.2"
 smallvec = { version = "1.6.1", features = ["serde"] }
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -55,9 +56,11 @@ tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tonic = { version = "=0.2.0-alpha.6", package = "madsim-tonic" }
-tracing = { version = "0.1" }
+tonic = { version = "0.2", package = "madsim-tonic" }
+tracing = "0.1"
 uuid = "1"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

@@ -17,7 +17,8 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::HopWindowNode;
 
-use super::{LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamHopWindow`] represents a hop window table function.
 #[derive(Debug, Clone)]
@@ -29,7 +30,7 @@ pub struct StreamHopWindow {
 impl StreamHopWindow {
     pub fn new(logical: LogicalHopWindow) -> Self {
         let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.pk_indices.to_vec();
+        let pk_indices = logical.base.logical_pk.to_vec();
         let input = logical.input();
 
         let i2o = logical.i2o_col_mapping();
@@ -39,6 +40,7 @@ impl StreamHopWindow {
             ctx,
             logical.schema().clone(),
             pk_indices,
+            logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
         );
@@ -64,8 +66,8 @@ impl PlanTreeNodeUnary for StreamHopWindow {
 
 impl_plan_tree_node_for_unary! {StreamHopWindow}
 
-impl ToStreamProst for StreamHopWindow {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamHopWindow {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::HopWindow(HopWindowNode {
             time_col: Some(self.logical.time_col.to_proto()),
             window_slide: Some(self.logical.window_slide.into()),

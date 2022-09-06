@@ -14,15 +14,16 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
+use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 
 use super::exchange::input::BoxedInput;
-use super::{ActorContextRef, OperatorInfoStatus};
+use super::ActorContextRef;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
 };
-use crate::task::ActorId;
+use crate::task::FragmentId;
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
@@ -33,11 +34,10 @@ pub struct ReceiverExecutor {
     /// Logical Operator Info
     info: ExecutorInfo,
 
-    /// Actor operator context
-    status: OperatorInfoStatus,
+    ctx: ActorContextRef,
 
-    // Actor id,
-    actor_id: ActorId,
+    /// Upstream fragment id.
+    upstream_fragment_id: FragmentId,
 
     /// Metrics
     metrics: Arc<StreamingMetrics>,
@@ -53,13 +53,14 @@ impl std::fmt::Debug for ReceiverExecutor {
 }
 
 impl ReceiverExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         schema: Schema,
         pk_indices: PkIndices,
         input: BoxedInput,
-        actor_context: ActorContextRef,
-        receiver_id: u64,
-        actor_id: ActorId,
+        ctx: ActorContextRef,
+        _receiver_id: u64,
+        upstream_fragment_id: FragmentId,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
@@ -69,33 +70,53 @@ impl ReceiverExecutor {
                 pk_indices,
                 identity: "ReceiverExecutor".to_string(),
             },
-            status: OperatorInfoStatus::new(actor_context, receiver_id),
-            actor_id,
+            ctx,
+            upstream_fragment_id,
             metrics,
         }
     }
 }
 
 impl Executor for ReceiverExecutor {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        let mut status = self.status;
-        let metrics = self.metrics.clone();
-        let actor_id_str = self.actor_id.to_string();
-        self.input
-            .inspect(move |msg| {
-                let Ok(msg) = msg else { return };
-                match &msg {
+    fn execute(mut self: Box<Self>) -> BoxedMessageStream {
+        let actor_id = self.ctx.id;
+        let actor_id_str = actor_id.to_string();
+        let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
+
+        let stream = #[try_stream]
+        async move {
+            let mut start_time = minstant::Instant::now();
+            while let Some(msg) = self.input.next().await {
+                self.metrics
+                    .actor_input_buffer_blocking_duration_ns
+                    .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
+                    .inc_by(start_time.elapsed().as_nanos() as u64);
+                let mut msg: Message = msg?;
+
+                match &mut msg {
                     Message::Chunk(chunk) => {
-                        metrics
+                        self.metrics
                             .actor_in_record_cnt
                             .with_label_values(&[&actor_id_str])
                             .inc_by(chunk.cardinality() as _);
                     }
-                    Message::Barrier(_) => {}
+                    Message::Barrier(barrier) => {
+                        tracing::trace!(
+                            target: "events::barrier::path",
+                            actor_id = actor_id,
+                            "receiver receives barrier from path: {:?}",
+                            barrier.passed_actors
+                        );
+                        barrier.passed_actors.push(actor_id);
+                    }
                 };
-                status.next_message(msg);
-            })
-            .boxed()
+
+                yield msg;
+                start_time = minstant::Instant::now();
+            }
+        };
+
+        stream.boxed()
     }
 
     fn schema(&self) -> &Schema {

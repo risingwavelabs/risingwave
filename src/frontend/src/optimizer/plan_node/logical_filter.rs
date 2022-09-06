@@ -16,6 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::error::Result;
 
 use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
@@ -23,7 +24,6 @@ use super::{
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
-use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
@@ -44,8 +44,19 @@ impl LogicalFilter {
             assert_input_ref!(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices().to_vec();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let pk_indices = input.logical_pk().to_vec();
+        let mut functional_dependency = input.functional_dependency().clone();
+        for i in &predicate.conjunctions {
+            if let Some((col, _)) = i.as_eq_const() {
+                functional_dependency.add_constant_columns(&[col.index()])
+            } else if let Some((left, right)) = i.as_eq_cond() {
+                functional_dependency
+                    .add_functional_dependency_by_column_indices(&[left.index()], &[right.index()]);
+                functional_dependency
+                    .add_functional_dependency_by_column_indices(&[right.index()], &[left.index()]);
+            }
+        }
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalFilter {
             base,
             predicate,
@@ -189,13 +200,16 @@ impl ToStream for LogicalFilter {
 #[cfg(test)]
 mod tests {
 
+    use std::collections::HashSet;
+
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalValues;
+    use crate::optimizer::property::FunctionalDependency;
     use crate::session::OptimizerContext;
 
     #[tokio::test]
@@ -385,5 +399,75 @@ mod tests {
         assert_eq!(values.schema().fields().len(), 2);
         assert_eq!(values.schema().fields()[0], fields[1]);
         assert_eq!(values.schema().fields()[1], fields[2]);
+    }
+
+    #[tokio::test]
+    async fn fd_derivation_filter() {
+        // input: [v1, v2, v3, v4]
+        // FD: v4 --> { v2, v3 }
+        // Condition: v1 = 0 AND v2 = v3
+        // output: [v1, v2, v3, v4],
+        // FD: v4 --> { v2, v3 }, {} --> v1, v2 --> v3, v3 --> v2
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
+            Field::with_name(DataType::Int32, "v4"),
+        ];
+        let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        // 3 --> 1, 2
+        values
+            .base
+            .functional_dependency
+            .add_functional_dependency_by_column_indices(&[3], &[1, 2]);
+        // v1 = 0 AND v2 = v3
+        let predicate = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::And,
+                vec![
+                    ExprImpl::FunctionCall(Box::new(
+                        FunctionCall::new(
+                            Type::Equal,
+                            vec![
+                                ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
+                                ExprImpl::Literal(Box::new(Literal::new(
+                                    Some(ScalarImpl::Int32(1)),
+                                    DataType::Int32,
+                                ))),
+                            ],
+                        )
+                        .unwrap(),
+                    )),
+                    ExprImpl::FunctionCall(Box::new(
+                        FunctionCall::new(
+                            Type::Equal,
+                            vec![
+                                ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                                ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
+                            ],
+                        )
+                        .unwrap(),
+                    )),
+                ],
+            )
+            .unwrap(),
+        ));
+        let filter = LogicalFilter::create_with_expr(values.into(), predicate);
+        let fd_set: HashSet<_> = filter
+            .functional_dependency()
+            .as_dependencies()
+            .iter()
+            .cloned()
+            .collect();
+        let expected_fd_set: HashSet<_> = [
+            FunctionalDependency::with_indices(4, &[3], &[1, 2]),
+            FunctionalDependency::with_indices(4, &[], &[0]),
+            FunctionalDependency::with_indices(4, &[1], &[2]),
+            FunctionalDependency::with_indices(4, &[2], &[1]),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(fd_set, expected_fd_set);
     }
 }

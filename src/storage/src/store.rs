@@ -18,9 +18,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
+use crate::hummock::local_version_manager::SyncResult;
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
@@ -30,7 +31,7 @@ pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, 
 pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B> =
     Future<Output = StorageResult<I>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
-pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
+pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<SyncResult>> + Send;
 pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
 
 #[macro_export]
@@ -103,7 +104,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_>;
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        check_bloom_filter: bool,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
@@ -183,26 +189,21 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         B: AsRef<[u8]> + Send;
 
     /// Creates a `WriteBatch` associated with this state store.
-    fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<Self> {
-        WriteBatch::new(self.clone(), write_options)
+    fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<'_, Self> {
+        WriteBatch::new(self, write_options)
     }
 
     /// Waits until the epoch is committed and its data is ready to read.
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_>;
+    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
 
     /// Syncs buffered data to S3.
     /// If the epoch is None, all buffered data will be synced.
     /// Otherwise, only data of the provided epoch will be synced.
-    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_>;
+    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_>;
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         MonitoredStateStore::new(self, stats)
-    }
-
-    /// Gets `epoch`'s uncommitted `Sstables`.
-    fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<LocalSstableInfo> {
-        todo!()
     }
 
     /// Clears contents in shared buffer.
@@ -223,7 +224,7 @@ pub trait StateStoreIter: Send + 'static {
 pub struct ReadOptions {
     pub epoch: u64,
     pub table_id: Option<TableId>,
-    pub ttl: Option<u32>, // second
+    pub retention_seconds: Option<u32>, // second
 }
 
 #[derive(Default, Clone)]
@@ -235,8 +236,10 @@ pub struct WriteOptions {
 impl ReadOptions {
     pub fn min_epoch(&self) -> u64 {
         let epoch = Epoch(self.epoch);
-        match self.ttl {
-            Some(ttl_second_u32) => epoch.subtract_ms((ttl_second_u32 * 1000) as u64).0,
+        match self.retention_seconds.as_ref() {
+            Some(retention_seconds_u32) => {
+                epoch.subtract_ms((retention_seconds_u32 * 1000) as u64).0
+            }
             None => 0,
         }
     }

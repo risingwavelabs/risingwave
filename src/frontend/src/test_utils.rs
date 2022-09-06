@@ -21,16 +21,16 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
-    TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
-    NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
+    IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
+    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable,
+    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
+    Source as ProstSource, Table as ProstTable,
 };
-use risingwave_pb::common::ParallelUnitMapping;
+use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -123,7 +123,7 @@ impl LocalFrontend {
             Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
                 .plan(bound)
                 .unwrap()
-                .gen_batch_query_plan()
+                .gen_batch_distributed_plan()
         } else {
             unreachable!()
         }
@@ -201,11 +201,6 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
         table.id = self.gen_id();
-        table.mapping = Some(ParallelUnitMapping {
-            table_id: table.id,
-            original_indices: [0, 10, 20].to_vec(),
-            data: [1, 2, 3].to_vec(),
-        });
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
         Ok(())
@@ -230,6 +225,26 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()> {
         self.create_sink_inner(sink, graph)
+    }
+
+    async fn create_index(
+        &self,
+        mut index: ProstIndex,
+        mut index_table: ProstTable,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        index_table.id = self.gen_id();
+        self.catalog.write().create_table(&index_table);
+        self.add_table_or_index_id(
+            index_table.id,
+            index_table.schema_id,
+            index_table.database_id,
+        );
+
+        index.id = index_table.id;
+        index.index_table_id = index_table.id;
+        self.catalog.write().create_index(&index);
+        Ok(())
     }
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
@@ -265,6 +280,33 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_sink(database_id, schema_id, sink_id);
+        Ok(())
+    }
+
+    async fn drop_index(&self, index_id: IndexId) -> Result<()> {
+        let &schema_id = self
+            .table_id_to_schema_id
+            .read()
+            .get(&index_id.index_id)
+            .unwrap();
+        let database_id = self.get_database_id_by_schema(schema_id);
+
+        let index = {
+            let catalog_reader = self.catalog.read();
+            let schema_catalog = catalog_reader
+                .get_schema_by_id(&database_id, &schema_id)
+                .unwrap();
+            schema_catalog.get_index_by_id(&index_id).unwrap().clone()
+        };
+
+        let index_table_id = index.index_table.id;
+        let (database_id, schema_id) = self.drop_table_or_index_id(index_id.index_id);
+        self.catalog
+            .write()
+            .drop_index(database_id, schema_id, index_id);
+        self.catalog
+            .write()
+            .drop_table(database_id, schema_id, index_table_id);
         Ok(())
     }
 
@@ -336,7 +378,22 @@ impl MockCatalogWriter {
             .insert(table_id, schema_id);
     }
 
+    fn add_table_or_index_id(&self, table_id: u32, schema_id: SchemaId, _database_id: DatabaseId) {
+        self.table_id_to_schema_id
+            .write()
+            .insert(table_id, schema_id);
+    }
+
     fn drop_table_or_sink_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
+        let schema_id = self
+            .table_id_to_schema_id
+            .write()
+            .remove(&table_id)
+            .unwrap();
+        (self.get_database_id_by_schema(schema_id), schema_id)
+    }
+
+    fn drop_table_or_index_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
         let schema_id = self
             .table_id_to_schema_id
             .write()
@@ -408,7 +465,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         let mut user_info = lock.get_user_by_name(&old_name).unwrap().clone();
         request.update_fields.into_iter().for_each(|field| {
             if field == UpdateField::Super as i32 {
-                user_info.is_supper = update_user.is_supper;
+                user_info.is_super = update_user.is_super;
             } else if field == UpdateField::Login as i32 {
                 user_info.can_login = update_user.can_login;
             } else if field == UpdateField::CreateDb as i32 {
@@ -501,7 +558,7 @@ impl MockUserInfoWriter {
         user_info.write().create_user(UserInfo {
             id: DEFAULT_SUPER_USER_ID,
             name: DEFAULT_SUPER_USER.to_string(),
-            is_supper: true,
+            is_super: true,
             can_create_db: true,
             can_create_user: true,
             can_login: true,
@@ -522,16 +579,25 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
-    async fn pin_snapshot(&self) -> RpcResult<u64> {
-        Ok(0)
+    async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
+        Ok(HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
-    async fn get_epoch(&self) -> RpcResult<u64> {
-        Ok(0)
+    async fn get_epoch(&self) -> RpcResult<HummockSnapshot> {
+        Ok(HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
-    async fn flush(&self) -> RpcResult<()> {
-        Ok(())
+    async fn flush(&self) -> RpcResult<HummockSnapshot> {
+        Ok(HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
     async fn list_table_fragments(
@@ -549,6 +615,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
 pub static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";
     package test;

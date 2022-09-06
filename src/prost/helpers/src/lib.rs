@@ -14,15 +14,10 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-extern crate proc_macro;
-extern crate syn;
-#[macro_use]
-extern crate quote;
-extern crate proc_macro2;
-
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use proc_macro_error::{proc_macro_error, ResultExt};
+use quote::quote;
 use syn::{DataStruct, DeriveInput};
 
 mod generate;

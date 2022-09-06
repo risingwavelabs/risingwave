@@ -15,15 +15,20 @@
 use std::collections::HashMap;
 
 use itertools::{iproduct, Itertools as _};
+use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{cast_ok_base, CastContext, DataTypeName};
+use super::{align_types, cast_ok_base, CastContext, DataTypeName};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
-pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
+pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<DataType> {
+    if let Some(res) = infer_type_for_special(func_type, inputs).transpose() {
+        return res;
+    }
+
     let actuals = inputs
         .iter()
         .map(|e| match e.is_unknown() {
@@ -32,7 +37,8 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
         })
         .collect_vec();
     let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &actuals)?;
-    let inputs = inputs
+    let inputs_owned = std::mem::take(inputs);
+    *inputs = inputs_owned
         .into_iter()
         .zip_eq(&sig.inputs_type)
         .map(|(expr, t)| {
@@ -42,8 +48,198 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
             Ok(expr)
         })
         .try_collect()?;
-    let ret_type = sig.ret_type.into();
-    Ok((inputs, ret_type))
+    Ok(sig.ret_type.into())
+}
+
+macro_rules! ensure_arity {
+    ($func:literal, $lower:literal <= | $inputs:ident | <= $upper:literal) => {
+        if !($lower <= $inputs.len() && $inputs.len() <= $upper) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes {} to {} arguments ({} given)",
+                $func,
+                $lower,
+                $upper,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+    ($func:literal, $lower:literal <= | $inputs:ident |) => {
+        if !($lower <= $inputs.len()) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes at least {} arguments ({} given)",
+                $func,
+                $lower,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+    ($func:literal, | $inputs:ident | == $num:literal) => {
+        if !($inputs.len() == $num) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes {} arguments ({} given)",
+                $func,
+                $num,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+}
+
+/// Special exprs that cannot be handled by [`infer_type_name`] and [`FuncSigMap`] are handled here.
+/// These include variadic functions, list and struct type, as well as non-implicit cast.
+///
+/// We should aim for enhancing the general inferring framework and reduce the special cases here.
+fn infer_type_for_special(
+    func_type: ExprType,
+    inputs: &mut Vec<ExprImpl>,
+) -> Result<Option<DataType>> {
+    match func_type {
+        ExprType::Case => {
+            let len = inputs.len();
+            align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
+                // `Case` organize `inputs` as (cond, res) pairs with a possible `else` res at
+                // the end. So we align exprs at odd indices as well as the last one when length
+                // is odd.
+                match i.is_odd() || len.is_odd() && i == len - 1 {
+                    true => Some(e),
+                    false => None,
+                }
+            }))
+            .map(Some)
+        }
+        ExprType::In => {
+            align_types(inputs.iter_mut())?;
+            Ok(Some(DataType::Boolean))
+        }
+        ExprType::Coalesce => {
+            ensure_arity!("coalesce", 1 <= | inputs |);
+            align_types(inputs.iter_mut()).map(Some)
+        }
+        ExprType::ConcatWs => {
+            ensure_arity!("concat_ws", 2 <= | inputs |);
+            let inputs_owned = std::mem::take(inputs);
+            *inputs = inputs_owned
+                .into_iter()
+                .enumerate()
+                .map(|(i, input)| match i {
+                    // 0-th arg must be string
+                    0 => input.cast_implicit(DataType::Varchar),
+                    // subsequent can be any type, using the output format
+                    _ => input.cast_output(),
+                })
+                .try_collect()?;
+            Ok(Some(DataType::Varchar))
+        }
+        ExprType::ConcatOp => {
+            let inputs_owned = std::mem::take(inputs);
+            *inputs = inputs_owned
+                .into_iter()
+                .map(|input| input.cast_explicit(DataType::Varchar))
+                .try_collect()?;
+            Ok(Some(DataType::Varchar))
+        }
+        ExprType::IsNotNull => {
+            ensure_arity!("is_not_null", | inputs | == 1);
+            match inputs[0].return_type() {
+                DataType::Struct(_) | DataType::List { .. } => Ok(Some(DataType::Boolean)),
+                _ => Ok(None),
+            }
+        }
+        ExprType::IsNull => {
+            ensure_arity!("is_null", | inputs | == 1);
+            match inputs[0].return_type() {
+                DataType::Struct(_) | DataType::List { .. } => Ok(Some(DataType::Boolean)),
+                _ => Ok(None),
+            }
+        }
+        ExprType::RegexpMatch => {
+            ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
+            if inputs.len() == 3 {
+                return Err(ErrorCode::NotImplemented(
+                    "flag in regexp_match".to_string(),
+                    4545.into(),
+                )
+                .into());
+            }
+            Ok(Some(DataType::List {
+                datatype: Box::new(DataType::Varchar),
+            }))
+        }
+        ExprType::ArrayCat => {
+            ensure_arity!("array_cat", | inputs | == 2);
+            let left_type = inputs[0].return_type();
+            let right_type = inputs[1].return_type();
+            let return_type = match (&left_type, &right_type) {
+                (
+                    DataType::List {
+                        datatype: left_elem_type,
+                    },
+                    DataType::List {
+                        datatype: right_elem_type,
+                    },
+                ) => {
+                    if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
+                        Some(left_type.clone())
+                    } else if left_type == **right_elem_type {
+                        Some(right_type.clone())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            Ok(Some(return_type.ok_or_else(|| {
+                ErrorCode::BindError(format!(
+                    "Cannot concatenate {} and {}",
+                    left_type, right_type
+                ))
+            })?))
+        }
+        ExprType::ArrayAppend => {
+            ensure_arity!("array_append", | inputs | == 2);
+            let left_type = inputs[0].return_type();
+            let right_type = inputs[1].return_type();
+            let return_type = match (&left_type, &right_type) {
+                (DataType::List { .. }, DataType::List { .. }) => None,
+                (
+                    DataType::List {
+                        datatype: left_elem_type,
+                    },
+                    _, // non-array
+                ) if **left_elem_type == right_type => Some(left_type.clone()),
+                _ => None,
+            };
+            Ok(Some(return_type.ok_or_else(|| {
+                ErrorCode::BindError(format!("Cannot append {} to {}", right_type, left_type))
+            })?))
+        }
+        ExprType::ArrayPrepend => {
+            ensure_arity!("array_prepend", | inputs | == 2);
+            let left_type = inputs[0].return_type();
+            let right_type = inputs[1].return_type();
+            let return_type = match (&left_type, &right_type) {
+                (DataType::List { .. }, DataType::List { .. }) => None,
+                (
+                    _, // non-array
+                    DataType::List {
+                        datatype: right_elem_type,
+                    },
+                ) if left_type == **right_elem_type => Some(right_type.clone()),
+                _ => None,
+            };
+            Ok(Some(return_type.ok_or_else(|| {
+                ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type))
+            })?))
+        }
+        ExprType::Vnode => {
+            ensure_arity!("vnode", 1 <= | inputs |);
+            Ok(Some(DataType::Int16))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// From all available functions in `sig_map`, find and return the best matching `FuncSign` for the
@@ -51,7 +247,7 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
 /// also match `substr(varchar, smallint)` or even `substr(varchar, unknown)` to `substr(varchar,
 /// int)`.
 ///
-/// This correponds to the `PostgreSQL` rules on operators and functions here:
+/// This corresponds to the `PostgreSQL` rules on operators and functions here:
 /// * <https://www.postgresql.org/docs/current/typeconv-oper.html>
 /// * <https://www.postgresql.org/docs/current/typeconv-func.html>
 ///
@@ -61,7 +257,7 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
 ///    both sides are same type.
 /// 3. Rank candidates based on most matching positions. This covers Rule 2, 4a, 4c and 4d in
 ///    `PostgreSQL`. See [`top_matches`] for details.
-/// 4. Attempt to narrow down candidates by selecting type catagories for unknowns. This covers Rule
+/// 4. Attempt to narrow down candidates by selecting type categories for unknowns. This covers Rule
 ///    4e in `PostgreSQL`. See [`narrow_category`] for details.
 /// 5. Attempt to narrow down candidates by assuming all arguments are same type. This covers Rule
 ///    4f in `PostgreSQL`. See [`narrow_same_type`] for details.
@@ -139,7 +335,7 @@ fn is_preferred(t: DataTypeName) -> bool {
 /// valid cast when they are of the same type, because it may deserve special treatment. This is
 /// also the behavior of underlying [`cast_ok_base`].
 ///
-/// Sometimes it is more convenient to include equality when checking whether a formal paramater can
+/// Sometimes it is more convenient to include equality when checking whether a formal parameter can
 /// accept an actual argument. So we introduced `eq_ok` to control this behavior.
 fn implicit_ok(source: DataTypeName, target: DataTypeName, eq_ok: bool) -> bool {
     eq_ok && source == target || cast_ok_base(source, target, CastContext::Implicit)
@@ -154,7 +350,7 @@ fn implicit_ok(source: DataTypeName, target: DataTypeName, eq_ok: bool) -> bool 
 /// * Rule 4a: If the input cannot implicit cast to expected type at any position, this candidate is
 ///   discarded.
 ///
-/// Correponding implementation in `PostgreSQL`:
+/// Corresponding implementation in `PostgreSQL`:
 /// * Rule 2 on operators: `OpernameGetOprid()` in `namespace.c` [14.0/86a4dc1][rule 2 oper src]
 ///   * Note that unknown-handling logic of `binary_oper_exact()` in `parse_oper.c` is in
 ///     [`infer_type_name`].
@@ -210,11 +406,11 @@ fn top_matches<'a, 'b>(
     best_candidates
 }
 
-/// Attempt to narrow down candidates by selecting type catagories for unknowns. This covers Rule 4e
+/// Attempt to narrow down candidates by selecting type categories for unknowns. This covers Rule 4e
 /// in [`PostgreSQL`](https://www.postgresql.org/docs/current/typeconv-func.html).
 ///
 /// This is done in 2 phases:
-/// * First, chech each unknown position individually and try to find a type category for it.
+/// * First, check each unknown position individually and try to find a type category for it.
 ///   * If any candidate accept varchar, varchar is selected;
 ///   * otherwise, if all candidate accept the same category, select this category.
 ///     * Also record whether any candidate accept the preferred type within this category.
@@ -223,10 +419,10 @@ fn top_matches<'a, 'b>(
 ///   * it does not agree with the type category assignment;
 ///   * the assigned type category contains a preferred type but the candidate is not preferred.
 ///
-/// If the first phase fails or the second phase gives an empty set, this attempt preserves orginal
+/// If the first phase fails or the second phase gives an empty set, this attempt preserves original
 /// list untouched.
 ///
-/// Correponding implementation in `PostgreSQL`:
+/// Corresponding implementation in `PostgreSQL`:
 /// * Line 1164 - Line 1298 of `func_select_candidate()` in `parse_func.c` [14.0/86a4dc1][rule 4e
 ///   src]
 ///
@@ -298,16 +494,16 @@ fn narrow_category<'a, 'b>(
 /// in [`PostgreSQL`](https://www.postgresql.org/docs/current/typeconv-func.html).
 ///
 /// If all non-null arguments are same type, assume all unknown arguments are of this type as well.
-/// Discard a candidate if its paramater type cannot be casted from this type.
+/// Discard a candidate if its parameter type cannot be casted from this type.
 ///
-/// If the condition is not met or the result is empty, this attempt preserves orginal list
+/// If the condition is not met or the result is empty, this attempt preserves original list
 /// untouched.
 ///
 /// Note this rule cannot replace special treatment given to binary operators in [Rule 2], because
 /// this runs after varchar-biased Rule 4e ([`narrow_category`]), and has no preference between
 /// exact-match and castable-match.
 ///
-/// Correponding implementation in `PostgreSQL`:
+/// Corresponding implementation in `PostgreSQL`:
 /// * Line 1300 - Line 1355 of `func_select_candidate()` in `parse_func.c` [14.0/86a4dc1][rule 4f
 ///   src]
 ///
@@ -466,15 +662,13 @@ fn build_type_derive_map() -> FuncSigMap {
         E::GreaterThan,
         E::GreaterThanOrEqual,
         E::IsDistinctFrom,
+        E::IsNotDistinctFrom,
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::List]);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestampz]);
-    // TODO: add support for time-interval comparison
-    // build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Interval]);
+    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
     for e in cmp_exprs {
         for t in [T::Boolean, T::Varchar] {
             map.insert(*e, vec![t, t], T::Boolean);
@@ -617,7 +811,7 @@ mod tests {
     use super::*;
 
     fn infer_type_v0(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
-        let inputs = inputs_type
+        let mut inputs = inputs_type
             .into_iter()
             .map(|t| {
                 crate::expr::Literal::new(
@@ -636,8 +830,7 @@ mod tests {
                 .into()
             })
             .collect();
-        let (_, ret) = infer_type(func_type, inputs)?;
-        Ok(ret)
+        infer_type(func_type, &mut inputs)
     }
 
     fn test_simple_infer_type(

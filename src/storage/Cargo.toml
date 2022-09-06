@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
 auto_enums = { version = "0.7", features = ["futures"] }
 bitvec = "1"
 byteorder = "1"
@@ -28,12 +29,10 @@ hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 libc = "0.2"
-log = "0.4"
 lz4 = "1.23.1"
-madsim = "=0.2.0-alpha.6"
 memcomparable = { path = "../utils/memcomparable" }
+minitrace = "0.4"
 minstant = "0.1"
-moka = { version = "0.9", features = ["future"] }
 nix = { version = "0.24.1", features = ["fs", "mman"] }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -48,6 +47,7 @@ risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+scopeguard = "1"
 # rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
 #     "encryption",
 #     "static_libcpp",
@@ -55,10 +55,11 @@ risingwave_rpc_client = { path = "../rpc_client" }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 spin = "0.9"
+sync-point = { path = "../utils/sync-point" }
 tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
-tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",
     "rt-multi-thread",
@@ -70,15 +71,18 @@ tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
 tokio-metrics = "0.1.0"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
-tonic = { version = "=0.2.0-alpha.6", package = "madsim-tonic" }
-tracing = { version = "0.1" }
+tonic = { version = "0.2", package = "madsim-tonic" }
+tracing = "0.1"
 twox-hash = "1"
-value-encoding = { path = "../utils/value-encoding" }
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
 zstd = "0.11.2"
 
+[target.'cfg(not(madsim))'.dependencies]
+risingwave_tracing = { path = "../tracing" }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
 [dev-dependencies]
-criterion = { version = "0.3", features = ["async_futures"]}
+criterion = { version = "0.3", features = ["async_futures"] }
+moka = { version = "0.9", features = ["future"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
@@ -117,3 +121,6 @@ harness = false
 name = "bench_compactor"
 harness = false
 
+[[bench]]
+name = "bench_multi_builder"
+harness = false

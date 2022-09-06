@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::{Future, TryFutureExt};
 use itertools::Itertools;
@@ -31,6 +31,7 @@ use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use tokio::task;
+use tracing::warn;
 
 use super::{Sink, SinkError};
 use crate::sink::Result;
@@ -175,6 +176,64 @@ impl KafkaSink {
         )
     }
 
+    async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema, ts_ms: u64) -> Result<()> {
+        let mut update_cache: Option<Map<String, Value>> = None;
+        for (op, row) in chunk.rows() {
+            let event_object = match op {
+                Op::Insert => Some(json!({
+                    "schema": schema_to_json(schema),
+                    "payload": {
+                        "before": null,
+                        "after": record_to_json(row.clone(), schema.fields.clone())?,
+                        "op": "c",
+                        "ts_ms": ts_ms,
+                    }
+                })),
+                Op::Delete => Some(json!({
+                    "schema": schema_to_json(schema),
+                    "payload": {
+                        "before": record_to_json(row.clone(), schema.fields.clone())?,
+                        "after": null,
+                        "op": "d",
+                        "ts_ms": ts_ms,
+                    }
+                })),
+                Op::UpdateDelete => {
+                    update_cache = Some(record_to_json(row.clone(), schema.fields.clone())?);
+                    continue;
+                }
+                Op::UpdateInsert => {
+                    if let Some(before) = update_cache.take() {
+                        Some(json!({
+                            "schema": schema_to_json(schema),
+                            "payload": {
+                                "before": before,
+                                "after": record_to_json(row.clone(), schema.fields.clone())?,
+                                "op": "u",
+                                "ts_ms": ts_ms,
+                            }
+                        }))
+                    } else {
+                        warn!(
+                            "not found UpdateDelete in prev row, skipping, row_id {:?}",
+                            row.index()
+                        );
+                        continue;
+                    }
+                }
+            };
+            if let Some(obj) = event_object {
+                self.send(
+                    BaseRecord::to(self.config.topic.as_str())
+                        .key(self.gen_message_key().as_bytes())
+                        .payload(obj.to_string().as_bytes()),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn append_only(&self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         for (op, row) in chunk.rows() {
             if op == Op::Insert {
@@ -195,13 +254,25 @@ impl KafkaSink {
 impl Sink for KafkaSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state, &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {
-            return Ok(())
-        }
+        // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state,
+        // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
+        // }
+
+        println!("sink chunk {:?}", chunk);
 
         match self.config.format.as_str() {
             "append_only" => self.append_only(chunk, schema).await,
-            "debezium" => todo!(),
+            "debezium" => {
+                self.debezium_update(
+                    chunk,
+                    schema,
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64,
+                )
+                .await
+            }
             _ => unreachable!(),
         }
     }
@@ -347,6 +418,40 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
     }
 
     Ok(records)
+}
+
+fn fields_to_json(fields: &[Field]) -> Value {
+    let mut res = Vec::new();
+    fields.iter().for_each(|field| {
+        res.push(json!({
+         "field": field.name,
+         "optional": true,
+         "type": field.type_name,
+        }))
+    });
+
+    json!(res)
+}
+
+fn schema_to_json(schema: &Schema) -> Value {
+    let mut schema_fields = Vec::new();
+    schema_fields.push(json!({
+        "type": "struct",
+        "fields": fields_to_json(&schema.fields),
+        "optional": true,
+        "field": "before",
+    }));
+    schema_fields.push(json!({
+        "type": "struct",
+        "fields": fields_to_json(&schema.fields),
+        "optional": true,
+        "field": "after",
+    }));
+    json!({
+        "type": "struct",
+        "fields": schema_fields,
+        "optional": false,
+    })
 }
 
 /// the struct conducts all transactions with Kafka
@@ -538,9 +643,10 @@ mod test {
                 type_name: "".into(),
             },
             Field {
-                data_type: DataType::Struct {
-                    fields: Arc::new([DataType::Int32, DataType::Float32]),
-                },
+                data_type: DataType::new_struct(
+                    vec![DataType::Int32, DataType::Float32],
+                    vec!["v4".to_string(), "v5".to_string()],
+                ),
                 name: "v3".into(),
                 sub_fields: vec![
                     Field {
@@ -561,6 +667,8 @@ mod test {
         ]);
 
         let json_chunk = chunk_to_json(chunk, &schema).unwrap();
+        let schema_json = schema_to_json(&schema);
+        assert_eq!(schema_json.to_string(), "{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"}],\"optional\":false,\"type\":\"struct\"}");
         assert_eq!(
             json_chunk[0].as_str(),
             "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":1,\"v5\":1.0}}"

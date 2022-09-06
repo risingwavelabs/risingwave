@@ -24,6 +24,7 @@ use super::{
 };
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
 /// [`LogicalUpdate`] iterates on input relation, set some columns, and inject update records into
@@ -35,6 +36,7 @@ pub struct LogicalUpdate {
     pub base: PlanBase,
     table_source_name: String, // explain-only
     source_id: TableId,        // TODO: use SourceId
+    associated_mview_id: TableId,
     input: PlanRef,
     exprs: Vec<ExprImpl>,
 }
@@ -45,16 +47,19 @@ impl LogicalUpdate {
         input: PlanRef,
         table_source_name: String,
         source_id: TableId,
+        associated_mview_id: TableId,
         exprs: Vec<ExprImpl>,
     ) -> Self {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let base = PlanBase::new_logical(ctx, schema, vec![]);
+        let fd_set = FunctionalDependencySet::new(schema.len());
+        let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
             base,
             table_source_name,
             source_id,
+            associated_mview_id,
             input,
             exprs,
         }
@@ -65,9 +70,16 @@ impl LogicalUpdate {
         input: PlanRef,
         table_source_name: String,
         source_id: TableId,
+        table_id: TableId,
         exprs: Vec<ExprImpl>,
     ) -> Result<Self> {
-        Ok(Self::new(input, table_source_name, source_id, exprs))
+        Ok(Self::new(
+            input,
+            table_source_name,
+            source_id,
+            table_id,
+            exprs,
+        ))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
@@ -82,6 +94,11 @@ impl LogicalUpdate {
     #[must_use]
     pub fn source_id(&self) -> TableId {
         self.source_id
+    }
+
+    #[must_use]
+    pub fn associated_mview_id(&self) -> TableId {
+        self.associated_mview_id
     }
 
     pub fn exprs(&self) -> &[ExprImpl] {
@@ -99,6 +116,7 @@ impl PlanTreeNodeUnary for LogicalUpdate {
             input,
             self.table_source_name.clone(),
             self.source_id,
+            self.associated_mview_id,
             self.exprs.clone(),
         )
     }

@@ -1,6 +1,6 @@
 # Create a table.
 statement ok
-create table ddl_t (v1 int not null);
+create table ddl_t (v1 int);
 
 # Create a mview on top of it.
 statement ok

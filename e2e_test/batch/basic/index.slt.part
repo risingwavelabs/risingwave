@@ -1,0 +1,51 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int, v2 int);
+
+statement ok
+create index idx1 on t1(v1) include(v2);
+
+statement ok
+create index idx2 on t1(v2);
+
+statement ok
+insert into t1 values(1, 2),(3,4),(5,6);
+
+statement ok
+explain select v1,v2 from t1 where v1 = 1;
+
+query II
+select v1,v2 from t1 where v1 = 1;
+----
+1 2
+
+query II
+select v1,v2 from t1 where v2 = 4;
+----
+3 4
+
+query II
+select v1,v2 from t1 where v1 = 1 or v2 = 4 order by v1, v2;
+----
+1 2
+3 4
+
+statement ok
+delete from t1 where v1 = 1;
+
+query II
+select v1,v2 from t1 order by v1, v2;
+----
+3 4
+5 6
+
+statement ok
+drop index idx1;
+
+statement ok
+drop index idx2;
+
+statement ok
+drop table t1;

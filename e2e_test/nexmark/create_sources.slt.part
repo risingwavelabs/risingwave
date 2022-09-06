@@ -1,0 +1,53 @@
+statement ok
+CREATE SOURCE person (
+    "id" BIGINT,
+    "name" VARCHAR,
+    "email_address" VARCHAR,
+    "credit_card" VARCHAR,
+    "city" VARCHAR,
+    "state" VARCHAR,
+    "date_time" TIMESTAMP,
+    "extra" VARCHAR,
+    PRIMARY KEY (id)
+) with (
+    connector = 'nexmark',
+    nexmark.table.type = 'Person',
+    nexmark.split.num = '8',
+    nexmark.min.event.gap.in.ns = '1000000'
+) ROW FORMAT JSON;
+
+statement ok
+CREATE SOURCE auction (
+    "id" BIGINT,
+    "item_name" VARCHAR,
+    "description" VARCHAR,
+    "initial_bid" BIGINT,
+    "reserve" BIGINT,
+    "date_time" TIMESTAMP,
+    "expires" TIMESTAMP,
+    "seller" BIGINT,
+    "category" BIGINT,
+    "extra" VARCHAR,
+    PRIMARY KEY (id)
+) with (
+    connector = 'nexmark',
+    nexmark.table.type = 'Auction',
+    nexmark.split.num = '8',
+    nexmark.min.event.gap.in.ns = '1000000'
+) ROW FORMAT JSON;
+
+statement ok
+CREATE SOURCE bid (
+    "auction" BIGINT,
+    "bidder" BIGINT,
+    "price" BIGINT,
+    "channel" VARCHAR,
+    "url" VARCHAR,
+    "date_time" TIMESTAMP,
+    "extra" VARCHAR
+) with (
+    connector = 'nexmark',
+    nexmark.table.type = 'Bid',
+    nexmark.split.num = '8',
+    nexmark.min.event.gap.in.ns = '1000000'
+) ROW FORMAT JSON;

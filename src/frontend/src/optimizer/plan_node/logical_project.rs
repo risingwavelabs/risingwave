@@ -29,7 +29,7 @@ use crate::expr::{
     assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
 };
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Construct a `LogicalProject` and dedup expressions.
@@ -43,14 +43,26 @@ pub struct LogicalProjectBuilder {
 impl LogicalProjectBuilder {
     /// add an expression to the `LogicalProject` and return the column index of the project's
     /// output
-    pub fn add_expr(&mut self, expr: &ExprImpl) -> usize {
+    pub fn add_expr(&mut self, expr: &ExprImpl) -> std::result::Result<usize, &'static str> {
+        if expr.has_subquery() {
+            return Err("subquery");
+        }
+        if expr.has_agg_call() {
+            return Err("aggregate function");
+        }
+        if expr.has_table_function() {
+            return Err("table function");
+        }
+        if expr.has_window_function() {
+            return Err("window function");
+        }
         if let Some(idx) = self.exprs_index.get(expr) {
-            *idx
+            Ok(*idx)
         } else {
             let index = self.exprs.len();
             self.exprs.push(expr.clone());
             self.exprs_index.insert(expr.clone(), index);
-            index
+            Ok(index)
         }
     }
 
@@ -59,10 +71,6 @@ impl LogicalProjectBuilder {
             return None;
         }
         self.exprs_index.get(expr).copied()
-    }
-
-    pub fn exprs_num(&self) -> usize {
-        self.exprs.len()
     }
 
     /// build the `LogicalProject` from `LogicalProjectBuilder`
@@ -79,20 +87,25 @@ pub struct LogicalProject {
 }
 impl LogicalProject {
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
-        assert!(
-            exprs.iter().all(|e| !e.has_table_function()),
-            "Project should not have table function."
-        );
-
         let ctx = input.ctx();
         let schema = Self::derive_schema(&exprs, input.schema());
-        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
+        let pk_indices = Self::derive_pk(input.schema(), input.logical_pk(), &exprs);
         for expr in &exprs {
             assert_input_ref!(expr, input.schema().fields().len());
             assert!(!expr.has_subquery());
             assert!(!expr.has_agg_call());
+            assert!(
+                !expr.has_table_function(),
+                "Project should not have table function."
+            );
+            assert!(
+                !expr.has_window_function(),
+                "Project should not have window function."
+            );
         }
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let functional_dependency =
+            Self::derive_fd(input.schema().len(), input.functional_dependency(), &exprs);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalProject { base, exprs, input }
     }
 
@@ -124,6 +137,12 @@ impl LogicalProject {
 
     pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
         Self::new(input, exprs).into()
+    }
+
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
@@ -198,6 +217,21 @@ impl LogicalProject {
             .map(|pk_col| i2o.try_map(*pk_col))
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default()
+    }
+
+    fn derive_fd(
+        input_len: usize,
+        input_fd_set: &FunctionalDependencySet,
+        exprs: &[ExprImpl],
+    ) -> FunctionalDependencySet {
+        let i2o = Self::i2o_col_mapping_inner(input_len, exprs);
+        let mut fd_set = FunctionalDependencySet::new(exprs.len());
+        for fd in input_fd_set.as_dependencies() {
+            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
+                fd_set.add_functional_dependency(fd);
+            }
+        }
+        fd_set
     }
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {
@@ -402,7 +436,7 @@ impl ToStream for LogicalProject {
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.pk_indices();
+        let input_pk = input.logical_pk();
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
         let input_schema = input.schema();

@@ -22,6 +22,7 @@ use futures_async_stream::try_stream;
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedMessageStream, Message, StreamChunk};
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::ActorId;
 
 #[derive(Debug, PartialEq)]
 pub enum AlignedMessage {
@@ -34,13 +35,12 @@ pub enum AlignedMessage {
 pub async fn barrier_align(
     mut left: BoxedMessageStream,
     mut right: BoxedMessageStream,
-    actor_id: u64,
+    actor_id: ActorId,
     metrics: Arc<StreamingMetrics>,
 ) {
     let actor_id = actor_id.to_string();
-    use madsim::rand::Rng;
     loop {
-        let prefer_left: bool = madsim::rand::thread_rng().gen();
+        let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
             select(left.next(), right.next()).await
         } else {

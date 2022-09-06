@@ -18,7 +18,6 @@
 mod block;
 
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
 
 pub use block::*;
 mod block_iterator;
@@ -27,9 +26,11 @@ mod bloom;
 use bloom::Bloom;
 pub mod builder;
 pub use builder::*;
+pub mod writer;
+pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
@@ -55,12 +56,11 @@ const VERSION: u32 = 1;
 pub struct Sstable {
     pub id: HummockSstableId,
     pub meta: SstableMeta,
-    pub blocks: Vec<Arc<Block>>,
 }
 
 impl Debug for Sstable {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GrpcExchangeSource")
+        f.debug_struct("Sstable")
             .field("id", &self.id)
             .field("meta", &self.meta)
             .finish()
@@ -69,25 +69,7 @@ impl Debug for Sstable {
 
 impl Sstable {
     pub fn new(id: HummockSstableId, meta: SstableMeta) -> Self {
-        Self {
-            id,
-            meta,
-            blocks: vec![],
-        }
-    }
-
-    pub fn new_with_data(
-        id: HummockSstableId,
-        meta: SstableMeta,
-        data: Bytes,
-    ) -> HummockResult<Self> {
-        let mut blocks = vec![];
-        for block_meta in &meta.block_metas {
-            let end_offset = (block_meta.offset + block_meta.len) as usize;
-            let block = Block::decode(data.slice(block_meta.offset as usize..end_offset))?;
-            blocks.push(Arc::new(block));
-        }
-        Ok(Self { id, meta, blocks })
+        Self { id, meta }
     }
 
     pub fn has_bloom_filter(&self) -> bool {
@@ -113,8 +95,8 @@ impl Sstable {
     }
 
     #[inline]
-    pub fn encoded_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size() + self.blocks.iter().map(|block|block.data().len()).sum::<usize>()
+    pub fn estimate_size(&self) -> usize {
+        8 /* id */ + self.meta.encoded_size()
     }
 
     #[cfg(test)]
@@ -137,6 +119,7 @@ pub struct BlockMeta {
     pub smallest_key: Vec<u8>,
     pub offset: u32,
     pub len: u32,
+    pub uncompressed_size: u32,
 }
 
 impl BlockMeta {
@@ -148,23 +131,26 @@ impl BlockMeta {
     pub fn encode(&self, buf: &mut Vec<u8>) {
         buf.put_u32_le(self.offset);
         buf.put_u32_le(self.len);
+        buf.put_u32_le(self.uncompressed_size);
         put_length_prefixed_slice(buf, &self.smallest_key);
     }
 
     pub fn decode(buf: &mut &[u8]) -> Self {
         let offset = buf.get_u32_le();
         let len = buf.get_u32_le();
+        let uncompressed_size = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         Self {
             smallest_key,
             offset,
             len,
+            uncompressed_size,
         }
     }
 
     #[inline]
     pub fn encoded_size(&self) -> usize {
-        12 /* offset + len + key len */ + self.smallest_key.len()
+        16 /* offset + len + key len + uncompressed size */ + self.smallest_key.len()
     }
 }
 
@@ -291,11 +277,13 @@ mod tests {
                     smallest_key: b"0-smallest-key".to_vec(),
                     offset: 0,
                     len: 100,
+                    uncompressed_size: 0,
                 },
                 BlockMeta {
                     smallest_key: b"5-some-key".to_vec(),
                     offset: 100,
                     len: 100,
+                    uncompressed_size: 0,
                 },
             ],
             bloom_filter: b"0123456789".to_vec(),

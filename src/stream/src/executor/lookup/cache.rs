@@ -18,7 +18,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::row::Row;
 
-use crate::executor::JOIN_CACHE_SIZE;
+use crate::executor::JOIN_CACHE_CAP;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
@@ -62,7 +62,7 @@ impl LookupCache {
 
     pub fn new() -> Self {
         Self {
-            data: EvictableHashMap::new(JOIN_CACHE_SIZE),
+            data: EvictableHashMap::new(JOIN_CACHE_CAP),
         }
     }
 }

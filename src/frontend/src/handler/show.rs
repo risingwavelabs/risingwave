@@ -84,7 +84,11 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
             .iter_materialized_source()
             .map(|t| t.name.clone())
             .collect(),
-        ShowObject::Sink { schema: _ } => unimplemented!(),
+        ShowObject::Sink { schema } => catalog_reader
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_sink()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::Columns { table } => {
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);

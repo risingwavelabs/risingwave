@@ -46,11 +46,11 @@ impl Expression for NestedConstructExpression {
             .map(|e| e.eval_checked(input))
             .collect::<Result<Vec<_>>>()?;
 
-        if let DataType::Struct { fields } = &self.data_type {
+        if let DataType::Struct(t) = &self.data_type {
             let mut builder = StructArrayBuilder::with_meta(
                 input.capacity(),
                 ArrayMeta::Struct {
-                    children: fields.clone(),
+                    children: t.fields.clone().into(),
                 },
             );
             builder.append_array_refs(columns, input.capacity())?;
@@ -91,7 +91,7 @@ impl Expression for NestedConstructExpression {
             .iter()
             .map(|e| e.eval_row(input))
             .collect::<Result<Vec<Datum>>>()?;
-        if let DataType::Struct { fields: _ } = &self.data_type {
+        if let DataType::Struct { .. } = &self.data_type {
             Ok(Some(StructValue::new(datums).to_scalar_value()))
         } else if let DataType::List { datatype: _ } = &self.data_type {
             Ok(Some(ListValue::new(datums).to_scalar_value()))
@@ -116,10 +116,7 @@ impl<'a> TryFrom<&'a ExprNode> for NestedConstructExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(
-            prost.get_expr_type().unwrap() == Type::Array
-                || prost.get_expr_type().unwrap() == Type::Row
-        );
+        ensure!([Type::Array, Type::Row].contains(&prost.get_expr_type().unwrap()));
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {

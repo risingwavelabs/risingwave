@@ -25,6 +25,7 @@ use super::{
 };
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanTreeNode;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, ConnectedComponentLabeller};
 
 /// `LogicalMultiJoin` combines two or more relations according to some condition.
@@ -80,7 +81,7 @@ pub struct LogicalMultiJoinBuilder {
 }
 
 impl LogicalMultiJoinBuilder {
-    /// add a predicate above the plan, so they will be rewriten from the `output_indices` to the
+    /// add a predicate above the plan, so they will be rewritten from the `output_indices` to the
     /// input indices
     pub fn add_predicate_above(&mut self, exprs: impl Iterator<Item = ExprImpl>) {
         let mut mapping = ColIndexMapping::with_target_size(
@@ -242,7 +243,7 @@ impl LogicalMultiJoin {
 
         let pk_indices = {
             let mut pk_indices = vec![];
-            for (i, input_pk) in inputs.iter().map(|input| input.pk_indices()).enumerate() {
+            for (i, input_pk) in inputs.iter().map(|input| input.logical_pk()).enumerate() {
                 for input_pk_idx in input_pk {
                     pk_indices.push(inner_i2o_mappings[i].map(*input_pk_idx));
                 }
@@ -253,7 +254,40 @@ impl LogicalMultiJoin {
                 .collect::<Option<Vec<_>>>()
                 .unwrap_or_default()
         };
-        let base = PlanBase::new_logical(inputs[0].ctx(), schema, pk_indices);
+        let functional_dependency = {
+            let mut fd_set = FunctionalDependencySet::new(tot_col_num);
+            let mut column_cnt: usize = 0;
+            let id_mapping = ColIndexMapping::identity(tot_col_num);
+            for i in &inputs {
+                let mapping =
+                    ColIndexMapping::with_shift_offset(i.schema().len(), column_cnt as isize)
+                        .composite(&id_mapping);
+                mapping
+                    .rewrite_functional_dependency_set(i.functional_dependency().clone())
+                    .into_dependencies()
+                    .into_iter()
+                    .for_each(|fd| fd_set.add_functional_dependency(fd));
+                column_cnt += i.schema().len();
+            }
+            for i in &on.conjunctions {
+                if let Some((col, _)) = i.as_eq_const() {
+                    fd_set.add_constant_columns(&[col.index()])
+                } else if let Some((left, right)) = i.as_eq_cond() {
+                    fd_set.add_functional_dependency_by_column_indices(
+                        &[left.index()],
+                        &[right.index()],
+                    );
+                    fd_set.add_functional_dependency_by_column_indices(
+                        &[right.index()],
+                        &[left.index()],
+                    );
+                }
+            }
+            ColIndexMapping::with_remaining_columns(&output_indices, tot_col_num)
+                .rewrite_functional_dependency_set(fd_set)
+        };
+        let base =
+            PlanBase::new_logical(inputs[0].ctx(), schema, pk_indices, functional_dependency);
 
         Self {
             base,
@@ -489,5 +523,132 @@ impl PredicatePushdown for LogicalMultiJoin {
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."
         )
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::HashSet;
+
+    use risingwave_common::catalog::Field;
+    use risingwave_common::types::DataType;
+    use risingwave_pb::expr::expr_node::Type;
+
+    use super::*;
+    use crate::expr::{FunctionCall, InputRef};
+    use crate::optimizer::plan_node::LogicalValues;
+    use crate::optimizer::property::FunctionalDependency;
+    use crate::session::OptimizerContext;
+    #[tokio::test]
+    async fn fd_derivation_multi_join() {
+        // t1: [v0, v1], t2: [v2, v3, v4], t3: [v5, v6]
+        // FD: v0 --> v1, v2 --> { v3, v4 }, {} --> v5
+        // On: v0 = 0 AND v1 = v3 AND v4 = v5
+        //
+        // Output: [v0, v1, v4, v5]
+        // FD: v0 --> v1, {} --> v0, {} --> v5, v4 --> v5, v5 --> v4
+        let ctx = OptimizerContext::mock().await;
+        let t1 = {
+            let fields: Vec<Field> = vec![
+                Field::with_name(DataType::Int32, "v0"),
+                Field::with_name(DataType::Int32, "v1"),
+            ];
+            let mut values = LogicalValues::new(vec![], Schema { fields }, ctx.clone());
+            // 0 --> 1
+            values
+                .base
+                .functional_dependency
+                .add_functional_dependency_by_column_indices(&[0], &[1]);
+            values
+        };
+        let t2 = {
+            let fields: Vec<Field> = vec![
+                Field::with_name(DataType::Int32, "v2"),
+                Field::with_name(DataType::Int32, "v3"),
+                Field::with_name(DataType::Int32, "v4"),
+            ];
+            let mut values = LogicalValues::new(vec![], Schema { fields }, ctx.clone());
+            // 0 --> 1, 2
+            values
+                .base
+                .functional_dependency
+                .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
+            values
+        };
+        let t3 = {
+            let fields: Vec<Field> = vec![
+                Field::with_name(DataType::Int32, "v5"),
+                Field::with_name(DataType::Int32, "v6"),
+            ];
+            let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
+            // {} --> 0
+            values
+                .base
+                .functional_dependency
+                .add_functional_dependency_by_column_indices(&[], &[0]);
+            values
+        };
+        // On: v0 = 0 AND v1 = v3 AND v4 = v5
+        let on: ExprImpl = FunctionCall::new(
+            Type::And,
+            vec![
+                FunctionCall::new(
+                    Type::Equal,
+                    vec![
+                        InputRef::new(0, DataType::Int32).into(),
+                        ExprImpl::literal_int(0),
+                    ],
+                )
+                .unwrap()
+                .into(),
+                FunctionCall::new(
+                    Type::And,
+                    vec![
+                        FunctionCall::new(
+                            Type::Equal,
+                            vec![
+                                InputRef::new(1, DataType::Int32).into(),
+                                InputRef::new(3, DataType::Int32).into(),
+                            ],
+                        )
+                        .unwrap()
+                        .into(),
+                        FunctionCall::new(
+                            Type::Equal,
+                            vec![
+                                InputRef::new(4, DataType::Int32).into(),
+                                InputRef::new(5, DataType::Int32).into(),
+                            ],
+                        )
+                        .unwrap()
+                        .into(),
+                    ],
+                )
+                .unwrap()
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
+        let multi_join = LogicalMultiJoin::new(
+            vec![t1.into(), t2.into(), t3.into()],
+            Condition::with_expr(on),
+            vec![0, 1, 4, 5],
+        );
+        let expected_fd_set: HashSet<_> = [
+            FunctionalDependency::with_indices(4, &[0], &[1]),
+            FunctionalDependency::with_indices(4, &[], &[0, 3]),
+            FunctionalDependency::with_indices(4, &[2], &[3]),
+            FunctionalDependency::with_indices(4, &[3], &[2]),
+        ]
+        .into_iter()
+        .collect();
+        let fd_set: HashSet<_> = multi_join
+            .functional_dependency()
+            .as_dependencies()
+            .iter()
+            .cloned()
+            .collect();
+        assert_eq!(expected_fd_set, fd_set);
     }
 }

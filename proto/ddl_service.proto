@@ -136,6 +136,27 @@ message RisectlListStateTablesResponse {
   repeated catalog.Table tables = 1;
 }
 
+message CreateIndexRequest {
+  catalog.Index index = 1;
+  catalog.Table index_table = 2;
+  stream_plan.StreamFragmentGraph fragment_graph = 3;
+}
+
+message CreateIndexResponse {
+  common.Status status = 1;
+  uint32 index_id = 2;
+  uint64 version = 4;
+}
+
+message DropIndexRequest {
+  uint32 index_id = 1;
+}
+
+message DropIndexResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -150,4 +171,6 @@ service DdlService {
   rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
   rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
+  rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
+  rpc DropIndex(DropIndexRequest) returns (DropIndexResponse);
 }

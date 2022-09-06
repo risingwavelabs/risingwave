@@ -16,17 +16,17 @@ use std::cmp::Ordering;
 use std::fmt::{Display, Formatter, Write as _};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::ops::{Add, Sub};
+use std::ops::{Add, Neg, Sub};
 
 use anyhow::anyhow;
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedSub};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
-use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use super::*;
+use crate::error::{ErrorCode, Result, RwError};
 
 /// Every interval can be represented by a `IntervalUnit`.
 /// Note that the difference between Interval and Instant.
@@ -36,8 +36,7 @@ use super::*;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-/// FIXME: the comparison of memcomparable encoding will be just compare these three numbers.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct IntervalUnit {
     months: i32,
     days: i32,
@@ -66,6 +65,10 @@ impl IntervalUnit {
 
     pub fn get_ms(&self) -> i64 {
         self.ms
+    }
+
+    pub fn get_ms_of_day(&self) -> u64 {
+        self.ms.rem_euclid(DAY_MS) as u64
     }
 
     pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> ArrayResult<Self> {
@@ -261,6 +264,36 @@ impl IntervalUnit {
 
         res
     }
+
+    /// Checks if [`IntervalUnit`] is positive.
+    pub fn is_positive(&self) -> bool {
+        self > &Self::new(0, 0, 0)
+    }
+}
+
+impl Serialize for IntervalUnit {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let IntervalUnit { months, days, ms } = {
+            let mut justified = *self;
+            justified.justify_interval();
+            justified
+        };
+        // serialize the `IntervalUnit` as a tuple
+        (months, days, ms).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for IntervalUnit {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let (months, days, ms) = <(i32, i32, i64)>::deserialize(deserializer)?;
+        Ok(Self { months, days, ms })
+    }
 }
 
 #[expect(clippy::from_over_into)]
@@ -280,6 +313,18 @@ impl From<&'_ IntervalUnitProto> for IntervalUnit {
             months: p.months,
             days: p.days,
             ms: p.ms,
+        }
+    }
+}
+
+impl From<NaiveTimeWrapper> for IntervalUnit {
+    fn from(time: NaiveTimeWrapper) -> Self {
+        let mut ms: i64 = (time.0.num_seconds_from_midnight() * 1000) as i64;
+        ms += (time.0.nanosecond() / 1_000_000) as i64;
+        Self {
+            months: 0,
+            days: 0,
+            ms,
         }
     }
 }
@@ -364,6 +409,18 @@ impl CheckedSub for IntervalUnit {
     }
 }
 
+impl Neg for IntervalUnit {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self {
+            months: -self.months,
+            days: -self.days,
+            ms: -self.ms,
+        }
+    }
+}
+
 impl Display for IntervalUnit {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let years = self.months / 12;
@@ -399,6 +456,155 @@ impl Display for IntervalUnit {
         }
         v.push(format_time);
         Display::fmt(&v.join(" "), f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DateTimeField {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
+}
+
+impl FromStr for DateTimeField {
+    type Err = RwError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "years" | "year" | "yrs" | "yr" | "y" => Ok(Self::Year),
+            "days" | "day" | "d" => Ok(Self::Day),
+            "hours" | "hour" | "hrs" | "hr" | "h" => Ok(Self::Hour),
+            "minutes" | "minute" | "mins" | "min" | "m" => Ok(Self::Minute),
+            "months" | "month" | "mons" | "mon" => Ok(Self::Month),
+            "seconds" | "second" | "secs" | "sec" | "s" => Ok(Self::Second),
+            _ => Err(ErrorCode::InvalidInputSyntax(format!("unknown unit {}", s)).into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum TimeStrToken {
+    Num(i64),
+    TimeUnit(DateTimeField),
+}
+
+fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
+    let s = s.trim();
+    let mut tokens = Vec::new();
+    let mut num_buf = "".to_string();
+    let mut char_buf = "".to_string();
+    for (i, c) in s.chars().enumerate() {
+        match c {
+            '-' => {
+                num_buf.push(c);
+            }
+            c if c.is_ascii_digit() => {
+                convert_unit(&mut char_buf, &mut tokens)?;
+                num_buf.push(c);
+            }
+            c if c.is_ascii_alphabetic() => {
+                convert_digit(&mut num_buf, &mut tokens)?;
+                char_buf.push(c);
+            }
+            chr if chr.is_ascii_whitespace() => {
+                convert_unit(&mut char_buf, &mut tokens)?;
+                convert_digit(&mut num_buf, &mut tokens)?;
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "Invalid character at offset {} in {}: {:?}. Only support digit or alphabetic now",
+                    i, s, c
+                )).into());
+            }
+        }
+    }
+    convert_digit(&mut num_buf, &mut tokens)?;
+    convert_unit(&mut char_buf, &mut tokens)?;
+
+    Ok(tokens)
+}
+
+fn convert_digit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
+    if !c.is_empty() {
+        match c.parse::<i64>() {
+            Ok(num) => {
+                t.push(TimeStrToken::Num(num));
+            }
+            Err(_) => {
+                return Err(
+                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", c)).into(),
+                );
+            }
+        }
+        c.clear();
+    }
+    Ok(())
+}
+
+fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
+    if !c.is_empty() {
+        t.push(TimeStrToken::TimeUnit(c.parse()?));
+        c.clear();
+    }
+    Ok(())
+}
+
+impl IntervalUnit {
+    pub fn parse_with_fields(s: &str, leading_field: Option<DateTimeField>) -> Result<Self> {
+        // > INTERVAL '1' means 1 second.
+        // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-INTERVAL-INPUT
+        let unit = leading_field.unwrap_or(DateTimeField::Second);
+        use DateTimeField::*;
+        let tokens = parse_interval(s)?;
+        // Todo: support more syntax
+        if tokens.len() > 2 {
+            return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
+        }
+        let num = match tokens.get(0) {
+            Some(TimeStrToken::Num(num)) => *num,
+            _ => {
+                return Err(
+                    ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
+                );
+            }
+        };
+        let interval_unit = match tokens.get(1) {
+            Some(TimeStrToken::TimeUnit(unit)) => unit,
+            _ => &unit,
+        };
+
+        (|| match interval_unit {
+            Year => {
+                let months = num.checked_mul(12)?;
+                Some(IntervalUnit::from_month(months as i32))
+            }
+            Month => Some(IntervalUnit::from_month(num as i32)),
+            Day => Some(IntervalUnit::from_days(num as i32)),
+            Hour => {
+                let ms = num.checked_mul(3600 * 1000)?;
+                Some(IntervalUnit::from_millis(ms))
+            }
+            Minute => {
+                let ms = num.checked_mul(60 * 1000)?;
+                Some(IntervalUnit::from_millis(ms))
+            }
+            Second => {
+                let ms = num.checked_mul(1000)?;
+                Some(IntervalUnit::from_millis(ms))
+            }
+        })()
+        .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)).into())
+    }
+}
+
+impl FromStr for IntervalUnit {
+    type Err = RwError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Self::parse_with_fields(s, None)
     }
 }
 
@@ -482,6 +688,45 @@ mod tests {
 
             let actual = lhs.div_float(OrderedFloat::<f64>(rhs as f64));
             assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let mut serializer = memcomparable::Serializer::new(vec![]);
+        let a = IntervalUnit::new(123, 456, 789);
+        a.serialize(&mut serializer).unwrap();
+        let buf = serializer.into_inner();
+        let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
+        assert_eq!(IntervalUnit::deserialize(&mut deserializer).unwrap(), a);
+    }
+
+    #[test]
+    fn test_memcomparable() {
+        let cases = [
+            ((1, 2, 3), (4, 5, 6), Ordering::Less),
+            ((0, 31, 0), (1, 0, 0), Ordering::Greater),
+            ((1, 0, 0), (0, 0, MONTH_MS + 1), Ordering::Less),
+            ((0, 1, 0), (0, 0, DAY_MS + 1), Ordering::Less),
+            ((2, 3, 4), (1, 2, 4 + DAY_MS + MONTH_MS), Ordering::Equal),
+        ];
+
+        for ((lhs_months, lhs_days, lhs_ms), (rhs_months, rhs_days, rhs_ms), order) in cases {
+            let lhs = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                IntervalUnit::new(lhs_months, lhs_days, lhs_ms)
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            let rhs = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                IntervalUnit::new(rhs_months, rhs_days, rhs_ms)
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            assert_eq!(lhs.cmp(&rhs), order)
         }
     }
 }

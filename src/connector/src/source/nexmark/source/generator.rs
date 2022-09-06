@@ -15,11 +15,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Ok, Result};
+use futures_async_stream::try_stream;
+use risingwave_common::bail;
 
 use crate::source::nexmark::config::NexmarkConfig;
 use crate::source::nexmark::source::event::{Event, EventType};
 use crate::source::nexmark::source::message::NexmarkMessage;
-use crate::source::SourceMessage;
+use crate::source::{SourceMessage, SplitId};
 
 #[derive(Clone, Debug)]
 pub struct NexmarkEventGenerator {
@@ -29,7 +31,7 @@ pub struct NexmarkEventGenerator {
     pub wall_clock_base_time: usize,
     pub split_index: i32,
     pub split_num: i32,
-    pub split_id: String,
+    pub split_id: SplitId,
     pub last_event: Option<Event>,
     pub event_type: EventType,
     pub use_real_time: bool,
@@ -38,31 +40,37 @@ pub struct NexmarkEventGenerator {
 }
 
 impl NexmarkEventGenerator {
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    pub async fn into_stream(mut self) {
+        loop {
+            yield self.next().await?
+        }
+    }
+
     pub async fn next(&mut self) -> Result<Vec<SourceMessage>> {
         if self.split_num == 0 {
-            return Err(anyhow::Error::msg(
-                "NexmarkEventGenerator is not ready".to_string(),
-            ));
+            bail!("NexmarkEventGenerator is not ready");
         }
         let mut res: Vec<SourceMessage> = vec![];
         let mut num_event = 0;
         let old_events_so_far = self.events_so_far;
 
         // Get unix timestamp in milliseconds
-        let current_timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let current_timestamp = if self.use_real_time {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64
+        } else {
+            0
+        };
 
-        if let Some(event) = &self.last_event {
+        if let Some(event) = self.last_event.take() {
             num_event += 1;
-            res.push(SourceMessage::from(NexmarkMessage::new(
-                self.split_id.clone(),
-                self.events_so_far as u64,
-                event.clone(),
-            )));
+            res.push(
+                NexmarkMessage::new(self.split_id.clone(), self.events_so_far as u64, event).into(),
+            );
         }
-        self.last_event = None;
 
         while num_event < self.max_chunk_size {
             if self.event_num > 0 && self.events_so_far >= self.event_num as u64 {
@@ -97,11 +105,9 @@ impl NexmarkEventGenerator {
             }
 
             num_event += 1;
-            res.push(SourceMessage::from(NexmarkMessage::new(
-                self.split_id.clone(),
-                self.events_so_far as u64,
-                event,
-            )));
+            res.push(
+                NexmarkMessage::new(self.split_id.clone(), self.events_so_far as u64, event).into(),
+            );
         }
 
         if !self.use_real_time && self.min_event_gap_in_ns > 0 {

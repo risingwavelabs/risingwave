@@ -28,16 +28,19 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(generic_associated_types)]
 #![feature(let_else)]
+#![feature(generators)]
+#![feature(type_alias_impl_trait)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
 pub mod compute_observer;
 pub mod rpc;
 pub mod server;
 
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
@@ -49,10 +52,6 @@ pub struct ComputeNodeOpts {
     // Optional, we will use listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
-
-    // TODO: This is currently unused.
-    #[clap(long)]
-    pub port: Option<u16>,
 
     #[clap(long, default_value = "hummock+memory")]
     pub state_store: String,
@@ -70,13 +69,24 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "")]
     pub config_path: String,
 
-    /// Enable reporting tracing information to jaeger
+    /// Enable reporting tracing information to jaeger.
     #[clap(long)]
     pub enable_jaeger_tracing: bool,
+
+    /// Enable async stack tracing for risectl.
+    #[clap(long)]
+    pub enable_async_stack_trace: bool,
+
+    /// Path to file cache data directory.
+    /// Left empty to disable file cache.
+    #[clap(long, default_value = "")]
+    pub file_cache_dir: String,
 }
 
 use std::future::Future;
 use std::pin::Pin;
+
+use risingwave_common::config::{BatchConfig, ServerConfig, StorageConfig, StreamingConfig};
 
 use crate::server::compute_node_serve;
 
@@ -93,7 +103,10 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         let client_address = opts
             .client_address
             .as_ref()
-            .unwrap_or(&opts.host)
+            .unwrap_or_else(|| {
+                tracing::warn!("Client address is not specified, defaulting to host address");
+                &opts.host
+            })
             .parse()
             .unwrap();
         tracing::info!("Client address is {}", client_address);
@@ -105,4 +118,24 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             join_handle.await.unwrap();
         }
     })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ComputeNodeConfig {
+    // For connection
+    #[serde(default)]
+    pub server: ServerConfig,
+
+    // Below for batch query.
+    #[serde(default)]
+    pub batch: BatchConfig,
+
+    // Below for streaming.
+    #[serde(default)]
+    pub streaming: StreamingConfig,
+
+    // Below for Hummock.
+    #[serde(default)]
+    pub storage: StorageConfig,
 }

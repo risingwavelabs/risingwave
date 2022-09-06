@@ -66,15 +66,21 @@ message FilterNode {
 message InsertNode {
   uint32 table_source_id = 1;
   repeated int32 column_ids = 2;
+  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
+  uint32 associated_mview_id = 3;
 }
 
 message DeleteNode {
   uint32 table_source_id = 1;
+  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
+  uint32 associated_mview_id = 2;
 }
 
 message UpdateNode {
   uint32 table_source_id = 1;
   repeated expr.ExprNode exprs = 2;
+  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
+  uint32 associated_mview_id = 3;
 }
 
 message ValuesNode {
@@ -91,13 +97,13 @@ message OrderByNode {
 
 message TopNNode {
   repeated plan_common.ColumnOrder column_orders = 1;
-  uint32 limit = 2;
-  uint32 offset = 3;
+  uint64 limit = 2;
+  uint64 offset = 3;
 }
 
 message LimitNode {
-  uint32 limit = 1;
-  uint32 offset = 2;
+  uint64 limit = 1;
+  uint64 offset = 2;
 }
 
 message NestedLoopJoinNode {
@@ -133,6 +139,9 @@ message HashJoinNode {
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
   repeated uint32 output_indices = 5;
+  // Null safe means it treats `null = null` as true.
+  // Each key pair can be null safe independently. (left_key, right_key, null_safe)
+  repeated bool null_safe = 6;
 }
 
 message SortMergeJoinNode {
@@ -202,7 +211,12 @@ message LookupJoinNode {
   repeated int32 probe_side_column_ids = 6;
   repeated uint32 output_indices = 7;
   repeated common.WorkerNode worker_nodes = 8;
+  // Null safe means it treats `null = null` as true.
+  // Each key pair can be null safe independently. (left_key, right_key, null_safe)
+  repeated bool null_safe = 9;
 }
+
+message UnionNode {}
 
 message PlanNode {
   repeated PlanNode children = 1;
@@ -230,6 +244,7 @@ message PlanNode {
     ExpandNode expand = 28;
     LookupJoinNode lookup_join = 29;
     ProjectSetNode project_set = 30;
+    UnionNode union = 31;
   }
   string identity = 24;
 }

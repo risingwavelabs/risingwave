@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use num_traits::Float;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
@@ -35,27 +34,10 @@ fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
     if !format {
         match d {
             ScalarRefImpl::Bool(b) => if b { "t" } else { "f" }.into(),
-            ScalarRefImpl::Float32(v) => pg_float_format(v).into(),
-            ScalarRefImpl::Float64(v) => pg_float_format(v).into(),
             _ => d.to_string().into(),
         }
     } else {
         d.binary_serialize()
-    }
-}
-
-fn pg_float_format<T: Float + ToString>(v: T) -> String {
-    if v.is_infinite() {
-        if v.is_sign_positive() {
-            "Infinity"
-        } else {
-            "-Infinity"
-        }
-        .to_string()
-    } else if v.is_nan() {
-        "NaN".to_string()
-    } else {
-        v.to_string()
     }
 }
 
@@ -80,7 +62,7 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
             col.flatten()
                 .into_iter()
                 .map(|c| {
-                    let type_name = if let DataType::Struct { fields: _f } = c.data_type {
+                    let type_name = if let DataType::Struct { .. } = c.data_type {
                         c.type_name.clone()
                     } else {
                         format!("{:?}", &c.data_type)
@@ -125,7 +107,7 @@ pub fn handle_with_properties(
         .into_iter()
         .map(|x| match x.value {
             Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
-            Value::Number(n, _) => Ok((x.name.real_value(), n)),
+            Value::Number(n) => Ok((x.name.real_value(), n)),
             Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
             _ => Err(RwError::from(ProtocolError(format!(
                 "{} with properties only support single quoted string value",

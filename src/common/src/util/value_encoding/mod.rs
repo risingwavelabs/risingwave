@@ -18,7 +18,6 @@
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 
-use crate::error::Result;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
@@ -26,6 +25,9 @@ use crate::types::{
 
 pub mod error;
 use error::ValueEncodingError;
+use risingwave_pb::data::data_type::TypeName;
+
+pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
 use crate::array::{ListRef, StructRef};
 
@@ -47,15 +49,13 @@ pub fn deserialize_cell(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
 }
 
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
-pub fn serialize_datum(cell: &Datum) -> Result<Vec<u8>> {
-    let mut buf: Vec<u8> = vec![];
+pub fn serialize_datum(cell: &Datum, mut buf: impl BufMut) {
     if let Some(datum) = cell {
         buf.put_u8(1);
         serialize_value(datum.as_scalar_ref_impl(), &mut buf)
     } else {
         buf.put_u8(0);
     }
-    Ok(buf)
 }
 
 /// Deserialize bytes into a datum (Not order guarantee, used in value encoding).
@@ -64,7 +64,7 @@ pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
     match null_tag {
         0 => Ok(None),
         1 => deserialize_value(ty, data),
-        _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag).into()),
+        _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag)),
     }
 }
 
@@ -147,30 +147,41 @@ fn deserialize_value(ty: &DataType, mut data: impl Buf) -> Result<Datum> {
         DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
         DataType::Timestampz => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
-        DataType::Struct { fields: _ } => deserialize_struct_or_list(ty, data)?,
-        DataType::List { datatype: _ } => deserialize_struct_or_list(ty, data)?,
+        DataType::Struct { .. } => deserialize_struct(ty, data)?,
+        DataType::List { .. } => deserialize_list(ty, data)?,
     }))
 }
 
-fn deserialize_struct_or_list(data_type: &DataType, mut data: impl Buf) -> Result<ScalarImpl> {
+fn deserialize_struct(data_type: &DataType, mut data: impl Buf) -> Result<ScalarImpl> {
+    assert_eq!(data_type.prost_type_name(), TypeName::Struct);
     let len = data.get_u32_le();
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
-    ScalarImpl::bytes_to_scalar(&bytes, &data_type.to_protobuf()).map_err(Into::into)
+    ScalarImpl::from_proto_bytes(&bytes, &data_type.to_protobuf())
+        .map_err(ValueEncodingError::InvalidStructEncoding)
+}
+
+fn deserialize_list(data_type: &DataType, mut data: impl Buf) -> Result<ScalarImpl> {
+    assert_eq!(data_type.prost_type_name(), TypeName::List);
+    let len = data.get_u32_le();
+    let mut bytes = vec![0; len as usize];
+    data.copy_to_slice(&mut bytes);
+    ScalarImpl::from_proto_bytes(&bytes, &data_type.to_protobuf())
+        .map_err(ValueEncodingError::InvalidListEncoding)
 }
 
 fn deserialize_str(mut data: impl Buf) -> Result<String> {
     let len = data.get_u32_le();
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
-    Ok(String::from_utf8(bytes).map_err(ValueEncodingError::InvalidUtf8)?)
+    String::from_utf8(bytes).map_err(ValueEncodingError::InvalidUtf8)
 }
 
 fn deserialize_bool(mut data: impl Buf) -> Result<bool> {
     match data.get_u8() {
         1 => Ok(true),
         0 => Ok(false),
-        value => Err(ValueEncodingError::InvalidBoolEncoding(value).into()),
+        value => Err(ValueEncodingError::InvalidBoolEncoding(value)),
     }
 }
 
@@ -184,18 +195,18 @@ fn deserialize_interval(mut data: impl Buf) -> Result<IntervalUnit> {
 fn deserialize_naivetime(mut data: impl Buf) -> Result<NaiveTimeWrapper> {
     let secs = data.get_u32_le();
     let nano = data.get_u32_le();
-    NaiveTimeWrapper::new_with_secs_nano_value_encoding(secs, nano)
+    NaiveTimeWrapper::with_secs_nano_value(secs, nano)
 }
 
 fn deserialize_naivedatetime(mut data: impl Buf) -> Result<NaiveDateTimeWrapper> {
     let secs = data.get_i64_le();
     let nsecs = data.get_u32_le();
-    NaiveDateTimeWrapper::new_with_secs_nsecs_value_encoding(secs, nsecs)
+    NaiveDateTimeWrapper::with_secs_nsecs_value(secs, nsecs)
 }
 
 fn deserialize_naivedate(mut data: impl Buf) -> Result<NaiveDateWrapper> {
     let days = data.get_i32_le();
-    NaiveDateWrapper::new_with_days_value_encoding(days)
+    NaiveDateWrapper::with_days_value(days)
 }
 
 fn deserialize_decimal(mut data: impl Buf) -> Result<Decimal> {

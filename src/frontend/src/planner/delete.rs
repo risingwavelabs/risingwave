@@ -25,13 +25,14 @@ impl Planner {
     pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<PlanRoot> {
         let name = delete.table_source.name.clone();
         let source_id = delete.table_source.source_id;
+        let table_id = delete.table_source.associated_mview_id;
         let scan = self.plan_base_table(delete.table)?;
         let input = if let Some(expr) = delete.selection {
             LogicalFilter::create_with_expr(scan, expr)
         } else {
             scan
         };
-        let plan: PlanRef = LogicalDelete::create(input, name, source_id)?.into();
+        let plan: PlanRef = LogicalDelete::create(input, name, source_id, table_id)?.into();
 
         // For delete, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;

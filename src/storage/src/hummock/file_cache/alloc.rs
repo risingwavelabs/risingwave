@@ -14,8 +14,7 @@
 
 pub struct AlignedAllocator<const ALIGN: usize>;
 
-extern crate alloc;
-use alloc::alloc::{Allocator, Global};
+use std::alloc::{Allocator, Global};
 
 use super::utils;
 

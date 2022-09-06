@@ -61,6 +61,8 @@ message DataType {
   // For list type it only contains 1 element which is the inner item type of the List.
   // For example, `ARRAY<INTEGER>` will be represented as `vec![DataType::Int32]`.
   repeated DataType field_type = 6;
+  // Name of the fields if it is a struct type. For other types it will be empty.
+  repeated string field_names = 7;
 }
 
 message StructArrayData {

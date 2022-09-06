@@ -1,0 +1,28 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation 
+
+# description: Test full outer join with caches
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE smalltable AS SELECT 1::INTEGER a;
+
+# disable this test since create table ... as ... is not supported.
+# values 1...1024 10x
+# statement ok
+# CREATE TABLE bigtable AS SELECT a::INTEGER a FROM generate_series(0, 9999, 1) tbl(a), generate_series(0, 9, 1) tbl2(b);
+
+# query I
+# SELECT COUNT(*) FROM bigtable FULL OUTER JOIN smalltable USING (a)
+# ----
+# 100000
+
+# query I
+# SELECT COUNT(*) FROM bigtable RIGHT OUTER JOIN smalltable USING (a)
+# ----
+# 10
+
+statement ok
+drop table smalltable;

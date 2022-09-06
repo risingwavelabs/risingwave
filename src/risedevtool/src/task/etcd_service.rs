@@ -38,7 +38,7 @@ impl EtcdService {
         Ok(Command::new(Self::path()?))
     }
 
-    /// Apply command args accroding to config
+    /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &EtcdConfig) -> Result<()> {
         let listen_urls = format!("http://{}:{}", config.listen_address, config.port);
         let advertise_urls = format!("http://{}:{}", config.address, config.port);

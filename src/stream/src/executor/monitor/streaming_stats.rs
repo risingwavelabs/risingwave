@@ -23,10 +23,9 @@ use prometheus::{
 pub struct StreamingMetrics {
     pub registry: Registry,
     pub executor_row_count: GenericCounterVec<AtomicU64>,
-    pub actor_processing_time: GenericGaugeVec<AtomicF64>,
-    pub actor_barrier_time: GenericGaugeVec<AtomicF64>,
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
+    pub actor_input_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
     pub actor_scheduled_duration: GenericGaugeVec<AtomicF64>,
     pub actor_scheduled_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_fast_poll_duration: GenericGaugeVec<AtomicF64>,
@@ -43,9 +42,16 @@ pub struct StreamingMetrics {
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
+
+    // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
+    pub join_cached_entries: GenericGaugeVec<AtomicI64>,
+    pub join_cached_rows: GenericGaugeVec<AtomicI64>,
+    pub join_cached_estimated_size: GenericGaugeVec<AtomicI64>,
+
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
     /// to flow through the graph.
@@ -74,22 +80,6 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let actor_processing_time = register_gauge_vec_with_registry!(
-            "stream_actor_processing_time",
-            "Time between merge node produces its first chunk in one epoch and barrier gets dispatched from actor_id",
-            &["actor_id", "merge_node_id"],
-            registry
-        )
-        .unwrap();
-
-        let actor_barrier_time = register_gauge_vec_with_registry!(
-            "stream_actor_barrier_time",
-            "Time between merge node produces a barrier and barrier gets dispatched from actor_id",
-            &["actor_id", "merge_node_id"],
-            registry
-        )
-        .unwrap();
-
         let actor_execution_time = register_gauge_vec_with_registry!(
             "stream_actor_actor_execution_time",
             "Total execution time (s) of an actor",
@@ -102,6 +92,14 @@ impl StreamingMetrics {
             "stream_actor_output_buffer_blocking_duration_ns",
             "Total blocking duration (ns) of output buffer",
             &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_input_buffer_blocking_duration_ns = register_int_counter_vec_with_registry!(
+            "stream_actor_input_buffer_blocking_duration_ns",
+            "Total blocking duration (ns) of input buffer",
+            &["actor_id", "upstream_fragment_id"],
             registry
         )
         .unwrap();
@@ -242,6 +240,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let join_actor_input_waiting_duration_ns = register_int_counter_vec_with_registry!(
+            "stream_join_actor_input_waiting_duration_ns",
+            "Total waiting duration (ns) of input buffer of join actor",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_join_barrier_align_duration",
             "Duration of join align barrier",
@@ -250,6 +256,30 @@ impl StreamingMetrics {
         let join_barrier_align_duration =
             register_histogram_vec_with_registry!(opts, &["actor_id", "wait_side"], registry)
                 .unwrap();
+
+        let join_cached_entries = register_int_gauge_vec_with_registry!(
+            "stream_join_cached_entries",
+            "Number of cached entries in streaming join operators",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let join_cached_rows = register_int_gauge_vec_with_registry!(
+            "stream_join_cached_rows",
+            "Number of cached rows in streaming join operators",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let join_cached_estimated_size = register_int_gauge_vec_with_registry!(
+            "stream_join_cached_estimated_size",
+            "Estimated size of all cached entries in streaming join operators",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
 
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
@@ -275,10 +305,9 @@ impl StreamingMetrics {
         Self {
             registry,
             executor_row_count,
-            actor_processing_time,
-            actor_barrier_time,
             actor_execution_time,
             actor_output_buffer_blocking_duration_ns,
+            actor_input_buffer_blocking_duration_ns,
             actor_scheduled_duration,
             actor_scheduled_cnt,
             actor_fast_poll_duration,
@@ -297,7 +326,11 @@ impl StreamingMetrics {
             exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
+            join_actor_input_waiting_duration_ns,
             join_barrier_align_duration,
+            join_cached_entries,
+            join_cached_rows,
+            join_cached_estimated_size,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,

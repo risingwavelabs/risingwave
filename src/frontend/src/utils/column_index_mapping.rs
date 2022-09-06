@@ -19,7 +19,9 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{
+    Distribution, FieldOrder, FunctionalDependency, FunctionalDependencySet, Order, RequiredDist,
+};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
@@ -93,7 +95,7 @@ impl ColIndexMapping {
     ///
     /// Positive offset:
     ///
-    /// ```rust
+    /// ```ignore
     /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(3, 3);
     /// assert_eq!(mapping.map(0), 3);
@@ -103,7 +105,7 @@ impl ColIndexMapping {
     ///
     /// Negative offset:
     ///
-    ///  ```rust
+    ///  ```ignore
     /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(6, -3);
     /// assert_eq!(mapping.try_map(0), None);
@@ -122,7 +124,8 @@ impl ColIndexMapping {
                 usize::try_from(target).ok()
             })
             .collect_vec();
-        Self::new(map)
+        let target_size = usize::try_from(source_num as isize + offset).unwrap();
+        Self::with_target_size(map, target_size)
     }
 
     /// Maps the smallest index to 0, the next smallest to 1, and so on.
@@ -131,7 +134,7 @@ impl ColIndexMapping {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// # use fixedbitset::FixedBitSet;
     /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut remaining_cols = vec![1, 3];
@@ -155,7 +158,7 @@ impl ColIndexMapping {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// # use fixedbitset::FixedBitSet;
     /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut removed_cols = vec![0, 2, 4];
@@ -185,7 +188,7 @@ impl ColIndexMapping {
     }
 
     /// Union two mapping, the result mapping `target_size` and source size will be the max size
-    /// ofthe two mappings.
+    /// of the two mappings.
     ///
     /// # Panics
     ///
@@ -293,18 +296,26 @@ impl ColIndexMapping {
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
     /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `SomeShard`.
     pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
-        match dist {
-            Distribution::HashShard(col_idxes) => {
-                let mapped_dist = col_idxes
-                    .iter()
-                    .map(|col_idx| self.try_map(*col_idx))
-                    .collect::<Option<Vec<_>>>();
-                match mapped_dist {
-                    Some(col_idx) => Distribution::HashShard(col_idx),
-                    None => Distribution::SomeShard,
-                }
+        let mapped_dist_key = dist
+            .dist_column_indices()
+            .iter()
+            .map(|col_idx| self.try_map(*col_idx))
+            .collect::<Option<Vec<_>>>();
+
+        match (mapped_dist_key, dist) {
+            (None, Distribution::HashShard(_)) | (None, Distribution::UpstreamHashShard(_)) => {
+                Distribution::SomeShard
             }
-            _ => dist.clone(),
+            (Some(mapped_dist_key), Distribution::HashShard(_)) => {
+                Distribution::HashShard(mapped_dist_key)
+            }
+            (Some(mapped_dist_key), Distribution::UpstreamHashShard(_)) => {
+                Distribution::UpstreamHashShard(mapped_dist_key)
+            }
+            _ => {
+                assert!(dist.dist_column_indices().is_empty());
+                dist.clone()
+            }
         }
     }
 
@@ -338,6 +349,47 @@ impl ColIndexMapping {
             },
             _ => dist.clone(),
         }
+    }
+
+    /// Rewrite the indices in a functional dependency.
+    ///
+    /// If some columns in the `from` side are removed, then this fd is no longer valid. For
+    /// example, for ABC --> D, it means that A, B, and C together can determine C. But if B is
+    /// removed, this fd is not valid. For this case, we will return [`None`]
+    ///
+    /// Additionally, If the `to` side of a functional dependency becomes empty after rewriting, it
+    /// means that this dependency is unneeded so we also return [`None`].
+    pub fn rewrite_functional_dependency(
+        &self,
+        fd: &FunctionalDependency,
+    ) -> Option<FunctionalDependency> {
+        let new_from = self.rewrite_bitset(fd.from());
+        let new_to = self.rewrite_bitset(fd.to());
+        if new_from.count_ones(..) != fd.from().count_ones(..) || new_to.is_clear() {
+            None
+        } else {
+            Some(FunctionalDependency::new(new_from, new_to))
+        }
+    }
+
+    /// Rewrite functional dependencies in `fd_set` one by one, using
+    /// `[ColIndexMapping::rewrite_functional_dependency]`.
+    ///
+    /// Note that this rewrite process handles each function dependency independently.
+    /// Relationships within function dependencies are not considered.
+    /// For example, if we have `fd_set` { AB --> C, A --> B }, and column B is removed.
+    /// The result would be an empty `fd_set`, rather than { A --> C }.
+    pub fn rewrite_functional_dependency_set(
+        &self,
+        fd_set: FunctionalDependencySet,
+    ) -> FunctionalDependencySet {
+        let mut new_fd_set = FunctionalDependencySet::new(self.target_size());
+        for i in fd_set.into_dependencies() {
+            if let Some(fd) = self.rewrite_functional_dependency(&i) {
+                new_fd_set.add_functional_dependency(fd);
+            }
+        }
+        new_fd_set
     }
 
     pub fn rewrite_bitset(&self, bitset: &FixedBitSet) -> FixedBitSet {
@@ -374,6 +426,7 @@ impl Debug for ColIndexMapping {
 
 #[cfg(test)]
 mod tests {
+    use crate::optimizer::property::{FunctionalDependency, FunctionalDependencySet};
     use crate::utils::ColIndexMapping;
 
     #[test]
@@ -387,6 +440,12 @@ mod tests {
     }
 
     #[test]
+    fn test_shift_0_source() {
+        let mapping = ColIndexMapping::with_shift_offset(0, 3);
+        assert_eq!(mapping.target_size(), 3);
+    }
+
+    #[test]
     fn test_composite() {
         let add_mapping = ColIndexMapping::with_shift_offset(3, 3);
         let remaining_cols = vec![3, 5];
@@ -395,5 +454,53 @@ mod tests {
         assert_eq!(composite.map(0), 0); // 0+3 = 3， 3 -> 0
         assert_eq!(composite.try_map(1), None);
         assert_eq!(composite.map(2), 1); // 2+3 = 5, 5 -> 1
+    }
+
+    #[test]
+    fn test_rewrite_fd() {
+        let mapping = ColIndexMapping::with_remaining_columns(&[1, 0], 4);
+        let new_fd = |from, to| FunctionalDependency::with_indices(4, from, to);
+        let fds_with_expected_res = vec![
+            (new_fd(&[0, 1], &[2, 3]), None),
+            (new_fd(&[2], &[0, 1]), None),
+            (
+                new_fd(&[1], &[0]),
+                Some(FunctionalDependency::with_indices(2, &[0], &[1])),
+            ),
+        ];
+        for (input, expected) in fds_with_expected_res {
+            assert_eq!(mapping.rewrite_functional_dependency(&input), expected);
+        }
+    }
+
+    #[test]
+    fn test_rewrite_fd_set() {
+        let new_fd = |from, to| FunctionalDependency::with_indices(4, from, to);
+        let fd_set = FunctionalDependencySet::with_dependencies(
+            4,
+            vec![
+                // removed
+                new_fd(&[0, 1], &[2, 3]),
+                new_fd(&[2], &[0, 1]),
+                new_fd(&[0, 1, 2], &[3]),
+                // empty mappings will be removed
+                new_fd(&[], &[]),
+                new_fd(&[1], &[]),
+                // constant column mapping will be kept
+                new_fd(&[], &[0]),
+                // kept
+                new_fd(&[1], &[0]),
+            ],
+        );
+        let mapping = ColIndexMapping::with_remaining_columns(&[1, 0], 4);
+        let result = mapping.rewrite_functional_dependency_set(fd_set);
+        let expected = FunctionalDependencySet::with_dependencies(
+            2,
+            vec![
+                FunctionalDependency::with_indices(2, &[], &[1]),
+                FunctionalDependency::with_indices(2, &[0], &[1]),
+            ],
+        );
+        assert_eq!(result, expected);
     }
 }

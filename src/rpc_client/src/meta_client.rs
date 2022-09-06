@@ -17,13 +17,15 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use paste::paste;
-use risingwave_common::catalog::{CatalogVersion, TableId};
+use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
+use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, LocalSstableInfo, SstIdRange};
+use risingwave_hummock_sdk::{
+    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+};
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable,
+    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
+    Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
@@ -41,16 +43,15 @@ use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
-use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
-use tonic::{Status, Streaming};
+use tonic::Streaming;
 
 use crate::error::Result;
 use crate::hummock_meta_client::HummockMetaClient;
-use crate::ExtraInfoSourceRef;
+use crate::{rpc_client_method_impl, ExtraInfoSourceRef};
 
 type DatabaseId = u32;
 type SchemaId = u32;
@@ -84,7 +85,7 @@ impl MetaClient {
         &self,
         addr: &HostAddr,
         worker_type: WorkerType,
-    ) -> Result<Box<dyn NotificationStream>> {
+    ) -> Result<Streaming<SubscribeResponse>> {
         let request = SubscribeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
@@ -131,7 +132,12 @@ impl MetaClient {
                 .map(|info| ExtraInfo { info: Some(info) })
                 .collect(),
         };
-        self.inner.heartbeat(request).await?;
+        let resp = self.inner.heartbeat(request).await?;
+        if let Some(status) = resp.status {
+            if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                panic!("{}", status.message);
+            }
+        }
         Ok(())
     }
 
@@ -213,6 +219,22 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.source_id, resp.version))
     }
 
+    pub async fn create_index(
+        &self,
+        index: ProstIndex,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<(TableId, CatalogVersion)> {
+        let request = CreateIndexRequest {
+            index: Some(index),
+            index_table: Some(table),
+            fragment_graph: Some(graph),
+        };
+        let resp = self.inner.create_index(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.index_id.into(), resp.version))
+    }
+
     pub async fn drop_materialized_source(
         &self,
         source_id: u32,
@@ -236,6 +258,14 @@ impl MetaClient {
     pub async fn drop_sink(&self, sink_id: u32) -> Result<CatalogVersion> {
         let request = DropSinkRequest { sink_id };
         let resp = self.inner.drop_sink(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_index(&self, index_id: IndexId) -> Result<CatalogVersion> {
+        let request = DropIndexRequest {
+            index_id: index_id.index_id,
+        };
+        let resp = self.inner.drop_index(request).await?;
         Ok(resp.version)
     }
 
@@ -338,10 +368,14 @@ impl MetaClient {
                         return;
                     }
                 }
-                let extra_info = extra_info_sources
-                    .iter()
-                    .filter_map(|s| s.get_extra_info())
-                    .collect::<Vec<_>>();
+                let mut extra_info = Vec::with_capacity(extra_info_sources.len());
+                for extra_info_source in &extra_info_sources {
+                    if let Some(info) = extra_info_source.get_extra_info().await {
+                        // None means the info is not available at the moment, and won't be sent to
+                        // meta.
+                        extra_info.push(info);
+                    }
+                }
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
@@ -352,10 +386,7 @@ impl MetaClient {
                 {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
-                        tracing::warn!("Failed to send_heartbeat: error {}", err);
-                        if err.to_string().contains("unknown worker") {
-                            panic!("Already removed by the meta node. Need to restart the worker");
-                        }
+                        tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
                     }
                     Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: timeout {}", err);
@@ -372,10 +403,10 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self) -> Result<()> {
+    pub async fn flush(&self) -> Result<HummockSnapshot> {
         let request = FlushRequest::default();
-        self.inner.flush(request).await?;
-        Ok(())
+        let resp = self.inner.flush(request).await?;
+        Ok(resp.snapshot.unwrap())
     }
 
     pub async fn list_table_fragments(
@@ -413,17 +444,13 @@ impl HummockMetaClient for MetaClient {
     async fn pin_version(
         &self,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
+    ) -> Result<pin_version_response::Payload> {
         let req = PinVersionRequest {
             context_id: self.worker_id(),
             last_pinned,
         };
         let resp = self.inner.pin_version(req).await?;
-        Ok((
-            resp.is_delta_response,
-            resp.version_deltas,
-            resp.pinned_version,
-        ))
+        Ok(resp.payload.unwrap())
     }
 
     async fn unpin_version(&self) -> Result<()> {
@@ -443,18 +470,18 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         let req = PinSnapshotRequest {
             context_id: self.worker_id(),
         };
         let resp = self.inner.pin_snapshot(req).await?;
-        Ok(resp.snapshot.unwrap().epoch)
+        Ok(resp.snapshot.unwrap())
     }
 
-    async fn get_epoch(&self) -> Result<HummockEpoch> {
+    async fn get_epoch(&self) -> Result<HummockSnapshot> {
         let req = GetEpochRequest {};
         let resp = self.inner.get_epoch(req).await?;
-        Ok(resp.snapshot.unwrap().epoch)
+        Ok(resp.snapshot.unwrap())
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {
@@ -470,7 +497,8 @@ impl HummockMetaClient for MetaClient {
             context_id: self.worker_id(),
             // For unpin_snapshot_before, we do not care about snapshots list but only min epoch.
             min_snapshot: Some(HummockSnapshot {
-                epoch: pinned_epochs,
+                committed_epoch: pinned_epochs,
+                current_epoch: pinned_epochs,
             }),
         };
         self.inner.unpin_snapshot_before(req).await?;
@@ -502,11 +530,27 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
-    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    async fn subscribe_compact_tasks(
+        &self,
+        max_concurrent_task_number: u64,
+    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
+            max_concurrent_task_number,
         };
         self.inner.subscribe_compact_tasks(req).await
+    }
+
+    async fn report_compaction_task_progress(
+        &self,
+        progress: Vec<CompactTaskProgress>,
+    ) -> Result<()> {
+        let req = ReportCompactionTaskProgressRequest {
+            context_id: self.worker_id(),
+            progress,
+        };
+        self.inner.report_compaction_task_progress(req).await?;
+        Ok(())
     }
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
@@ -514,6 +558,12 @@ impl HummockMetaClient for MetaClient {
             vacuum_task: Some(vacuum_task),
         };
         self.inner.report_vacuum_task(req).await?;
+        Ok(())
+    }
+
+    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
+        let req = ReportFullScanTaskRequest { sst_ids };
+        self.inner.report_full_scan_task(req).await?;
         Ok(())
     }
 
@@ -541,6 +591,15 @@ impl HummockMetaClient for MetaClient {
         self.inner.trigger_manual_compaction(req).await?;
         Ok(())
     }
+
+    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+        self.inner
+            .trigger_full_gc(TriggerFullGcRequest {
+                sst_retention_time_sec,
+            })
+            .await?;
+        Ok(())
+    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -564,7 +623,8 @@ impl GrpcMetaClient {
 
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
-        let endpoint = Endpoint::from_shared(addr.to_string())?;
+        let endpoint = Endpoint::from_shared(addr.to_string())?
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
         let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
             .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
             .map(jitter);
@@ -605,23 +665,6 @@ impl GrpcMetaClient {
     }
 }
 
-macro_rules! grpc_meta_client_impl {
-    ([], $( { $client:ident, $fn_name:ident, $req:ty, $resp:ty }),*) => {
-        $(paste! {
-            impl GrpcMetaClient {
-                pub async fn [<$fn_name>](&self, request: $req) -> Result<$resp> {
-                    Ok(self
-                        .$client
-                        .to_owned()
-                        .$fn_name(request)
-                        .await?
-                        .into_inner())
-                }
-            }
-        })*
-    }
-}
-
 macro_rules! for_all_meta_rpc {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
@@ -639,12 +682,14 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
+            ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
+            ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
@@ -656,9 +701,12 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
+            ,{ hummock_client, report_compaction_task_progress, ReportCompactionTaskProgressRequest, ReportCompactionTaskProgressResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
+            ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
+            ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
@@ -667,45 +715,11 @@ macro_rules! for_all_meta_rpc {
             ,{ scale_client, pause, PauseRequest, PauseResponse }
             ,{ scale_client, resume, ResumeRequest, ResumeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
+            ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
         }
     };
 }
 
-for_all_meta_rpc! { grpc_meta_client_impl }
-
 impl GrpcMetaClient {
-    pub async fn subscribe(
-        &self,
-        request: SubscribeRequest,
-    ) -> Result<Box<dyn NotificationStream>> {
-        Ok(Box::new(
-            self.notification_client
-                .to_owned()
-                .subscribe(request)
-                .await?
-                .into_inner(),
-        ))
-    }
-}
-
-#[async_trait::async_trait]
-pub trait NotificationStream: Send {
-    /// Ok(Some) => receive a `SubscribeResponse`.
-    /// Ok(None) => stream terminates.
-    /// Err => error happens.
-    async fn next(&mut self) -> Result<Option<SubscribeResponse>>;
-}
-
-#[async_trait::async_trait]
-impl NotificationStream for Streaming<SubscribeResponse> {
-    async fn next(&mut self) -> Result<Option<SubscribeResponse>> {
-        self.message().await.map_err(Into::into)
-    }
-}
-
-#[async_trait::async_trait]
-impl NotificationStream for Receiver<std::result::Result<SubscribeResponse, Status>> {
-    async fn next(&mut self) -> Result<Option<SubscribeResponse>> {
-        self.recv().await.transpose().map_err(Into::into)
-    }
+    for_all_meta_rpc! { rpc_client_method_impl }
 }

@@ -29,8 +29,6 @@ pub enum Error {
     MetaStoreError(anyhow::Error),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
-    #[error("compactor {0} is busy")]
-    CompactorBusy(HummockContextId),
     #[error("compaction task {0} already assigned to compactor {1}")]
     CompactionTaskAlreadyAssigned(u64, HummockContextId),
     #[error("compaction group {0} not found")]
@@ -39,8 +37,8 @@ pub enum Error {
     InvalidCompactionGroupMember(StateTableId),
     #[error("SST {0} is invalid")]
     InvalidSst(HummockSstableId),
-    #[error("internal error: {0}")]
-    InternalError(String),
+    #[error(transparent)]
+    InternalError(anyhow::Error),
 }
 
 impl Error {
@@ -52,7 +50,7 @@ impl Error {
 impl From<MetaStoreError> for Error {
     fn from(error: MetaStoreError) -> Self {
         match error {
-            MetaStoreError::ItemNotFound(err) => Error::InternalError(err),
+            MetaStoreError::ItemNotFound(err) => anyhow::anyhow!(err).into(),
             MetaStoreError::TransactionAbort() => {
                 // TODO: need more concrete error from meta store.
                 Error::InvalidContext(0)
@@ -69,7 +67,19 @@ impl From<MetadataModelError> for Error {
     fn from(err: MetadataModelError) -> Self {
         match err {
             MetadataModelError::MetaStoreError(e) => e.into(),
-            e => Error::InternalError(e.to_string()),
+            e => anyhow::anyhow!(e).into(),
         }
+    }
+}
+
+impl From<Error> for tonic::Status {
+    fn from(err: Error) -> Self {
+        tonic::Status::new(tonic::Code::Internal, format!("{}", err))
+    }
+}
+
+impl From<anyhow::Error> for Error {
+    fn from(e: anyhow::Error) -> Self {
+        Error::InternalError(e)
     }
 }

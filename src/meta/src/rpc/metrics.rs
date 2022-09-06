@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicU64;
+
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, IntGaugeVec, Registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
+    HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 
 pub struct MetaMetrics {
@@ -24,30 +27,32 @@ pub struct MetaMetrics {
     /// gRPC latency of meta services
     pub grpc_latency: HistogramVec,
     /// The duration from barrier injection to commit
-    /// It is the sum of inflight-latency , sync-latency and wait-commit-latency
+    /// It is the sum of inflight-latency, sync-latency and wait-commit-latency
     pub barrier_latency: Histogram,
     /// The duration from barrier complete to commit
     pub barrier_wait_commit_latency: Histogram,
 
-    /// latency between each barrier send
+    /// Latency between each barrier send
     pub barrier_send_latency: Histogram,
-    /// the nums of all barrier. the it is the sum of in-flight and complete but waiting for other
-    /// barrier
+    /// The number of all barriers. It is the sum of barreriers that are in-flight or completed but
+    /// waiting for other barriers
     pub all_barrier_nums: IntGauge,
-    /// the nums of in-flight barrier
+    /// The number of in-flight barriers
     pub in_flight_barrier_nums: IntGauge,
 
-    /// max committed epoch
+    /// Max committed epoch
     pub max_committed_epoch: IntGauge,
-    /// num of uncommitted SSTs,
+    /// The number of uncommitted SSTs,
     pub uncommitted_sst_num: IntGauge,
-    /// num of SSTs in each level
+    /// The number of SSTs in each level
     pub level_sst_num: IntGaugeVec,
-    // /// num of SSTs to be merged to next level in each level
+    /// The number of SSTs to be merged to next level in each level
     pub level_compact_cnt: IntGaugeVec,
+    /// The number of compact tasks
+    pub compact_frequency: IntCounterVec,
 
     pub level_file_size: IntGaugeVec,
-    /// hummock version size
+    /// Hummock version size
     pub version_size: IntGauge,
 
     /// Latency for hummock manager to acquire lock
@@ -55,6 +60,11 @@ pub struct MetaMetrics {
 
     /// Latency for hummock manager to really process a request after acquire the lock
     pub hummock_manager_real_process_time: HistogramVec,
+
+    pub time_after_last_observation: AtomicU64,
+
+    /// The number of nodes with `Running` state.
+    pub node_num: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -133,8 +143,17 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let compact_frequency = register_int_counter_vec_with_registry!(
+            "storage_level_compact_frequency",
+            "num of compactions from each level to next level",
+            &["group", "result"],
+            registry
+        )
+        .unwrap();
+
         let version_size =
             register_int_gauge_with_registry!("version_size", "version size", registry).unwrap();
+
         let level_file_size = register_int_gauge_vec_with_registry!(
             "storage_level_total_file_size",
             "KBs total file bytes in each level",
@@ -159,6 +178,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let node_num = register_int_gauge_vec_with_registry!(
+            "node_num",
+            "number of running nodes in the cluster",
+            &["node_type"],
+            registry,
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -173,10 +200,14 @@ impl MetaMetrics {
             uncommitted_sst_num,
             level_sst_num,
             level_compact_cnt,
+            compact_frequency,
             level_file_size,
             version_size,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
+            time_after_last_observation: AtomicU64::new(0),
+
+            node_num,
         }
     }
 

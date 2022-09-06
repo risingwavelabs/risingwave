@@ -18,18 +18,18 @@ use std::sync::Arc;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::PkIndices;
+use crate::executor::{ActorContextRef, PkIndices};
 
 pub struct HashJoinExecutorBuilder;
 
 impl ExecutorBuilder for HashJoinExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
@@ -38,8 +38,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
 
-        let source_l = params.input.remove(0);
-        let source_r = params.input.remove(0);
+        let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
         let table_l = node.get_left_table()?;
         let table_r = node.get_right_table()?;
@@ -65,6 +64,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
         );
+        let null_safe = node.get_null_safe().to_vec();
         let output_indices = node
             .get_output_indices()
             .iter()
@@ -116,14 +116,16 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let kind = calc_hash_key_kind(&keys);
 
         let state_table_l =
-            RowBasedStateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
-        let state_table_r = RowBasedStateTable::from_table_catalog(table_r, store, Some(vnodes));
+            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
+        let state_table_r = StateTable::from_table_catalog(table_r, store, Some(vnodes));
 
         let args = HashJoinExecutorDispatcherArgs {
+            ctx: params.actor_context,
             source_l,
             source_r,
             params_l,
             params_r,
+            null_safe,
             pk_indices: params.pk_indices,
             output_indices,
             executor_id: params.executor_id,
@@ -132,7 +134,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             state_table_l,
             state_table_r,
             is_append_only,
-            actor_id: params.actor_id as u64,
             metrics: params.executor_stats,
         };
 
@@ -145,19 +146,20 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 struct HashJoinExecutorDispatcher<S: StateStore, const T: JoinTypePrimitive>(PhantomData<S>);
 
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
+    ctx: ActorContextRef,
     source_l: Box<dyn Executor>,
     source_r: Box<dyn Executor>,
     params_l: JoinParams,
     params_r: JoinParams,
+    null_safe: Vec<bool>,
     pk_indices: PkIndices,
     output_indices: Vec<usize>,
     executor_id: u64,
     cond: Option<BoxedExpression>,
     op_info: String,
-    state_table_l: RowBasedStateTable<S>,
-    state_table_r: RowBasedStateTable<S>,
+    state_table_l: StateTable<S>,
+    state_table_r: StateTable<S>,
     is_append_only: bool,
-    actor_id: u64,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -169,13 +171,14 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Ok(Box::new(HashJoinExecutor::<K, S, T>::new(
+            args.ctx,
             args.source_l,
             args.source_r,
             args.params_l,
             args.params_r,
+            args.null_safe,
             args.pk_indices,
             args.output_indices,
-            args.actor_id,
             args.executor_id,
             args.cond,
             args.op_info,

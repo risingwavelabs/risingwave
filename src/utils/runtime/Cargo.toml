@@ -9,19 +9,9 @@ async-trait = "0.1"
 console = "0.15"
 console-subscriber = "0.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-isahc = { version = "1", default-features = false } # isahc is the http client used for tracing. Always set it as the same version as opentelemetry-jaeger's.
-madsim = "=0.2.0-alpha.6"
-opentelemetry = { version = "0.17", features = ["rt-tokio", "trace"] }
-opentelemetry-jaeger = { version = "0.16", features = [
-    "rt-tokio",
-    "collector_client",
-    "isahc",
-    "isahc_collector_client",
-] }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.10", features = ["flamegraph"] }
-thrift = "0.15" # thrift is used for our implementation of `RwTokio` runtime. Always set it as the same version as opentelemetry-jaeger's.
-tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -31,7 +21,8 @@ tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
     "fs"
 ] }
 tokio-stream = "0.1"
-tracing = { version = "0.1" }
-tracing-opentelemetry = "0.17"
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot"] }
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }

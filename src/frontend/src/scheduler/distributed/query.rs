@@ -17,15 +17,15 @@ use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::bail;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_rpc_client::ComputeClientPoolRef;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::oneshot::Sender;
 use tokio::sync::{oneshot, RwLock};
-use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 use super::{QueryResultFetcher, StageEvent};
+use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
@@ -36,9 +36,6 @@ use crate::scheduler::{HummockSnapshotManagerRef, SchedulerError, SchedulerResul
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
 pub enum QueryMessage {
-    /// Commands to stop execution..
-    Stop,
-
     /// Events passed running execution.
     Stage(StageEvent),
 }
@@ -49,19 +46,11 @@ enum QueryState {
     /// In this state, some data structures for starting executions are created to avoid holding
     /// them `QueryExecution`
     Pending {
-        /// We create this runner before start execution to avoid hold unuseful fields in
-        /// `QueryExecution`
-        runner: QueryRunner,
-
-        /// Receiver of root stage info.
-        root_stage_receiver: oneshot::Receiver<SchedulerResult<QueryResultFetcher>>,
+        msg_receiver: Receiver<QueryMessage>,
     },
 
     /// Running
-    Running {
-        _msg_sender: Sender<QueryMessage>,
-        _task_handle: JoinHandle<SchedulerResult<()>>,
-    },
+    Running,
 
     /// Failed
     Failed,
@@ -73,7 +62,12 @@ enum QueryState {
 pub struct QueryExecution {
     query: Arc<Query>,
     state: Arc<RwLock<QueryState>>,
-    _stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
+
+    /// These fields are just used for passing to Query Runner.
+    epoch: u64,
+    stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 struct QueryRunner {
@@ -82,8 +76,6 @@ struct QueryRunner {
     scheduled_stages_count: usize,
     /// Query messages receiver. For example, stage state change events, query commands.
     msg_receiver: Receiver<QueryMessage>,
-    // Sender of above message receiver. We need to keep it so that we can pass it to stages.
-    msg_sender: Sender<QueryMessage>,
 
     /// Will be set to `None` after all stage scheduled.
     root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
@@ -100,6 +92,7 @@ impl QueryExecution {
         worker_node_manager: WorkerNodeManagerRef,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
+        catalog_reader: CatalogReader,
     ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
@@ -123,57 +116,55 @@ impl QueryExecution {
                     sender.clone(),
                     children_stages,
                     compute_client_pool.clone(),
+                    catalog_reader.clone(),
                 ));
                 stage_executions.insert(stage_id, stage_exec);
             }
             Arc::new(stage_executions)
         };
 
-        let (root_stage_sender, root_stage_receiver) =
-            oneshot::channel::<SchedulerResult<QueryResultFetcher>>();
-
-        let runner = QueryRunner {
-            query: query.clone(),
-            stage_executions: stage_executions.clone(),
-            msg_receiver: receiver,
-            root_stage_sender: Some(root_stage_sender),
-            msg_sender: sender,
-            scheduled_stages_count: 0,
-            epoch,
-            hummock_snapshot_manager,
-            compute_client_pool,
-        };
-
         let state = QueryState::Pending {
-            runner,
-            root_stage_receiver,
+            msg_receiver: receiver,
         };
 
         Self {
             query,
             state: Arc::new(RwLock::new(state)),
-            _stage_executions: stage_executions,
+            stage_executions,
+            epoch,
+            compute_client_pool,
+            hummock_snapshot_manager,
         }
     }
 
     /// Start execution of this query.
-    pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
+    pub async fn start(
+        &self,
+        shutdown_tx: Sender<SchedulerError>,
+    ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
 
         match cur_state {
-            QueryState::Pending {
-                runner,
-                root_stage_receiver,
-            } => {
-                let msg_sender = runner.msg_sender.clone();
-                let task_handle = tokio::spawn(async move {
-                    let query_id = runner.query.query_id.clone();
-                    runner.run().await.map_err(|e| {
-                        error!("Query {:?} failed, reason: {:?}", query_id, e);
-                        e
-                    })
-                });
+            QueryState::Pending { msg_receiver } => {
+                *state = QueryState::Running;
+
+                let (root_stage_sender, root_stage_receiver) =
+                    oneshot::channel::<SchedulerResult<QueryResultFetcher>>();
+
+                let runner = QueryRunner {
+                    query: self.query.clone(),
+                    stage_executions: self.stage_executions.clone(),
+                    msg_receiver,
+                    root_stage_sender: Some(root_stage_sender),
+                    scheduled_stages_count: 0,
+                    epoch: self.epoch,
+                    hummock_snapshot_manager: self.hummock_snapshot_manager.clone(),
+                    compute_client_pool: self.compute_client_pool.clone(),
+                };
+
+                // Not trace the error here, it will be processed in scheduler.
+                tokio::spawn(async move { runner.run(shutdown_tx).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -185,17 +176,10 @@ impl QueryExecution {
                     self.query.query_id
                 );
 
-                *state = QueryState::Running {
-                    _msg_sender: msg_sender,
-                    _task_handle: task_handle,
-                };
-
                 Ok(root_stage)
             }
-            s => {
-                // Restore old state
-                *state = s;
-                bail!("Query not pending!")
+            _ => {
+                unreachable!("The query runner should not be scheduled twice");
             }
         }
     }
@@ -208,20 +192,11 @@ impl QueryExecution {
 }
 
 impl QueryRunner {
-    async fn run(mut self) -> SchedulerResult<()> {
+    async fn run(mut self, shutdown_tx: tokio::sync::oneshot::Sender<SchedulerError>) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
-            // TODO: We should not return error here, we should abort query.
-            tracing::trace!(
-                "Starting query stage: {:?}-{:?}",
-                self.query.query_id,
-                stage_id
-            );
-            self.stage_executions[stage_id].start().await.map_err(|e| {
-                error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
-                e
-            })?;
+            self.stage_executions[stage_id].start().await;
             tracing::trace!(
                 "Query stage {:?}-{:?} started.",
                 self.query.query_id,
@@ -248,7 +223,7 @@ impl QueryRunner {
                         tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
                         self.hummock_snapshot_manager
                             .unpin_snapshot(self.epoch, self.query.query_id())
-                            .await?;
+                            .await;
                     }
 
                     if self.scheduled_stages_count == self.stage_executions.len() {
@@ -256,11 +231,11 @@ impl QueryRunner {
                         self.send_root_stage_info().await;
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
-                            if self.all_children_scheduled(parent).await {
-                                self.stage_executions[parent].start().await.map_err(|e| {
-                                    error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
-                                    e
-                                })?;
+                            if self.all_children_scheduled(parent).await
+                                // Do not schedule same stage twice.
+                                && self.stage_executions[parent].is_pending().await
+                            {
+                                self.stage_executions[parent].start().await;
                             }
                         }
                     }
@@ -271,7 +246,7 @@ impl QueryRunner {
                         self.query.query_id, id, reason
                     );
 
-                    // Consume sender here.
+                    // Consume sender here and send error to root stage.
                     let root_stage_sender = mem::take(&mut self.root_stage_sender);
                     // It's possible we receive stage failed event message multi times and the
                     // sender has been consumed in first failed event.
@@ -284,20 +259,30 @@ impl QueryRunner {
                                 self.query.query_id
                             );
                         }
+                    } else {
+                        // If root stage has been taken, then use channel to send error to
+                        // `QueryResultFetcher`. This may happen if some execution error received
+                        // after we have scheduled are events.
+
+                        if shutdown_tx.send(reason).is_err() {
+                            warn!("Sending error to query result fetcher fail!");
+                        }
                     }
-                    // TODO: We should can cancel all scheduled stages here.
+
+                    // Stop all running stages.
+                    for (_stage_id, stage_execution) in self.stage_executions.iter() {
+                        // The stop is return immediately so no need to spawn tasks.
+                        stage_execution.stop().await;
+                    }
+
+                    // One stage failed, not necessary to execute schedule stages.
+                    break;
                 }
                 rest => {
-                    return Err(SchedulerError::NotImplemented(
-                        format!("unsupported message \"{:?}\" for QueryRunner.run", rest),
-                        None.into(),
-                    ));
+                    unimplemented!("unsupported message \"{:?}\" for QueryRunner.run", rest);
                 }
             }
         }
-
-        info!("Query runner {:?} finished.", self.query.query_id);
-        Ok(())
     }
 
     #[expect(clippy::unused_async)]
@@ -351,12 +336,17 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
+    use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
+    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
+    use tokio::sync::oneshot;
 
+    use crate::catalog::catalog_service::CatalogReader;
+    use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         BatchExchange, BatchHashJoin, EqJoinPredicate, LogicalJoin, LogicalScan, ToBatch,
@@ -366,7 +356,7 @@ mod tests {
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
-    use crate::scheduler::HummockSnapshotManager;
+    use crate::scheduler::{HummockSnapshotManager, SchedulerError};
     use crate::session::OptimizerContext;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
@@ -375,6 +365,7 @@ mod tests {
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let compute_client_pool = Arc::new(ComputeClientPool::new(1024));
+        let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
         let query_execution = QueryExecution::new(
             create_query().await,
             100,
@@ -383,9 +374,11 @@ mod tests {
                 MockFrontendMetaClient {},
             ))),
             compute_client_pool,
+            catalog_reader,
         );
-
-        assert!(query_execution.start().await.is_err());
+        // Channel just used to pass compiler.
+        let (shutdown_tx, _shutdown_rx) = oneshot::channel::<SchedulerError>();
+        assert!(query_execution.start(shutdown_tx).await.is_err());
     }
 
     async fn create_query() -> Query {
@@ -397,13 +390,13 @@ mod tests {
         //   Scan  Scan
         //
         let ctx = OptimizerContext::mock().await;
-
+        let table_id = 0.into();
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
             false,
             Rc::new(TableDesc {
-                table_id: 0.into(),
-                pk: vec![],
+                table_id,
+                stream_key: vec![],
                 order_key: vec![],
                 columns: vec![
                     ColumnDesc {
@@ -423,7 +416,7 @@ mod tests {
                 ],
                 distribution_key: vec![],
                 appendonly: false,
-                vnode_mapping: Some(vec![]),
+                retention_seconds: TABLE_OPTION_DUMMY_RETAINTION_SECOND,
             }),
             vec![],
             ctx,
@@ -463,6 +456,7 @@ mod tests {
                             index: 2,
                             data_type: DataType::Int32,
                         },
+                        false,
                     ),
                     (
                         InputRef {
@@ -473,6 +467,7 @@ mod tests {
                             index: 3,
                             data_type: DataType::Float64,
                         },
+                        false,
                     ),
                 ],
                 2,
@@ -518,8 +513,12 @@ mod tests {
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
+        worker_node_manager.insert_fragment_mapping(0, vec![]);
+        let catalog = Arc::new(RwLock::new(Catalog::default()));
+        catalog.write().insert_table_id_mapping(table_id, 0);
+        let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.
-        let fragmenter = BatchPlanFragmenter::new(worker_node_manager);
+        let fragmenter = BatchPlanFragmenter::new(worker_node_manager, catalog_reader);
         fragmenter.split(batch_exchange_node3.clone()).unwrap()
     }
 

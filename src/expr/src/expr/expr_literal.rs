@@ -100,7 +100,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.expr_type == Type::ConstantValue as i32);
+        ensure!(prost.get_expr_type().unwrap() == Type::ConstantValue);
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         if prost.rex_node.is_none() {
             return Ok(Self {
@@ -111,7 +111,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
         if let RexNode::Constant(prost_value) = prost.get_rex_node().unwrap() {
             // TODO: We need to unify these
-            let value = ScalarImpl::bytes_to_scalar(
+            let value = ScalarImpl::from_proto_bytes(
                 prost_value.get_body(),
                 prost.get_return_type().unwrap(),
             )?;

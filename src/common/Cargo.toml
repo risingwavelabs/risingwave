@@ -16,21 +16,20 @@ comfy-table = "6"
 crc32fast = "1"
 either = "1"
 enum-as-inner = "0.5"
+fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 humantime = "2.1"
 itertools = "0.10"
 lazy_static = "1"
-log = "0.4"
-lru = { git = "https://github.com/singularity-data/lru-rs.git", rev = "e0e9ddaf8e4a51c244a03676734437e68a336b30" }
-madsim = "=0.2.0-alpha.6"
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "e0e9ddaf8e4a51c244a03676734437e68a336b30" }
 memcomparable = { path = "../utils/memcomparable" }
 more-asserts = "0.3"
 num-traits = "0.2"
-num_cpus = "1.13.1"
 parking_lot = "0.12"
 paste = "1"
-postgres-types = { version = "0.2", features = ["derive","with-chrono-0_4"] }
+pin-project = "1"
+postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
 prometheus = { version = "0.13" }
 prost = "0.11"
 rand = "0.8"
@@ -43,14 +42,15 @@ serde_json = "1"
 smallvec = "1"
 spin = "0.9"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"
 toml = "0.5"
-tonic = { version = "=0.2.0-alpha.6", package = "madsim-tonic" }
-tracing = { version = "0.1" }
+tonic = { version = "0.2", package = "madsim-tonic" }
+tracing = "0.1"
 twox-hash = "1"
 url = "2"
-value-encoding = { path = "../utils/value-encoding" }
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]

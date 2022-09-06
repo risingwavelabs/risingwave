@@ -6,16 +6,14 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-log = "0.4"
-madsim = "=0.2.0-alpha.6"
-moka = { version = "0.9", features = ["future"] }
 paste = "1"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -24,6 +22,10 @@ tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-retry = "0.3"
-tonic = { version = "=0.2.0-alpha.6", package = "madsim-tonic" }
-tracing = { version = "0.1" }
+tokio-stream = "0.1"
+tonic = { version = "0.2", package = "madsim-tonic" }
+tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
+moka = { version = "0.9", features = ["future"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

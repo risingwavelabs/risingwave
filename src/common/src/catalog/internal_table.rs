@@ -15,17 +15,26 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 
-pub fn generate_intertable_name_with_type(
+pub const RW_TABLE_FUNCTION_NAME: &str = "rw_table";
+
+pub fn generate_internal_table_name_with_type(
     mview_name: &str,
+    fragment_id: u32,
     table_id: u32,
     table_type: &str,
 ) -> String {
-    format!("__INTERNAL_{}_{}_{}", mview_name, table_type, table_id)
+    format!(
+        "__internal_{}_{}_{}_{}",
+        mview_name,
+        fragment_id,
+        table_type.to_lowercase(),
+        table_id
+    )
 }
 
 pub fn valid_table_name(table_name: &str) -> bool {
     lazy_static! {
-        static ref INTERNAL_TABLE_NAME: Regex = Regex::new(r"__INTERNAL_.*_\d+").unwrap();
+        static ref INTERNAL_TABLE_NAME: Regex = Regex::new(r"__internal_.*_\d+").unwrap();
     }
     !INTERNAL_TABLE_NAME.is_match(table_name)
 }

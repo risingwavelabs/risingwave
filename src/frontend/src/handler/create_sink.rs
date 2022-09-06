@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::Sink as ProstSink;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -29,7 +30,7 @@ use crate::handler::privilege::ObjectCheckItem;
 use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
 use crate::optimizer::PlanRef;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
+use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
@@ -63,16 +64,17 @@ pub fn gen_sink_plan(
     let (database_id, schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
-        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
-
-        check_privileges(
-            session,
-            &vec![ObjectCheckItem::new(
-                schema.owner(),
-                Action::Create,
-                Object::SchemaId(schema.id()),
-            )],
-        )?;
+        if schema_name != DEFAULT_SCHEMA_NAME {
+            let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+            check_privileges(
+                session,
+                &vec![ObjectCheckItem::new(
+                    schema.owner(),
+                    Action::Create,
+                    Object::SchemaId(schema.id()),
+                )],
+            )?;
+        }
 
         catalog_reader.check_relation_name_duplicated(
             session.database(),
@@ -133,9 +135,8 @@ pub async fn handle_create_sink(
 
     let (sink, graph) = {
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
-        let stream_plan = plan.to_stream_prost();
 
-        (sink, StreamFragmenter::build_graph(stream_plan))
+        (sink, build_graph(plan))
     };
 
     let catalog_writer = session.env().catalog_writer();

@@ -21,7 +21,7 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::util::scan_range::ScanRange;
+use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
@@ -198,7 +198,7 @@ impl Condition {
         self,
         left_col_num: usize,
         right_col_num: usize,
-    ) -> (Vec<(InputRef, InputRef)>, Self) {
+    ) -> (Vec<(InputRef, InputRef, bool)>, Self) {
         let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
         let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
 
@@ -208,7 +208,9 @@ impl Condition {
             if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
                 others.push(expr)
             } else if let Some(columns) = expr.as_eq_cond() {
-                eq_keys.push(columns);
+                eq_keys.push((columns.0, columns.1, false));
+            } else if let Some(columns) = expr.as_is_not_distinct_from_cond() {
+                eq_keys.push((columns.0, columns.1, true));
             } else {
                 others.push(expr)
             }
@@ -239,6 +241,72 @@ impl Condition {
         .unwrap()
     }
 
+    /// Generate range scans from each arm of `OR` clause and merge them.
+    /// Currently, only support equal type range scans.
+    /// Keep in mind that range scans can not overlap, otherwise duplicate rows will occur.
+    fn disjunctions_to_scan_ranges(
+        order_column_ids: &[usize],
+        num_cols: usize,
+        disjunctions: Vec<ExprImpl>,
+    ) -> Result<Option<(Vec<ScanRange>, Self)>> {
+        let disjunctions_result: Result<Vec<(Vec<ScanRange>, Self)>> = disjunctions
+            .into_iter()
+            .map(|x| {
+                Condition {
+                    conjunctions: to_conjunctions(x),
+                }
+                .split_to_scan_ranges(order_column_ids, num_cols)
+            })
+            .collect();
+
+        // If any arm of `OR` clause fails, bail out.
+        let disjunctions_result = disjunctions_result?;
+
+        // If all arms of `OR` clause scan ranges are simply equal condition type, merge all
+        // of them.
+        let all_equal = disjunctions_result
+            .iter()
+            .all(|(scan_ranges, other_condition)| {
+                other_condition.always_true()
+                    && scan_ranges
+                        .iter()
+                        .all(|x| !x.eq_conds.is_empty() && is_full_range(&x.range))
+            });
+
+        if all_equal {
+            // Think about the case (a = 1) or (a = 1 and b = 2).
+            // We should only keep the large one range scan a = 1, because a = 1 overlaps with
+            // (a = 1 and b = 2).
+            let scan_ranges = disjunctions_result
+                .into_iter()
+                .flat_map(|(scan_ranges, _)| scan_ranges)
+                // sort, large one first
+                .sorted_by(|a, b| a.eq_conds.len().cmp(&b.eq_conds.len()))
+                .collect_vec();
+            // Make sure each range never overlaps with others, that's what scan range mean.
+            let mut non_overlap_scan_ranges: Vec<ScanRange> = vec![];
+            for s1 in &scan_ranges {
+                let overlap = non_overlap_scan_ranges.iter().any(|s2| {
+                    #[allow(clippy::disallowed_methods)]
+                    s1.eq_conds
+                        .iter()
+                        .zip(s2.eq_conds.iter())
+                        .all(|(a, b)| a == b)
+                });
+                // If overlap happens, keep the large one and large one always in
+                // `non_overlap_scan_ranges`.
+                // Otherwise, put s1 into `non_overlap_scan_ranges`.
+                if !overlap {
+                    non_overlap_scan_ranges.push(s1.clone());
+                }
+            }
+
+            Ok(Some((non_overlap_scan_ranges, Condition::true_cond())))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
     pub fn split_to_scan_ranges(
         self,
@@ -247,6 +315,19 @@ impl Condition {
     ) -> Result<(Vec<ScanRange>, Self)> {
         fn false_cond() -> (Vec<ScanRange>, Condition) {
             (vec![], Condition::false_cond())
+        }
+
+        // It's an OR.
+        if self.conjunctions.len() == 1 {
+            if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
+                if let Some((scan_ranges, other_condition)) =
+                    Self::disjunctions_to_scan_ranges(order_column_ids, num_cols, disjunctions)?
+                {
+                    return Ok((scan_ranges, other_condition));
+                } else {
+                    return Ok((vec![], self));
+                }
+            }
         }
 
         let mut col_idx_to_pk_idx = vec![None; num_cols];
@@ -304,10 +385,20 @@ impl Condition {
                         // column = NULL
                         return Ok(false_cond());
                     };
-                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l != value) {
+                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| if let Some(l) = l {
+                        l != value
+                    } else {
+                        true
+                    }) {
                         return Ok(false_cond());
                     }
-                    eq_conds = vec![value];
+                    eq_conds = vec![Some(value)];
+                } else if let Some(input_ref) = expr.as_is_null() {
+                    assert_eq!(input_ref.index, order_column_ids[i]);
+                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l.is_some()) {
+                        return Ok(false_cond());
+                    }
+                    eq_conds = vec![None];
                 } else if let Some((input_ref, in_const_list)) = expr.as_in_const_list() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     let mut scalars = HashSet::new();
@@ -319,7 +410,7 @@ impl Condition {
                         let Some(value) = value else {
                             continue;
                         };
-                        scalars.insert(value);
+                        scalars.insert(Some(value));
                     }
                     if scalars.is_empty() {
                         // There're only NULLs in the in-list
@@ -462,7 +553,7 @@ impl Condition {
         }
     }
 
-    pub fn visit_expr(&self, visitor: &mut impl ExprVisitor) {
+    pub fn visit_expr(&self, visitor: &mut impl ExprVisitor<()>) {
         self.conjunctions
             .iter()
             .for_each(|expr| visitor.visit_expr(expr))
