@@ -81,12 +81,13 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: u32,
 
-    /// Properties of the table. For example, "appendonly" or "retention_seconds".
+    /// Properties of the table. For example, `appendonly` or `retention_seconds`.
     pub properties: WithOptions,
 
+    /// The fragment id of the `Materialize` operator for this table.
     pub fragment_id: FragmentId,
 
-    /// an optional column index which is the vnode of each row computed by the table's consistent
+    /// An optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution
     pub vnode_col_idx: Option<usize>,
 }

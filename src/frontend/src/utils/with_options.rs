@@ -87,7 +87,7 @@ impl WithOptions {
 
     /// Get the subset of the options for internal table catalogs.
     ///
-    /// Currently only "retention_seconds" is included.
+    /// Currently only `retention_seconds` is included.
     pub fn internal_table_subset(&self) -> Self {
         self.subset([options::RETENTION_SECONDS])
     }
