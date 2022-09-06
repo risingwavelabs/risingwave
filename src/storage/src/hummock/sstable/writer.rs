@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 
 use super::BlockMeta;
 use crate::hummock::{HummockResult, SstableBuilderOptions, SstableMeta};
@@ -33,13 +33,13 @@ pub trait SstableWriter: Send {
 
 /// Append SST data to a buffer. Used for tests and benchmarks.
 pub struct InMemWriter {
-    buf: BytesMut,
+    buf: Vec<u8>,
 }
 
 impl InMemWriter {
     pub fn new(capacity: usize) -> Self {
         Self {
-            buf: BytesMut::with_capacity(capacity),
+            buf: Vec::with_capacity(capacity),
         }
     }
 }
@@ -54,15 +54,13 @@ impl SstableWriter for InMemWriter {
     type Output = Bytes;
 
     fn write_block(&mut self, block: &[u8], _meta: &BlockMeta) -> HummockResult<()> {
-        self.buf.put_slice(block);
+        self.buf.extend_from_slice(block);
         Ok(())
     }
 
     fn finish(mut self, meta: &SstableMeta) -> HummockResult<Self::Output> {
-        let size_footer = meta.block_metas.len() as u32;
-        self.buf.put_slice(&size_footer.to_le_bytes());
-        let data = self.buf.freeze();
-        Ok(data)
+        meta.encode_to(&mut self.buf);
+        Ok(Bytes::from(self.buf))
     }
 
     fn data_len(&self) -> usize {
@@ -105,6 +103,7 @@ mod tests {
             key_count: 0,
             smallest_key: Vec::new(),
             largest_key: Vec::new(),
+            footer: 0,
             version: VERSION,
         };
 

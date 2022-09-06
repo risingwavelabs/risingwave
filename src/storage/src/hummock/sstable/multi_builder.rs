@@ -182,6 +182,7 @@ where
                 }),
                 file_size: meta.estimated_size as u64,
                 table_ids: builder_output.table_ids,
+                meta_offset: meta.footer,
             };
 
             self.sst_outputs.push(SplitTableOutput {

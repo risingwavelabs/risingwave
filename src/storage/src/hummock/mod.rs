@@ -260,7 +260,7 @@ impl HummockStorage {
                     }
 
                     UncommittedData::Sst((_, table_info)) => {
-                        let table = self.sstable_store.sstable(table_info.id, stats).await?;
+                        let table = self.sstable_store.sstable(&table_info, stats).await?;
                         table_counts += 1;
 
                         if let Some(data) = self

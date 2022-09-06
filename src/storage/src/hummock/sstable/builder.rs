@@ -247,6 +247,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             smallest_key,
             largest_key,
             version: VERSION,
+            footer: self.writer.data_len() as u64,
         };
 
         tracing::trace!(

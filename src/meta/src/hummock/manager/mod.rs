@@ -1101,10 +1101,10 @@ where
                     }
                     Some(compactor) => compactor,
                 };
-                let sst_ids = sstables.iter().map(|(_, sst_id)| sst_id.id).collect_vec();
+                let sst_infos = sstables.iter().map(|(_, sst)| sst.clone()).collect_vec();
                 if compactor
                     .send_task(Task::ValidationTask(ValidationTask {
-                        sst_ids,
+                        sst_infos,
                         sst_id_to_worker_id: sst_to_context.clone(),
                         epoch,
                     }))

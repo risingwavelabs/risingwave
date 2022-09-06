@@ -110,6 +110,7 @@ impl Sstable {
             }),
             file_size: self.meta.estimated_size as u64,
             table_ids: vec![],
+            meta_offset: self.meta.footer,
         }
     }
 }
@@ -162,6 +163,7 @@ pub struct SstableMeta {
     pub key_count: u32,
     pub smallest_key: Vec<u8>,
     pub largest_key: Vec<u8>,
+    pub footer: u64,
     /// Format version, for further compatibility.
     pub version: u32,
 }
@@ -180,20 +182,26 @@ impl SstableMeta {
     /// ```
     pub fn encode_to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
+        self.encode_to(&mut buf);
+        buf
+    }
+
+    pub fn encode_to(&self, buf: &mut Vec<u8>) {
+        let start_offset = buf.len();
         buf.put_u32_le(self.block_metas.len() as u32);
         for block_meta in &self.block_metas {
-            block_meta.encode(&mut buf);
+            block_meta.encode(buf);
         }
-        put_length_prefixed_slice(&mut buf, &self.bloom_filter);
+        put_length_prefixed_slice(buf, &self.bloom_filter);
         buf.put_u32_le(self.estimated_size as u32);
         buf.put_u32_le(self.key_count as u32);
-        put_length_prefixed_slice(&mut buf, &self.smallest_key);
-        put_length_prefixed_slice(&mut buf, &self.largest_key);
-        let checksum = xxhash64_checksum(&buf);
+        put_length_prefixed_slice(buf, &self.smallest_key);
+        put_length_prefixed_slice(buf, &self.largest_key);
+        buf.put_u64_le(self.footer);
+        let checksum = xxhash64_checksum(&buf[start_offset..]);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
         buf.put_u32_le(MAGIC);
-        buf
     }
 
     pub fn decode(buf: &mut &[u8]) -> HummockResult<Self> {
@@ -226,6 +234,7 @@ impl SstableMeta {
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
+        let footer = buf.get_u64_le();
 
         Ok(Self {
             block_metas,
@@ -234,6 +243,7 @@ impl SstableMeta {
             key_count,
             smallest_key,
             largest_key,
+            footer,
             version,
         })
     }
@@ -254,6 +264,7 @@ impl SstableMeta {
             + self.smallest_key.len()
             + 4 // key len
             + self.largest_key.len()
+            + 8 // footer
             + 8 // checksum
             + 4 // version
             + 4 // magic
@@ -291,6 +302,7 @@ mod tests {
             key_count: 123,
             smallest_key: b"0-smallest-key".to_vec(),
             largest_key: b"9-largest-key".to_vec(),
+            footer: 123,
             version: VERSION,
         };
         let buf = meta.encode_to_bytes();

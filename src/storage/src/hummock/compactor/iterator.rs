@@ -173,7 +173,7 @@ impl ConcatSstableIterator {
             self.sstable_iter.take();
             let table = self
                 .sstable_store
-                .sstable(self.tables[idx].id, &mut self.stats)
+                .sstable(&self.tables[idx], &mut self.stats)
                 .await?;
             let block_metas = &table.value().meta.block_metas;
             let start_index = if self.key_range.left.is_empty() {
