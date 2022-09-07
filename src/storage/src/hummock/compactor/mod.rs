@@ -39,7 +39,7 @@ use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key::{get_epoch, FullKey};
+use risingwave_hummock_sdk::key::{get_epoch, user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::VersionedComparator;
@@ -162,7 +162,7 @@ impl Compactor {
                 sstable_id_manager.remove_watermark_sst_id(tracker_id);
             },
         );
-
+        // select_table_infos and target_table_info ??
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
         let select_table_infos = compact_task
@@ -252,7 +252,10 @@ impl Compactor {
                     .meta
                     .block_metas
                     .iter()
-                    .map(|block| block.smallest_key.clone())
+                    .map(|block| {
+                        FullKey::from_user_key_slice(user_key(&block.smallest_key), u64::MAX)
+                            .into_inner()
+                    })
                     .collect_vec(),
             );
         }
