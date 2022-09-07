@@ -110,6 +110,13 @@ const fn is_semi_or_anti(join_type: JoinTypePrimitive) -> bool {
     is_semi(join_type) || is_anti(join_type)
 }
 
+const fn need_update_matched_degree(
+    join_type: JoinTypePrimitive,
+    side_type: SideTypePrimitive,
+) -> bool {
+    only_forward_matched_side(join_type, side_type) || outer_side_null(join_type, side_type)
+}
+
 pub struct JoinParams {
     /// Indices of the join keys
     pub join_key_indices: Vec<usize>,
@@ -779,8 +786,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                         yield Message::Chunk(chunk);
                                     }
                                 }
-                                side_match.ht.inc_degree(matched_row_ref)?;
-                                matched_row.inc_degree();
+                                if need_update_matched_degree(T, SIDE) {
+                                    side_match.ht.inc_degree(matched_row_ref)?;
+                                    matched_row.inc_degree();
+                                }
                             }
                             // If the stream is append-only and the join key covers pk in both side,
                             // then we can remove matched rows since pk is unique and will not be
@@ -808,6 +817,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         yield Message::Chunk(chunk);
                     }
 
+                    let degree_to_ins = if need_update_matched_degree(T, SIDE) {
+                        0
+                    } else {
+                        degree
+                    };
+
                     if append_only_optimize {
                         if !append_only_matched_rows.is_empty() {
                             // Since join key contains pk and pk is unique, there should be only
@@ -818,12 +833,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         } else {
                             side_update
                                 .ht
-                                .insert(key, pk, JoinRow::new(value, degree))?;
+                                .insert(key, pk, JoinRow::new(value, degree_to_ins))?;
                         }
                     } else {
                         side_update
                             .ht
-                            .insert(key, pk, JoinRow::new(value, degree))?;
+                            .insert(key, pk, JoinRow::new(value, degree_to_ins))?;
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -835,8 +850,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             let mut matched_row = matched_row?;
                             if check_join_condition(&row, &matched_row.row)? {
                                 degree += 1;
-                                side_match.ht.dec_degree(matched_row_ref)?;
-                                matched_row.dec_degree()?;
+                                if need_update_matched_degree(T, SIDE) {
+                                    side_match.ht.dec_degree(matched_row_ref)?;
+                                    matched_row.dec_degree()?;
+                                }
                                 if !forward_exactly_once(T, SIDE) {
                                     if let Some(chunk) = hashjoin_chunk_builder
                                         .with_match_on_delete(&row, &matched_row)?
@@ -864,9 +881,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     {
                         yield Message::Chunk(chunk);
                     }
+                    let degree_to_del = if need_update_matched_degree(T, SIDE) {
+                        0
+                    } else {
+                        degree
+                    };
                     side_update
                         .ht
-                        .delete(key, pk, JoinRow::new(value, degree))?;
+                        .delete(key, pk, JoinRow::new(value, degree_to_del))?;
                 }
             }
         }
