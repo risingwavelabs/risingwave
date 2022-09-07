@@ -929,22 +929,25 @@ mod tests {
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
+        let (untouched, old, new) = (234, 235, 238); // broadcast downstream actors
+        let (old_simple, new_simple) = (114, 514); // simple downstream actors
+
         // 1. Register info and channels in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
-            for local_actor_id in [actor_id, 234, 235, 238, 114, 514] {
+            for local_actor_id in [actor_id, untouched, old, new, old_simple, new_simple] {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
         add_local_channels(
             ctx.clone(),
             vec![
-                (actor_id, 234),
-                (actor_id, 235),
-                (actor_id, 238),
-                (actor_id, 114),
-                (actor_id, 514),
+                (actor_id, untouched),
+                (actor_id, old),
+                (actor_id, new),
+                (actor_id, old_simple),
+                (actor_id, new_simple),
             ],
         );
 
@@ -955,7 +958,7 @@ mod tests {
             &ProstDispatcher {
                 r#type: DispatcherType::Broadcast as _,
                 dispatcher_id: broadcast_dispatcher_id,
-                downstream_actor_id: vec![234, 235],
+                downstream_actor_id: vec![untouched, old],
                 ..Default::default()
             },
         )
@@ -968,7 +971,7 @@ mod tests {
             &ProstDispatcher {
                 r#type: DispatcherType::Simple as _,
                 dispatcher_id: simple_dispatcher_id,
-                downstream_actor_id: vec![114],
+                downstream_actor_id: vec![old_simple],
                 ..Default::default()
             },
         )
@@ -985,7 +988,7 @@ mod tests {
         pin_mut!(executor);
 
         // 2. Take downstream receivers.
-        let mut rxs = [234, 235, 238, 114, 514]
+        let mut rxs = [untouched, old, new, old_simple, new_simple]
             .into_iter()
             .map(|id| (id, ctx.take_receiver(&(actor_id, id)).unwrap()))
             .collect::<HashMap<_, _>>();
@@ -1004,8 +1007,8 @@ mod tests {
         let dispatcher_updates = maplit::hashmap! {
             actor_id => ProstDispatcherUpdate {
                 dispatcher_id: broadcast_dispatcher_id,
-                added_downstream_actor_id: vec![238],
-                removed_downstream_actor_id: vec![235],
+                added_downstream_actor_id: vec![new],
+                removed_downstream_actor_id: vec![old],
                 ..Default::default()
             }
         };
@@ -1019,16 +1022,16 @@ mod tests {
         executor.next().await.unwrap().unwrap();
 
         // 5. Check downstream.
-        try_recv!(234).unwrap().as_chunk().unwrap();
-        try_recv!(234).unwrap().as_barrier().unwrap();
+        try_recv!(untouched).unwrap().as_chunk().unwrap();
+        try_recv!(untouched).unwrap().as_barrier().unwrap();
 
-        try_recv!(235).unwrap().as_chunk().unwrap();
-        try_recv!(235).unwrap().as_barrier().unwrap(); // It should still receive the barrier even if it's to be removed.
+        try_recv!(old).unwrap().as_chunk().unwrap();
+        try_recv!(old).unwrap().as_barrier().unwrap(); // It should still receive the barrier even if it's to be removed.
 
-        try_recv!(238).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
+        try_recv!(new).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
 
-        try_recv!(114).unwrap().as_chunk().unwrap();
-        try_recv!(114).unwrap().as_barrier().unwrap(); // Untouched.
+        try_recv!(old_simple).unwrap().as_chunk().unwrap();
+        try_recv!(old_simple).unwrap().as_barrier().unwrap(); // Untouched.
 
         // 6. Send another barrier.
         tx.send(Message::Barrier(Barrier::new_test_barrier(2)))
@@ -1037,12 +1040,12 @@ mod tests {
         executor.next().await.unwrap().unwrap();
 
         // 7. Check downstream.
-        try_recv!(234).unwrap().as_barrier().unwrap();
-        try_recv!(235).unwrap_err(); // Since it's stopped, we can't receive the new messages.
-        try_recv!(238).unwrap().as_barrier().unwrap();
+        try_recv!(untouched).unwrap().as_barrier().unwrap();
+        try_recv!(old).unwrap_err(); // Since it's stopped, we can't receive the new messages.
+        try_recv!(new).unwrap().as_barrier().unwrap();
 
-        try_recv!(114).unwrap().as_barrier().unwrap(); // Untouched.
-        try_recv!(514).unwrap_err(); // Untouched.
+        try_recv!(old_simple).unwrap().as_barrier().unwrap(); // Untouched.
+        try_recv!(new_simple).unwrap_err(); // Untouched.
 
         // 8. Send another chunk.
         tx.send(Message::Chunk(StreamChunk::default()))
@@ -1053,8 +1056,8 @@ mod tests {
         let dispatcher_updates = maplit::hashmap! {
             actor_id => ProstDispatcherUpdate {
                 dispatcher_id: simple_dispatcher_id,
-                added_downstream_actor_id: vec![514],
-                removed_downstream_actor_id: vec![114],
+                added_downstream_actor_id: vec![new_simple],
+                removed_downstream_actor_id: vec![old_simple],
                 ..Default::default()
             }
         };
@@ -1068,10 +1071,10 @@ mod tests {
         executor.next().await.unwrap().unwrap();
 
         // 10. Check downstream.
-        try_recv!(114).unwrap().as_chunk().unwrap();
-        try_recv!(114).unwrap().as_barrier().unwrap(); // It should still receive the barrier even if it's to be removed.
+        try_recv!(old_simple).unwrap().as_chunk().unwrap();
+        try_recv!(old_simple).unwrap().as_barrier().unwrap(); // It should still receive the barrier even if it's to be removed.
 
-        try_recv!(514).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
+        try_recv!(new_simple).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
 
         // 11. Send another barrier.
         tx.send(Message::Barrier(Barrier::new_test_barrier(4)))
@@ -1080,8 +1083,8 @@ mod tests {
         executor.next().await.unwrap().unwrap();
 
         // 12. Check downstream.
-        try_recv!(114).unwrap_err(); // Since it's stopped, we can't receive the new messages.
-        try_recv!(514).unwrap().as_barrier().unwrap();
+        try_recv!(old_simple).unwrap_err(); // Since it's stopped, we can't receive the new messages.
+        try_recv!(new_simple).unwrap().as_barrier().unwrap();
     }
 
     #[tokio::test]

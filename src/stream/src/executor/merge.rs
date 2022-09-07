@@ -87,7 +87,7 @@ impl MergeExecutor {
         Self::new(
             Schema::default(),
             vec![],
-            ActorContext::create(233),
+            ActorContext::create(114),
             514,
             1919,
             inputs.into_iter().map(LocalInput::for_test).collect(),
@@ -394,6 +394,7 @@ mod tests {
         let schema = Schema { fields: vec![] };
 
         let actor_id = 233;
+        let (untouched, old, new) = (234, 235, 238); // upstream actors
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
@@ -401,16 +402,16 @@ mod tests {
         {
             let mut actor_infos = ctx.actor_infos.write();
 
-            for local_actor_id in [actor_id, 234, 235, 238] {
+            for local_actor_id in [actor_id, untouched, old, new] {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
         add_local_channels(
             ctx.clone(),
-            vec![(234, actor_id), (235, actor_id), (238, actor_id)],
+            vec![(untouched, actor_id), (old, actor_id), (new, actor_id)],
         );
 
-        let inputs: Vec<_> = [234, 235]
+        let inputs: Vec<_> = [untouched, old]
             .into_iter()
             .map(|upstream_actor_id| {
                 new_input(&ctx, metrics.clone(), actor_id, 0, upstream_actor_id, 0)
@@ -435,7 +436,7 @@ mod tests {
         pin_mut!(merge);
 
         // 2. Take downstream receivers.
-        let txs = [234, 235, 238]
+        let txs = [untouched, old, new]
             .into_iter()
             .map(|id| (id, ctx.take_sender(&(id, actor_id)).unwrap()))
             .collect::<HashMap<_, _>>();
@@ -453,7 +454,7 @@ mod tests {
         }
 
         // 3. Send a chunk.
-        send!([234, 235], Message::Chunk(StreamChunk::default()));
+        send!([untouched, old], Message::Chunk(StreamChunk::default()));
         recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice.
         recv!().unwrap().as_chunk().unwrap();
         assert!(recv!().is_none());
@@ -461,8 +462,8 @@ mod tests {
         // 4. Send a configuration change barrier.
         let merge_updates = maplit::hashmap! {
             actor_id => MergeUpdate {
-                added_upstream_actor_id: vec![238],
-                removed_upstream_actor_id: vec![235],
+                added_upstream_actor_id: vec![new],
+                removed_upstream_actor_id: vec![old],
             }
         };
 
@@ -472,15 +473,15 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
         });
-        send!([234, 235], Message::Barrier(b1.clone()));
-        assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream 238.
+        send!([untouched, old], Message::Barrier(b1.clone()));
+        assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
 
-        send!([238], Message::Barrier(b1.clone()));
+        send!([new], Message::Barrier(b1.clone()));
         recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
 
         // 5. Send a chunk.
-        send!([234, 238], Message::Chunk(StreamChunk::default()));
-        recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice, since 235 is removed.
+        send!([untouched, new], Message::Chunk(StreamChunk::default()));
+        recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice, since old is removed.
         recv!().unwrap().as_chunk().unwrap();
         assert!(recv!().is_none());
     }
