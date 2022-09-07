@@ -15,8 +15,8 @@ gh release create "${BUILDKITE_TAG}" --generate-notes -d -p
 
 echo "--- Download artifacts"
 mkdir -p target/debug && cd target/debug
-buildkite-agent artifact download risingwave-release .
-mv risingwave-release risingwave
+buildkite-agent artifact download risingwave-ci-release .
+mv risingwave-ci-release risingwave
 chmod +x risingwave
 tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
 
