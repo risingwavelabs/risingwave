@@ -552,7 +552,7 @@ impl Compactor {
             }
 
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
-            // If there is no keys whose epoch is equal than `watermark`, keep the latest key which
+            // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest key which
             // satisfies `epoch` < `watermark`
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
