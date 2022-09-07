@@ -546,6 +546,11 @@ async fn test_hummock_manager_basic() {
             Payload::PinnedVersion(version) => version,
         };
         assert_eq!(version.id, FIRST_VERSION_ID + 2);
+        // pinned by context_id_1
+        assert_eq!(
+            hummock_manager.get_min_pinned_version_id().await,
+            FIRST_VERSION_ID + 1
+        );
     }
 
     // ssts_to_delete is always empty because no compaction is ever invoked.
@@ -574,6 +579,10 @@ async fn test_hummock_manager_basic() {
         .unpin_version_before(context_id_1, u64::MAX)
         .await
         .unwrap();
+    assert_eq!(
+        hummock_manager.get_min_pinned_version_id().await,
+        FIRST_VERSION_ID + 2
+    );
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
