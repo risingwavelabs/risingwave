@@ -338,20 +338,13 @@ impl SstableStore {
                     offset: sst.meta_offset as usize,
                     size: (sst.file_size - sst.meta_offset) as usize,
                 };
-		        let sst = sst.clone();
                 async move {
                     let now = Instant::now();
                     let buf = store
                         .read(&meta_path, Some(loc))
                         .await
                         .map_err(HummockError::object_io_error)?;
-                    let meta = match SstableMeta::decode(&mut &buf[..]) {
-                        Err(e) => {
-                            tracing::error!("decode sst({}) failed, meta_offset: {}, size: {}", sst.id, sst.meta_offset, sst.file_size);
-                            return Err(e);
-                        },
-                        Ok(m) => m,
-                    };
+                    let meta = SstableMeta::decode(&mut &buf[..])?;
                     let sst = Sstable::new(sst_id, meta);
                     let charge = sst.meta.encoded_size();
                     let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();

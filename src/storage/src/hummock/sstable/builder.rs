@@ -248,7 +248,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             version: VERSION,
             meta_offset,
         };
-        meta.estimated_size = meta.encoded_size() as u32  + meta_offset as u32;
+        meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
         let sst_info = SstableInfo {
             id: self.sstable_id,
             key_range: Some(risingwave_pb::hummock::KeyRange {
