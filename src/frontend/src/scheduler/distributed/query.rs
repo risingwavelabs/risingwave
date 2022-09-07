@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::oneshot::Sender;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, warn};
 
@@ -30,7 +31,7 @@ use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::{HummockSnapshotManagerRef, SchedulerResult};
+use crate::scheduler::{HummockSnapshotManagerRef, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -137,7 +138,10 @@ impl QueryExecution {
     }
 
     /// Start execution of this query.
-    pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
+    pub async fn start(
+        &self,
+        shutdown_tx: Sender<SchedulerError>,
+    ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
 
@@ -160,7 +164,7 @@ impl QueryExecution {
                 };
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run().await });
+                tokio::spawn(async move { runner.run(shutdown_tx).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -188,7 +192,7 @@ impl QueryExecution {
 }
 
 impl QueryRunner {
-    async fn run(mut self) {
+    async fn run(mut self, shutdown_tx: tokio::sync::oneshot::Sender<SchedulerError>) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -254,6 +258,14 @@ impl QueryRunner {
                                 "Root stage failure event for {:?} sent.",
                                 self.query.query_id
                             );
+                        }
+                    } else {
+                        // If root stage has been taken, then use channel to send error to
+                        // `QueryResultFetcher`. This may happen if some execution error received
+                        // after we have scheduled are events.
+
+                        if shutdown_tx.send(reason).is_err() {
+                            warn!("Sending error to query result fetcher fail!");
                         }
                     }
 
@@ -326,11 +338,12 @@ mod tests {
 
     use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
+    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
+    use tokio::sync::oneshot;
 
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
@@ -343,7 +356,7 @@ mod tests {
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
-    use crate::scheduler::HummockSnapshotManager;
+    use crate::scheduler::{HummockSnapshotManager, SchedulerError};
     use crate::session::OptimizerContext;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
@@ -363,7 +376,9 @@ mod tests {
             compute_client_pool,
             catalog_reader,
         );
-        assert!(query_execution.start().await.is_err());
+        // Channel just used to pass compiler.
+        let (shutdown_tx, _shutdown_rx) = oneshot::channel::<SchedulerError>();
+        assert!(query_execution.start(shutdown_tx).await.is_err());
     }
 
     async fn create_query() -> Query {
@@ -401,7 +416,7 @@ mod tests {
                 ],
                 distribution_key: vec![],
                 appendonly: false,
-                retention_seconds: TABLE_OPTION_DUMMY_RETAINTION_SECOND,
+                retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
             }),
             vec![],
             ctx,

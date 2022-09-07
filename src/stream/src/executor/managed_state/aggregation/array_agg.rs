@@ -55,7 +55,7 @@ pub struct ManagedArrayAggState<S: StateStore> {
     state_table_order_types: Vec<OrderType>,
 
     /// In-memory all-or-nothing cache.
-    cache: Cache<Datum>,
+    cache: Cache<OrderedRow, Datum>,
 
     /// Whether the cache is fully synced to state table.
     cache_synced: bool,

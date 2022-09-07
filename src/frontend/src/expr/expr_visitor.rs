@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery, TableFunction,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
+    TableFunction, WindowFunction,
 };
 
 /// Traverse an expression tree.
@@ -25,6 +26,11 @@ use super::{
 /// Note: The default implementation for `visit_subquery` is a no-op, i.e., expressions inside
 /// subqueries are not traversed.
 pub trait ExprVisitor<R: Default> {
+    /// This merge function is used to reduce results of expr inputs.
+    /// In order to always remind users to implement themselves, we don't provide an default
+    /// implementation.
+    fn merge(a: R, b: R) -> R;
+
     fn visit_expr(&mut self, expr: &ExprImpl) -> R {
         match expr {
             ExprImpl::InputRef(inner) => self.visit_input_ref(inner),
@@ -34,23 +40,24 @@ pub trait ExprVisitor<R: Default> {
             ExprImpl::Subquery(inner) => self.visit_subquery(inner),
             ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
             ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
+            ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &FunctionCall) -> R {
-        let mut r = R::default();
         func_call
             .inputs()
             .iter()
-            .for_each(|expr| r = self.visit_expr(expr));
-        r
+            .map(|expr| self.visit_expr(expr))
+            .reduce(Self::merge)
+            .unwrap_or_default()
     }
     fn visit_agg_call(&mut self, agg_call: &AggCall) -> R {
-        let mut r = R::default();
         agg_call
             .inputs()
             .iter()
-            .for_each(|expr| r = self.visit_expr(expr));
-        r
+            .map(|expr| self.visit_expr(expr))
+            .reduce(Self::merge)
+            .unwrap_or_default()
     }
     fn visit_literal(&mut self, _: &Literal) -> R {
         R::default()
@@ -65,11 +72,19 @@ pub trait ExprVisitor<R: Default> {
         R::default()
     }
     fn visit_table_function(&mut self, func_call: &TableFunction) -> R {
-        let mut r = R::default();
         func_call
             .args
             .iter()
-            .for_each(|expr| r = self.visit_expr(expr));
-        r
+            .map(|expr| self.visit_expr(expr))
+            .reduce(Self::merge)
+            .unwrap_or_default()
+    }
+    fn visit_window_function(&mut self, func_call: &WindowFunction) -> R {
+        func_call
+            .args
+            .iter()
+            .map(|expr| self.visit_expr(expr))
+            .reduce(Self::merge)
+            .unwrap_or_default()
     }
 }

@@ -23,7 +23,7 @@ message AuthInfo {
 message UserInfo {
   uint32 id = 1;
   string name = 2;
-  bool is_supper = 3;
+  bool is_super = 3;
   bool can_create_db = 4;
   bool can_create_user = 5;
   bool can_login = 6;

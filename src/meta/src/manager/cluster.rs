@@ -178,7 +178,7 @@ where
         Ok(())
     }
 
-    pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
+    pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let worker = core.get_worker_by_host_checked(host_address.clone())?;
         let worker_type = worker.worker_type();
@@ -206,10 +206,10 @@ where
         // Notify local subscribers.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerDeletion(worker_node))
+            .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
             .await;
 
-        Ok(())
+        Ok(worker_type)
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
@@ -275,11 +275,11 @@ where
                 // 3. Delete expired workers.
                 for (worker_id, key) in workers_to_delete {
                     match cluster_manager.delete_worker_node(key.clone()).await {
-                        Ok(_) => {
+                        Ok(worker_type) => {
                             cluster_manager
                                 .env
                                 .notification_manager()
-                                .delete_sender(WorkerKey(key.clone()))
+                                .delete_sender(worker_type, WorkerKey(key.clone()))
                                 .await;
                             tracing::warn!(
                                 "Deleted expired worker {} {:#?}, current timestamp {}",

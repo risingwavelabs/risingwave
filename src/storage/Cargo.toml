@@ -55,6 +55,7 @@ scopeguard = "1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 spin = "0.9"
+sync-point = { path = "../utils/sync-point" }
 tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }

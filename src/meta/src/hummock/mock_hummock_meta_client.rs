@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::{
     SstIdRange,
 };
 use risingwave_pb::hummock::{
-    pin_version_response, CompactTask, CompactionGroup, HummockSnapshot,
+    pin_version_response, CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -151,6 +151,13 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
         _max_concurrent_task_number: u64,
     ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+        unimplemented!()
+    }
+
+    async fn report_compaction_task_progress(
+        &self,
+        _progress: Vec<CompactTaskProgress>,
+    ) -> Result<()> {
         unimplemented!()
     }
 

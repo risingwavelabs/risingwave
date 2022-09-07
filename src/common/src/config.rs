@@ -115,9 +115,6 @@ pub struct StorageConfig {
     #[serde(default = "default::share_buffer_compaction_worker_threads_number")]
     pub share_buffer_compaction_worker_threads_number: u32,
 
-    // /// Size threshold to trigger shared buffer flush.
-    // #[serde(default = "default::shared_buffer_threshold")]
-    // pub shared_buffer_threshold: u32,
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
     #[serde(default = "default::shared_buffer_capacity_mb")]
@@ -165,8 +162,8 @@ pub struct StorageConfig {
     pub file_cache: FileCacheConfig,
 
     /// Whether to enable streaming upload for sstable.
-    #[serde(default = "default::enable_sst_streaming_upload")]
-    pub enable_sst_streaming_upload: bool,
+    #[serde(default = "default::min_sst_size_for_streaming_upload")]
+    pub min_sst_size_for_streaming_upload: u64,
 }
 
 impl Default for StorageConfig {
@@ -223,12 +220,6 @@ mod default {
 
     pub fn share_buffer_compaction_worker_threads_number() -> u32 {
         4
-    }
-
-    #[expect(dead_code)]
-    pub fn shared_buffer_threshold() -> u32 {
-        // 192MB
-        201326592
     }
 
     pub fn shared_buffer_capacity_mb() -> u32 {
@@ -302,8 +293,9 @@ mod default {
         96 * 1024 * 1024
     }
 
-    pub fn enable_sst_streaming_upload() -> bool {
-        false
+    pub fn min_sst_size_for_streaming_upload() -> u64 {
+        // 32MB
+        32 * 1024 * 1024
     }
 }
 
@@ -326,7 +318,7 @@ pub mod constant {
             }
         }
 
-        pub const TABLE_OPTION_DUMMY_RETAINTION_SECOND: u32 = 0;
-        pub const PROPERTIES_RETAINTION_SECOND_KEY: &str = "retention_seconds";
+        pub const TABLE_OPTION_DUMMY_RETENTION_SECOND: u32 = 0;
+        pub const PROPERTIES_RETENTION_SECOND_KEY: &str = "retention_seconds";
     }
 }

@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::TableId;
+use std::sync::Arc;
+
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::executor::AppendOnlyTopNExecutor;
@@ -30,39 +32,28 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::AppendOnlyTopN)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
-        let order_pairs: Vec<_> = node
-            .get_column_orders()
+        let table = node.get_table()?;
+        let vnodes = params.vnode_bitmap.map(Arc::new);
+        let state_table = StateTable::from_table_catalog(table, store, vnodes);
+        let order_pairs = table
+            .get_order_key()
             .iter()
             .map(OrderPair::from_prost)
             .collect();
-        let limit = if node.limit == 0 {
-            None
-        } else {
-            Some(node.limit as usize)
-        };
-        let cache_size = Some(1024);
-        let total_count = (0, 0);
-        // TODO: refactor to one state table likes the non-append-only version
-        let table_id_l = TableId::new(node.table_id_l);
-        let table_id_h = TableId::new(node.table_id_h);
-        let key_indices = node
+        let key_indices = table
             .get_distribution_key()
             .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
-
+            .map(|idx| *idx as usize)
+            .collect();
         Ok(AppendOnlyTopNExecutor::new(
             input,
             order_pairs,
-            (node.offset as usize, limit),
+            (node.offset as usize, node.limit as usize),
             params.pk_indices,
-            store,
-            table_id_l,
-            table_id_h,
-            cache_size,
-            total_count,
+            0,
             params.executor_id,
             key_indices,
+            state_table,
         )?
         .boxed())
     }

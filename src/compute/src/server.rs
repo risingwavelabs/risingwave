@@ -31,7 +31,7 @@ use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
+use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compactor::{
@@ -94,7 +94,7 @@ pub async fn compute_node_serve(
     let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
-    let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
+    let batch_metrics = Arc::new(BatchMetrics::new());
     let batch_task_metrics_mgr = Arc::new(BatchTaskMetricsManager::new(registry.clone()));
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
@@ -169,6 +169,7 @@ pub async fn compute_node_serve(
                 filter_key_extractor_manager: filter_key_extractor_manager.clone(),
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
+                task_progress: Default::default(),
             });
             // TODO: use normal sstable store for single-process mode.
             let compactor_sstable_store = CompactorSstableStore::new(
@@ -207,6 +208,7 @@ pub async fn compute_node_serve(
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
+    let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
     let batch_env = BatchEnvironment::new(
         source_mgr.clone(),
         batch_mgr.clone(),
@@ -216,6 +218,7 @@ pub async fn compute_node_serve(
         state_store.clone(),
         batch_task_metrics_mgr.clone(),
         batch_metrics.clone(),
+        client_pool,
     );
 
     // Initialize the streaming environment.

@@ -23,7 +23,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::future::try_join_all;
 use risingwave_common::cache::{CacheableEntry, LruCache};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncWriteExt};
 
 use super::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
@@ -174,6 +174,10 @@ impl DiskObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for DiskObjectStore {
+    fn get_object_prefix(&self, _obj_id: u64) -> String {
+        String::default()
+    }
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         if obj.is_empty() {
             Err(ObjectError::internal("upload empty object"))
@@ -262,6 +266,19 @@ impl ObjectStore for DiskObjectStore {
         }
 
         try_join_all(ret).await
+    }
+
+    /// **Currently not implemented!**
+    ///
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    async fn streaming_read(
+        &self,
+        _path: &str,
+        _start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        unimplemented!()
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {

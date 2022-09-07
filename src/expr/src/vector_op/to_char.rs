@@ -20,7 +20,7 @@ use crate::Result;
 
 /// Compile the pg pattern to chrono pattern.
 // TODO: Chrono can not fully support the pg format, so consider using other implementations later.
-fn compile_pattern_to_chrono(tmpl: &str) -> String {
+pub fn compile_pattern_to_chrono(tmpl: &str) -> String {
     // https://www.postgresql.org/docs/current/functions-formatting.html
     static PG_PATTERNS: &[&str] = &[
         "HH24", "hh24", "HH12", "hh12", "HH", "hh", "MI", "mi", "SS", "ss", "YYYY", "yyyy", "YY",

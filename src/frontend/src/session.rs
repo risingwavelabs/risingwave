@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
@@ -36,7 +35,8 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_rpc_client::{ComputeClientPool, MetaClient};
+use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
@@ -59,11 +59,12 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
+use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts};
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
-    // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
+    // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
     /// For debugging purposes, store the SQL string in Context
     pub sql: Arc<str>,
@@ -77,8 +78,8 @@ pub struct OptimizerContext {
     pub optimizer_trace: Arc<Mutex<Vec<String>>>,
     /// Store correlated id
     pub next_correlated_id: AtomicU32,
-    /// Store handle_with_properties for internal table
-    pub with_properties: HashMap<String, String>,
+    /// Store options or properties from the `with` clause
+    pub with_options: WithOptions,
 }
 
 #[derive(Clone, Debug)]
@@ -135,7 +136,7 @@ impl OptimizerContextRef {
 }
 
 impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>, with_options: WithOptions) -> Self {
         Self {
             session_ctx,
             next_id: AtomicI32::new(0),
@@ -144,7 +145,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
-            with_properties: HashMap::new(),
+            with_options,
         }
     }
 
@@ -160,7 +161,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
-            with_properties: HashMap::new(),
+            with_options: Default::default(),
         }
         .into()
     }
@@ -190,6 +191,7 @@ pub struct FrontendEnv {
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     server_addr: HostAddr,
+    client_pool: ComputeClientPoolRef,
 }
 
 impl FrontendEnv {
@@ -220,6 +222,7 @@ impl FrontendEnv {
             catalog_reader.clone(),
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
+        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
         Self {
             meta_client,
             catalog_writer,
@@ -230,6 +233,7 @@ impl FrontendEnv {
             query_manager,
             hummock_snapshot_manager,
             server_addr,
+            client_pool,
         }
     }
 
@@ -310,6 +314,8 @@ impl FrontendEnv {
 
         meta_client.activate(&frontend_address).await?;
 
+        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+
         Ok((
             Self {
                 catalog_reader,
@@ -321,6 +327,7 @@ impl FrontendEnv {
                 query_manager,
                 hummock_snapshot_manager,
                 server_addr: frontend_address,
+                client_pool,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -378,6 +385,10 @@ impl FrontendEnv {
 
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
+    }
+
+    pub fn client_pool(&self) -> ComputeClientPoolRef {
+        self.client_pool.clone()
     }
 }
 
@@ -480,12 +491,15 @@ impl SessionManager for SessionManagerImpl {
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        if reader.get_database_by_name(database).is_err() {
-            return Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Not found database name: {}", database),
-            )));
-        }
+        let database_id = reader
+            .get_database_by_name(database)
+            .map_err(|_| {
+                Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Not found database name: {}", database),
+                ))
+            })?
+            .id();
         let user_reader = self.env.user_info_reader();
         let reader = user_reader.read_guard();
         if let Some(user) = reader.get_user_by_name(user_name) {
@@ -493,6 +507,19 @@ impl SessionManager for SessionManagerImpl {
                 return Err(Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("User {} is not allowed to login", user_name),
+                )));
+            }
+            let has_privilege = user.grant_privileges.iter().any(|privilege| {
+                privilege.object == Some(Object::DatabaseId(database_id))
+                    && privilege
+                        .action_with_opts
+                        .iter()
+                        .any(|ao| ao.action == Action::Connect as i32)
+            });
+            if !user.is_super && !has_privilege {
+                return Err(Box::new(Error::new(
+                    ErrorKind::PermissionDenied,
+                    "User does not have CONNECT privilege.",
                 )));
             }
             let user_authenticator = match &user.auth_info {
@@ -659,7 +686,7 @@ impl Session for SessionImpl {
 
 /// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session, Arc::from(sql));
+    let context = OptimizerContext::new(session, Arc::from(sql), WithOptions::try_from(&stmt)?);
     let session = context.session_ctx.clone();
 
     let bound = {

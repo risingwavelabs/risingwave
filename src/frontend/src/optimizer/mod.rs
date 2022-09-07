@@ -28,15 +28,16 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 use property::Order;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
+use self::plan_visitor::has_logical_over_agg;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::BatchExchange;
-use crate::optimizer::plan_visitor::PlanVisitor;
+use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
+use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
@@ -159,7 +160,7 @@ impl PlanRoot {
     }
 
     /// Apply logical optimization to the plan.
-    pub fn gen_optimized_logical_plan(&self) -> PlanRef {
+    pub fn gen_optimized_logical_plan(&self) -> Result<PlanRef> {
         let mut plan = self.plan.clone();
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -200,6 +201,10 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
+
+        if has_logical_apply(plan.clone()) {
+            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
+        }
 
         // Predicate Push-down
         plan = plan.predicate_pushdown(Condition::true_cond());
@@ -280,26 +285,37 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         );
 
-        plan
+        plan = self.optimize_by_rules(
+            plan,
+            "Convert Window Aggregation".to_string(),
+            vec![
+                OverAggToTopNRule::create(),
+                ProjectMergeRule::create(),
+                ProjectEliminateRule::create(),
+            ],
+            ApplyOrder::TopDown,
+        );
+        if has_logical_over_agg(plan.clone()) {
+            return Err(ErrorCode::InternalError(format!(
+                "OverAgg can not be transformed. Plan:\n{}",
+                plan.explain_to_string().unwrap()
+            ))
+            .into());
+        }
+
+        Ok(plan)
     }
 
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
     fn gen_batch_plan(&self) -> Result<PlanRef> {
         // Logical optimization
-        let mut plan = self.gen_optimized_logical_plan();
+        let mut plan = self.gen_optimized_logical_plan()?;
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
         assert!(*plan.distribution() == Distribution::Single, "{}", plan);
-
-        struct HasExchange;
-        impl PlanVisitor<bool> for HasExchange {
-            fn visit_batch_exchange(&mut self, _: &BatchExchange) -> bool {
-                true
-            }
-        }
-        assert!(!HasExchange.visit(plan.clone()), "{}", plan);
+        assert!(!has_batch_exchange(plan.clone()), "{}", plan);
 
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
@@ -327,6 +343,14 @@ impl PlanRoot {
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Distributed Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
+        }
+        // Always insert a exchange singleton for batch dml.
+        // TODO: Support local dml and
+        if plan.node_type() == PlanNodeType::BatchUpdate
+            || plan.node_type() == PlanNodeType::BatchInsert
+            || plan.node_type() == PlanNodeType::BatchDelete
+        {
+            plan = BatchExchange::new(plan, Order::any(), Distribution::Single).into();
         }
 
         Ok(plan)
@@ -365,7 +389,7 @@ impl PlanRoot {
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let mut plan = match self.plan.convention() {
             Convention::Logical => {
-                let plan = self.gen_optimized_logical_plan();
+                let plan = self.gen_optimized_logical_plan()?;
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
                 self.required_dist =
                     out_col_change.rewrite_required_distribution(&self.required_dist);

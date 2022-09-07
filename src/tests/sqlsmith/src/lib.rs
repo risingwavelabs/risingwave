@@ -21,7 +21,7 @@ use risingwave_frontend::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
     BinaryOperator, ColumnDef, Cte, Expr, Ident, Join, JoinConstraint, JoinOperator, ObjectName,
-    OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
+    OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, With,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -274,12 +274,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         order_by
     }
 
-    fn gen_limit(&mut self) -> Option<Expr> {
+    fn gen_limit(&mut self) -> Option<String> {
         if !self.is_mview && self.rng.gen_bool(0.2) {
-            Some(Expr::Value(Value::Number(
-                self.rng.gen_range(0..=100).to_string(),
-                false,
-            )))
+            Some(self.rng.gen_range(0..=100).to_string())
         } else {
             None
         }

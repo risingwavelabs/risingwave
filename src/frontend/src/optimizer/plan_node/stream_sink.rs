@@ -12,21 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanBase, PlanRef, ToStreamProst};
+use super::{PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
+use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::WithOptions;
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone)]
 pub struct StreamSink {
     pub base: PlanBase,
     input: PlanRef,
-    properties: HashMap<String, String>,
+    properties: WithOptions,
 }
 
 impl StreamSink {
@@ -47,7 +48,7 @@ impl StreamSink {
     }
 
     #[must_use]
-    pub fn new(input: PlanRef, properties: HashMap<String, String>) -> Self {
+    pub fn new(input: PlanRef, properties: WithOptions) -> Self {
         let base = Self::derive_plan_base(&input).unwrap();
         Self {
             base,
@@ -77,8 +78,8 @@ impl fmt::Display for StreamSink {
     }
 }
 
-impl ToStreamProst for StreamSink {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamSink {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
         let input = self.input.clone();
@@ -88,7 +89,7 @@ impl ToStreamProst for StreamSink {
         ProstStreamNode::Sink(SinkNode {
             table_id: table_desc.table_id.table_id(),
             column_ids: vec![], // TODO(nanderstabel): fix empty Vector
-            properties: self.properties.clone(),
+            properties: self.properties.inner().clone(),
         })
     }
 }
