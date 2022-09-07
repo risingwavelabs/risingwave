@@ -23,7 +23,7 @@ use async_stack_trace::StackTrace;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, Row, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
@@ -404,8 +404,7 @@ impl<S: StateStore> StateTable<S> {
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
-    pub fn write_with_chunk(&mut self, chunk: StreamChunk) {
-        let chunk = chunk.compact().unwrap();
+    pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let (chunk, op) = chunk.into_parts();
         let hash_builder = CRC32FastBuilder {};
 
@@ -430,11 +429,26 @@ impl<S: StateStore> StateTable<S> {
                     self.pk_serializer.serialize_ref(r, vnode_and_pk);
                 }
             });
-        // the chunk has been compacted at the most first in the function
-        for (op, key, value) in izip!(op, vnode_and_pks, values) {
-            match op {
-                Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
-                Op::Delete | Op::UpdateDelete => self.mem_table.delete(key, value),
+
+        let (_, vis) = chunk.into_parts();
+        match vis {
+            Vis::Bitmap(vis) => {
+                for ((op, key, value), vis) in izip!(op, vnode_and_pks, values).zip_eq(vis.iter()) {
+                    if vis {
+                        match op {
+                            Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
+                            Op::Delete | Op::UpdateDelete => self.mem_table.delete(key, value),
+                        }
+                    }
+                }
+            }
+            Vis::Compact(_) => {
+                for (op, key, value) in izip!(op, vnode_and_pks, values) {
+                    match op {
+                        Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
+                        Op::Delete | Op::UpdateDelete => self.mem_table.delete(key, value),
+                    }
+                }
             }
         }
     }
