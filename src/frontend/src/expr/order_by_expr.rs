@@ -12,23 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
+
+use itertools::Itertools;
+
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::property::Direction;
 
 /// A sort expression in the `ORDER BY` clause.
 ///
 /// See also [`bind_order_by_expr`](`crate::binder::Binder::bind_order_by_expr`).
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct OrderByExpr {
     pub expr: ExprImpl,
     pub direction: Direction,
     pub nulls_first: bool,
 }
 
+impl Display for OrderByExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.expr)?;
+        if self.direction == Direction::Desc {
+            write!(f, " DESC")?;
+        }
+        if self.nulls_first {
+            write!(f, " NULLS FIRST")?;
+        }
+        Ok(())
+    }
+}
+
 /// See [`OrderByExpr`].
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct OrderBy {
     pub sort_exprs: Vec<OrderByExpr>,
+}
+
+impl Display for OrderBy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ORDER BY {}", self.sort_exprs.iter().format(", "))
+    }
 }
 
 impl OrderBy {

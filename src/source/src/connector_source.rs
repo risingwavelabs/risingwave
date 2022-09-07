@@ -49,7 +49,7 @@ impl SourceContext {
 }
 
 lazy_static::lazy_static! {
-    static ref DEFAULT_SPLIT_ID: SplitId = SplitId::new("None".into());
+    static ref DEFAULT_SPLIT_ID: SplitId = "None".into();
 }
 
 struct InnerConnectorSourceReader {
@@ -175,7 +175,7 @@ impl InnerConnectorSourceReader {
 
                     self.metrics
                         .partition_input_count
-                        .with_label_values(&[actor_id.as_str(), source_id.as_str(), id.as_str()])
+                        .with_label_values(&[actor_id.as_str(), source_id.as_str(), &*id])
                         .inc_by(msg.len() as u64);
 
                     output.send(Ok(msg)).await.ok();
