@@ -38,7 +38,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         let tables: Vec<String> = level_entry
             .table_infos
             .iter()
-            .map(|table| format!("[id: {}, {}KB]", table.id, table.file_size / 1024))
+            .map(|table| format!("[id: {}, {}]", table.id, table.meta_offset))
             .collect();
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }

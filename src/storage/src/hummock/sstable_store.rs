@@ -280,16 +280,6 @@ impl SstableStore {
         }
     }
 
-    pub fn get_sst_meta_path(&self, sst_id: HummockSstableId) -> String {
-        let is_remote = is_remote_sst_id(sst_id);
-        let obj_prefix = self.store.get_object_prefix(sst_id, is_remote);
-        let mut ret = format!("{}/{}{}.meta", self.path, obj_prefix, sst_id);
-        if !is_remote {
-            ret = get_local_path(&ret);
-        }
-        ret
-    }
-
     pub fn get_sst_data_path(&self, sst_id: HummockSstableId) -> String {
         let is_remote = is_remote_sst_id(sst_id);
         let obj_prefix = self.store.get_object_prefix(sst_id, is_remote);
@@ -348,15 +338,20 @@ impl SstableStore {
                     offset: sst.meta_offset as usize,
                     size: (sst.file_size - sst.meta_offset) as usize,
                 };
-                println!("file {}: {}, {}", sst.id, sst.meta_offset, sst.file_size);
+		        let sst = sst.clone();
                 async move {
                     let now = Instant::now();
-
                     let buf = store
                         .read(&meta_path, Some(loc))
                         .await
                         .map_err(HummockError::object_io_error)?;
-                    let meta = SstableMeta::decode(&mut &buf[..])?;
+                    let meta = match SstableMeta::decode(&mut &buf[..]) {
+                        Err(e) => {
+                            tracing::error!("decode sst({}) failed, meta_offset: {}, size: {}", sst.id, sst.meta_offset, sst.file_size);
+                            return Err(e);
+                        },
+                        Ok(m) => m,
+                    };
                     let sst = Sstable::new(sst_id, meta);
                     let charge = sst.meta.encoded_size();
                     let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
@@ -773,11 +768,8 @@ mod tests {
     fn test_basic() {
         let sstable_store = mock_sstable_store();
         let sst_id = 123;
-        let meta_path = sstable_store.get_sst_meta_path(sst_id);
         let data_path = sstable_store.get_sst_data_path(sst_id);
-        assert_eq!(meta_path, "test/123.meta");
         assert_eq!(data_path, "test/123.data");
-        assert_eq!(sstable_store.get_sst_id_from_path(&meta_path), sst_id);
         assert_eq!(sstable_store.get_sst_id_from_path(&data_path), sst_id);
     }
 }

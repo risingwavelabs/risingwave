@@ -306,7 +306,9 @@ mod tests {
             meta_offset: 123,
             version: VERSION,
         };
+        let sz = meta.encoded_size();
         let buf = meta.encode_to_bytes();
+        assert_eq!(sz, buf.len());
         let decoded_meta = SstableMeta::decode(&mut &buf[..]).unwrap();
         assert_eq!(decoded_meta, meta);
     }

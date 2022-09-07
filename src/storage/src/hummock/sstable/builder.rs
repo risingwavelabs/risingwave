@@ -227,11 +227,10 @@ impl<W: SstableWriter> SstableBuilder<W> {
         let largest_key = self.last_full_key.clone();
 
         self.build_block()?;
-        // The extra 4 bytes is for the size footer.
-        let data_len = self.writer.data_len() + 4;
+        let meta_offset = self.writer.data_len() as u64;
         assert!(!smallest_key.is_empty());
 
-        let meta = SstableMeta {
+        let mut meta = SstableMeta {
             block_metas: self.block_metas,
             bloom_filter: if self.options.bloom_false_positive > 0.0 {
                 let bits_per_key = Bloom::bloom_bits_per_key(
@@ -242,13 +241,14 @@ impl<W: SstableWriter> SstableBuilder<W> {
             } else {
                 vec![]
             },
-            estimated_size: data_len as u32,
+            estimated_size: 0,
             key_count: self.key_count as u32,
             smallest_key,
             largest_key,
             version: VERSION,
-            meta_offset: self.writer.data_len() as u64,
+            meta_offset,
         };
+        meta.estimated_size = meta.encoded_size() as u32  + meta_offset as u32;
         let sst_info = SstableInfo {
             id: self.sstable_id,
             key_range: Some(risingwave_pb::hummock::KeyRange {
