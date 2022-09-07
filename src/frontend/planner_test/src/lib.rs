@@ -429,6 +429,7 @@ impl TestCase {
                 context,
                 Box::new(q),
                 ObjectName(vec!["test".into()]),
+                false,
             )?;
 
             // Only generate stream_plan if it is specified in test case
