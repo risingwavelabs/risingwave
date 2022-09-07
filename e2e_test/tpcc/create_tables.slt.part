@@ -101,24 +101,24 @@ CREATE TABLE tpcc_orderline (
 
 statement ok
 CREATE TABLE tpcc_stock (
-        s_i_id INTEGER,
-        s_w_id INTEGER,
-        s_quantity INTEGER,
-        s_dist_01 VARCHAR,
-        s_dist_02 VARCHAR,
-        s_dist_03 VARCHAR,
-        s_dist_04 VARCHAR,
-        s_dist_05 VARCHAR,
-        s_dist_06 VARCHAR,
-        s_dist_07 VARCHAR,
-        s_dist_08 VARCHAR,
-        s_dist_09 VARCHAR,
-        s_dist_10 VARCHAR,
-        s_ytd INTEGER,
-        s_order_cnt INTEGER,
-        s_remote_cnt INTEGER,
-        s_data VARCHAR,
-        PRIMARY KEY (s_i_id, s_w_id)
+        st_i_id INTEGER,
+        st_w_id INTEGER,
+        st_quantity INTEGER,
+        st_dist_01 VARCHAR,
+        st_dist_02 VARCHAR,
+        st_dist_03 VARCHAR,
+        st_dist_04 VARCHAR,
+        st_dist_05 VARCHAR,
+        st_dist_06 VARCHAR,
+        st_dist_07 VARCHAR,
+        st_dist_08 VARCHAR,
+        st_dist_09 VARCHAR,
+        st_dist_10 VARCHAR,
+        st_ytd INTEGER,
+        st_order_cnt INTEGER,
+        st_remote_cnt INTEGER,
+        st_data VARCHAR,
+        PRIMARY KEY (st_i_id, st_w_id)
 );
 
 statement ok
