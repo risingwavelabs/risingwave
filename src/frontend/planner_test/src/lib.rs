@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(label_break_value)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 //! Data-driven tests.
 
@@ -86,6 +87,9 @@ pub struct TestCase {
     /// Error of `.gen_batch_local_plan()`
     pub batch_local_error: Option<String>,
 
+    /// Error of `.gen_stream_plan()`
+    pub stream_error: Option<String>,
+
     /// Support using file content or file location to create source.
     pub create_source: Option<CreateSource>,
 
@@ -139,6 +143,9 @@ pub struct TestCaseResult {
 
     /// Error of `.gen_batch_local_plan()`
     pub batch_local_error: Option<String>,
+
+    /// Error of `.gen_stream_plan()`
+    pub stream_error: Option<String>,
 }
 
 impl TestCaseResult {
@@ -169,6 +176,7 @@ impl TestCaseResult {
             optimizer_error: self.optimizer_error,
             batch_error: self.batch_error,
             batch_local_error: self.batch_local_error,
+            stream_error: self.stream_error,
             binder_error: self.binder_error,
             create_source: original_test_case.create_source.clone(),
             with_config_map: original_test_case.with_config_map.clone(),
@@ -374,63 +382,75 @@ impl TestCase {
             }
         }
 
-        if self.batch_plan.is_some()
-            || self.batch_plan_proto.is_some()
-            || self.batch_error.is_some()
-        {
-            let batch_plan = match logical_plan.gen_batch_distributed_plan() {
-                Ok(batch_plan) => batch_plan,
-                Err(err) => {
-                    ret.batch_error = Some(err.to_string());
-                    return Ok(ret);
+        'batch: {
+            if self.batch_plan.is_some()
+                || self.batch_plan_proto.is_some()
+                || self.batch_error.is_some()
+            {
+                let batch_plan = match logical_plan.gen_batch_distributed_plan() {
+                    Ok(batch_plan) => batch_plan,
+                    Err(err) => {
+                        ret.batch_error = Some(err.to_string());
+                        break 'batch;
+                    }
+                };
+
+                // Only generate batch_plan if it is specified in test case
+                if self.batch_plan.is_some() {
+                    ret.batch_plan = Some(explain_plan(&batch_plan));
                 }
-            };
 
-            // Only generate batch_plan if it is specified in test case
-            if self.batch_plan.is_some() {
-                ret.batch_plan = Some(explain_plan(&batch_plan));
-            }
-
-            // Only generate batch_plan_proto if it is specified in test case
-            if self.batch_plan_proto.is_some() {
-                ret.batch_plan_proto = Some(serde_yaml::to_string(
-                    &batch_plan.to_batch_prost_identity(false),
-                )?);
+                // Only generate batch_plan_proto if it is specified in test case
+                if self.batch_plan_proto.is_some() {
+                    ret.batch_plan_proto = Some(serde_yaml::to_string(
+                        &batch_plan.to_batch_prost_identity(false),
+                    )?);
+                }
             }
         }
 
-        if self.batch_local_plan.is_some() || self.batch_local_error.is_some() {
-            let batch_plan = match logical_plan.gen_batch_local_plan() {
-                Ok(batch_plan) => batch_plan,
-                Err(err) => {
-                    ret.batch_local_error = Some(err.to_string());
-                    return Ok(ret);
-                }
-            };
+        'local_batch: {
+            if self.batch_local_plan.is_some() || self.batch_local_error.is_some() {
+                let batch_plan = match logical_plan.gen_batch_local_plan() {
+                    Ok(batch_plan) => batch_plan,
+                    Err(err) => {
+                        ret.batch_local_error = Some(err.to_string());
+                        break 'local_batch;
+                    }
+                };
 
-            // Only generate batch_plan if it is specified in test case
-            if self.batch_local_plan.is_some() {
-                ret.batch_local_plan = Some(explain_plan(&batch_plan));
+                // Only generate batch_plan if it is specified in test case
+                if self.batch_local_plan.is_some() {
+                    ret.batch_local_plan = Some(explain_plan(&batch_plan));
+                }
             }
         }
 
-        if self.stream_plan.is_some() {
-            let q = if let Statement::Query(q) = stmt {
-                q.as_ref().clone()
-            } else {
-                return Err(anyhow!("expect a query"));
-            };
+        'stream: {
+            if self.stream_plan.is_some() || self.stream_error.is_some() {
+                let q = if let Statement::Query(q) = stmt {
+                    q.as_ref().clone()
+                } else {
+                    return Err(anyhow!("expect a query"));
+                };
 
-            let (stream_plan, _table) = create_mv::gen_create_mv_plan(
-                &session,
-                context,
-                Box::new(q),
-                ObjectName(vec!["test".into()]),
-            )?;
+                let stream_plan = match create_mv::gen_create_mv_plan(
+                    &session,
+                    context,
+                    Box::new(q),
+                    ObjectName(vec!["test".into()]),
+                ) {
+                    Ok((stream_plan, _table)) => stream_plan,
+                    Err(err) => {
+                        ret.stream_error = Some(err.to_string());
+                        break 'stream;
+                    }
+                };
 
-            // Only generate stream_plan if it is specified in test case
-            if self.stream_plan.is_some() {
-                ret.stream_plan = Some(explain_plan(&stream_plan));
+                // Only generate stream_plan if it is specified in test case
+                if self.stream_plan.is_some() {
+                    ret.stream_plan = Some(explain_plan(&stream_plan));
+                }
             }
         }
 

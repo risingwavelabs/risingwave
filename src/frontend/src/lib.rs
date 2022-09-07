@@ -25,6 +25,7 @@
 #![warn(clippy::await_holding_lock)]
 #![deny(unused_must_use)]
 #![deny(rustdoc::broken_intra_doc_links)]
+#![allow(rustdoc::private_intra_doc_links)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
 #![feature(generators)]
