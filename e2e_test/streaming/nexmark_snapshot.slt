@@ -14,11 +14,13 @@ include ./nexmark/q4.slt.part
 include ./nexmark/q5.slt.part
 include ./nexmark/q7.slt.part
 include ./nexmark/q8.slt.part
+include ./nexmark/q9.slt.part
 include ./nexmark/q10.slt.part
 include ./nexmark/q14.slt.part
 include ./nexmark/q15.slt.part
 include ./nexmark/q16.slt.part
 include ./nexmark/q17.slt.part
+include ./nexmark/q18.slt.part
 include ./nexmark/q20.slt.part
 include ./nexmark/q21.slt.part
 include ./nexmark/q22.slt.part

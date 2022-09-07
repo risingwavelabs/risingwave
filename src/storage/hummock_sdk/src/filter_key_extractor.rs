@@ -390,7 +390,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::types::{DataType, VIRTUAL_NODE_SIZE};
     use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
@@ -499,7 +499,7 @@ mod tests {
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
-                String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                String::from(PROPERTIES_RETENTION_SECOND_KEY),
                 String::from("300"),
             )]),
             fragment_id: 0,
