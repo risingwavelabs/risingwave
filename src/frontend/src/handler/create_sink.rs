@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -23,7 +22,6 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::CreateSinkStatement;
 
 use super::privilege::check_privileges;
-use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::handler::privilege::ObjectCheckItem;
@@ -31,13 +29,14 @@ use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
 use crate::optimizer::PlanRef;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::build_graph;
+use crate::WithOptions;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
     schema_id: SchemaId,
     name: String,
     associated_table_id: u32,
-    properties: HashMap<String, String>,
+    properties: &WithOptions,
     owner: u32,
 ) -> Result<ProstSink> {
     Ok(ProstSink {
@@ -46,7 +45,7 @@ pub(crate) fn make_prost_sink(
         database_id,
         name,
         associated_table_id,
-        properties,
+        properties: properties.inner().clone(),
         owner,
         dependent_relations: vec![],
     })
@@ -57,8 +56,6 @@ pub fn gen_sink_plan(
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
 ) -> Result<(PlanRef, ProstSink)> {
-    let with_properties = handle_with_properties("create_sink", stmt.with_properties.0)?;
-
     let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
 
     let (database_id, schema_id) = {
@@ -97,12 +94,14 @@ pub fn gen_sink_plan(
         )
     };
 
+    let properties = context.inner().with_options.clone();
+
     let sink = make_prost_sink(
         database_id,
         schema_id,
         stmt.sink_name.to_string(),
         associated_table_id,
-        with_properties.clone(),
+        &properties,
         session.user_id(),
     )?;
 
@@ -115,7 +114,7 @@ pub fn gen_sink_plan(
     ))
     .into();
 
-    let plan: PlanRef = StreamSink::new(scan_node, with_properties).into();
+    let plan: PlanRef = StreamSink::new(scan_node, properties).into();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();

@@ -616,7 +616,7 @@ mod tests {
 
     use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
+    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
@@ -673,7 +673,7 @@ mod tests {
                 ],
                 distribution_key: vec![],
                 appendonly: false,
-                retention_seconds: TABLE_OPTION_DUMMY_RETAINTION_SECOND,
+                retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
             }),
             vec![],
             ctx,

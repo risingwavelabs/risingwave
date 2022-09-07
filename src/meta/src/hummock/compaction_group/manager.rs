@@ -373,7 +373,7 @@ mod tests {
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
 
@@ -409,7 +409,7 @@ mod tests {
         assert_eq!(registered_number(inner.read().await.deref()), 0);
 
         let table_properties = HashMap::from([(
-            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from(PROPERTIES_RETENTION_SECOND_KEY),
             String::from("300"),
         )]);
         let table_option = TableOption::build_table_option(&table_properties);
@@ -531,7 +531,7 @@ mod tests {
         };
         assert_eq!(registered_number().await, 0);
         let table_properties = HashMap::from([(
-            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from(PROPERTIES_RETENTION_SECOND_KEY),
             String::from("300"),
         )]);
 
