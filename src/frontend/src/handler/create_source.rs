@@ -33,7 +33,6 @@ use super::create_table::{
     bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
 };
 use super::privilege::check_privileges;
-use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
 use crate::handler::privilege::ObjectCheckItem;
@@ -111,11 +110,11 @@ pub async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
-    let with_properties = handle_with_properties("create_source", stmt.with_properties.0)?;
-
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
+
+    let with_properties = context.with_options.inner().clone();
 
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
