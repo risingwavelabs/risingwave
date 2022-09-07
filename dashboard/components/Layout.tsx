@@ -61,6 +61,14 @@ function NavButton({
   )
 }
 
+function NavTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <Text mt={3} textColor="teal.500" fontWeight="semibold" lineHeight="6">
+      {children}
+    </Text>
+  )
+}
+
 function Layout({ children }: { children: React.ReactNode }) {
   return (
     <Fragment>
@@ -76,7 +84,15 @@ function Layout({ children }: { children: React.ReactNode }) {
       >
         <Box height="50px" width="full" mb={3}>
           <HStack spacing={0}>
-            <Image boxSize="50px" src="/risingwave.svg" />
+            <Link href="/" passHref>
+              <a>
+                <Image
+                  boxSize="50px"
+                  src="/risingwave.svg"
+                  alt="RisingWave Logo"
+                />
+              </a>
+            </Link>
             <Text fontSize="xl">
               <b>RisingWave</b> Dashboard
             </Text>
@@ -86,10 +102,23 @@ function Layout({ children }: { children: React.ReactNode }) {
           <NavButton href="/cluster/" leftIcon={<IconServer />}>
             Cluster Overview
           </NavButton>
-          <NavButton href="/data_sources/">Data Sources</NavButton>
-          <NavButton href="/materialized_views/">Materialized Views</NavButton>
-          <NavButton href="/streaming_plan/">Streaming Plan</NavButton>
-          <NavButton href="/batch_tasks/">Batch Tasks</NavButton>
+          <VStack width="full" alignItems="flex-start" px={3}>
+            <NavTitle>Catalog</NavTitle>
+            <NavButton href="/data_sources/">Data Sources</NavButton>
+            <NavButton href="/materialized_views/">
+              Materialized Views
+            </NavButton>
+          </VStack>
+          <VStack width="full" alignItems="flex-start" px={3}>
+            <NavTitle>Streaming</NavTitle>
+            <NavButton href="/streaming_graph/">Graph</NavButton>
+            <NavButton href="/streaming_plan/">Fragments</NavButton>
+          </VStack>
+          <VStack width="full" alignItems="flex-start" px={3}>
+            <NavTitle>Batch</NavTitle>
+            <NavButton href="/batch_tasks/">Batch Tasks</NavButton>
+          </VStack>
+          <VStack mb={3}></VStack>
           <NavButton href="/settings/">Settings</NavButton>
         </VStack>
       </Box>
