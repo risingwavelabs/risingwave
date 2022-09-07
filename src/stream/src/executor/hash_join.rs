@@ -852,22 +852,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         0
                     };
 
-                    if append_only_optimize {
-                        if !append_only_matched_rows.is_empty() {
-                            // Since join key contains pk and pk is unique, there should be only
-                            // one row if matched
-                            let [row]: [_; 1] = append_only_matched_rows.try_into().unwrap();
-                            let pk = row.row_by_indices(&side_match.pk_indices);
-                            side_match.ht.delete(key, pk, row)?;
-                        } else {
-                            side_update
-                                .ht
-                                .insert(key, pk, JoinRow::new(value, degree_to_ins))?;
-                        }
-                    } else {
+                    if append_only_optimize && !append_only_matched_rows.is_empty() {
+                        // Since join key contains pk and pk is unique, there should be only
+                        // one row if matched
+                        let [row]: [_; 1] = append_only_matched_rows.try_into().unwrap();
+                        let pk = row.row_by_indices(&side_match.pk_indices);
+                        side_match.ht.delete(key, pk, row)?;
+                    } else if need_update_side_update_degree(T, SIDE) {
                         side_update
                             .ht
                             .insert(key, pk, JoinRow::new(value, degree_to_ins))?;
+                    } else {
+                        side_update.ht.insert_row(key, pk, value)?;
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -910,14 +906,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     {
                         yield Message::Chunk(chunk);
                     }
-                    let degree_to_del = if need_update_side_update_degree(T, SIDE) {
-                        degree
+                    if need_update_side_update_degree(T, SIDE) {
+                        side_update
+                            .ht
+                            .delete(key, pk, JoinRow::new(value, degree))?;
                     } else {
-                        0
+                        side_update.ht.delete_row(key, pk, value)?;
                     };
-                    side_update
-                        .ht
-                        .delete(key, pk, JoinRow::new(value, degree_to_del))?;
                 }
             }
         }

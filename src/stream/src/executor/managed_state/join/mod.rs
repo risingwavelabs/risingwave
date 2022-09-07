@@ -437,12 +437,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(())
     }
 
-    /// Insert a key
+    /// Insert a join row
     pub fn insert(&mut self, key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
         if let Some(entry) = self.inner.get_mut(key) {
             entry.insert(pk, value.encode()?);
         }
-
         // If no cache maintained, only update the flush buffer.
         let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
         self.state.table.insert(row)?;
@@ -450,16 +449,39 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(())
     }
 
-    /// Delete a key
+    /// Insert a row
+    pub fn insert_row(&mut self, key: &K, pk: Row, value: Row) -> StreamExecutorResult<()> {
+        let join_row = JoinRow::new(value.clone(), 0);
+
+        if let Some(entry) = self.inner.get_mut(key) {
+            entry.insert(pk, join_row.encode()?);
+        }
+        // If no cache maintained, only update the state table.
+        self.state.table.insert(value)?;
+        Ok(())
+    }
+
+    /// Delete a join row
     pub fn delete(&mut self, key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
         if let Some(entry) = self.inner.get_mut(key) {
             entry.remove(pk);
         }
 
-        // If no cache maintained, only update the flush buffer.
+        // If no cache maintained, only update the state table.
         let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
         self.state.table.delete(row)?;
         self.degree_state.table.delete(degree)?;
+        Ok(())
+    }
+
+    /// Delete a row
+    pub fn delete_row(&mut self, key: &K, pk: Row, value: Row) -> StreamExecutorResult<()> {
+        if let Some(entry) = self.inner.get_mut(key) {
+            entry.remove(pk);
+        }
+
+        // If no cache maintained, only update the state table.
+        self.state.table.delete(value)?;
         Ok(())
     }
 

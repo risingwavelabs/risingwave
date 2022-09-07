@@ -21,8 +21,8 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
 use risingwave_storage::error::{StorageError, StorageResult};
 
-/// Zip two streams of primary key and rows into a single stream, sorted by primary key.
-/// We should ensure that the primary key from different streams are unique.
+/// Zip two streams of primary key and rows into a single stream, sorted by order key.
+/// We should ensure that the order key from different streams are unique.
 #[try_stream(ok = (Cow<'a, Row>, Cow<'a, Row>), error = StorageError)]
 pub async fn zip_by_order_key<'a, S>(stream1: S, key1: &'a [usize], stream2: S, key2: &'a [usize])
 where
