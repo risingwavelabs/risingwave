@@ -404,7 +404,7 @@ impl<S: StateStore> StateTable<S> {
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
-    pub fn write_from_chunk(&mut self, chunk: StreamChunk) -> StorageResult<()> {
+    pub fn write_with_chunk(&mut self, chunk: StreamChunk) -> StorageResult<()> {
         let chunk = chunk.compact().unwrap();
         let (chunk, op) = chunk.into_parts();
         let hash_builder = CRC32FastBuilder {};

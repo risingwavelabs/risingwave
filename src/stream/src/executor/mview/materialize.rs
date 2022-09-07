@@ -118,36 +118,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             let msg = msg?;
             yield match msg {
                 Message::Chunk(chunk) => {
-                    for (idx, op) in chunk.ops().iter().enumerate() {
-                        // check visibility
-                        let visible = chunk
-                            .visibility()
-                            .as_ref()
-                            .map(|x| x.is_set(idx).unwrap())
-                            .unwrap_or(true);
-                        if !visible {
-                            continue;
-                        }
-
-                        // assemble pk row
-
-                        // assemble row
-                        let row = Row(chunk
-                            .columns()
-                            .iter()
-                            .map(|x| x.array_ref().datum_at(idx))
-                            .collect_vec());
-
-                        match op {
-                            Insert | UpdateInsert => {
-                                self.state_table.insert(row)?;
-                            }
-                            Delete | UpdateDelete => {
-                                self.state_table.delete(row)?;
-                            }
-                        }
-                    }
-
+                    self.state_table.write_with_chunk(chunk.clone())?;
                     Message::Chunk(chunk)
                 }
                 Message::Barrier(b) => {
