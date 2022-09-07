@@ -133,6 +133,9 @@ pub trait StreamingUploader: Send + Sync {
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
+    /// Get the key prefix for object
+    fn get_object_prefix(&self, obj_id: u64) -> String;
+
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
 
@@ -323,6 +326,24 @@ impl ObjectStoreImpl {
 
     pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         object_store_impl_method_body!(self, list, prefix)
+    }
+
+    pub fn get_object_prefix(&self, obj_id: u64, is_remote: bool) -> String {
+        // FIXME: ObjectStoreImpl lacks of flexibility for adding new interface to ObjectStore
+        // trait. Macro object_store_impl_method_body enforces the new interfaces to be async and
+        // routes to local or remote only depends on the path
+        match self {
+            ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
+            ObjectStoreImpl::Disk(store) => store.inner.get_object_prefix(obj_id),
+            ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
+            ObjectStoreImpl::Hybrid { local, remote } => {
+                if is_remote {
+                    remote.get_object_prefix(obj_id, true)
+                } else {
+                    local.get_object_prefix(obj_id, false)
+                }
+            }
+        }
     }
 }
 

@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter::once;
 use std::mem::take;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -35,6 +36,7 @@ use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
+use risingwave_rpc_client::StreamClientPoolRef;
 use smallvec::SmallVec;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -55,7 +57,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
+use crate::storage::meta_store::MetaStore;
 use crate::{MetaError, MetaResult};
 
 mod command;
@@ -196,7 +198,7 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     cluster_manager: ClusterManagerRef<S>,
 
-    catalog_manager: CatalogManagerRef<S>,
+    pub(crate) catalog_manager: CatalogManagerRef<S>,
 
     fragment_manager: FragmentManagerRef<S>,
 
@@ -204,7 +206,7 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     metrics: Arc<MetaMetrics>,
 
-    env: MetaSrvEnv<S>,
+    pub(crate) env: MetaSrvEnv<S>,
 }
 /// Post-processing information for barriers.
 struct CheckpointPost<S: MetaStore> {
@@ -218,8 +220,10 @@ struct CheckpointPost<S: MetaStore> {
 /// Post-processing information for barriers and previously uncommitted ssts
 struct UncommittedMessages<S: MetaStore> {
     uncommitted_checkpoint_post: VecDeque<CheckpointPost<S>>,
-    /// Ssts that need to commit with next checkpoint.
-    uncommitted_ssts: Vec<LocalSstableInfo>,
+    /// Ssts that need to commit with next checkpoint. We need to save data in reverse order of
+    /// epoch, because we will save `uncommitted_ssts` in version, and traverse them in the
+    /// forward direction and return the key when we find it
+    uncommitted_ssts: VecDeque<LocalSstableInfo>,
     /// Work_ids that need to commit with next checkpoint.
     uncommitted_work_ids: HashMap<HummockSstableId, WorkerId>,
 }
@@ -315,7 +319,7 @@ where
                     .insert(sst.id, resp.worker_id);
                 self.uncommitted_messages
                     .uncommitted_ssts
-                    .push((grouped.compaction_group_id, sst));
+                    .push_front((grouped.compaction_group_id, sst));
             });
         }
         self.uncommitted_messages
@@ -417,8 +421,12 @@ where
             .set(self.command_ctx_queue.len() as i64);
     }
 
-    /// Inject a `command_ctx` in `command_ctx_queue`, and its state is `InFlight`.
-    fn inject(&mut self, command_ctx: Arc<CommandContext<S>>, notifiers: SmallVec<[Notifier; 1]>) {
+    /// Enqueue a barrier command, and init its state to `InFlight`.
+    fn enqueue_command(
+        &mut self,
+        command_ctx: Arc<CommandContext<S>>,
+        notifiers: SmallVec<[Notifier; 1]>,
+    ) {
         let timer = self.metrics.barrier_latency.start_timer();
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
@@ -429,9 +437,9 @@ where
         });
     }
 
-    /// Change the state of this `prev_epoch` to `Complete`. Return continuous nodes
-    /// with `Complete` starting from first node [`Complete`..`InFlight`) and remove them.
-    fn complete(
+    /// Change the state of this `prev_epoch` to `Completed`. Return continuous nodes
+    /// with `Completed` starting from first node [`Completed`..`InFlight`) and remove them.
+    fn barrier_completed(
         &mut self,
         prev_epoch: u64,
         result: Vec<BarrierCompleteResponse>,
@@ -459,7 +467,7 @@ where
     }
 
     /// Remove all nodes from queue and return them.
-    fn fail(&mut self) -> Vec<EpochNode<S>> {
+    fn barrier_failed(&mut self) -> Vec<EpochNode<S>> {
         let complete_nodes = self.command_ctx_queue.drain(..).collect_vec();
         complete_nodes
             .iter()
@@ -553,7 +561,7 @@ where
         metrics: Arc<MetaMetrics>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
-        let interval = env.opts.checkpoint_interval;
+        let interval = env.opts.barrier_interval;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
         let checkpoint_frequency = env.opts.checkpoint_frequency;
         tracing::info!(
@@ -708,36 +716,39 @@ where
             ));
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
-            checkpoint_control.inject(command_ctx.clone(), notifiers);
 
-            self.inject_and_send_err(command_ctx, barrier_complete_tx.clone())
+            checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
+            self.inject_barrier(command_ctx, barrier_complete_tx.clone())
                 .await;
         }
     }
 
-    /// Inject barrier and send err.
-    async fn inject_and_send_err(
-        &self,
-        command_context: Arc<CommandContext<S>>,
-        barrier_complete_tx: UnboundedSender<(u64, MetaResult<Vec<BarrierCompleteResponse>>)>,
-    ) {
-        let result = self
-            .inject_barrier(command_context.clone(), barrier_complete_tx.clone())
-            .await;
-        if let Err(e) = result {
-            barrier_complete_tx
-                .send((command_context.prev_epoch.0, Err(e)))
-                .unwrap();
-        }
-    }
-
-    /// Send inject-barrier-rpc to stream service and wait for its response before returns.
-    /// Then spawn a new tokio task to send barrier-complete-rpc and wait for its response
+    /// Inject a barrier to all CNs and spawn a task to collect it
     async fn inject_barrier(
         &self,
         command_context: Arc<CommandContext<S>>,
         barrier_complete_tx: UnboundedSender<(u64, MetaResult<Vec<BarrierCompleteResponse>>)>,
-    ) -> MetaResult<()> {
+    ) {
+        let prev_epoch = command_context.prev_epoch.0;
+        let result = self.inject_barrier_inner(command_context.clone()).await;
+        match result {
+            Ok(node_need_collect) => {
+                let _ = tokio::spawn(Self::collect_barrier(
+                    node_need_collect,
+                    self.env.stream_client_pool_ref(),
+                    command_context,
+                    barrier_complete_tx,
+                ));
+            }
+            Err(e) => barrier_complete_tx.send((prev_epoch, Err(e))).unwrap(),
+        }
+    }
+
+    /// Send inject-barrier-rpc to stream service and wait for its response before returns.
+    async fn inject_barrier_inner(
+        &self,
+        command_context: Arc<CommandContext<S>>,
+    ) -> MetaResult<HashMap<WorkerId, bool>> {
         fail_point!("inject_barrier_err", |_| bail!("inject_barrier_err"));
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info.clone();
@@ -786,40 +797,47 @@ where
             }
         });
         try_join_all(inject_futures).await?;
-        let env = self.env.clone();
-        tokio::spawn(async move {
-            let prev_epoch = command_context.prev_epoch.0;
-            let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
-                if !*node_need_collect.get(node_id).unwrap() {
-                    // No need to send or collect barrier for this node.
-                    None
-                } else {
-                    let request_id = Uuid::new_v4().to_string();
-                    let env = env.clone();
-                    async move {
-                        let client = env.stream_client_pool().get(node).await?;
-                        let request = BarrierCompleteRequest {
-                            request_id,
-                            prev_epoch,
-                        };
-                        tracing::trace!(
-                            target: "events::meta::barrier::barrier_complete",
-                            "barrier complete request: {:?}", request
-                        );
+        Ok(node_need_collect)
+    }
 
-                        // This RPC returns only if this worker node has collected this barrier.
-                        client.barrier_complete(request).await
-                    }
-                    .into()
+    /// Send barrier-complete-rpc and wait for responses from all CNs
+    async fn collect_barrier(
+        node_need_collect: HashMap<WorkerId, bool>,
+        client_pool_ref: StreamClientPoolRef,
+        command_context: Arc<CommandContext<S>>,
+        barrier_complete_tx: UnboundedSender<(u64, MetaResult<Vec<BarrierCompleteResponse>>)>,
+    ) {
+        let prev_epoch = command_context.prev_epoch.0;
+        let info = command_context.info.clone();
+        let client_pool = client_pool_ref.deref();
+        let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
+            if !*node_need_collect.get(node_id).unwrap() {
+                // No need to send or collect barrier for this node.
+                None
+            } else {
+                let request_id = Uuid::new_v4().to_string();
+                async move {
+                    let client = client_pool.get(node).await?;
+                    let request = BarrierCompleteRequest {
+                        request_id,
+                        prev_epoch,
+                    };
+                    tracing::trace!(
+                        target: "events::meta::barrier::barrier_complete",
+                        "barrier complete request: {:?}", request
+                    );
+
+                    // This RPC returns only if this worker node has collected this barrier.
+                    client.barrier_complete(request).await
                 }
-            });
-
-            let result = try_join_all(collect_futures).await;
-            barrier_complete_tx
-                .send((prev_epoch, result.map_err(Into::into)))
-                .unwrap();
+                .into()
+            }
         });
-        Ok(())
+
+        let result = try_join_all(collect_futures).await;
+        barrier_complete_tx
+            .send((prev_epoch, result.map_err(Into::into)))
+            .unwrap();
     }
 
     /// Changes the state is `Complete`, and try commit all epoch that state is `Complete` in
@@ -834,20 +852,20 @@ where
     ) {
         if let Err(err) = result {
             fail_point!("inject_barrier_err_success");
-            let fail_node = checkpoint_control.fail();
+            let fail_node = checkpoint_control.barrier_failed();
             tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
             self.do_recovery(err, fail_node.into_iter(), state, tracker)
                 .await;
             return;
         }
         // change the state is Complete
-        let mut complete_nodes = checkpoint_control.complete(prev_epoch, result.unwrap());
+        let mut complete_nodes = checkpoint_control.barrier_completed(prev_epoch, result.unwrap());
         // try commit complete nodes
         let (mut index, mut err_msg) = (0, None);
         for (i, node) in complete_nodes.iter_mut().enumerate() {
             assert!(matches!(node.state, Completed(_)));
             if let Err(err) = self
-                .complete_barriers(node, tracker, checkpoint_control)
+                .complete_barrier(node, tracker, checkpoint_control)
                 .await
             {
                 index = i;
@@ -859,7 +877,7 @@ where
         if let Some(err) = err_msg {
             let fail_nodes = complete_nodes
                 .drain(index..)
-                .chain(checkpoint_control.fail().into_iter());
+                .chain(checkpoint_control.barrier_failed().into_iter());
             self.do_recovery(err, fail_nodes, state, tracker).await;
         }
     }
@@ -904,7 +922,7 @@ where
     }
 
     /// Try to commit this node. If err, returns
-    async fn complete_barriers(
+    async fn complete_barrier(
         &self,
         node: &mut EpochNode<S>,
         tracker: &mut CreateMviewProgressTracker,
@@ -970,7 +988,10 @@ where
                         self.hummock_manager
                             .commit_epoch(
                                 prev_epoch,
-                                uncommitted_messages.uncommitted_ssts,
+                                uncommitted_messages
+                                    .uncommitted_ssts
+                                    .into_iter()
+                                    .collect_vec(),
                                 uncommitted_messages.uncommitted_work_ids,
                             )
                             .await?;

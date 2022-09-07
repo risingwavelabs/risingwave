@@ -131,11 +131,6 @@ impl From<MetaError> for tonic::Status {
     }
 }
 
-/// Convert `MetaError` into `tonic::Status`. Generally used in `map_err`.
-pub fn meta_error_to_tonic(err: impl Into<MetaError>) -> tonic::Status {
-    err.into().into()
-}
-
 impl From<ProstFieldNotFound> for MetaError {
     fn from(e: ProstFieldNotFound) -> Self {
         MetadataModelError::from(e).into()

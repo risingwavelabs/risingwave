@@ -72,6 +72,16 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .collect_vec()
     }
 
+    pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
+        self.inner
+            .read()
+            .await
+            .compaction_groups
+            .values()
+            .map(|cg| cg.group_id)
+            .collect_vec()
+    }
+
     pub async fn compaction_group(&self, id: CompactionGroupId) -> Option<CompactionGroup> {
         self.inner.read().await.compaction_groups.get(&id).cloned()
     }
@@ -359,12 +369,11 @@ impl CompactionGroupManagerInner {
 
 #[cfg(test)]
 mod tests {
-
     use std::collections::{BTreeMap, HashMap};
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
 
@@ -400,7 +409,7 @@ mod tests {
         assert_eq!(registered_number(inner.read().await.deref()), 0);
 
         let table_properties = HashMap::from([(
-            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from(PROPERTIES_RETENTION_SECOND_KEY),
             String::from("300"),
         )]);
         let table_option = TableOption::build_table_option(&table_properties);
@@ -522,7 +531,7 @@ mod tests {
         };
         assert_eq!(registered_number().await, 0);
         let table_properties = HashMap::from([(
-            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from(PROPERTIES_RETENTION_SECOND_KEY),
             String::from("300"),
         )]);
 

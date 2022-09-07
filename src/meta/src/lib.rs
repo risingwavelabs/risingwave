@@ -39,6 +39,8 @@
 #![feature(map_try_insert)]
 #![feature(hash_drain_filter)]
 #![feature(is_some_with)]
+#![feature(btree_drain_filter)]
+#![feature(result_option_inspect)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
@@ -57,7 +59,7 @@ use std::time::Duration;
 
 use clap::{ArgEnum, Parser};
 pub use error::{MetaError, MetaResult};
-use risingwave_common::config::ComputeNodeConfig;
+use serde::{Deserialize, Serialize};
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
@@ -147,22 +149,24 @@ pub struct MetaNodeOpts {
     /// Enable sanity check when SSTs are committed. By default disabled.
     #[clap(long)]
     enable_committed_sst_sanity_check: bool,
-}
 
-fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
-    risingwave_common::config::load_config(&opts.config_path)
+    /// Schedule compaction for all compaction groups with this interval.
+    #[clap(long, default_value = "60")]
+    pub periodic_compaction_interval_sec: u64,
 }
 
 use std::future::Future;
 use std::pin::Pin;
 
-/// Start meta node
+use risingwave_common::config::{load_config, StreamingConfig};
 
+/// Start meta node
 pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let compute_config = load_config(&opts);
+        let meta_config: MetaNodeConfig = load_config(&opts.config_path).unwrap();
+        tracing::info!("Starting meta node with config {:?}", meta_config);
         let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
@@ -182,11 +186,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             Backend::Mem => MetaStoreBackend::Mem,
         };
         let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
-        let checkpoint_interval =
-            Duration::from_millis(compute_config.streaming.barrier_interval_ms as u64);
+        let barrier_interval =
+            Duration::from_millis(meta_config.streaming.barrier_interval_ms as u64);
         let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
-        let in_flight_barrier_nums = compute_config.streaming.in_flight_barrier_nums as usize;
-        let checkpoint_frequency = compute_config.streaming.checkpoint_frequency as usize;
+        let in_flight_barrier_nums = meta_config.streaming.in_flight_barrier_nums as usize;
+        let checkpoint_frequency = meta_config.streaming.checkpoint_frequency as usize;
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -203,7 +207,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             opts.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
-                checkpoint_interval,
+                barrier_interval,
                 max_idle_ms,
                 in_flight_barrier_nums,
                 checkpoint_frequency,
@@ -212,6 +216,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compactor_selection_retry_interval_sec: opts.compactor_selection_retry_interval_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
+                periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
             },
         )
         .await
@@ -219,4 +224,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         join_handle.await.unwrap();
         tracing::info!("Meta server is stopped");
     })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct MetaNodeConfig {
+    // Below for streaming.
+    #[serde(default)]
+    pub streaming: StreamingConfig,
 }

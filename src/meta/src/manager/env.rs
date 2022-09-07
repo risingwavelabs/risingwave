@@ -64,7 +64,7 @@ where
 /// Options shared by all meta service instances
 pub struct MetaOpts {
     pub enable_recovery: bool,
-    pub checkpoint_interval: Duration,
+    pub barrier_interval: Duration,
 
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
@@ -83,13 +83,15 @@ pub struct MetaOpts {
     pub collect_gc_watermark_spin_interval_sec: u64,
     /// Enable sanity check when SSTs are committed
     pub enable_committed_sst_sanity_check: bool,
+    /// Schedule compaction for all compaction groups with this interval.
+    pub periodic_compaction_interval_sec: u64,
 }
 
 impl Default for MetaOpts {
     fn default() -> Self {
         Self {
             enable_recovery: false,
-            checkpoint_interval: Duration::from_millis(250),
+            barrier_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
             checkpoint_frequency: 20,
@@ -98,6 +100,7 @@ impl Default for MetaOpts {
             compactor_selection_retry_interval_sec: 5,
             collect_gc_watermark_spin_interval_sec: 5,
             enable_committed_sst_sanity_check: false,
+            periodic_compaction_interval_sec: 60,
         }
     }
 }
@@ -108,7 +111,7 @@ impl MetaOpts {
     pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
-            checkpoint_interval: Duration::from_millis(250),
+            barrier_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
             checkpoint_frequency: 20,

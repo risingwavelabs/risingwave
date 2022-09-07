@@ -21,7 +21,7 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::OrderedRowSerializer;
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
+use risingwave_common::util::value_encoding::deserialize_datum;
 
 use super::ColumnDescMapping;
 
@@ -31,9 +31,13 @@ pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
     result
 }
 
-pub fn serialize_column_id(column_id: &ColumnId) -> [u8; 4] {
-    let id = column_id.get_id();
-    (id as u32 ^ (1 << 31)).to_be_bytes()
+pub fn serialize_pk_with_vnode(
+    pk: &Row,
+    serializer: &OrderedRowSerializer,
+    vnode: VirtualNode,
+) -> Vec<u8> {
+    let pk_bytes = serialize_pk(pk, serializer);
+    [&vnode.to_be_bytes(), pk_bytes.as_slice()].concat()
 }
 
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
@@ -41,24 +45,10 @@ pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
     Ok((column_id as i32).into())
 }
 
-pub fn serialize_pk_and_column_id(pk_buf: &[u8], col_id: &ColumnId) -> Result<Vec<u8>> {
-    Ok([pk_buf, serialize_column_id(col_id).as_slice()].concat())
-}
-
 pub fn parse_raw_key_to_vnode_and_key(raw_key: &[u8]) -> (VirtualNode, &[u8]) {
     let (vnode_bytes, key_bytes) = raw_key.split_at(VIRTUAL_NODE_SIZE);
     let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
     (vnode, key_bytes)
-}
-
-/// used for streaming table serialize
-pub fn serialize(row: Row) -> Result<Vec<u8>> {
-    let mut value_bytes = vec![];
-    for cell in &row.0 {
-        value_bytes.extend(serialize_datum(cell)?);
-    }
-    let res = value_bytes;
-    Ok(res)
 }
 
 /// used for batch table deserialize

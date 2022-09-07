@@ -66,11 +66,33 @@ pub struct Args {
     #[clap(short, long)]
     jobs: Option<usize>,
 
+    /// The probability of etcd request timeout.
+    #[clap(long, default_value = "0.0")]
+    etcd_timeout_rate: f32,
+
+    /// Randomly kill the meta node after each query.
+    ///
+    /// Currently only available when `-j` is not set.
+    #[clap(long)]
+    kill_meta: bool,
+
+    /// Randomly kill a frontend node after each query.
+    ///
+    /// Currently only available when `-j` is not set.
+    #[clap(long)]
+    kill_frontend: bool,
+
     /// Randomly kill a compute node after each query.
     ///
-    /// Only available when `-j` is not set.
+    /// Currently only available when `-j` is not set.
     #[clap(long)]
-    kill_node: bool,
+    kill_compute: bool,
+
+    /// Randomly kill a compactor node after each query.
+    ///
+    /// Currently only available when `-j` is not set.
+    #[clap(long)]
+    kill_compactor: bool,
 
     /// The number of sqlsmith test cases to generate.
     ///
@@ -91,6 +113,23 @@ async fn main() {
     println!("seed = {}", handle.seed());
     println!("{:?}", args);
 
+    // etcd node
+    handle
+        .create_node()
+        .name("etcd")
+        .ip("192.168.10.1".parse().unwrap())
+        .init(|| async {
+            let addr = "0.0.0.0:2388".parse().unwrap();
+            etcd_client::SimServer::builder()
+                .timeout_rate(args.etcd_timeout_rate)
+                .serve(addr)
+                .await
+                .unwrap();
+        })
+        .build();
+    // wait for the service to be ready
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // meta node
     handle
         .create_node()
@@ -103,12 +142,16 @@ async fn main() {
                 // "src/config/risingwave.toml",
                 "--listen-addr",
                 "0.0.0.0:5690",
+                "--backend",
+                "etcd",
+                "--etcd-endpoints",
+                "192.168.10.1:2388",
             ]);
             risingwave_meta::start(opts).await
         })
         .build();
     // wait for the service to be ready
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
     // frontend node
     let mut frontend_ip = vec![];
@@ -156,7 +199,7 @@ async fn main() {
                 ]);
                 risingwave_compute::start(opts).await
             });
-        if args.kill_node {
+        if args.kill_compute || args.kill_meta {
             builder = builder.restart_on_panic();
         }
         builder.build();
@@ -227,26 +270,36 @@ async fn main() {
 
 #[cfg(madsim)]
 async fn kill_node() {
-    if rand::thread_rng().gen_range(0.0..1.0) < 0.0 {
-        // kill a frontend (disabled)
+    let mut nodes = vec![];
+    if ARGS.kill_meta {
+        nodes.push(format!("meta"));
+    }
+    if ARGS.kill_frontend {
         // FIXME: handle postgres connection error
         let i = rand::thread_rng().gen_range(1..=ARGS.frontend_nodes);
-        let name = format!("frontend-{}", i);
-        tracing::info!("restart {name}");
-        madsim::runtime::Handle::current().restart(&name);
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    } else {
-        // kill a compute node
+        nodes.push(format!("frontend-{}", i));
+    }
+    if ARGS.kill_compute {
         let i = rand::thread_rng().gen_range(1..=ARGS.compute_nodes);
-        let name = format!("compute-{}", i);
+        nodes.push(format!("compute-{}", i));
+    }
+    if ARGS.kill_compactor {
+        let i = rand::thread_rng().gen_range(1..=ARGS.compactor_nodes);
+        nodes.push(format!("compactor-{}", i));
+    }
+    if nodes.is_empty() {
+        return;
+    }
+    for name in &nodes {
         tracing::info!("kill {name}");
         madsim::runtime::Handle::current().kill(&name);
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
+    }
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    for name in &nodes {
         tracing::info!("restart {name}");
         madsim::runtime::Handle::current().restart(&name);
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     }
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 }
 
 #[cfg(not(madsim))]
@@ -267,7 +320,7 @@ impl sqllogictest::Hook for HookImpl {
 
 async fn run_slt_task(glob: &str, host: &str) {
     let risingwave = Risingwave::connect(host.to_string(), "dev".to_string()).await;
-    if ARGS.kill_node {
+    if ARGS.kill_compute {
         risingwave
             .client
             .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
@@ -275,15 +328,17 @@ async fn run_slt_task(glob: &str, host: &str) {
             .expect("failed to set");
     }
     let mut tester = sqllogictest::Runner::new(risingwave);
-    if ARGS.kill_node {
-        tester.set_hook(HookImpl);
-    }
+    tester.set_hook(HookImpl);
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
-        tester.run_file_async(path).await.unwrap();
+        tester
+            .run_file_async(path)
+            .await
+            .map_err(|e| panic!("{e}"))
+            .unwrap()
     }
 }
 
@@ -298,6 +353,7 @@ async fn run_parallel_slt_task(
     tester
         .run_parallel_async(glob, hosts.to_vec(), Risingwave::connect, jobs)
         .await
+        .map_err(|e| panic!("{e}"))
 }
 
 struct Risingwave {

@@ -36,6 +36,7 @@
 #![feature(assert_matches)]
 #![feature(map_first_last)]
 #![feature(lint_reasons)]
+#![feature(box_patterns)]
 
 #[macro_use]
 mod catalog;
@@ -54,7 +55,7 @@ mod scheduler;
 pub mod session;
 mod stream_fragmenter;
 mod utils;
-extern crate tracing;
+pub use utils::WithOptions;
 mod meta_client;
 pub mod test_utils;
 mod user;
@@ -65,6 +66,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use pgwire::pg_server::pg_serve;
+use serde::{Deserialize, Serialize};
 use session::SessionManagerImpl;
 
 #[derive(Parser, Clone, Debug)]
@@ -98,6 +100,8 @@ impl Default for FrontendOpts {
 use std::future::Future;
 use std::pin::Pin;
 
+use risingwave_common::config::ServerConfig;
+
 /// Start frontend
 pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
@@ -106,4 +110,11 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
         pg_serve(&opts.host, session_mgr).await.unwrap();
     })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct FrontendConfig {
+    // For connection
+    #[serde(default)]
+    pub server: ServerConfig,
 }

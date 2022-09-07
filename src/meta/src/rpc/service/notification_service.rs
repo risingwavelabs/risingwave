@@ -24,7 +24,6 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
-use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification, WorkerKey,
@@ -74,8 +73,8 @@ where
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
-        let host_address = req.get_host().map_err(meta_error_to_tonic)?.clone();
+        let worker_type = req.get_worker_type()?;
+        let host_address = req.get_host()?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
@@ -84,9 +83,6 @@ where
             catalog_guard.database.get_catalog().await?;
         let creating_tables = catalog_guard.database.list_creating_tables();
         let users = catalog_guard.user.list_users();
-
-        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
-        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
         let fragment_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.fragment_id));
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
@@ -97,6 +93,9 @@ where
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
         let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
+
+        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
+        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
         // Send the snapshot on subscription. After that we will send only updates.
         let meta_snapshot = match worker_type {

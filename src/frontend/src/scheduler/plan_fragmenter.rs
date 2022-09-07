@@ -24,6 +24,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as FieldProst;
+use serde::ser::SerializeStruct;
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -67,6 +69,21 @@ pub struct ExecutionPlanNode {
     ///
     /// `None` when this node is not `BatchExchange`.
     pub source_stage_id: Option<StageId>,
+}
+
+impl Serialize for ExecutionPlanNode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("QueryStage", 5)?;
+        state.serialize_field("plan_node_id", &self.plan_node_id)?;
+        state.serialize_field("plan_node_type", &self.plan_node_type)?;
+        state.serialize_field("schema", &self.schema)?;
+        state.serialize_field("children", &self.children)?;
+        state.serialize_field("source_stage_id", &self.source_stage_id)?;
+        state.end()
+    }
 }
 
 impl From<PlanRef> for ExecutionPlanNode {
@@ -213,6 +230,19 @@ impl Debug for QueryStage {
     }
 }
 
+impl Serialize for QueryStage {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("QueryStage", 3)?;
+        state.serialize_field("root", &self.root)?;
+        state.serialize_field("parallelism", &self.parallelism)?;
+        state.serialize_field("exchange_info", &self.exchange_info)?;
+        state.end()
+    }
+}
+
 pub type QueryStageRef = Arc<QueryStage>;
 
 struct QueryStageBuilder {
@@ -265,7 +295,7 @@ impl QueryStageBuilder {
 }
 
 /// Maintains how each stage are connected.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct StageGraph {
     pub root_stage_id: StageId,
     pub stages: HashMap<StageId, QueryStageRef>,
@@ -586,7 +616,7 @@ mod tests {
 
     use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
+    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
@@ -643,7 +673,7 @@ mod tests {
                 ],
                 distribution_key: vec![],
                 appendonly: false,
-                retention_seconds: TABLE_OPTION_DUMMY_RETAINTION_SECOND,
+                retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
             }),
             vec![],
             ctx,
