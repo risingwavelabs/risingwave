@@ -25,7 +25,6 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::Result;
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
@@ -545,38 +544,39 @@ impl Dispatcher for HashDataDispatcher {
 
             // get hash value of every line by its key
             let hash_builder = CRC32FastBuilder {};
-            let hash_values = chunk
+            let vnodes = chunk
+                .data_chunk()
                 .get_hash_values(&self.keys, hash_builder)
                 .unwrap()
-                .iter()
-                .map(|hash| *hash as usize % VIRTUAL_NODE_COUNT)
+                .into_iter()
+                .map(|hash| hash.to_vnode())
                 .collect_vec();
 
-            tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, hash_values);
+            tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, vnodes);
 
             let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
                 .take(num_outputs)
                 .collect_vec();
-            let mut last_hash_value_when_update_delete: usize = 0;
+            let mut last_vnode_when_update_delete = 0;
             let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
             let (ops, columns, visibility) = chunk.into_inner();
 
             match visibility {
                 None => {
-                    hash_values.iter().zip_eq(ops).for_each(|(hash, op)| {
+                    vnodes.iter().zip_eq(ops).for_each(|(vnode, op)| {
                         // get visibility map for every output chunk
                         for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
-                            vis_map.append(self.hash_mapping[*hash] == output.actor_id());
+                            vis_map.append(self.hash_mapping[*vnode as usize] == output.actor_id());
                         }
                         // The 'update' message, noted by an UpdateDelete and a successive
                         // UpdateInsert, need to be rewritten to common
                         // Delete and Insert if they were dispatched to
                         // different actors.
                         if op == Op::UpdateDelete {
-                            last_hash_value_when_update_delete = *hash;
+                            last_vnode_when_update_delete = *vnode;
                         } else if op == Op::UpdateInsert {
-                            if *hash != last_hash_value_when_update_delete {
+                            if *vnode != last_vnode_when_update_delete {
                                 new_ops.push(Op::Delete);
                                 new_ops.push(Op::Insert);
                             } else {
@@ -589,15 +589,15 @@ impl Dispatcher for HashDataDispatcher {
                     });
                 }
                 Some(visibility) => {
-                    hash_values
+                    vnodes
                         .iter()
                         .zip_eq(visibility.iter())
                         .zip_eq(ops)
-                        .for_each(|((hash, visible), op)| {
+                        .for_each(|((vnode, visible), op)| {
                             for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
                             {
                                 vis_map.append(
-                                    visible && self.hash_mapping[*hash] == output.actor_id(),
+                                    visible && self.hash_mapping[*vnode as usize] == output.actor_id(),
                                 );
                             }
                             if !visible {
@@ -605,9 +605,9 @@ impl Dispatcher for HashDataDispatcher {
                                 return;
                             }
                             if op == Op::UpdateDelete {
-                                last_hash_value_when_update_delete = *hash;
+                                last_vnode_when_update_delete = *vnode;
                             } else if op == Op::UpdateInsert {
-                                if *hash != last_hash_value_when_update_delete {
+                                if *vnode != last_vnode_when_update_delete {
                                     new_ops.push(Op::Delete);
                                     new_ops.push(Op::Insert);
                                     panic!("Update of the same pk is shuffled to different partitions, which might cause problems. We forbid this for now.");
