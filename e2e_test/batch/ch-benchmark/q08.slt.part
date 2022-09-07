@@ -1,4 +1,6 @@
-statement ok
+# ERROR:  QueryError: Feature is not yet implemented: unsupported function: "mod"
+# runs, but no output. Probably need to select different rows from tables.
+query TR rowsort
 select	 extract(year from o_entry_d) as l_year,
     	 sum(case when n2.n_name = 'Germany' then ol_amount else 0 end) / sum(ol_amount) as mkt_share
 from	 item, supplier, stock, orderline, order, customer, nation n1, nation n2, region

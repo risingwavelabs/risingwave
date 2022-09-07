@@ -1,6 +1,7 @@
-statement ok
+# runs, but no output. Probably need to select different rows from tables.
+query ITRTTT rowsort
 select	 c_id, c_last, sum(ol_amount) as revenue, c_city, c_phone, n_name
-from	 customer, orders, orderline, nation
+from	 customer, order, orderline, nation
 where	 c_id = o_c_id
     	 and c_w_id = o_w_id
     	 and c_d_id = o_d_id

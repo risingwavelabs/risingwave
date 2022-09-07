@@ -1,4 +1,6 @@
-statement ok
+# ERROR:  QueryError: Feature is not yet implemented: unsupported function: "mod"
+# runs, but no output. Probably need to select different rows from tables.
+query ITTR rowsort
 select	 s_nationkey as supp_nation,
     	 substr(c_state,1,1) as cust_nation,
     	 extract(year from o_entry_d) as l_year,

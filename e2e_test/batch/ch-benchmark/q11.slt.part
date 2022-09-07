@@ -1,4 +1,6 @@
-statement ok
+# ERROR:  QueryError: Feature is not yet implemented: unsupported function: "mod"
+# runs, but no output. Probably need to select different rows from tables.
+query II rowsort
 select	 s_i_id, sum(s_order_cnt) as ordercount
 from	 stock, supplier, nation
 where	 mod((s_w_id * s_i_id),10000) = s_suppkey

@@ -1,4 +1,5 @@
-statement ok
+# ERROR:  QueryError: Feature is not yet implemented: unsupported function: "mod"
+query TTII rowsort
 select	 i_name,
          substr(i_data, 1, 3) as brand,
          i_price,

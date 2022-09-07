@@ -1,4 +1,6 @@
-statement ok
+# ERROR:  QueryError: Feature is not yet implemented: unsupported function: "mod"
+# runs, but no output. Probably need to select different rows from tables.
+query TR rowsort
 select	 n_name,
     	 sum(ol_amount) as revenue
 from	 customer, order, orderline, stock, supplier, nation, region

@@ -1,7 +1,7 @@
-statement ok
+query II rowsort
 select	 c_count, count(*) as custdist
 from	 (select c_id, count(o_id)
-    	 from customer left outer join orders on (
+    	 from customer left outer join order on (
     		c_w_id = o_w_id
     		and c_d_id = o_d_id
     		and c_id = o_c_id
