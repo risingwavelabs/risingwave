@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
@@ -341,6 +342,25 @@ where
     pub async fn create_materialized_view(
         &self,
         table_fragments: &mut TableFragments,
+        context: &mut CreateMaterializedViewContext,
+    ) -> MetaResult<()> {
+        let mut revert_funcs = vec![];
+        if let Err(e) = self
+            .create_materialized_view_impl(&mut revert_funcs, table_fragments, context)
+            .await
+        {
+            for revert_func in revert_funcs.into_iter().rev() {
+                revert_func.await;
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    async fn create_materialized_view_impl(
+        &self,
+        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
+        table_fragments: &mut TableFragments,
         CreateMaterializedViewContext {
             dispatchers,
             upstream_worker_actors,
@@ -351,19 +371,6 @@ where
             ..
         }: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
-        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
-        // It MUST be cleared before Ok returns.
-        let mut revert_funcs = scopeguard::guard(
-            vec![],
-            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
-                tokio::spawn(async move {
-                    for revert_func in revert_funcs.into_iter().rev() {
-                        revert_func.await;
-                    }
-                });
-            },
-        );
-
         // Schedule actors to parallel units. `locations` will record the parallel unit that an
         // actor is scheduled to, and the worker node this parallel unit is on.
         let mut locations = {
@@ -684,8 +691,6 @@ where
         self.source_manager
             .patch_update(Some(source_fragments), Some(init_split_assignment))
             .await?;
-
-        revert_funcs.clear();
         Ok(())
     }
 
