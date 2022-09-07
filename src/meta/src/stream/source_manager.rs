@@ -48,7 +48,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 use tokio_retry::strategy::FixedInterval;
 
-use crate::barrier::{BarrierManagerRef, Command};
+use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId,
@@ -68,7 +68,7 @@ pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
-    barrier_manager: BarrierManagerRef<S>,
+    barrier_scheduler: BarrierScheduler<S>,
     compaction_group_manager: CompactionGroupManagerRef<S>,
     core: Arc<Mutex<SourceManagerCore<S>>>,
 }
@@ -416,7 +416,7 @@ where
     pub async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        barrier_scheduler: BarrierScheduler<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
@@ -454,7 +454,7 @@ where
             env,
             cluster_manager,
             catalog_manager,
-            barrier_manager,
+            barrier_scheduler,
             compaction_group_manager,
             core,
         })
@@ -717,7 +717,7 @@ where
 
             tokio_retry::Retry::spawn(FixedInterval::new(Self::SOURCE_RETRY_INTERVAL), || async {
                 let command = command.clone();
-                self.barrier_manager.run_command(command).await
+                self.barrier_scheduler.run_command(command).await
             })
             .await
             .expect("source manager barrier push down failed");
