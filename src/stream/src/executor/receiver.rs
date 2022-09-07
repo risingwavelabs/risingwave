@@ -196,3 +196,118 @@ impl Executor for ReceiverExecutor {
         &self.info.identity
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use futures::{pin_mut, FutureExt};
+    use risingwave_common::array::StreamChunk;
+    use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
+
+    use super::*;
+    use crate::executor::{ActorContext, Barrier, Executor, Mutation};
+    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
+
+    #[tokio::test]
+    async fn test_configuration_change() {
+        let schema = Schema { fields: vec![] };
+
+        let actor_id = 233;
+        let ctx = Arc::new(SharedContext::for_test());
+        let metrics = Arc::new(StreamingMetrics::unused());
+
+        // 1. Register info and channels in context.
+        {
+            let mut actor_infos = ctx.actor_infos.write();
+
+            for local_actor_id in [actor_id, 114, 514] {
+                actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
+            }
+        }
+        add_local_channels(ctx.clone(), vec![(114, actor_id), (514, actor_id)]);
+
+        let input = new_input(&ctx, metrics.clone(), actor_id, 0, 114, 0).unwrap();
+
+        let receiver = ReceiverExecutor::new(
+            schema,
+            vec![],
+            ActorContext::create(actor_id),
+            0,
+            0,
+            input,
+            ctx.clone(),
+            233,
+            metrics.clone(),
+        )
+        .boxed()
+        .execute();
+
+        pin_mut!(receiver);
+
+        // 2. Take downstream receivers.
+        let txs = [114, 514]
+            .into_iter()
+            .map(|id| (id, ctx.take_sender(&(id, actor_id)).unwrap()))
+            .collect::<HashMap<_, _>>();
+        macro_rules! send {
+            ($actors:expr, $msg:expr) => {
+                for actor in $actors {
+                    txs.get(&actor).unwrap().send($msg).await.unwrap();
+                }
+            };
+        }
+        macro_rules! send_error {
+            ($actors:expr, $msg:expr) => {
+                for actor in $actors {
+                    txs.get(&actor).unwrap().send($msg).await.unwrap_err();
+                }
+            };
+        }
+        macro_rules! recv {
+            () => {
+                receiver
+                    .next()
+                    .now_or_never()
+                    .flatten()
+                    .transpose()
+                    .unwrap()
+            };
+        }
+
+        // 3. Send a chunk.
+        send!([114], Message::Chunk(StreamChunk::default()));
+        recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk.
+        assert!(recv!().is_none());
+
+        // 4. Send a configuration change barrier.
+        let merge_updates = maplit::hashmap! {
+            actor_id => MergeUpdate {
+                added_upstream_actor_id: vec![514],
+                removed_upstream_actor_id: vec![114],
+            }
+        };
+
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+            dispatchers: Default::default(),
+            merges: merge_updates,
+            vnode_bitmaps: Default::default(),
+            dropped_actors: Default::default(),
+        });
+        send!([514], Message::Barrier(b1.clone()));
+        assert!(recv!().is_none()); // We should not receive the barrier, as 514 is not the upstream.
+
+        send!([114], Message::Barrier(b1.clone()));
+        recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
+
+        // 5. Send a chunk to the removed upstream.
+        send_error!([114], Message::Chunk(StreamChunk::default()));
+        assert!(recv!().is_none());
+
+        // 6. Send a chunk to the added upstream.
+        send!([514], Message::Chunk(StreamChunk::default()));
+        recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk.
+        assert!(recv!().is_none());
+    }
+}
