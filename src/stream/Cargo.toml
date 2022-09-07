@@ -75,3 +75,8 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+criterion = { version = "0.3" }
+
+[[bench]]
+name = "bench_encoding"
+harness = false
