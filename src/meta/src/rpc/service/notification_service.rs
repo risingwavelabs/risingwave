@@ -74,6 +74,9 @@ where
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
+        if worker_type == WorkerType::Compactor {
+            self.hummock_manager.pin_snapshot(req.worker_id).await?;
+        }
         let host_address = req.get_host()?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
