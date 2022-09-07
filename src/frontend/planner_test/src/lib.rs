@@ -439,6 +439,7 @@ impl TestCase {
                     context,
                     Box::new(q),
                     ObjectName(vec!["test".into()]),
+                    false,
                 ) {
                     Ok((stream_plan, _table)) => stream_plan,
                     Err(err) => {
