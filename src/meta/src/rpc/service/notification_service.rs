@@ -84,16 +84,6 @@ where
         let creating_tables = catalog_guard.database.list_creating_tables();
         let users = catalog_guard.user.list_users();
 
-        let context_id = match self
-            .cluster_manager
-            .get_cluster_core_guard()
-            .await
-            .get_worker_by_host(host_address.clone())
-        {
-            Some(worker) => worker.worker_id(),
-            None => return Err(Status::invalid_argument("worker is removed")),
-        };
-
         let fragment_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.fragment_id));
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
         let parallel_unit_mappings = fragment_guard
@@ -102,7 +92,9 @@ where
             .collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
-        self.hummock_manager.pin_version(context_id).await?;
+        self.hummock_manager
+            .pin_version(req.get_worker_id())
+            .await?;
         let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;

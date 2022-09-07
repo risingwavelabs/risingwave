@@ -89,6 +89,7 @@ impl MetaClient {
         let request = SubscribeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
+            worker_id: self.worker_id(),
         };
         self.inner.subscribe(request).await
     }
