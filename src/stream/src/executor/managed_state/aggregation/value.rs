@@ -103,7 +103,7 @@ impl<S: StateStore> ManagedValueState<S> {
                 .as_ref()
                 .unwrap_or_else(Row::empty)
                 .values()
-                .map(|v| v.clone())
+                .cloned()
                 .chain(std::iter::once(output))
                 .collect(),
         );
