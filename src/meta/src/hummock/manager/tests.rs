@@ -528,6 +528,10 @@ async fn test_hummock_manager_basic() {
             Payload::PinnedVersion(version) => version,
         };
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
+        assert_eq!(
+            hummock_manager.get_min_pinned_version_id().await,
+            FIRST_VERSION_ID + 1
+        );
     }
 
     commit_one(epoch, hummock_manager.clone()).await;
