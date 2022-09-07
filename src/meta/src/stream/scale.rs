@@ -138,15 +138,11 @@ where
             actor_status.extend(table_fragments.actor_status.clone());
         }
 
-        // Index the downstream fragment, will skip the chain of mv on mv
+        // Index the downstream fragment
         let mut downstream_fragment_id_map = HashMap::new();
         for actor in actor_map.values() {
             for dispatcher in &actor.dispatcher {
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
-                    if chain_actor_ids.contains(downstream_actor_id) {
-                        continue;
-                    }
-
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
                         downstream_fragment_id_map
                             .entry(actor.fragment_id as FragmentId)
@@ -190,7 +186,7 @@ where
             match fragment.get_fragment_type()? {
                 FragmentType::Source => bail!("scaling SourceNode is not supported"),
                 FragmentType::Sink if downstream_fragment_id_map.get(fragment_id).is_some() => {
-                    bail!("scaling of SinkNode with downstream is not supported")
+                    bail!("scaling of SinkNode / MaterializeNode with downstream is not supported")
                 }
                 _ => {}
             }
@@ -694,8 +690,8 @@ where
         Ok(())
     }
 
-    // Modifies the upstream and downstream actors of the new created actor according to the overall
-    // changes, and is used to handle cascading updates
+    /// Modifies the upstream and downstream actors of the new created actor according to the
+    /// overall changes, and is used to handle cascading updates
     fn modify_actor_upstream_and_downstream(
         fragment_map: &HashMap<FragmentId, Fragment>,
         actor_map: &HashMap<ActorId, StreamActor>,
@@ -726,7 +722,7 @@ where
                         _ => bail!("single distribution only support migration"),
                     }
                 }
-                _ => unreachable!(),
+                FragmentDistributionType::Unspecified => unreachable!(),
             }
         }
 
@@ -817,7 +813,7 @@ where
                             .extend(downstream_actors_to_create.keys().cloned())
                     }
                 }
-                _ => unimplemented!(),
+                _ => bail!("only hash dispatcher is supported"),
             }
 
             if let Some(mapping) = dispatcher.hash_mapping.as_mut() {
@@ -842,7 +838,7 @@ where
                     (None, None) => {
                         // do nothing
                     }
-                    _ => unimplemented!(),
+                    _ => bail!("mapping update for scaling is not supported"),
                 }
             }
         }
