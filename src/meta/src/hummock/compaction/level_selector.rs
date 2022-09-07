@@ -453,7 +453,9 @@ pub mod tests {
         }
     }
 
-    pub fn generate_l0_with_overlap(table_infos: Vec<SstableInfo>) -> OverlappingLevel {
+    /// Returns a `OverlappingLevel`, with each `table_infos`'s element placed in a nonoverlapping
+    /// sub-level.
+    pub fn generate_l0_nonoverlapping_sublevels(table_infos: Vec<SstableInfo>) -> OverlappingLevel {
         let total_file_size = table_infos.iter().map(|table| table.file_size).sum::<u64>();
         OverlappingLevel {
             sub_levels: table_infos
@@ -469,6 +471,29 @@ pub mod tests {
                 .collect_vec(),
             total_file_size,
         }
+    }
+
+    /// Returns a `OverlappingLevel`, with each `table_infos`'s element placed in a overlapping
+    /// sub-level.
+    pub fn generate_l0_overlapping_sublevels(
+        table_infos: Vec<Vec<SstableInfo>>,
+    ) -> OverlappingLevel {
+        let mut l0 = OverlappingLevel {
+            sub_levels: table_infos
+                .into_iter()
+                .enumerate()
+                .map(|(idx, table)| Level {
+                    level_idx: 0,
+                    level_type: LevelType::Overlapping as i32,
+                    total_file_size: table.iter().map(|table| table.file_size).sum::<u64>(),
+                    sub_level_id: idx as u64,
+                    table_infos: table.clone(),
+                })
+                .collect_vec(),
+            total_file_size: 0,
+        };
+        l0.total_file_size = l0.sub_levels.iter().map(|l| l.total_file_size).sum::<u64>();
+        l0
     }
 
     fn assert_compaction_task(compact_task: &CompactionTask, level_handlers: &[LevelHandler]) {
@@ -500,7 +525,7 @@ pub mod tests {
         ];
         let mut levels = Levels {
             levels,
-            l0: Some(generate_l0_with_overlap(vec![])),
+            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
         };
         let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 2);
@@ -571,7 +596,7 @@ pub mod tests {
         ];
         let mut levels = Levels {
             levels,
-            l0: Some(generate_l0_with_overlap(generate_tables(
+            l0: Some(generate_l0_nonoverlapping_sublevels(generate_tables(
                 15..25,
                 0..600,
                 3,
@@ -643,7 +668,7 @@ pub mod tests {
     fn test_manual_compaction_picker_l0() {
         let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
         let selector = DynamicLevelSelector::new(config, Arc::new(RangeOverlapStrategy::default()));
-        let l0 = generate_l0_with_overlap(vec![
+        let l0 = generate_l0_nonoverlapping_sublevels(vec![
             generate_table(0, 1, 0, 500, 1),
             generate_table(1, 1, 0, 500, 1),
         ]);
@@ -728,7 +753,7 @@ pub mod tests {
     fn test_manual_compaction_picker() {
         let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
         let selector = DynamicLevelSelector::new(config, Arc::new(RangeOverlapStrategy::default()));
-        let l0 = generate_l0_with_overlap(vec![]);
+        let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
         let levels = vec![
             generate_level(1, vec![]),
