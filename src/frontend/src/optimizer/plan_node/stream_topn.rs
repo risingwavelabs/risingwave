@@ -29,6 +29,7 @@ pub struct StreamTopN {
 
 impl StreamTopN {
     pub fn new(logical: LogicalTopN) -> Self {
+        assert!(logical.group_key().is_empty());
         let ctx = logical.base.ctx.clone();
         let dist = match logical.input().distribution() {
             Distribution::Single => Distribution::Single,

@@ -7,3 +7,8 @@ query T
 SELECT to_char(timestamp '2006-01-02 15:04:05', 'YYYY-MM-DD HH24:MI:SS');
 ----
 2006-01-02 15:04:05
+
+query T
+SELECT to_char(timestamp '2006-01-02 15:04:05', 'yyyy-mm-dd hh24:mi:ss');
+----
+2006-01-02 15:04:05

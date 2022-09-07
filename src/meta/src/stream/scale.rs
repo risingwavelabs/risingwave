@@ -673,7 +673,7 @@ where
 
         let applied_reschedules = self
             .fragment_manager
-            .pre_apply_reschedules(fragment_created_actors.clone())
+            .pre_apply_reschedules(fragment_created_actors)
             .await;
 
         let fragment_manager_ref = self.fragment_manager.clone();

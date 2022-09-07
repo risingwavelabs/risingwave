@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use tokio::io::AsyncRead;
 
 pub mod mem;
 pub use mem::*;
@@ -148,6 +149,15 @@ pub trait ObjectStore: Send + Sync {
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes>;
 
     async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>>;
+
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    async fn streaming_read(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>>;
 
     /// Obtains the object metadata.
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata>;
@@ -309,6 +319,17 @@ impl ObjectStoreImpl {
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         object_store_impl_method_body!(self, metadata, path)
+    }
+
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    pub async fn streaming_read(
+        &self,
+        path: &str,
+        start_loc: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        object_store_impl_method_body!(self, streaming_read, path, start_loc)
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
@@ -491,6 +512,18 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .read_bytes
             .inc_by(ret.iter().map(|block| block.len()).sum::<usize>() as u64);
         Ok(ret)
+    }
+
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    async fn streaming_read(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        // TODO: add metrics
+        self.inner.streaming_read(path, start_pos).await
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
