@@ -16,7 +16,8 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use futures::StreamExt;
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
+use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::TaskOutputId;
@@ -24,17 +25,20 @@ use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 // use futures_async_stream::try_stream;
 use tokio::sync::oneshot;
+use tokio::sync::oneshot::Receiver;
 use tracing::debug;
 
 // use async_stream::try_stream;
 // use futures::stream;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
+use crate::handler::query::QueryResultSet;
+use crate::handler::util::to_pg_rows;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError,
-    SchedulerResult,
+    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, LocalQueryExecution,
+    SchedulerError, SchedulerResult,
 };
 
 pub struct QueryResultFetcher {
@@ -77,8 +81,8 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
-        shutdown_tx: oneshot::Sender<SchedulerError>,
-    ) -> SchedulerResult<impl DataChunkStream> {
+        format: bool,
+    ) -> SchedulerResult<QueryResultSet> {
         let query_id = query.query_id().clone();
         let epoch = self
             .hummock_snapshot_manager
@@ -100,6 +104,8 @@ impl QueryManager {
         // // Create a oneshot channel for QueryResultFetcher to get failed event.
         // let (shutdown_tx_for_cancel, shutdown_rx_for_cancel) = oneshot::channel();
 
+        // Create a oneshot channel for QueryResultFetcher to get failed event.
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
         // // Insert shutdown channel into channel map so able to cancel it outside.
         // // TODO: Find a way to delete it when query ends.
         // {
@@ -117,7 +123,9 @@ impl QueryManager {
             }
         };
 
-        Ok(query_result_fetcher.run())
+        // Ok(query_result_fetcher.run())
+        // query_result_fetcher.collect_chunks(format).await
+        query_result_fetcher.collect_rows(format, shutdown_rx).await
     }
 }
 
@@ -152,6 +160,34 @@ impl QueryResultFetcher {
         while let Some(response) = stream.next().await {
             yield DataChunk::from_protobuf(response?.get_record_batch()?)?;
         }
+    }
+
+    fn run_wrapper(self) -> BoxedDataChunkStream {
+        Box::pin(self.run())
+    }
+
+    pub async fn collect_rows(
+        self,
+        format: bool,
+        shutdown_rx: Receiver<SchedulerError>,
+    ) -> SchedulerResult<QueryResultSet> {
+        let data_stream = self.run_wrapper();
+        let mut data_stream = data_stream.take_until(shutdown_rx);
+        let mut rows = vec![];
+        #[for_await]
+        for chunk in &mut data_stream {
+            rows.extend(to_pg_rows(chunk?, format));
+        }
+
+        // Check whether error happen, if yes, returned.
+        let execution_ret = data_stream.take_result();
+        if let Some(ret) = execution_ret {
+            return Err(ret
+                .expect("The shutdown message receiver should not fail")
+                .into());
+        }
+
+        Ok(rows)
     }
 }
 
