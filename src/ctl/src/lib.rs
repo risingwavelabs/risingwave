@@ -113,10 +113,14 @@ enum MetaCommands {
     Resume,
     /// get cluster info
     ClusterInfo,
-    /// reschedule
+    /// Reschedule the parallel unit in the stream graph
     Reschedule {
-        /// plan of reschedule
-        plan: String
+        /// Plan of reschedule
+        #[clap(long)]
+        plan: String,
+        /// Show the plan only, no actual operation
+        #[clap(long)]
+        dry_run: bool,
     },
 }
 
@@ -149,7 +153,7 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause().await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
-        Commands::Meta(MetaCommands::Reschedule { plan }) => cmd_impl::meta::reschedule(plan).await?,
+        Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => cmd_impl::meta::reschedule(plan, dry_run).await?,
         Commands::Trace => cmd_impl::trace::trace().await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(sleep).await?,
     }
