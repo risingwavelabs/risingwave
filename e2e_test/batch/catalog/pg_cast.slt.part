@@ -1,4 +1,4 @@
-query IIIT
+query IIIT rowsort
 SELECT * FROM pg_catalog.pg_cast
 ----
 0 16 23 EXPLICIT

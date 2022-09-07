@@ -118,11 +118,9 @@ impl DataTypeName {
             DataTypeName::Struct | DataTypeName::List => false,
         }
     }
-}
 
-impl From<DataTypeName> for DataType {
-    fn from(type_name: DataTypeName) -> Self {
-        match type_name {
+    pub fn to_type(&self) -> Option<DataType> {
+        let t = match self {
             DataTypeName::Boolean => DataType::Boolean,
             DataTypeName::Int16 => DataType::Int16,
             DataTypeName::Int32 => DataType::Int32,
@@ -137,9 +135,16 @@ impl From<DataTypeName> for DataType {
             DataTypeName::Time => DataType::Time,
             DataTypeName::Interval => DataType::Interval,
             DataTypeName::Struct | DataTypeName::List => {
-                panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
+                return None;
             }
-        }
+        };
+        Some(t)
+    }
+}
+
+impl From<DataTypeName> for DataType {
+    fn from(type_name: DataTypeName) -> Self {
+        type_name.to_type().unwrap_or_else(|| panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`."))
     }
 }
 
