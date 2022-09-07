@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -55,6 +56,8 @@ pub struct QueryManager {
     catalog_reader: CatalogReader,
 }
 
+type QueryManagerRef = Arc<QueryManager>;
+
 impl QueryManager {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
@@ -72,7 +75,7 @@ impl QueryManager {
 
     pub async fn schedule(
         &self,
-        _context: ExecutionContextRef,
+        context: ExecutionContextRef,
         query: Query,
         shutdown_tx: oneshot::Sender<SchedulerError>,
     ) -> SchedulerResult<impl DataChunkStream> {
@@ -84,15 +87,26 @@ impl QueryManager {
             .committed_epoch;
 
         let query_execution = QueryExecution::new(
+            context,
             query,
             epoch,
             self.worker_node_manager.clone(),
             self.hummock_snapshot_manager.clone(),
             self.compute_client_pool.clone(),
             self.catalog_reader.clone(),
-        );
+        )
+        .await;
 
-        // Create a oneshot channel for QueryResultFetcher to get failed event.
+        // // Create a oneshot channel for QueryResultFetcher to get failed event.
+        // let (shutdown_tx_for_cancel, shutdown_rx_for_cancel) = oneshot::channel();
+
+        // // Insert shutdown channel into channel map so able to cancel it outside.
+        // // TODO: Find a way to delete it when query ends.
+        // {
+        //     let session_ctx = context.session.clone();
+        //     session_ctx.insert_query_shutdown_sender(query_id.clone(), shutdown_tx_for_cancel);
+        // }
+
         let query_result_fetcher = match query_execution.start(shutdown_tx).await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
