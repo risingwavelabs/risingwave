@@ -1,9 +1,8 @@
-# ERROR:  QueryError: Feature is not yet implemented: unsupported function: "mod"
 query TT rowsort
 select	 s_name, s_address
 from	 supplier, nation
 where	 s_suppkey in
-                (select  mod(s_i_id * s_w_id, 10000)
+                (select  (s_i_id * s_w_id) % 10000
                 from     tpcc_stock, tpcc_orderline
                 where    s_i_id in
                                 (select i_id

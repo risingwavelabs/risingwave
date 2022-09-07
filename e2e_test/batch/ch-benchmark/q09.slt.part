@@ -1,11 +1,10 @@
-# ERROR:  QueryError: Feature is not yet implemented: unsupported function: "mod"
 # runs, but no output. Probably need to select different rows from tables.
 query TTR rowsort
 select	 n_name, extract(year from o_entry_d) as l_year, sum(ol_amount) as sum_profit
 from	 tpcc_item, tpcc_stock, supplier, tpcc_orderline, tpcc_order, nation
 where	 ol_i_id = s_i_id
     	 and ol_supply_w_id = s_w_id
-    	 and mod((s_w_id * s_i_id), 10000) = s_suppkey
+    	 and (s_w_id * s_i_id) % 10000 = s_suppkey
     	 and ol_w_id = o_w_id
     	 and ol_d_id = o_d_id
     	 and ol_o_id = o_id
