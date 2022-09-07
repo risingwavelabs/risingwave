@@ -323,8 +323,7 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
 
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
-        let managed_state =
-            ManagedTopNState::<S>::new(total_count, state_table, ordered_row_deserializer);
+        let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
 
         Ok(Self {
             info: ExecutorInfo {

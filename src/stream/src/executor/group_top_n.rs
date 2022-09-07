@@ -123,8 +123,7 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
 
-        let managed_state =
-            ManagedTopNState::<S>::new(total_count, state_table, ordered_row_deserializer);
+        let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
 
         Ok(Self {
             info: ExecutorInfo {
