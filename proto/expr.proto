@@ -95,6 +95,10 @@ message ExprNode {
     ARRAY = 521;
     ARRAY_ACCESS = 522;
     ROW = 523;
+    // Array functions
+    ARRAY_CAT = 531;
+    ARRAY_APPEND = 532;
+    ARRAY_PREPEND = 533;
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;

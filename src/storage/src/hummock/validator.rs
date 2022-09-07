@@ -48,18 +48,21 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             Ok(holder) => holder,
             Err(err) => {
                 // One reasonable cause is the SST has been vacuumed.
-                tracing::warn!("Skip sanity check for SST {}. {:#?}", sst_id, err);
+                tracing::warn!("Skip sanity check for SST {}. {}", sst_id, err);
                 continue;
             }
         };
+
+        // TODO: to use `prefetch: false` after `prefetch` be supported by
+        // SstableIteratorReadOptions
         let mut iter = SstableIterator::new(
             holder,
             sstable_store.clone(),
-            Arc::new(SstableIteratorReadOptions { prefetch: false }),
+            Arc::new(SstableIteratorReadOptions::default()),
         );
         let mut previous_key: Option<Vec<u8>> = None;
         if let Err(err) = iter.rewind().await {
-            tracing::warn!("Skip sanity check for SST {}. {:#?}", sst_id, err);
+            tracing::warn!("Skip sanity check for SST {}. {}", sst_id, err);
         }
         while iter.is_valid() {
             key_counts += 1;
@@ -88,7 +91,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             }
             previous_key = Some(current_key);
             if let Err(err) = iter.next().await {
-                tracing::warn!("Skip remaining sanity check for SST {}. {:#?}", sst_id, err);
+                tracing::warn!("Skip remaining sanity check for SST {}. {}", sst_id, err);
                 break;
             }
         }
@@ -98,5 +101,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             sst_id,
             task.epoch
         );
+        iter.collect_local_statistic(&mut unused);
+        unused.ignore();
     }
 }

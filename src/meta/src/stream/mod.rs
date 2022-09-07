@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod scale;
 mod scheduler;
 mod source_manager;
 mod stream_graph;
@@ -19,6 +20,7 @@ mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
 
+pub use scale::*;
 pub use scheduler::*;
 pub use source_manager::*;
 pub use stream_graph::*;

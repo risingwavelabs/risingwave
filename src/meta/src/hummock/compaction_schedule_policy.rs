@@ -48,6 +48,8 @@ pub trait CompactionSchedulePolicy: Send + Sync {
 
     fn remove_compactor(&mut self, context_id: HummockContextId);
 
+    fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>>;
+
     /// Notify the `CompactorManagerInner` of the completion of a task to adjust the next compactor
     /// to schedule.
     fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask);
@@ -55,8 +57,12 @@ pub trait CompactionSchedulePolicy: Send + Sync {
 
 // This strategy is retained just for reference, it is not used.
 pub struct RoundRobinPolicy {
-    /// Senders of stream to available compactors.
-    compactors: Vec<Arc<Compactor>>,
+    /// The context ids of compactors.
+    compactors: Vec<HummockContextId>,
+
+    /// TODO: Let each compactor have its own Mutex, we should not need to lock whole thing.
+    /// The outer lock is a RwLock, so we should still be able to modify each compactor
+    compactor_map: HashMap<HummockContextId, Arc<Compactor>>,
 
     /// We use round-robin approach to assign tasks to compactors.
     /// This field indexes the compactor which the next task should be assigned to.
@@ -67,6 +73,7 @@ impl RoundRobinPolicy {
     pub fn new() -> Self {
         Self {
             compactors: vec![],
+            compactor_map: HashMap::new(),
             next_compactor: 0,
         }
     }
@@ -105,25 +112,9 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
             return None;
         }
         let compactor_index = self.next_compactor % self.compactors.len();
-        let compactor = self.compactors[compactor_index].clone();
+        let compactor = self.compactors[compactor_index];
         self.next_compactor += 1;
-        Some(compactor)
-    }
-
-    fn add_compactor(
-        &mut self,
-        context_id: HummockContextId,
-        max_concurrent_task_number: u64,
-    ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
-        self.compactors.retain(|c| c.context_id() != context_id);
-        self.compactors.push(Arc::new(Compactor::new(
-            context_id,
-            tx,
-            max_concurrent_task_number,
-        )));
-        tracing::info!("Added compactor session {}", context_id);
-        rx
+        Some(self.compactor_map.get(&compactor).unwrap().clone())
     }
 
     fn random_compactor(&mut self, _compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
@@ -132,13 +123,33 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         }
 
         let compactor_index = rand::thread_rng().gen::<usize>() % self.compactors.len();
-        let compactor = self.compactors[compactor_index].clone();
-        Some(compactor)
+        let compactor = self.compactors[compactor_index];
+        Some(self.compactor_map.get(&compactor).unwrap().clone())
+    }
+
+    fn add_compactor(
+        &mut self,
+        context_id: HummockContextId,
+        max_concurrent_task_number: u64,
+    ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
+        let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
+        self.compactors.retain(|c| *c != context_id);
+        self.compactor_map.remove(&context_id);
+        self.compactors.push(context_id);
+        self.compactor_map.insert(
+            context_id,
+            Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
+        );
+        rx
     }
 
     fn remove_compactor(&mut self, context_id: HummockContextId) {
-        self.compactors.retain(|c| c.context_id() != context_id);
-        tracing::info!("Removed compactor session {}", context_id);
+        self.compactors.retain(|c| *c != context_id);
+        self.compactor_map.remove(&context_id);
+    }
+
+    fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
+        self.compactor_map.get(&context_id).cloned()
     }
 
     fn report_compact_task(&mut self, _context_id: HummockContextId, _task: &CompactTask) {}
@@ -269,7 +280,6 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
         );
         self.compactor_to_score.insert(context_id, 0);
-        tracing::info!("Added compactor session {}", context_id);
         rx
     }
 
@@ -279,7 +289,15 @@ impl CompactionSchedulePolicy for ScoredPolicy {
                 .remove(&(pending_bytes, context_id))
                 .unwrap();
         }
-        tracing::info!("Removed compactor session {}", context_id);
+    }
+
+    fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
+        if let Some(score) = self.compactor_to_score.get(&context_id) {
+            let compactor = self.score_to_compactor.get(&(*score, context_id));
+            Some(compactor.unwrap().clone())
+        } else {
+            None
+        }
     }
 
     fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask) {
@@ -319,7 +337,7 @@ mod tests {
     {
         let original_tables = generate_test_tables(epoch, get_sst_ids(hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager_ref_for_test(),
+            hummock_manager.compaction_group_manager(),
             &original_tables,
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -384,7 +402,14 @@ mod tests {
         ));
 
         let task = dummy_compact_task(123, 0);
-        let compactor = compactor_manager.compactors.first().unwrap().clone();
+        let compactor = {
+            let compactor_id = compactor_manager.compactors.first().unwrap();
+            compactor_manager
+                .compactor_map
+                .get(compactor_id)
+                .unwrap()
+                .clone()
+        };
         compactor
             .send_task(Task::CompactTask(task.clone()))
             .await

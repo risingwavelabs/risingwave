@@ -16,8 +16,9 @@ use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, OrderDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
 #[derive(Debug, Clone)]
@@ -53,23 +54,23 @@ impl StreamGroupTopN {
     }
 }
 
-impl ToStreamProst for StreamGroupTopN {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamGroupTopN {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let group_key = self.group_key.iter().map(|idx| *idx as u32).collect();
 
         if self.logical.limit() == 0 {
             panic!("topN's limit shouldn't be 0.");
         }
+        let table = self
+            .logical
+            .infer_internal_table_catalog(Some(&self.group_key))
+            .with_id(state.gen_table_id_wrapped());
         let group_topn_node = GroupTopNNode {
             limit: self.logical.limit() as u64,
             offset: self.logical.offset() as u64,
             group_key,
-            table: Some(
-                self.logical
-                    .infer_internal_table_catalog(Some(&self.group_key))
-                    .to_state_table_prost(),
-            ),
+            table: Some(table.to_state_table_prost()),
         };
 
         ProstStreamNode::GroupTopN(group_topn_node)

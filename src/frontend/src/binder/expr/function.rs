@@ -16,17 +16,17 @@ use std::iter::once;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
+use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
 use crate::binder::bind_context::Clause;
-use crate::binder::Binder;
+use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, TableFunction,
-    TableFunctionType, WindowFunction, WindowFunctionType,
+    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, Subquery, SubqueryKind,
+    TableFunction, TableFunctionType, WindowFunction, WindowFunctionType,
 };
 use crate::utils::Condition;
 
@@ -34,6 +34,17 @@ impl Binder {
     pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
         let function_name = if f.name.0.len() == 1 {
             f.name.0.get(0).unwrap().real_value()
+        } else if f.name.0.len() == 2 {
+            let schema_name = f.name.0.get(0).unwrap().real_value();
+            if schema_name == PG_CATALOG_SCHEMA_NAME {
+                f.name.0.get(1).unwrap().real_value()
+            } else {
+                return Err(ErrorCode::BindError(format!(
+                    "Unsupported function name under schema: {}",
+                    schema_name
+                ))
+                .into());
+            }
         } else {
             return Err(ErrorCode::NotImplemented(
                 format!("qualified function: {}", f.name),
@@ -148,6 +159,10 @@ impl Binder {
             "octet_length" => ExprType::OctetLength,
             "bit_length" => ExprType::BitLength,
             "regexp_match" => ExprType::RegexpMatch,
+            // array
+            "array_cat" => ExprType::ArrayCat,
+            "array_append" => ExprType::ArrayAppend,
+            "array_prepend" => ExprType::ArrayPrepend,
             // System information operations.
             "pg_typeof" if inputs.len() == 1 => {
                 let input = &inputs[0];
@@ -168,6 +183,28 @@ impl Binder {
                     self.auth_context.user_name.clone(),
                 ));
             }
+            "pg_get_userbyid" => {
+                return if inputs.len() == 1 {
+                    let input = &inputs[0];
+                    let bound_query = self.bind_get_user_by_id_select(input)?;
+                    Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                        BoundQuery {
+                            body: BoundSetExpr::Select(Box::new(bound_query)),
+                            order: vec![],
+                            limit: None,
+                            offset: None,
+                            extra_order_exprs: vec![],
+                        },
+                        SubqueryKind::Scalar,
+                    ))))
+                } else {
+                    Err(ErrorCode::ExprError(
+                        "Too many/few arguments for pg_catalog.pg_get_userbyid()".into(),
+                    )
+                    .into())
+                }
+            }
+            "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
             // internal
             "rw_vnode" => ExprType::Vnode,
             _ => {
@@ -181,7 +218,7 @@ impl Binder {
         Ok(FunctionCall::new(function_type, inputs)?.into())
     }
 
-    pub(super) fn bind_agg(&mut self, f: Function, kind: AggKind) -> Result<ExprImpl> {
+    pub(super) fn bind_agg(&mut self, mut f: Function, kind: AggKind) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
         let inputs: Vec<ExprImpl> = f
             .args
@@ -215,6 +252,10 @@ impl Binder {
                             .into(),
                     )
                     .into());
+                }
+                AggKind::Max | AggKind::Min => {
+                    // distinct max or min returns the same result as non-distinct max or min.
+                    f.distinct = false;
                 }
                 _ => (),
             };

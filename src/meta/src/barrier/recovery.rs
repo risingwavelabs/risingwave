@@ -23,7 +23,6 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
 use risingwave_pb::data::Epoch as ProstEpoch;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
@@ -122,13 +121,11 @@ where
                 Command::checkpoint(),
             ));
 
-            let command_ctx_clone = command_ctx.clone();
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            if let Err(err) = self.inject_barrier(command_ctx_clone, tx).await {
-                error!("inject_barrier failed: {}", err);
-                return Err(err);
-            }
-            match rx.recv().await.unwrap() {
+            let (barrier_complete_tx, mut barrier_complete_rx) =
+                tokio::sync::mpsc::unbounded_channel();
+            self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
+                .await;
+            match barrier_complete_rx.recv().await.unwrap() {
                 (_, Ok(response)) => {
                     if let Err(err) = command_ctx.post_collect().await {
                         error!("post_collect failed: {}", err);
@@ -201,7 +198,8 @@ where
 
     async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
         debug!("start migrate actors.");
-        // get expired workers
+
+        // 1. get expired workers
         let expired_workers = info
             .actor_map
             .iter()
@@ -213,29 +211,14 @@ where
             return Ok(false);
         }
         debug!("got expired workers {:#?}", expired_workers);
+
         let (migrate_map, node_map) = self.get_migrate_map_plan(info, &expired_workers).await;
-        // migrate actors in fragments, return updated fragments and pu to pu migrate plan
-        let new_fragments = self
-            .fragment_manager
+        // 2. migrate actors in fragments
+        self.fragment_manager
             .migrate_actors(&migrate_map, &node_map)
             .await?;
-        debug!("notify mapping info to frontends");
-        for table_fragment in new_fragments {
-            for fragment in table_fragment.fragments.values() {
-                if !fragment.state_table_ids.is_empty() {
-                    let mut mapping = fragment
-                        .vnode_mapping
-                        .clone()
-                        .expect("no data distribution found");
-                    mapping.fragment_id = fragment.fragment_id;
-                    self.env
-                        .notification_manager()
-                        .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
-                        .await;
-                }
-            }
-        }
         debug!("migrate actors succeed.");
+
         Ok(true)
     }
 

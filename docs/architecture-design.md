@@ -6,11 +6,18 @@ This document serves as one of the materials for newcomers to learn the high-lev
 
 ## Architecture 
 
-There are currently 3 types of nodes in the cluster: 
+There are currently 4 types of nodes in the cluster: 
 
 * **Frontend**: Frontend is a stateless proxy that accepts user queries through Postgres protocol. It is responsible for parsing, validation, optimization, and answering the results of each individual query. 
 * **ComputeNode**: ComputeNode is responsible for executing the optimized query plan. 
-* **MetaServer**: The central metadata management service. It also acts as a failure detector that periodically sends heartbeats to frontends and compute-nodes in the cluster.
+* **Compactor**: Compactor is a stateless worker node responsible for executing the compaction tasks for our storage engine.
+* **MetaServer**: The central metadata management service. It also acts as a failure detector that periodically sends heartbeats to frontends and compute-nodes in the cluster. There are multiple sub-components running in MetaServer:
+   * **ClusterManager**: Manage the cluster information, such as the address and status of nodes.
+   * **StreamManager**: Manage the stream graph of RisingWave.
+   * **CatalogManager**: Manage table catalog in RisingWave. DDL goes through catalog manager and catalog updates will be propagated to all frontend nodes in an async manner.
+   * **BarrierManager**: Manage barrier injection and collection. Checkpoint is initiated by barrier manager regularly.
+   * **HummockManager**: Manage the SST file manifest and metainfo of Hummock storage.
+   * **CompactionManager**: Manage the compaction status and task assignment of Hummock storage.
 
 ![Architecture](./images/architecture-design/architecture.svg)
 

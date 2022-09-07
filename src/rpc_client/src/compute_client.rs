@@ -95,7 +95,7 @@ impl ComputeClient {
             .await
             .inspect_err(|_| {
                 tracing::error!(
-                    "failed to create stream from remote_input {} from fragment {} to fragment {}",
+                    "failed to create stream from remote_input {} from actor {} to actor {}",
                     self.addr,
                     up_actor_id,
                     down_actor_id

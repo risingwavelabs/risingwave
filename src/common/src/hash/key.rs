@@ -26,6 +26,7 @@ use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, ListRef,
     Row, StructRef,
 };
+use crate::collection::estimate_size::EstimateSize;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode,
@@ -94,7 +95,9 @@ pub trait HashKeySerDe<'a>: ScalarRef<'a> {
 /// Current comparison implementation treats `null == null`. This is consistent with postgresql's
 /// group by implementation, but not join. In pg's join implementation, `null != null`, and the join
 /// executor should take care of this.
-pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
+pub trait HashKey:
+    EstimateSize + Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static
+{
     type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
@@ -150,76 +153,6 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
     fn null_bitmap(&self) -> &FixedBitSet;
 }
 
-/// A wrapper over `HashKey` to support null-safe, i.e., 'IS NOT DISTINCT FROM' semantics. This
-/// should be used in batch/stream hash join executors.
-///
-/// For example, given `null_matched = [false, true]`, we should match the first column by equal
-/// semantics (null != null) and the second column by null-safe semantics (null == null).
-///
-/// | left | right | matched |
-/// | --- | --- | --- |
-/// | (1, null) | (1, null) | true |
-/// | (null, 1) | (null, 1) | false |
-/// | (null, null) | (null, null) | false |
-pub struct JoinHashKey<'a, K> {
-    key: K,
-    null_matched: &'a FixedBitSet,
-}
-
-impl<'a, K: HashKey> JoinHashKey<'a, K> {
-    pub fn build(
-        column_idxes: &[usize],
-        data_chunk: &DataChunk,
-        null_matched: &'a FixedBitSet,
-    ) -> ArrayResult<Vec<Self>> {
-        let hash_codes = data_chunk.get_hash_values(column_idxes, CRC32FastBuilder)?;
-        Ok(Self::build_from_hash_code(
-            column_idxes,
-            data_chunk,
-            hash_codes,
-            null_matched,
-        ))
-    }
-
-    fn build_from_hash_code(
-        column_idxes: &[usize],
-        data_chunk: &DataChunk,
-        hash_codes: Vec<HashCode>,
-        null_matched: &'a FixedBitSet,
-    ) -> Vec<Self> {
-        let mut serializers: Vec<K::S> = hash_codes.into_iter().map(K::S::from_hash_code).collect();
-
-        for column_idx in column_idxes {
-            data_chunk
-                .column_at(*column_idx)
-                .array_ref()
-                .serialize_to_hash_key(&mut serializers[..]);
-        }
-
-        serializers
-            .into_iter()
-            .map(|ser| Self {
-                key: ser.into_hash_key(),
-                null_matched,
-            })
-            .collect()
-    }
-}
-
-impl<'a, K: HashKey> PartialEq for JoinHashKey<'a, K> {
-    fn eq(&self, other: &Self) -> bool {
-        self.key == other.key && self.key.null_bitmap().is_subset(self.null_matched)
-    }
-}
-
-impl<'a, K: HashKey> Eq for JoinHashKey<'a, K> {}
-
-impl<'a, K: HashKey> Hash for JoinHashKey<'a, K> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.key.hash(state)
-    }
-}
-
 /// Designed for hash keys with at most `N` serialized bytes.
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
@@ -235,9 +168,15 @@ pub struct FixedSizeKey<const N: usize> {
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
 pub struct SerializedKey {
-    key: Vec<Datum>,
+    key: Row,
     hash_code: u64,
     null_bitmap: FixedBitSet,
+}
+
+impl<const N: usize> EstimateSize for FixedSizeKey<N> {
+    fn estimated_heap_size(&self) -> usize {
+        self.null_bitmap.estimated_heap_size()
+    }
 }
 
 /// Fix clippy warning.
@@ -252,6 +191,12 @@ impl<const N: usize> Eq for FixedSizeKey<N> {}
 impl<const N: usize> Hash for FixedSizeKey<N> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_u64(self.hash_code)
+    }
+}
+
+impl EstimateSize for SerializedKey {
+    fn estimated_heap_size(&self) -> usize {
+        self.key.estimated_heap_size() + self.null_bitmap.estimated_heap_size()
     }
 }
 
@@ -288,7 +233,7 @@ impl Hasher for PrecomputedHasher {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct PrecomputedBuildHasher;
 
 impl BuildHasher for PrecomputedBuildHasher {
@@ -636,7 +581,7 @@ impl HashKeySerializer for SerializedKeySerializer {
 
     fn into_hash_key(self) -> SerializedKey {
         SerializedKey {
-            key: self.buffer,
+            key: Row(self.buffer),
             hash_code: self.hash_code,
             null_bitmap: self.null_bitmap,
         }
@@ -715,10 +660,9 @@ impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
-        ensure!(self.key.len() == array_builders.len());
         array_builders
             .iter_mut()
-            .zip_eq(self.key)
+            .zip_eq(self.key.0)
             .try_for_each(|(array_builder, key)| {
                 array_builder.append_datum(&key).map_err(Into::into)
             })

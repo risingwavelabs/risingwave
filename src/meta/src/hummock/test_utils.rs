@@ -54,7 +54,7 @@ where
     let table_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_tables(epoch, table_ids);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -88,7 +88,7 @@ where
         .unwrap();
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables_2,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -105,7 +105,7 @@ where
     epoch += 1;
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables_3,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -241,7 +241,11 @@ pub async fn setup_compute_env_with_config(
             .unwrap(),
     );
 
-    let compactor_manager = Arc::new(CompactorManager::new_for_test());
+    let compactor_manager = Arc::new(
+        CompactorManager::new_with_meta(env.clone(), 1)
+            .await
+            .unwrap(),
+    );
 
     let hummock_manager = Arc::new(
         HummockManager::new(
