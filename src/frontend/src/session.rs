@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+// use tokio::sync::Mutex;
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
@@ -42,7 +44,7 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tracing::info;
 
@@ -58,13 +60,16 @@ use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
+use crate::scheduler::{
+    HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager, QueryMessage,
+};
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
 use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts};
+// use crate::scheduler::QueryMessage;
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
@@ -432,7 +437,8 @@ pub struct SessionImpl {
 
     /// Shutdown channels map
     /// FIXME: Use weak key hash map to remove query id if query ends.
-    shutdown_receivers_map: Arc<Mutex<HashMap<QueryId, Option<Sender<()>>>>>,
+    shutdown_receivers_map:
+        Arc<tokio::sync::Mutex<HashMap<QueryId, Option<mpsc::Sender<QueryMessage>>>>>,
 
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
@@ -450,7 +456,7 @@ impl SessionImpl {
             auth_context,
             user_authenticator,
             config_map: RwLock::new(Default::default()),
-            shutdown_receivers_map: Arc::new(Mutex::new(HashMap::new())),
+            shutdown_receivers_map: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             id,
         }
     }
@@ -500,22 +506,26 @@ impl SessionImpl {
         self.config_map.write().set(key, value)
     }
 
-    pub fn insert_query_shutdown_sender(&self, query_id: QueryId, shutdown_tx: Sender<()>) {
-        let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
+    pub async fn insert_query_shutdown_sender(
+        &self,
+        query_id: QueryId,
+        shutdown_tx: mpsc::Sender<QueryMessage>,
+    ) {
+        let mut write_guard = self.shutdown_receivers_map.lock().await;
         write_guard.insert(query_id, Some(shutdown_tx));
     }
 
-    // TODO: Support cancel query's in current session. This needs to store query ID in session.
-    pub fn cancel_running_queries(&self) {
-        let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
-        for (query_id, sender) in &mut *write_guard {
-            if let Some(sender_swap) = mem::take(sender) {
-                sender_swap.send(()).unwrap();
-                info!("Cancel query_id {:?} in query manager", query_id);
-            }
-        }
-        write_guard.clear();
-    }
+    // // TODO: Support cancel query's in current session. This needs to store query ID in session.
+    // pub fn cancel_running_queries(&self) {
+    //     let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
+    //     for (query_id, sender) in &mut *write_guard {
+    //         if let Some(sender_swap) = mem::take(sender) {
+    //             sender_swap.send(QueryMessage::CancelQuery).await.unwrap();
+    //             info!("Cancel query_id {:?} in query manager", query_id);
+    //         }
+    //     }
+    //     write_guard.clear();
+    // }
 
     pub fn session_id(&self) -> SessionId {
         self.id
@@ -759,11 +769,11 @@ impl Session for SessionImpl {
         &self.user_authenticator
     }
 
-    fn cancel_running_queries(&self) {
-        let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
+    async fn cancel_running_queries(&self) {
+        let mut write_guard = self.shutdown_receivers_map.lock().await;
         for (query_id, sender) in &mut *write_guard {
             if let Some(sender_swap) = mem::take(sender) {
-                sender_swap.send(()).unwrap();
+                sender_swap.send(QueryMessage::CancelQuery).await.unwrap();
                 info!("Cancel query_id {:?} in query manager", query_id);
             }
         }

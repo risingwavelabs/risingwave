@@ -169,7 +169,7 @@ where
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg)?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
-            FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
+            FeMessage::CancelQuery(m) => self.process_cancel_msg(m).await?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => self.process_parse_msg(m).await?,
             FeMessage::Bind(m) => self.process_bind_msg(m).await?,
@@ -269,14 +269,14 @@ where
         Ok(())
     }
 
-    fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
+    async fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
         let session = self
             .session_mgr
             .connect_for_cancel(m.target_process_id, m.target_secret_key)?;
         self.session = Some(session);
         // TODO: Abort running query in `QueryManager`.
         let session = self.session.clone().unwrap();
-        session.cancel_running_queries();
+        session.cancel_running_queries().await;
         self.session = None;
         self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         Ok(())
