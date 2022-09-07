@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::future::try_join_all;
+use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::try_match_expand;
@@ -585,19 +585,21 @@ where
 
     /// Broadcast the create source request to all compute nodes.
     pub async fn create_source(&self, source: &Source) -> MetaResult<()> {
-        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
-        // It MUST be cleared before Ok returns.
-        let mut revert_funcs = scopeguard::guard(
-            vec![],
-            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
-                tokio::spawn(async move {
-                    for revert_func in revert_funcs {
-                        revert_func.await;
-                    }
-                });
-            },
-        );
+        let mut revert_funcs = vec![];
+        if let Err(e) = self.create_source_impl(&mut revert_funcs, source).await {
+            for revert_func in revert_funcs.into_iter().rev() {
+                revert_func.await;
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
 
+    async fn create_source_impl(
+        &self,
+        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
+        source: &Source,
+    ) -> MetaResult<()> {
         // Register beforehand and is safeguarded by CompactionGroupManager::purge_stale_members.
         let registered_table_ids = self
             .compaction_group_manager
@@ -622,15 +624,12 @@ where
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
-            revert_funcs.clear();
             return Ok(());
         }
 
         if let Some(StreamSource(_)) = source.info {
             Self::create_source_worker(source, &mut core.managed_sources).await?;
         }
-
-        revert_funcs.clear();
         Ok(())
     }
 
