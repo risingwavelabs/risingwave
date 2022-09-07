@@ -360,6 +360,7 @@ impl BlockBuilder {
         self.compression_algorithm.encode(&mut self.buf);
         let checksum = xxhash64_checksum(&self.buf);
         self.buf.put_u64_le(checksum);
+        tracing::info!("build block len: {}", self.buf.len());
         self.buf.as_ref()
     }
 

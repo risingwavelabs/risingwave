@@ -83,6 +83,7 @@ where
     pub fn append(&mut self, key: K, value: &V) {
         let offset = self.buffer.len();
         let len = value.encoded_len();
+        tracing::info!("file cache append key: {:?}, len: {}", key, len);
         let bloc = BlockLoc {
             bidx: offset as u32 / self.block_size as u32,
             len: len as u32,
@@ -305,6 +306,12 @@ where
         let (bloc, _key) = guard.get(slot).ok_or(Error::InvalidSlot(slot))?;
         let offset = bloc.bidx as u64 * self.block_size as u64;
         let blen = bloc.blen(self.block_size as u32) as usize;
+        tracing::info!(
+            "file cache get key: {:?}, raw len: {}, len: {}",
+            _key,
+            blen,
+            bloc.len
+        );
 
         let timer = self.metrics.disk_read_latency.start_timer();
         let buf = self.cache_file.read(offset, blen).await?;
