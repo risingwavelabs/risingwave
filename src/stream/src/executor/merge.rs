@@ -15,6 +15,7 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
@@ -32,7 +33,8 @@ pub struct MergeExecutor {
     /// Upstream channels.
     upstreams: Vec<BoxedInput>,
 
-    ctx: ActorContextRef,
+    /// The context of the actor.
+    actor_context: ActorContextRef,
 
     /// Belonged fragment id.
     fragment_id: FragmentId,
@@ -40,6 +42,7 @@ pub struct MergeExecutor {
     /// Upstream fragment id.
     upstream_fragment_id: FragmentId,
 
+    /// Logical Operator Info
     info: ExecutorInfo,
 
     /// Shared context of the stream manager.
@@ -64,7 +67,7 @@ impl MergeExecutor {
     ) -> Self {
         Self {
             upstreams: inputs,
-            ctx,
+            actor_context: ctx,
             fragment_id,
             upstream_fragment_id,
             info: ExecutorInfo {
@@ -97,8 +100,8 @@ impl MergeExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(self.ctx.id, self.upstreams);
-        let actor_id = self.ctx.id;
+        let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
+        let actor_id = self.actor_context.id;
         let actor_id_str = actor_id.to_string();
         let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
@@ -128,7 +131,7 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
-                    if let Some(update) = barrier.as_update_merge(self.ctx.id) {
+                    if let Some(update) = barrier.as_update_merge(self.actor_context.id) {
                         // Create new upstreams receivers.
                         let new_upstreams = update
                             .added_upstream_actor_id
@@ -137,18 +140,19 @@ impl MergeExecutor {
                                 new_input(
                                     &self.context,
                                     self.metrics.clone(),
-                                    self.ctx.id,
+                                    self.actor_context.id,
                                     self.fragment_id,
                                     upstream_actor_id,
                                     self.upstream_fragment_id,
                                 )
                             })
                             .try_collect()
-                            .map_err(|_| anyhow::anyhow!("failed to create upstream receivers"))?;
+                            .context("failed to create upstream receivers")?;
 
                         // Poll the first barrier from the new upstreams. It must be the same as the
                         // one we polled from original upstreams.
-                        let mut select_new = SelectReceivers::new(self.ctx.id, new_upstreams);
+                        let mut select_new =
+                            SelectReceivers::new(self.actor_context.id, new_upstreams);
                         let new_barrier = expect_first_barrier(&mut select_new).await?;
                         assert_eq!(barrier, &new_barrier);
 

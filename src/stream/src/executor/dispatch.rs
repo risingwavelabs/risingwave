@@ -818,10 +818,8 @@ mod tests {
     use tokio::sync::mpsc::channel;
 
     use super::*;
-    use crate::executor::exchange::input::LocalInput;
     use crate::executor::exchange::output::Output;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::executor::ActorContext;
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
     #[derive(Debug)]
@@ -924,18 +922,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_configuration_change() {
-        let schema = Schema { fields: vec![] };
+        let _schema = Schema { fields: vec![] };
         let (tx, rx) = channel(16);
         let actor_id = 233;
-        let input = Box::new(ReceiverExecutor::new(
-            schema.clone(),
-            vec![],
-            LocalInput::for_test(rx),
-            ActorContext::create(actor_id),
-            0,
-            0,
-            Arc::new(StreamingMetrics::unused()),
-        ));
+        let input = Box::new(ReceiverExecutor::for_test(rx));
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
