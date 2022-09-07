@@ -17,7 +17,7 @@ use std::alloc::Global;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use fixedbitset::FixedBitSet;
 use futures::future::try_join;
 use futures_async_stream::for_await;
@@ -230,6 +230,8 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     state: TableInner<S>,
     /// Degree table
     degree_state: TableInner<S>,
+    /// If degree table is need
+    need_degree_table: bool,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
 }
@@ -256,6 +258,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         degree_table: StateTable<S>,
         degree_pk_indices: Vec<usize>,
         null_matched: FixedBitSet,
+        need_degree_table: bool,
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
         side: &'static str,
@@ -288,6 +291,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             degree_state,
             null_matched,
             alloc,
+            need_degree_table,
             metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
     }
@@ -373,40 +377,52 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .table
             .iter_with_pk_prefix(&key, self.current_epoch);
 
-        let degree_table_iter_fut = self
-            .degree_state
-            .table
-            .iter_with_pk_prefix(&key, self.current_epoch);
-
-        let (table_iter, degree_table_iter) =
-            try_join(table_iter_fut, degree_table_iter_fut).await?;
-
-        // We need this because ttl may remove some entries from table but leave the entries with
-        // the same stream key in degree table.
-        let merged_iter = zip_by_order_key(
-            table_iter,
-            &self.state.pk_indices,
-            degree_table_iter,
-            &self.degree_state.pk_indices,
-        );
-
         let mut entry_state = JoinEntryState::default();
-        #[for_await]
-        for row_and_degree in merged_iter {
-            let (row, degree) = row_and_degree?;
-            debug_assert_eq!(degree.size(), self.degree_state.order_key_indices.len() + 1);
-            let pk = row.by_indices(&self.state.pk_indices);
-            let degree_i64 = degree
-                .0
-                .last()
-                .cloned()
-                .ok_or_else(|| anyhow!("Empty row"))?
-                .ok_or_else(|| anyhow!("Fail to fetch a degree"))?;
-            entry_state.insert(
-                pk,
-                JoinRow::new(row.into_owned(), *degree_i64.as_int64() as u64).encode()?,
+
+        if self.need_degree_table {
+            let degree_table_iter_fut = self
+                .degree_state
+                .table
+                .iter_with_pk_prefix(&key, self.current_epoch);
+
+            let (table_iter, degree_table_iter) =
+                try_join(table_iter_fut, degree_table_iter_fut).await?;
+
+            // We need this because ttl may remove some entries from table but leave the entries
+            // with the same stream key in degree table.
+            let zipped_iter = zip_by_order_key(
+                table_iter,
+                &self.state.pk_indices,
+                degree_table_iter,
+                &self.degree_state.pk_indices,
             );
-        }
+
+            #[for_await]
+            for row_and_degree in zipped_iter {
+                let (row, degree) = row_and_degree?;
+                debug_assert_eq!(degree.size(), self.degree_state.order_key_indices.len() + 1);
+                let pk = row.by_indices(&self.state.pk_indices);
+                let degree_i64 = degree
+                    .0
+                    .last()
+                    .cloned()
+                    .context("Empty row")?
+                    .context("Fail to fetch a degree")?;
+                entry_state.insert(
+                    pk,
+                    JoinRow::new(row.into_owned(), *degree_i64.as_int64() as u64).encode()?,
+                );
+            }
+        } else {
+            let table_iter = table_iter_fut.await?;
+
+            #[for_await]
+            for row in table_iter {
+                let row = row?;
+                let pk = row.by_indices(&self.state.pk_indices);
+                entry_state.insert(pk, JoinRow::new(row.into_owned(), 0).encode()?);
+            }
+        };
 
         Ok(entry_state)
     }

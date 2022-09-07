@@ -29,6 +29,7 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use self::JoinType::{FullOuter, LeftOuter, LeftSemi, RightAnti, RightOuter, RightSemi};
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
@@ -37,6 +38,7 @@ use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
+use crate::executor::JoinType::LeftAnti;
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
 /// Limit number of the cached entries (one per join key) on each side.
@@ -110,11 +112,32 @@ const fn is_semi_or_anti(join_type: JoinTypePrimitive) -> bool {
     is_semi(join_type) || is_anti(join_type)
 }
 
-const fn need_update_matched_degree(
+const fn need_update_side_matched_degree(
     join_type: JoinTypePrimitive,
     side_type: SideTypePrimitive,
 ) -> bool {
     only_forward_matched_side(join_type, side_type) || outer_side_null(join_type, side_type)
+}
+
+const fn need_update_side_update_degree(
+    join_type: JoinTypePrimitive,
+    side_type: SideTypePrimitive,
+) -> bool {
+    forward_exactly_once(join_type, side_type) || is_outer_side(join_type, side_type)
+}
+
+const fn need_left_degree(join_type: JoinTypePrimitive) -> bool {
+    join_type == FullOuter
+        || join_type == LeftOuter
+        || join_type == LeftAnti
+        || join_type == LeftSemi
+}
+
+const fn need_right_degree(join_type: JoinTypePrimitive) -> bool {
+    join_type == FullOuter
+        || join_type == RightOuter
+        || join_type == RightAnti
+        || join_type == RightSemi
 }
 
 pub struct JoinParams {
@@ -507,6 +530,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             }
             null_matched
         };
+
+        let need_degree_table_l = need_left_degree(T);
+        let need_degree_table_r = need_right_degree(T);
+
         Self {
             ctx: ctx.clone(),
             input_l: Some(input_l),
@@ -524,6 +551,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     degree_state_table_l,
                     degree_pk_indices_l,
                     null_matched.clone(),
+                    need_degree_table_l,
                     metrics.clone(),
                     ctx.id,
                     "left",
@@ -544,6 +572,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     degree_state_table_r,
                     degree_pk_indices_r,
                     null_matched,
+                    need_degree_table_r,
                     metrics.clone(),
                     ctx.id,
                     "right",
@@ -786,7 +815,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                         yield Message::Chunk(chunk);
                                     }
                                 }
-                                if need_update_matched_degree(T, SIDE) {
+                                if need_update_side_matched_degree(T, SIDE) {
                                     side_match.ht.inc_degree(matched_row_ref)?;
                                     matched_row.inc_degree();
                                 }
@@ -817,10 +846,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         yield Message::Chunk(chunk);
                     }
 
-                    let degree_to_ins = if need_update_matched_degree(T, SIDE) {
-                        0
-                    } else {
+                    let degree_to_ins = if need_update_side_update_degree(T, SIDE) {
                         degree
+                    } else {
+                        0
                     };
 
                     if append_only_optimize {
@@ -850,7 +879,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             let mut matched_row = matched_row?;
                             if check_join_condition(&row, &matched_row.row)? {
                                 degree += 1;
-                                if need_update_matched_degree(T, SIDE) {
+                                if need_update_side_matched_degree(T, SIDE) {
                                     side_match.ht.dec_degree(matched_row_ref)?;
                                     matched_row.dec_degree()?;
                                 }
@@ -881,10 +910,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     {
                         yield Message::Chunk(chunk);
                     }
-                    let degree_to_del = if need_update_matched_degree(T, SIDE) {
-                        0
-                    } else {
+                    let degree_to_del = if need_update_side_update_degree(T, SIDE) {
                         degree
+                    } else {
+                        0
                     };
                     side_update
                         .ht
