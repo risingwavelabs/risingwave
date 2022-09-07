@@ -1063,7 +1063,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     assert_eq!(compact_task.get_task_id(), 2);
     // send task
     compactor_manager
-        .random_compactor()
+        .random_compactor(Some(&compact_task))
         .unwrap()
         .send_task(Task::CompactTask(compact_task.clone()))
         .await
@@ -1101,7 +1101,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     assert_eq!(compact_task.get_task_id(), 3);
     // send task
     compactor_manager
-        .random_compactor()
+        .random_compactor(Some(&compact_task))
         .unwrap()
         .send_task(Task::CompactTask(compact_task.clone()))
         .await
@@ -1182,7 +1182,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     assert_eq!(compact_task.get_task_id(), 2);
     // send task
     compactor_manager
-        .random_compactor()
+        .random_compactor(Some(&compact_task))
         .unwrap()
         .send_task(Task::CompactTask(compact_task.clone()))
         .await
