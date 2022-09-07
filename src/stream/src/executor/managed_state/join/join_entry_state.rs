@@ -132,7 +132,7 @@ mod tests {
         );
 
         for row_ref in data_chunk.rows() {
-            let row: Row = row_ref.into();
+            let row: Row = row_ref.to_owned_row();
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
             let pk = Row(pk);
             let join_row = JoinRow { row, degree: 0 };

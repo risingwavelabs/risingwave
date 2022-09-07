@@ -903,7 +903,7 @@ mod tests {
         fn sorted_rows(self) -> Vec<(Op, Row)> {
             let (chunk, ops) = self.into_parts();
             ops.into_iter()
-                .zip_eq(chunk.rows().map(Row::from))
+                .zip_eq(chunk.rows().map(|r| r.to_owned_row()))
                 .sorted()
                 .collect_vec()
         }

@@ -18,7 +18,6 @@ use std::ops;
 use bytes::Buf;
 use itertools::Itertools;
 
-use super::RowRef;
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
 use crate::types::{hash_datum, DataType, Datum};
@@ -32,13 +31,6 @@ impl ops::Index<usize> for Row {
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
-    }
-}
-
-// TODO: remove this due to implicit allocation
-impl From<RowRef<'_>> for Row {
-    fn from(row_ref: RowRef<'_>) -> Self {
-        row_ref.to_owned_row()
     }
 }
 
