@@ -511,7 +511,10 @@ async fn test_hummock_manager_basic() {
         HummockVersionId::MAX
     );
     for _ in 0..2 {
-        hummock_manager.unpin_version(context_id_1).await.unwrap();
+        hummock_manager
+            .unpin_version_before(context_id_1, u64::MAX)
+            .await
+            .unwrap();
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
             HummockVersionId::MAX
@@ -525,10 +528,6 @@ async fn test_hummock_manager_basic() {
             Payload::PinnedVersion(version) => version,
         };
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
-        assert_eq!(
-            hummock_manager.get_min_pinned_version_id().await,
-            FIRST_VERSION_ID + 1
-        );
     }
 
     commit_one(epoch, hummock_manager.clone()).await;
@@ -543,11 +542,6 @@ async fn test_hummock_manager_basic() {
             Payload::PinnedVersion(version) => version,
         };
         assert_eq!(version.id, FIRST_VERSION_ID + 2);
-        // pinned by context_id_1
-        assert_eq!(
-            hummock_manager.get_min_pinned_version_id().await,
-            FIRST_VERSION_ID + 1
-        );
     }
 
     // ssts_to_delete is always empty because no compaction is ever invoked.
@@ -561,7 +555,7 @@ async fn test_hummock_manager_basic() {
     );
     assert_eq!(
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        1
+        2
     );
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
@@ -572,11 +566,10 @@ async fn test_hummock_manager_basic() {
         (1, 0)
     );
 
-    hummock_manager.unpin_version(context_id_1).await.unwrap();
-    assert_eq!(
-        hummock_manager.get_min_pinned_version_id().await,
-        FIRST_VERSION_ID + 2
-    );
+    hummock_manager
+        .unpin_version_before(context_id_1, u64::MAX)
+        .await
+        .unwrap();
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
@@ -587,7 +580,7 @@ async fn test_hummock_manager_basic() {
     );
     assert_eq!(
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        1
+        0
     );
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
@@ -598,7 +591,10 @@ async fn test_hummock_manager_basic() {
         (1, 0)
     );
 
-    hummock_manager.unpin_version(context_id_2).await.unwrap();
+    hummock_manager
+        .unpin_version_before(context_id_2, u64::MAX)
+        .await
+        .unwrap();
     assert_eq!(
         hummock_manager.get_min_pinned_version_id().await,
         HummockVersionId::MAX

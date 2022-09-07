@@ -442,26 +442,6 @@ where
         Ok(ret)
     }
 
-    /// Remove this context from context pin info.
-    #[named]
-    pub async fn unpin_version(&self, context_id: HummockContextId) -> Result<()> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        let _timer = start_measure_real_process_timer!(self);
-        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning_guard.pinned_versions);
-        let release_version = pinned_versions.remove(context_id);
-        if release_version.is_some() {
-            commit_multi_var!(self, Some(context_id), pinned_versions)?;
-        }
-
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            self.check_state_consistency().await;
-        }
-
-        Ok(())
-    }
-
     /// Unpin all pins which belongs to `context_id` and has an id which is older than
     /// `unpin_before`. All versions >= `unpin_before` will be treated as if they are all pinned by
     /// this `context_id` so they will not be vacummed.
