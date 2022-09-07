@@ -133,7 +133,7 @@ impl<K: Ord, V> Cache<K, V> {
 /// when they are not dirty.
 pub enum ManagedStateImpl<S: StateStore> {
     /// States as single scalar value e.g. `COUNT`, `SUM`
-    Value(ManagedValueState),
+    Value(ManagedValueState<S>),
 
     /// States as table structure e.g. `MAX`, `STRING_AGG`
     Table(Box<dyn ManagedTableState<S>>),
@@ -149,7 +149,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.apply_chunk(ops, visibility, columns),
+            Self::Value(state) => state.apply_chunk(ops, visibility, columns, epoch, state_table),
             Self::Table(state) => {
                 state
                     .apply_chunk(ops, visibility, columns, epoch, state_table)

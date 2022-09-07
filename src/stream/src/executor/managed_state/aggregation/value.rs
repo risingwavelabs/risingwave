@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
@@ -26,25 +28,23 @@ use crate::executor::error::StreamExecutorResult;
 /// A wrapper around [`StreamingAggStateImpl`], which fetches data from the state store and helps
 /// update the state. We don't use any trait to wrap around all `ManagedXxxState`, so as to reduce
 /// the overhead of creating boxed async future.
-pub struct ManagedValueState {
+pub struct ManagedValueState<S: StateStore> {
+    _phantom_data: PhantomData<S>,
+
     /// Upstream column indices of agg arguments.
     arg_indices: Vec<usize>,
 
     /// The internal single-value state.
     state: Box<dyn StreamingAggStateImpl>,
 
-    /// Indicates whether this managed state is dirty. If this state is dirty, we cannot evict the
-    /// state from memory.
-    is_dirty: bool,
-
     /// Primary key to look up in relational table. For value state, there is only one row.
     /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
     group_key: Option<Row>,
 }
 
-impl ManagedValueState {
+impl<S: StateStore> ManagedValueState<S> {
     /// Create a single-value managed state based on `AggCall` and `Keyspace`.
-    pub async fn new<S: StateStore>(
+    pub async fn new(
         agg_call: AggCall,
         row_count: Option<usize>,
         group_key: Option<&Row>,
@@ -69,6 +69,7 @@ impl ManagedValueState {
 
         // Create the internal state based on the value we get.
         Ok(Self {
+            _phantom_data: PhantomData,
             arg_indices: agg_call.args.val_indices().to_vec(),
             state: create_streaming_agg_state(
                 agg_call.args.arg_types(),
@@ -76,7 +77,6 @@ impl ManagedValueState {
                 &agg_call.return_type,
                 data,
             )?,
-            is_dirty: false,
             group_key: group_key.cloned(),
         })
     }
@@ -87,15 +87,28 @@ impl ManagedValueState {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
+        _epoch: u64,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, columns));
-        self.is_dirty = true;
         let data = self
             .arg_indices
             .iter()
             .map(|col_idx| columns[*col_idx])
             .collect_vec();
-        self.state.apply_batch(ops, visibility, &data)
+        self.state.apply_batch(ops, visibility, &data)?;
+        let output = self.state.get_output()?;
+        let row = Row::new(
+            self.group_key
+                .as_ref()
+                .unwrap_or_else(Row::empty)
+                .values()
+                .map(|v| v.clone())
+                .chain(std::iter::once(output))
+                .collect(),
+        );
+        state_table.upsert(row)?;
+        Ok(())
     }
 
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
@@ -106,29 +119,13 @@ impl ManagedValueState {
         self.state.get_output()
     }
 
-    /// Check if this state needs a flush.
+    // TODO(yuchao): to remove
     pub fn is_dirty(&self) -> bool {
-        self.is_dirty
+        false
     }
 
-    pub fn flush<S: StateStore>(
-        &mut self,
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()> {
-        // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
-        // cause incorrect result: it will only produce more I/O.
-        debug_assert!(self.is_dirty());
-
-        // Persist value into relational table. The inserted row should concat with pk (pk is in
-        // front of value). In this case, the pk is just group key.
-
-        let mut v = vec![];
-        v.extend_from_slice(&self.group_key.as_ref().unwrap_or_else(Row::empty).0);
-        v.push(self.state.get_output()?);
-
-        state_table.insert(Row::new(v))?;
-
-        self.is_dirty = false;
+    // TODO(yuchao): to remove
+    pub fn flush(&mut self, _state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         Ok(())
     }
 }
