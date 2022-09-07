@@ -192,7 +192,9 @@ impl<S: StateStore> SourceExecutor<S> {
                 None => {
                     no_change_flag = false;
                     // write new assigned split to state cache. snapshot is base on cache.
-                    self.state_cache.entry(sc.id()).or_insert(sc.clone());
+                    self.state_cache
+                        .entry(sc.id())
+                        .or_insert_with(|| sc.clone());
                     target_state.push(sc.clone())
                 }
             }
