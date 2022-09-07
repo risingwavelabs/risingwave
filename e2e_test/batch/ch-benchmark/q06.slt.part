@@ -1,4 +1,3 @@
-# runs, but no output. Probably need to select different rows from tables.
 query R rowsort
 select	sum(ol_amount) as revenue
 from	tpcc_orderline
