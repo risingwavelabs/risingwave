@@ -893,8 +893,7 @@ mod tests {
         global_stream_manager: GlobalStreamManager<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
-        join_handles: Vec<JoinHandle<()>>,
-        shutdown_txs: Vec<Sender<()>>,
+        join_handle_shutdown_txs: Vec<(JoinHandle<()>, Sender<()>)>,
     }
 
     impl MockServices {
@@ -1000,16 +999,16 @@ mod tests {
                 global_stream_manager: stream_manager,
                 fragment_manager,
                 state,
-                join_handles: vec![join_handle_2, join_handle],
-                shutdown_txs: vec![shutdown_tx_2, shutdown_tx],
+                join_handle_shutdown_txs: vec![
+                    (join_handle_2, shutdown_tx_2),
+                    (join_handle, shutdown_tx),
+                ],
             })
         }
 
         async fn stop(self) {
-            for shutdown_tx in self.shutdown_txs {
+            for (join_handle, shutdown_tx) in self.join_handle_shutdown_txs {
                 shutdown_tx.send(()).unwrap();
-            }
-            for join_handle in self.join_handles {
                 join_handle.await.unwrap();
             }
         }
