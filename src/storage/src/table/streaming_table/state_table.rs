@@ -408,7 +408,7 @@ impl<S: StateStore> StateTable<S> {
         let (chunk, op) = chunk.into_parts();
         let hash_builder = CRC32FastBuilder {};
 
-        let mut vnode_and_pks = vec![vec![]; chunk.cardinality()];
+        let mut vnode_and_pks = vec![vec![]; chunk.capacity()];
 
         chunk
             .get_hash_values(&self.dist_key_indices, hash_builder)
