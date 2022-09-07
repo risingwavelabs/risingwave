@@ -22,7 +22,6 @@ export interface GraphNode {
 
 export type GraphTraverseStep = (node: GraphNode) => boolean
 
-
 /**
  * Traverse a tree from its root node, and do operation
  * by calling the step function.
@@ -48,18 +47,19 @@ export function treeBfs(root: GraphNode, step: GraphTraverseStep) {
  * Traverse a graph from a random node, and do
  * operation by calling the step function.
  * Every node will be visited only once.
- * @param {{nextNodes: []}} root A random node in the graph
- * @param {(node: any) => boolean} step callback when a node is visited.
- * @param {string} [neighborListKey="nextNodes"]
  * return true if you want to stop traverse its next nodes
  */
-export function graphBfs(root: GraphNode, step: GraphTraverseStep, neighborListKey?: string) {
+export function graphBfs(
+  root: GraphNode,
+  step: GraphTraverseStep,
+  neighborListKey?: string
+) {
   let key = (neighborListKey || "nextNodes") as keyof typeof root
   let visitedNodes = new Set()
   let bfsList = [root]
   while (true) {
     let c = bfsList.shift()
-    if (c === undefined){
+    if (c === undefined) {
       break
     }
     visitedNodes.add(c)
@@ -109,7 +109,7 @@ export function getConnectedComponent(nodes: Array<GraphNode>) {
     if (shellNode.g === -1) {
       shellNode.g = cnt++
       graphBfs(shellNode, (c) => {
-        let g = 'g' as keyof typeof c
+        let g = "g" as keyof typeof c
         c[g] = shellNode.g
         return false
       })
