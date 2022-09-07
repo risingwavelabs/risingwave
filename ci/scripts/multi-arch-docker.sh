@@ -4,7 +4,7 @@
 set -euo pipefail
 
 date="$(date +%Y%m%d)"
-ghcraddr="ghcr.io/singularity-data"
+ghcraddr="ghcr.io/risingwavelabs"
 
 components=(
   "risingwave"
