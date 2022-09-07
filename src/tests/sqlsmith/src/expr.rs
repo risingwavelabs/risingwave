@@ -17,10 +17,10 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
+use risingwave_common::types::DataTypeName;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{
-    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastContext, CastSig, DataTypeName, ExprType,
-    FuncSign,
+    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastContext, CastSig, ExprType, FuncSign,
 };
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,

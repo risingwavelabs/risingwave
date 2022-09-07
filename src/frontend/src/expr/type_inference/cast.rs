@@ -16,9 +16,8 @@ use std::collections::HashMap;
 
 use itertools::Itertools as _;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DataTypeName};
 
-use super::DataTypeName;
 use crate::expr::{Expr as _, ExprImpl};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
