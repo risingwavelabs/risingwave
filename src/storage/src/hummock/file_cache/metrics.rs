@@ -57,7 +57,7 @@ impl FileCacheMetrics {
             "file_cache_disk_latency",
             "file cache disk latency",
             &["op"],
-            vec![0.000001, 0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0],
+            vec![0.0001, 0.001, 0.005, 0.01, 0.02, 0.03, 0.05, 0.1, 0.5, 1.0],
             registry,
         )
         .unwrap();
