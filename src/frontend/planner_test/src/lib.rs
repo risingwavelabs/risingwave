@@ -439,7 +439,7 @@ impl TestCase {
                     context,
                     Box::new(q),
                     ObjectName(vec!["test".into()]),
-                    false
+                    false,
                 ) {
                     Ok((stream_plan, _table)) => stream_plan,
                     Err(err) => {
@@ -447,7 +447,6 @@ impl TestCase {
                         break 'stream;
                     }
                 };
-
 
                 // Only generate stream_plan if it is specified in test case
                 if self.stream_plan.is_some() {
