@@ -26,18 +26,40 @@ const RESCHEDULE_FRAGMENT_KEY: &str = "fragment";
 const RESCHEDULE_REMOVED_KEY: &str = "removed";
 const RESCHEDULE_ADDED_KEY: &str = "added";
 
-pub async fn reschedule(plan: String, dry_run: bool) -> Result<()> {
+// For plan `100-[1,2,3]+[4,5];101-[1];102+[3]`, the following reschedule request will be generated
+// {
+//     100: Reschedule {
+//         added_parallel_units: [
+//             4,
+//             5,
+//         ],
+//         removed_parallel_units: [
+//             1,
+//             2,
+//             3,
+//         ],
+//     },
+//     101: Reschedule {
+//         added_parallel_units: [],
+//         removed_parallel_units: [
+//             1,
+//         ],
+//     },
+//     102: Reschedule {
+//         added_parallel_units: [
+//             3,
+//         ],
+//         removed_parallel_units: [],
+//     },
+// }
+pub async fn reschedule(mut plan: String, dry_run: bool) -> Result<()> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
 
     let regex = Regex::new(RESCHEDULE_MATCH_REGEXP)?;
     let mut reschedules = HashMap::new();
 
-    let plan = {
-        let mut plan = plan;
-        plan.retain(|c| !c.is_whitespace());
-        plan
-    };
+    plan.retain(|c| !c.is_whitespace());
 
     for fragment_reschedule_plan in plan.split(';') {
         let captures = regex
@@ -87,6 +109,8 @@ pub async fn reschedule(plan: String, dry_run: bool) -> Result<()> {
         if !reschedule.added_parallel_units.is_empty() {
             println!("\tAdd:    {:?}", reschedule.added_parallel_units);
         }
+
+        println!();
     }
 
     if !dry_run {
