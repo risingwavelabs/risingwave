@@ -169,10 +169,11 @@ impl CompactorManager {
     }
 
     /// Gets next idle compactor to assign task.
-    // Note: If a compactor is returned, the task is considered to be already
-    // assigned to it. This may cause inconsistency between `CompactorManager` and `HummockManager,
-    // if `HummockManager::assign_compaction_task` and `next_idle_compactor` fail to be called
-    // together.
+    // TODO: If a compactor is returned and `compact_task` is `Some`, then it is considered to be
+    // already assigned to it. This may cause inconsistency between `CompactorManager` and
+    // `HummockManager, if `HummockManager::assign_compaction_task` and `next_idle_compactor` are
+    // not called together. So we might need to put `HummockManager::assign_compaction_task` in this
+    // function.
     pub fn next_idle_compactor(
         &self,
         compact_task: Option<&CompactTask>,
@@ -192,10 +193,11 @@ impl CompactorManager {
     }
 
     /// Gets next compactor to assign task.
-    // Note: If a compactor is returned, the task is considered to be already
-    // assigned to it. This may cause inconsistency between `CompactorManager` and `HummockManager,
-    // if `HummockManager::assign_compaction_task` and `next_compactor` fail to be called
-    // together.
+    // TODO: If a compactor is returned and `compact_task` is `Some`, then it is considered to be
+    // already assigned to it. This may cause inconsistency between `CompactorManager` and
+    // `HummockManager, if `HummockManager::assign_compaction_task` and `next_compactor` are
+    // not called together. So we might need to put `HummockManager::assign_compaction_task` in this
+    // function.
     pub fn next_compactor(&self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
         let need_update_task_num = compact_task.is_some();
         let mut policy = self.policy.write();
@@ -212,10 +214,11 @@ impl CompactorManager {
     }
 
     /// Gets next compactor to assign task.
-    // Note: If a compactor is returned, the task is considered to be already
-    // assigned to it. This may cause inconsistency between `CompactorManager` and `HummockManager,
-    // if `HummockManager::assign_compaction_task` and `random_compactor` fail to be called
-    // together.
+    // TODO: If a compactor is returned and `compact_task` is `Some`, then it is considered to be
+    // already assigned to it. This may cause inconsistency between `CompactorManager` and
+    // `HummockManager, if `HummockManager::assign_compaction_task` and `random_compactor` are
+    // not called together. So we might need to put `HummockManager::assign_compaction_task` in this
+    // function.
     pub fn random_compactor(&self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
         let need_update_task_num = compact_task.is_some();
         let mut policy = self.policy.write();
