@@ -122,13 +122,11 @@ fn bench_hash_agg(c: &mut Criterion) {
         (vec![0], AggKind::Count, vec![], DataType::Int64),
         (vec![0], AggKind::Count, vec![2], DataType::Int64),
         (vec![0], AggKind::Min, vec![1], DataType::Int64),
-        (vec![0], AggKind::Avg, vec![1], DataType::Int64),
         (vec![0], AggKind::StringAgg, vec![2], DataType::Varchar),
         (vec![0, 2], AggKind::Sum, vec![1], DataType::Int64),
         (vec![0, 2], AggKind::Count, vec![], DataType::Int64),
         (vec![0, 2], AggKind::Count, vec![2], DataType::Int64),
         (vec![0, 2], AggKind::Min, vec![1], DataType::Int64),
-        (vec![0, 2], AggKind::Avg, vec![1], DataType::Int64),
     ];
 
     for (group_key_columns, agg_kind, arg_columns, return_type) in bench_variants.into_iter() {
