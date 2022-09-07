@@ -16,7 +16,6 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
-use std::ops::Bound::{self, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -28,10 +27,10 @@ use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
-use risingwave_common::types::{DataType, VirtualNode};
+use risingwave_common::types::VirtualNode;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::{end_bound_of_prefix, prefixed_range, range_of_prefix};
+use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
 use risingwave_pb::catalog::Table;
 use tracing::trace;
 
@@ -39,11 +38,11 @@ use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
-    serialize_pk, serialize_pk_with_vnode, serialize_value, streaming_deserialize,
+    serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
-use crate::table::{compute_vnode, Distribution};
+use crate::table::{compute_vnode, DataTypes, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
@@ -60,7 +59,7 @@ pub struct StateTable<S: StateStore> {
     pk_serializer: OrderedRowSerializer,
 
     /// Datatypes of each column, used for deserializing the row.
-    data_types: Vec<DataType>,
+    data_types: DataTypes,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -147,10 +146,7 @@ impl<S: StateStore> StateTable<S> {
         let keyspace = Keyspace::table_root(store, &table_id);
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
-        let data_types = table_columns
-            .iter()
-            .map(|c| c.data_type.clone())
-            .collect_vec();
+        let data_types = table_columns.iter().map(|c| c.data_type.clone()).collect();
 
         let Distribution {
             dist_key_indices,
@@ -220,10 +216,7 @@ impl<S: StateStore> StateTable<S> {
         let keyspace = Keyspace::table_root(store, &table_id);
 
         let pk_serializer = OrderedRowSerializer::new(order_types);
-        let data_types = table_columns
-            .iter()
-            .map(|c| c.data_type.clone())
-            .collect_vec();
+        let data_types = table_columns.iter().map(|c| c.data_type.clone()).collect();
         let dist_key_in_pk_indices = dist_key_indices
             .iter()
             .map(|&di| {
@@ -372,7 +365,7 @@ impl<S: StateStore> StateTable<S> {
 
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = serialize_value(value).map_err(err)?;
+        let value_bytes = value.serialize().map_err(err)?;
         self.mem_table.insert(key_bytes, value_bytes);
         Ok(())
     }
@@ -383,7 +376,7 @@ impl<S: StateStore> StateTable<S> {
         let pk = old_value.by_indices(self.pk_indices());
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = serialize_value(old_value).map_err(err)?;
+        let value_bytes = old_value.serialize().map_err(err)?;
         self.mem_table.delete(key_bytes, value_bytes);
         Ok(())
     }
@@ -400,8 +393,8 @@ impl<S: StateStore> StateTable<S> {
             self.compute_vnode_by_pk(&new_pk),
         );
 
-        let old_value_bytes = serialize_value(old_value).map_err(err)?;
-        let new_value_bytes = serialize_value(new_value).map_err(err)?;
+        let old_value_bytes = old_value.serialize().map_err(err)?;
+        let new_value_bytes = new_value.serialize().map_err(err)?;
         self.mem_table
             .update(new_key_bytes, old_value_bytes, new_value_bytes);
         Ok(())
@@ -509,18 +502,50 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let storage_iter = self.storage_iter_with_prefix(epoch, pk_prefix).await?;
+        let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
+        let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
+        let encoded_key_range = range_of_prefix(&encoded_prefix);
 
-        let mem_table_iter = {
-            let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
-            let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
-            let encoded_key_range = range_of_prefix(&encoded_prefix);
+        // We assume that all usages of iterating the state table only access a single vnode.
+        // If this assertion fails, then something must be wrong with the operator implementation or
+        // the distribution derivation from the optimizer.
+        let vnode = self
+            .try_compute_vnode_by_pk_prefix(pk_prefix)
+            .expect("the records with `pk_prefix` should reside in the same vnode")
+            .to_be_bytes();
+        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
 
-            let vnode_hint = self.try_compute_vnode_by_pk_prefix(pk_prefix);
-            let vnode = vnode_hint.unwrap_or(0_u8);
-            let encoded_key_range_with_vnode =
-                prefixed_range(encoded_key_range, &vnode.to_be_bytes());
-            self.mem_table.iter(encoded_key_range_with_vnode)
+        // Mem table iterator.
+        let mem_table_iter = self.mem_table.iter(encoded_key_range_with_vnode.clone());
+
+        // Storage iterator.
+        let storage_iter = {
+            // Construct prefix hint for prefix bloom filter.
+            let pk_prefix_indices = &self.pk_indices[..pk_prefix.size()];
+            let prefix_hint = {
+                if self.dist_key_indices.is_empty() || self.dist_key_indices != pk_prefix_indices {
+                    None
+                } else {
+                    Some([&vnode, &encoded_prefix[..]].concat())
+                }
+            };
+
+            trace!(
+                table_id = ?self.keyspace.table_id(),
+                ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
+                dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
+                "storage_iter_with_prefix"
+            );
+
+            StorageIterInner::<S>::new(
+                &self.keyspace,
+                prefix_hint,
+                encoded_key_range_with_vnode,
+                self.get_read_option(epoch),
+                self.data_types.clone(),
+            )
+            .await?
+            .into_stream()
         };
 
         Ok(
@@ -528,99 +553,16 @@ impl<S: StateStore> StateTable<S> {
                 .into_stream(),
         )
     }
-
-    /// Iterates on the table with the given prefix of the pk in `pk_prefix`.
-    async fn storage_iter_with_prefix(
-        &self,
-        epoch: u64,
-        pk_prefix: &Row,
-    ) -> StorageResult<StorageIter<S>> {
-        fn serialize_pk_bound(
-            pk_serializer: &OrderedRowSerializer,
-            pk_prefix: &Row,
-            is_start_bound: bool,
-        ) -> Bound<Vec<u8>> {
-            let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
-            let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
-            if pk_prefix.size() == 0 {
-                Unbounded
-            } else if is_start_bound {
-                Included(serialized_pk_prefix)
-            } else {
-                end_bound_of_prefix(&serialized_pk_prefix)
-            }
-        }
-
-        let start_key = serialize_pk_bound(&self.pk_serializer, pk_prefix, true);
-        let end_key = serialize_pk_bound(&self.pk_serializer, pk_prefix, false);
-
-        assert!(pk_prefix.size() <= self.pk_indices.len());
-        let pk_prefix_indices = (0..pk_prefix.size())
-            .into_iter()
-            .map(|index| self.pk_indices[index])
-            .collect_vec();
-        let prefix_hint = if self.dist_key_indices.is_empty()
-            || self.dist_key_indices != pk_prefix_indices
-        {
-            trace!(
-                "storage_iter_with_prefix dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
-                self.keyspace.table_id(),
-                pk_prefix,
-                self.dist_key_indices,
-                pk_prefix_indices
-            );
-            None
-        } else {
-            let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
-            let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
-            Some(serialized_pk_prefix)
-        };
-
-        trace!(
-            "storage_iter_with_prefix table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
-            self.keyspace.table_id(),
-            prefix_hint,
-            start_key,
-            end_key,
-            pk_prefix,
-            self.dist_key_indices,
-            pk_prefix_indices
-        );
-
-        let vnode_hint = self.try_compute_vnode_by_pk_prefix(pk_prefix);
-        let vnode = vnode_hint.unwrap_or(0_u8);
-
-        let raw_key_range = prefixed_range((start_key, end_key), &vnode.to_be_bytes());
-        let prefix_hint = prefix_hint
-            .clone()
-            .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
-        let read_options = self.get_read_option(epoch);
-        let iter = StorageIterInner::<S>::new(
-            &self.keyspace,
-            prefix_hint,
-            raw_key_range,
-            read_options,
-            self.data_types.clone(),
-        )
-        .await?
-        .into_stream();
-
-        Ok(iter)
-    }
 }
 
 pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
 
-pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
-
-/// The row iterator of the storage table.
-pub type StorageIter<S: StateStore> = impl PkAndRowStream;
 struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_iter: C,
     _phantom: PhantomData<&'a ()>,
     /// Data type of each column, used for deserializing the row.
-    data_types: Vec<DataType>,
+    data_types: DataTypes,
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
@@ -630,7 +572,7 @@ where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
     C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
 {
-    fn new(mem_table_iter: M, storage_iter: C, data_types: Vec<DataType>) -> Self {
+    fn new(mem_table_iter: M, storage_iter: C, data_types: DataTypes) -> Self {
         Self {
             mem_table_iter,
             storage_iter,
@@ -741,7 +683,7 @@ struct StorageIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
     /// Data type of each column, used for deserializing the row.
-    data_types: Vec<DataType>,
+    data_types: DataTypes,
 }
 
 impl<S: StateStore> StorageIterInner<S> {
@@ -750,7 +692,7 @@ impl<S: StateStore> StorageIterInner<S> {
         prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
         read_options: ReadOptions,
-        data_types: Vec<DataType>,
+        data_types: DataTypes,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,

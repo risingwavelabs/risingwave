@@ -524,7 +524,10 @@ impl SstableWriter for BatchUploadWriter {
         Ok(())
     }
 
-    fn finish(mut self, size_footer: u32) -> HummockResult<Self::Output> {
+    fn finish(mut self, meta: &SstableMeta) -> HummockResult<Self::Output> {
+        let meta_path = self.sstable_store.get_sst_meta_path(self.sst_id);
+        let size_footer = meta.block_metas.len();
+        let meta = Bytes::from(meta.encode_to_bytes());
         let join_handle = tokio::spawn(async move {
             // Upload size footer.
             self.buf.put_slice(&size_footer.to_le_bytes());
@@ -543,6 +546,11 @@ impl SstableWriter for BatchUploadWriter {
                 .clone()
                 .put_sst_data(self.sst_id, data.clone())
                 .await?;
+            self.sstable_store
+                .store
+                .upload(&meta_path, meta)
+                .await
+                .map_err(HummockError::object_io_error)?;
 
             // Add block cache.
             if CachePolicy::Fill == self.policy {
@@ -611,15 +619,19 @@ impl SstableWriter for StreamingUploadWriter {
             .map_err(HummockError::object_io_error)
     }
 
-    fn finish(mut self, size_footer: u32) -> HummockResult<UploadJoinHandle> {
-        // Upload size footer.
+    fn finish(mut self, meta: &SstableMeta) -> HummockResult<UploadJoinHandle> {
+        // TODO: this footer is never used.
+        let size_footer = meta.block_metas.len() as u32;
+        let meta = Bytes::from(meta.encode_to_bytes());
+
         self.object_uploader
             .write_bytes(Bytes::from(size_footer.to_le_bytes().to_vec()))
             .map_err(HummockError::object_io_error)?;
-
+        let meta_path = self.sstable_store.get_sst_meta_path(self.sst_id);
+        let data_path = self.sstable_store.get_sst_data_path(self.sst_id);
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
-            let tracker = self.tracker.map(|mut t| {
+            let _tracker = self.tracker.map(|mut t| {
                     if !t.try_increase_memory(uploader_memory_usage as u64) {
                         tracing::debug!("failed to allocate increase memory for data file, sst id: {}, file size: {}",
                                         self.sst_id, uploader_memory_usage);
@@ -628,22 +640,33 @@ impl SstableWriter for StreamingUploadWriter {
                 });
 
             // Upload data to object store.
-            let ret = self
-                .object_uploader
+            self.object_uploader
                 .finish()
                 .await
-                .map_err(HummockError::object_io_error);
+                .map_err(HummockError::object_io_error)?;
+            if let Err(e) = self
+                .sstable_store
+                .store
+                .upload(&meta_path, meta)
+                .await
+                .map_err(HummockError::object_io_error)
+            {
+                let _ = self.sstable_store.store.delete(&data_path).await;
+                return Err(e);
+            }
 
             // Add block cache.
-            if let CachePolicy::Fill = self.policy && ret.is_ok() {
+            if let CachePolicy::Fill = self.policy {
                 debug_assert!(!self.blocks.is_empty());
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
-                    self.sstable_store.block_cache
-                        .insert(self.sst_id, block_idx as u64, Box::new(block));
+                    self.sstable_store.block_cache.insert(
+                        self.sst_id,
+                        block_idx as u64,
+                        Box::new(block),
+                    );
                 }
             }
-            drop(tracker);
-            ret
+            Ok(())
         });
         Ok(join_handle)
     }

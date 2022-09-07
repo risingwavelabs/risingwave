@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
+use risingwave_expr::error::ExprError;
 use tokio_postgres::error::{DbError, Error as PgError, SqlState};
 
 use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
@@ -114,13 +115,16 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
     }
 }
 
-/// We diverge from PostgreSQL, instead of having undefined behaviour for overflows,
-/// See: <https://github.com/risingwavelabs/risingwave/blob/b4eb1107bc16f8d583563f776f748632ddcaa0cb/src/expr/src/vector_op/bitwise_op.rs#L24>
-/// FIXME: This approach is brittle and should change in the future,
-/// when we have a better way of handling overflows.
-/// Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3900>
+fn is_division_by_zero_err(db_error: &DbError) -> bool {
+    db_error
+        .message()
+        .contains(&ExprError::DivisionByZero.to_string())
+}
+
 fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
-    db_error.message().contains("Expr error: NumericOutOfRange")
+    db_error
+        .message()
+        .contains(&ExprError::NumericOutOfRange.to_string())
 }
 
 /// Workaround to permit runtime errors not being propagated through channels.
@@ -134,7 +138,10 @@ fn is_broken_chan_err(db_error: &DbError) -> bool {
 
 fn is_permissible_error(db_error: &DbError) -> bool {
     let is_internal_error = *db_error.code() == SqlState::INTERNAL_ERROR;
-    is_internal_error && (is_numeric_out_of_range_err(db_error) || is_broken_chan_err(db_error))
+    is_internal_error
+        && (is_numeric_out_of_range_err(db_error)
+            || is_broken_chan_err(db_error)
+            || is_division_by_zero_err(db_error))
 }
 
 /// Validate client responses

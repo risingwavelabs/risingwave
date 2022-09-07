@@ -11,11 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -23,8 +22,9 @@ use risingwave_pb::stream_plan::DynamicFilterNode;
 use super::utils::TableCatalogBuilder;
 use crate::catalog::TableCatalog;
 use crate::expr::Expr;
-use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, ToStreamProst};
+use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{Condition, ConditionDisplay};
 
 #[derive(Clone, Debug)]
@@ -92,21 +92,21 @@ impl PlanTreeNodeBinary for StreamDynamicFilter {
 
 impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 
-impl ToStreamProst for StreamDynamicFilter {
-    fn to_stream_prost_body(&self) -> NodeBody {
+impl StreamNode for StreamDynamicFilter {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
+        let condition = self
+            .predicate
+            .as_expr_unless_true()
+            .map(|x| x.to_expr_proto());
+        let left_table = infer_left_internal_table_catalog(self.clone().into(), self.left_index)
+            .with_id(state.gen_table_id_wrapped());
+        let right_table = infer_right_internal_table_catalog(self.right.clone())
+            .with_id(state.gen_table_id_wrapped());
         NodeBody::DynamicFilter(DynamicFilterNode {
             left_key: self.left_index as u32,
-            condition: self
-                .predicate
-                .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
-            left_table: Some(
-                infer_left_internal_table_catalog(self.clone().into(), self.left_index)
-                    .to_internal_table_prost(),
-            ),
-            right_table: Some(
-                infer_right_internal_table_catalog(self.right.clone()).to_internal_table_prost(),
-            ),
+            condition,
+            left_table: Some(left_table.to_internal_table_prost()),
+            right_table: Some(right_table.to_internal_table_prost()),
         })
     }
 }
@@ -124,20 +124,8 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     pk_indices.extend(&base.logical_pk);
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-    if !base.ctx.inner().with_properties.is_empty() {
-        let properties: HashMap<_, _> = base
-            .ctx
-            .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-
-        if !properties.is_empty() {
-            internal_table_catalog_builder.add_properties(properties);
-        }
-    }
+    internal_table_catalog_builder
+        .set_properties(base.ctx.inner().with_options.internal_table_subset());
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
@@ -146,21 +134,6 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     pk_indices.iter().for_each(|idx| {
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
-
-    if !base.ctx.inner().with_properties.is_empty() {
-        let properties: HashMap<_, _> = base
-            .ctx
-            .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-
-        if !properties.is_empty() {
-            internal_table_catalog_builder.add_properties(properties);
-        }
-    }
 
     internal_table_catalog_builder.build(dist_keys, append_only, None)
 }
@@ -176,6 +149,8 @@ fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
     );
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    internal_table_catalog_builder
+        .set_properties(base.ctx.inner().with_options.internal_table_subset());
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);

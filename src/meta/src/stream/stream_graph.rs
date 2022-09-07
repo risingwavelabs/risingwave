@@ -595,12 +595,9 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::AppendOnlyTopN(node) => {
-                        node.table_id_l += table_id_offset;
-                        node.table_id_h += table_id_offset;
-
-                        // TODO add catalog::Table to AppendOnlyTopN
-                        check_and_fill_internal_table(node.table_id_l, None);
-                        check_and_fill_internal_table(node.table_id_h, None);
+                        if let Some(table) = &mut node.table {
+                            update_table(table, "AppendOnlyTopNNode");
+                        }
                     }
                     NodeBody::TopN(node) => {
                         if let Some(table) = &mut node.table {
@@ -1060,7 +1057,7 @@ impl ActorGraphBuilder {
                 ]
             }
             NodeBody::AppendOnlyTopN(node) => {
-                vec![node.table_id_l, node.table_id_h]
+                vec![node.table.as_ref().unwrap().id]
             }
             NodeBody::GroupTopN(node) => {
                 vec![node.table.as_ref().unwrap().id]

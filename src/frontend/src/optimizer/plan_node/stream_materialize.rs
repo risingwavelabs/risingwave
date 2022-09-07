@@ -12,23 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// The first column id to allocate for a new materialized view.
 ///
@@ -159,13 +159,7 @@ impl StreamMaterialize {
         }
 
         let ctx = input.ctx();
-        let properties: HashMap<_, _> = ctx
-            .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+        let properties = ctx.inner().with_options.internal_table_subset();
 
         let table = TableCatalog {
             id: TableId::placeholder(),
@@ -247,8 +241,8 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 
 impl_plan_tree_node_for_unary! { StreamMaterialize }
 
-impl ToStreamProst for StreamMaterialize {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamMaterialize {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::Materialize(MaterializeNode {

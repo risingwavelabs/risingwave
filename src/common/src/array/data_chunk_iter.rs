@@ -271,7 +271,7 @@ impl Row {
     pub fn serialize(&self) -> value_encoding::Result<Vec<u8>> {
         let mut result = vec![];
         for cell in &self.0 {
-            result.extend(serialize_datum(cell)?);
+            serialize_datum(cell, &mut result);
         }
         Ok(result)
     }
