@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod iter_utils;
 mod join_entry_state;
+
 use std::alloc::Global;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
@@ -30,11 +32,12 @@ use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_storage::table::streaming_table::state_table;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
-use risingwave_storage::table::streaming_table::{state_table, zip_by_order_key};
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
+use self::iter_utils::zip_by_order_key;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::hash::{BuildHasher, Hash, Hasher};
-use std::ops;
+use std::{cmp, ops};
 
 use bytes::Buf;
 use itertools::Itertools;
@@ -248,6 +248,28 @@ impl Row {
     pub fn empty<'a>() -> &'a Self {
         static EMPTY_ROW: Row = Row(Vec::new());
         &EMPTY_ROW
+    }
+
+    /// Compare two rows' stream key
+    pub fn cmp_by_key(
+        row1: impl AsRef<Self>,
+        key1: &[usize],
+        row2: impl AsRef<Self>,
+        key2: &[usize],
+    ) -> cmp::Ordering {
+        assert_eq!(key1.len(), key2.len());
+        let pk_len = key1.len();
+        for i in 0..pk_len {
+            let datum1 = &row1.as_ref()[key1[i]];
+            let datum2 = &row2.as_ref()[key2[i]];
+            if datum1 > datum2 {
+                return cmp::Ordering::Greater;
+            }
+            if datum1 < datum2 {
+                return cmp::Ordering::Less;
+            }
+        }
+        cmp::Ordering::Equal
     }
 
     /// Compare two rows' stream key

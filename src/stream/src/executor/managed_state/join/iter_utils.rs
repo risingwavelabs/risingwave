@@ -13,70 +13,52 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::cmp::Ordering;
 
-use futures::future::{select, Either};
+use futures::future::join;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
+use risingwave_storage::error::{StorageError, StorageResult};
 
-use crate::error::{StorageError, StorageResult};
-
-/// Merge two streams of primary key and rows into a single stream, sorted by primary key.
+/// Zip two streams of primary key and rows into a single stream, sorted by primary key.
 /// We should ensure that the primary key from different streams are unique.
 #[try_stream(ok = (Cow<'a, Row>, Cow<'a, Row>), error = StorageError)]
 pub async fn zip_by_order_key<'a, S>(stream1: S, key1: &'a [usize], stream2: S, key2: &'a [usize])
 where
     S: Stream<Item = StorageResult<Cow<'a, Row>>> + 'a,
 {
+    let (stream1, stream2) = (stream1.peekable(), stream2.peekable());
     pin_mut!(stream1);
     pin_mut!(stream2);
-    'outer: loop {
-        let prefer_left: bool = rand::random();
-        let select_result = if prefer_left {
-            select(stream1.next(), stream2.next()).await
-        } else {
-            match select(stream2.next(), stream1.next()).await {
-                Either::Left(x) => Either::Right(x),
-                Either::Right(x) => Either::Left(x),
-            }
-        };
 
-        match select_result {
-            Either::Left((None, _)) | Either::Right((None, _)) => {
-                // Return because one side end, no more rows to match
-                break;
-            }
-            Either::Left((Some(row), _)) => {
-                let left_row = row?;
-                'inner: loop {
-                    let right_row = stream2.next().await;
-                    match right_row {
-                        Some(row) => {
-                            let right_row = row?;
-                            if Row::eq_by_pk(&left_row, key1, &right_row, key2) {
-                                yield (left_row, right_row);
-                                break 'inner;
-                            }
-                        }
-                        None => break 'outer,
+    loop {
+        match join(stream1.as_mut().peek(), stream2.as_mut().peek()).await {
+            (None, _) | (_, None) => break,
+
+            (Some(Ok(left_row)), Some(Ok(right_row))) => {
+                match Row::cmp_by_key(left_row, key1, right_row, key2) {
+                    Ordering::Greater => {
+                        stream2.next().await;
+                    }
+                    Ordering::Less => {
+                        stream1.next().await;
+                    }
+                    Ordering::Equal => {
+                        let row_l = stream1.next().await.unwrap()?;
+                        let row_r = stream2.next().await.unwrap()?;
+                        yield (row_l, row_r);
                     }
                 }
             }
-            Either::Right((Some(row), _)) => {
-                let right_row = row?;
-                'inner: loop {
-                    let left_row = stream1.next().await;
-                    match left_row {
-                        Some(row) => {
-                            let left_row = row?;
-                            if Row::eq_by_pk(&left_row, key1, &right_row, key2) {
-                                yield (left_row, right_row);
-                                break 'inner;
-                            }
-                        }
-                        None => break 'outer,
-                    }
-                }
+
+            (Some(Err(_)), Some(_)) => {
+                // Throw the left error.
+                return Err(stream1.next().await.unwrap().unwrap_err());
+            }
+            (Some(_), Some(Err(_))) => {
+                // Throw the right error.
+                return Err(stream2.next().await.unwrap().unwrap_err());
             }
         }
     }
@@ -86,9 +68,9 @@ where
 mod tests {
     use futures_async_stream::for_await;
     use risingwave_common::types::ScalarImpl;
+    use risingwave_storage::error::StorageResult;
 
     use super::*;
-    use crate::error::StorageResult;
 
     fn gen_row(i: i64) -> StorageResult<Cow<'static, Row>> {
         Ok(Cow::Owned(Row(vec![Some(ScalarImpl::Int64(i))])))
