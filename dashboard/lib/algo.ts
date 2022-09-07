@@ -16,19 +16,26 @@
  */
 import { newMatrix } from "./util"
 
+export interface GraphNode {
+  nextNodes: Array<GraphNode>
+}
+
+export type GraphTraverseStep = (node: GraphNode) => boolean
+
+
 /**
  * Traverse a tree from its root node, and do operation
  * by calling the step function.
  * Every node will be visited only once.
- * @param {{nextNodes: []}} root The root node of the tree
- * @param {(node: any) => boolean} step callback when a node is visited.
  * return true if you want to stop to traverse its next nodes.
  */
-export function treeBfs(root, step) {
+export function treeBfs(root: GraphNode, step: GraphTraverseStep) {
   let bfsList = [root]
-  while (bfsList.length !== 0) {
+  while (true) {
     let c = bfsList.shift()
-
+    if (c === undefined) {
+      break
+    }
     if (!step(c)) {
       for (let nextNode of c.nextNodes) {
         bfsList.push(nextNode)
@@ -46,13 +53,15 @@ export function treeBfs(root, step) {
  * @param {string} [neighborListKey="nextNodes"]
  * return true if you want to stop traverse its next nodes
  */
-export function graphBfs(root, step, neighborListKey) {
-  let key = neighborListKey || "nextNodes"
+export function graphBfs(root: GraphNode, step: GraphTraverseStep, neighborListKey?: string) {
+  let key = (neighborListKey || "nextNodes") as keyof typeof root
   let visitedNodes = new Set()
   let bfsList = [root]
-  while (bfsList.length !== 0) {
+  while (true) {
     let c = bfsList.shift()
-
+    if (c === undefined){
+      break
+    }
     visitedNodes.add(c)
     if (!step(c)) {
       for (let nextNode of c[key]) {
@@ -71,7 +80,7 @@ export function graphBfs(root, step, neighborListKey) {
  * @returns {Array<Array<any>>} A list of groups containing
  * nodes in the same connected component
  */
-export function getConnectedComponent(nodes) {
+export function getConnectedComponent(nodes: Array<GraphNode>) {
   let node2shellNodes = new Map()
 
   for (let node of nodes) {
@@ -100,7 +109,9 @@ export function getConnectedComponent(nodes) {
     if (shellNode.g === -1) {
       shellNode.g = cnt++
       graphBfs(shellNode, (c) => {
-        c.g = shellNode.g
+        let g = 'g' as keyof typeof c
+        c[g] = shellNode.g
+        return false
       })
     }
   }
