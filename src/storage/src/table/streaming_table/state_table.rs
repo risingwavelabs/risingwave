@@ -419,7 +419,9 @@ impl<S: StateStore> StateTable<S> {
             .for_each(|(h, vnode_and_pk)| {
                 vnode_and_pk.extend_from_slice(h.to_vnode().to_be_bytes().as_slice())
             });
+        let values = chunk.serialize();
 
+        let chunk = chunk.reorder_columns(self.pk_indices());
         chunk
             .rows_with_holes()
             .zip_eq(vnode_and_pks.iter_mut())
@@ -428,7 +430,6 @@ impl<S: StateStore> StateTable<S> {
                     self.pk_serializer.serialize_ref(r, vnode_and_pk);
                 }
             });
-        let values = chunk.serialize();
         // the chunk has been compacted at the most first in the function
         for (op, key, value) in izip!(op, vnode_and_pks, values) {
             match op {
