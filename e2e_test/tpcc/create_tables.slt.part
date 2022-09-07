@@ -1,5 +1,5 @@
 statement ok
-CREATE TABLE customer (
+CREATE TABLE tpcc_customer (
         c_id INTEGER,
         c_d_id INTEGER,
         c_w_id INTEGER,
@@ -26,7 +26,7 @@ CREATE TABLE customer (
 );
 
 statement ok
-CREATE TABLE district (
+CREATE TABLE tpcc_district (
         d_id INTEGER,
         d_w_id INTEGER,
         d_name VARCHAR,
@@ -42,7 +42,7 @@ CREATE TABLE district (
 );
 
 statement ok
-CREATE TABLE history (
+CREATE TABLE tpcc_history (
         h_c_id INTEGER,
         h_c_d_id INTEGER,
         h_c_w_id INTEGER,
@@ -54,7 +54,7 @@ CREATE TABLE history (
 );
 
 statement ok
-CREATE TABLE item (
+CREATE TABLE tpcc_item (
         i_id INTEGER,
         i_im_id INTEGER,
         i_name VARCHAR,
@@ -64,7 +64,7 @@ CREATE TABLE item (
 );
 
 statement ok
-CREATE TABLE neworder (
+CREATE TABLE tpcc_neworder (
         no_o_id INTEGER,
         no_d_id INTEGER,
         no_w_id INTEGER,
@@ -72,7 +72,7 @@ CREATE TABLE neworder (
 );
 
 statement ok
-CREATE TABLE order (
+CREATE TABLE tpcc_order (
         o_id INTEGER,
         o_d_id INTEGER,
         o_w_id INTEGER,
@@ -85,7 +85,7 @@ CREATE TABLE order (
 );
 
 statement ok
-CREATE TABLE orderline (
+CREATE TABLE tpcc_orderline (
         ol_o_id INTEGER,
         ol_d_id INTEGER,
         ol_w_id INTEGER,
@@ -100,7 +100,7 @@ CREATE TABLE orderline (
 );
 
 statement ok
-CREATE TABLE stock (
+CREATE TABLE tpcc_stock (
         s_i_id INTEGER,
         s_w_id INTEGER,
         s_quantity INTEGER,
@@ -122,7 +122,7 @@ CREATE TABLE stock (
 );
 
 statement ok
-CREATE TABLE warehouse (
+CREATE TABLE tpcc_warehouse (
         w_id INTEGER,
         w_name VARCHAR,
         w_street_1 VARCHAR,

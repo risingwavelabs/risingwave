@@ -3,7 +3,7 @@
 query TR rowsort
 select	 extract(year from o_entry_d) as l_year,
     	 sum(case when n2.n_name = 'Germany' then ol_amount else 0 end) / sum(ol_amount) as mkt_share
-from	 item, supplier, stock, orderline, order, customer, nation n1, nation n2, region
+from	 tpcc_item, supplier, tpcc_stock, tpcc_orderline, tpcc_order, tpcc_customer, nation n1, nation n2, region
 where	 i_id = s_i_id
     	 and ol_i_id = s_i_id
     	 and ol_supply_w_id = s_w_id

@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO history (h_c_id,h_c_d_id,h_c_w_id,h_d_id,h_w_id,h_date,h_amount,h_data) VALUES
+INSERT INTO tpcc_history (h_c_id,h_c_d_id,h_c_w_id,h_d_id,h_w_id,h_date,h_amount,h_data) VALUES
 (1,1,1,1,1,'2015-11-22 00:00:00',10,'iLwRiB2m N2k'),
 (2,1,1,1,1,'2015-11-22 00:00:00',10,'RggkyRkBmLLN'),
 (3,1,1,1,1,'2015-11-22 00:00:00',10,'0iwPLBN6kNLNw6gBiNg0'),

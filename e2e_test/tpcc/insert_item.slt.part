@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO item (i_id,i_im_id,i_name,i_price,i_data) VALUES
+INSERT INTO tpcc_item (i_id,i_im_id,i_name,i_price,i_data) VALUES
 (1,1,'B44imm6Bi4Rw NN',22.67,'2ORIGINALwNBRm0wkmN6y6PwPPP'),
 (2,5298,'BNN0RwL2N6 iikRg6Py2B',59.31,'wR4 i2 gyPkNB6Py06i Lw0L2L2R6BB wm2B 4kmL2Rgm4N2N'),
 (3,3283,'N2m2mkRi00ik06gwmggw',98.28,'L w miwLB myy RPmw0BPymL6RiP4k2BN006RRLkRPiR'),

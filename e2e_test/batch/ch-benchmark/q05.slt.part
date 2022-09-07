@@ -3,7 +3,7 @@
 query TR rowsort
 select	 n_name,
     	 sum(ol_amount) as revenue
-from	 customer, order, orderline, stock, supplier, nation, region
+from	 tpcc_customer, tpcc_order, tpcc_orderline, tpcc_stock, supplier, nation, region
 where	 c_id = o_c_id
     	 and c_w_id = o_w_id
     	 and c_d_id = o_d_id

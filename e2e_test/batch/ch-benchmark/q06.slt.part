@@ -1,7 +1,7 @@
 # runs, but no output. Probably need to select different rows from tables.
 query R rowsort
 select	sum(ol_amount) as revenue
-from	orderline
+from	tpcc_orderline
 where	ol_delivery_d >= '1999-01-01 00:00:00.000000'
     	and ol_delivery_d < '2020-01-01 00:00:00.000000'
     	and ol_quantity between 1 and 100000;

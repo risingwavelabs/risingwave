@@ -4,10 +4,10 @@ select	 s_name, s_address
 from	 supplier, nation
 where	 s_suppkey in
                 (select  mod(s_i_id * s_w_id, 10000)
-                from     stock, orderline
+                from     tpcc_stock, tpcc_orderline
                 where    s_i_id in
                                 (select i_id
-                                from item
+                                from tpcc_item
                                 where i_data like 'co%')
                          and ol_i_id=s_i_id
                          and ol_delivery_d > '2010-05-23 12:00:00'

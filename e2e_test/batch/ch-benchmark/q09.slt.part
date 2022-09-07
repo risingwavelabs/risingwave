@@ -2,7 +2,7 @@
 # runs, but no output. Probably need to select different rows from tables.
 query TTR rowsort
 select	 n_name, extract(year from o_entry_d) as l_year, sum(ol_amount) as sum_profit
-from	 item, stock, supplier, orderline, order, nation
+from	 tpcc_item, tpcc_stock, supplier, tpcc_orderline, tpcc_order, nation
 where	 ol_i_id = s_i_id
     	 and ol_supply_w_id = s_w_id
     	 and mod((s_w_id * s_i_id), 10000) = s_suppkey

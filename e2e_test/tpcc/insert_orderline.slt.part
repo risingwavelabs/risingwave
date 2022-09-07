@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO orderline (ol_o_id,ol_d_id,ol_w_id,ol_number,ol_i_id,ol_supply_w_id,ol_delivery_d,ol_quantity,ol_amount,ol_dist_info) VALUES
+INSERT INTO tpcc_orderline (ol_o_id,ol_d_id,ol_w_id,ol_number,ol_i_id,ol_supply_w_id,ol_delivery_d,ol_quantity,ol_amount,ol_dist_info) VALUES
 (1,1,1,1,72163,1,'2015-11-22 00:00:00',5,0,'PBN24wNLik4iN2Lk2NR0LLR4'),
 (1,1,1,2,80424,1,'2015-11-22 00:00:00',5,0,'kPkRwBigPRwPB6R4BkBLLgPy'),
 (1,1,1,3,577,1,'2015-11-22 00:00:00',5,0,'Ngwi424iLwLB0P44mBRLByB6'),

@@ -2,7 +2,7 @@
 query III rowsort
 select	 ol_o_id, ol_w_id, ol_d_id,
 		 sum(ol_amount) as revenue, o_entry_d
-from 	 customer, neworder, order, orderline
+from 	 tpcc_customer, tpcc_neworder, tpcc_order, tpcc_orderline
 where 	 c_state like 'A%'
 		 and c_id = o_c_id
 		 and c_w_id = o_w_id

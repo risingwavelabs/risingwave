@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO stock (s_i_id,s_w_id,s_quantity,s_dist_01,s_dist_02,s_dist_03,s_dist_04,s_dist_05,s_dist_06,s_dist_07,s_dist_08,s_dist_09,s_dist_10,s_ytd,s_order_cnt,s_remote_cnt,s_data) VALUES
+INSERT INTO tpcc_stock (s_i_id,s_w_id,s_quantity,s_dist_01,s_dist_02,s_dist_03,s_dist_04,s_dist_05,s_dist_06,s_dist_07,s_dist_08,s_dist_09,s_dist_10,s_ytd,s_order_cnt,s_remote_cnt,s_data) VALUES
 (1,1,10,' Pkm4N 6Rk0B4L6L  iNwRRN','L4PN 406kNP0B0Nm4R4gRg2B','0 PyLiw4N0iLmBNB60myyw4B','LiPgR4NN2PRk2L 4gikBNkRy','2NRgLLPiPkBN  iRyB4Nw 4y','RBRykPgiL4B ggwwyyBNN0Pi','006kiw0P4iBLwL gi2m P4kP','B g44m2kykkRgk2gPi NyiL0','B0R 62mLmyBBw mLLgP4kRy4','imPk4k0kg NiLgmw4LigiPBy',0,0,0,'P0k  gNLim22 2RiPN20ykm24yB4iBLiiRy2'),
 (2,1,53,'ikkw4myP6ki64iBy62RggLLB','wN2g4y2NBP62BN6BB0wPm0BR','k4RLRPLPL4LwNkyy 6iiyB2P','LB  4BBRgN2yRLi P22iLwRP','gN4iyRg 4mNB6i0Lgk2Nwgw4','i6mN04www44R4yPPw2 6P242','BPi6 NiNw60P424gkg2P 0iy','LBg2myR 2L20myiLyyBkPikP','wL44wmwPgk Pmg066y4y606L','wBBPwR660N6NBmm6L62RwiNk',0,0,0,'w0B4w 6i6yPiL4kmBL46 gyRmm kw4 ym46PBwi'),
 (3,1,35,'m4BgLBPB064yRw4ki2g62y0B','06 gR2gNim0 PmBmR2 NgBi','PNwiPgm6L2R4iBR LN2wByPm','6gRR2BiNg426  B6i26Lw200','42BkgPNLiwyyB L B44iw2Bk','gmykL4wNPkP6gkNym0BLRPP2','kRwmik2iLB ig BmkPPNmRiy','2Nmyg0BB 26ikiPi0gB0NBmi','LgkRNiiNRRPmkRNw40NmR40P','kkw04Bggk00BkLB20iRLLN6w',0,0,0,'kkwR4kB6 404mgLw6RRNLiRk0g4206B'),

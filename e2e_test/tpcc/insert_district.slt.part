@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO district (d_id,d_w_id,d_name,d_street_1,d_street_2,d_city,d_state,d_zip,d_tax,d_ytd,d_next_o_id) VALUES
+INSERT INTO tpcc_district (d_id,d_w_id,d_name,d_street_1,d_street_2,d_city,d_state,d_zip,d_tax,d_ytd,d_next_o_id) VALUES
 (1,1,'PgLwPg','R6i6Bwi0L6wikNB6wPi','0NRiwmRgwNyNL2R4m','PP2w y2NNLy','PB','526711111',0.0712,65355.6,3021),
 (2,1,'wgRmBLP 6','Li42g0L0PR','y  wmwNgk2','iig26BL  4gNLg0','k0','924011111',0.0729,64269.1,3011),
 (3,1,' NmBg6NP','PkL6RmN yNiPiB0','k2B60R4i44y0','wN4mL BPkN66yw Lig','44','655311111',0.1298,52280.5,3017),

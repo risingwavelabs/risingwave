@@ -5,6 +5,6 @@ select   ol_number,
          avg(ol_quantity) as avg_qty,
          avg(ol_amount) as avg_amount,
          count(*) as count_order
-from     orderline
+from     tpcc_orderline
 where    ol_delivery_d > '2007-01-02 00:00:00.000000'
 group by ol_number order by ol_number;

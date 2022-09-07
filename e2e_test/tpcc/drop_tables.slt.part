@@ -1,24 +1,24 @@
 statement ok
-DROP TABLE customer;
+DROP TABLE tpcc_customer;
 
 statement ok
-DROP TABLE district;
+DROP TABLE tpcc_district;
 
 statement ok
-DROP TABLE history;
+DROP TABLE tpcc_history;
 
 statement ok
-DROP TABLE item;
+DROP TABLE tpcc_item;
 
 statement ok
-DROP TABLE neworder;
+DROP TABLE tpcc_neworder;
 
 statement ok
-DROP TABLE orders;
+DROP TABLE tpcc_orders;
 
 statement ok
-DROP TABLE stock;
+DROP TABLE tpcc_stock;
 
 statement ok
-DROP TABLE warehouse;
+DROP TABLE tpcc_warehouse;
 
