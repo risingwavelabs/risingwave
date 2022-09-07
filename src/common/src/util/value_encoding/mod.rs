@@ -91,14 +91,11 @@ fn serialize_value(value: ScalarRefImpl, mut buf: impl BufMut) {
         ScalarRefImpl::NaiveTime(v) => {
             serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
-        ScalarRefImpl::Struct(StructRef::ValueRef { val }) => {
-            serialize_struct_or_list(val.to_protobuf_owned(), buf);
+        ScalarRefImpl::Struct(s) => {
+            serialize_struct_or_list(s.to_protobuf_owned(), buf);
         }
         ScalarRefImpl::List(list) => {
             serialize_struct_or_list(list.to_protobuf_owned(), buf);
-        }
-        _ => {
-            panic!("Type {} is unable to be serialized.", value)
         }
     }
 }
