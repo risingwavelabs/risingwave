@@ -7,8 +7,8 @@ from	 tpcc_stock, tpcc_item
 where	 i_id = s_i_id
          and i_data not like 'zz%'
          and ((s_w_id * s_i_id) % 10000 not in
-                (select s_suppkey
+                (select su_suppkey
                 from supplier
-                where s_comment like '%bad%'))
+                where su_comment like '%bad%'))
 group by i_name, substr(i_data, 1, 3), i_price
 order by supplier_cnt desc;

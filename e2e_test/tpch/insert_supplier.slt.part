@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO supplier (s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment) VALUES 
+INSERT INTO supplier (su_suppkey, su_name, su_address, su_nationkey, su_phone, su_acctbal, su_comment) VALUES 
 (1,'Supplier#000000001',' N kD4on9OM Ipw3,gf0JBoQDd7tgrzrddZ',17,'27-918-335-1736',5755.94,'each slyly above the careful'),
 (2,'Supplier#000000002','89eJ5ksX3ImxJQBvxObC,',5,'15-679-861-2259',4032.68,' slyly bold instructions. idle dependen'),
 (3,'Supplier#000000003','q1,G3Pj6OjIuUYfUoH18BFTKP5aU9bEV3',1,'11-383-516-1199',4192.40,'blithely silent requests after the express dependencies are sl'),

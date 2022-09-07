@@ -1,7 +1,7 @@
 query TT rowsort
-select	 s_name, s_address
+select	 su_name, su_address
 from	 supplier, nation
-where	 s_suppkey in
+where	 su_suppkey in
                 (select  (s_i_id * s_w_id) % 10000
                 from     tpcc_stock, tpcc_orderline
                 where    s_i_id in
@@ -12,6 +12,6 @@ where	 s_suppkey in
                          and ol_delivery_d > '2010-05-23 12:00:00'
                 group by s_i_id, s_w_id, s_quantity
                 having   2*s_quantity > sum(ol_quantity))
-         and s_nationkey = n_nationkey
+         and su_nationkey = n_nationkey
          and n_name = 'Germany'
-order by s_name;
+order by su_name;
