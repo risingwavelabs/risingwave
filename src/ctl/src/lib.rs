@@ -153,7 +153,9 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause().await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
-        Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => cmd_impl::meta::reschedule(plan, dry_run).await?,
+        Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
+            cmd_impl::meta::reschedule(plan, dry_run).await?
+        }
         Commands::Trace => cmd_impl::trace::trace().await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(sleep).await?,
     }

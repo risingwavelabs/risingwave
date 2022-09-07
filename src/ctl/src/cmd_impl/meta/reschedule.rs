@@ -39,23 +39,19 @@ pub async fn reschedule(plan: String, dry_run: bool) -> Result<()> {
         plan
     };
 
-    for fragment_reschedule_plan in plan.split(";") {
-        let captures = regex.captures(fragment_reschedule_plan).ok_or(anyhow!(
-            "plan \"{}\" format illegal",
-            fragment_reschedule_plan
-        ))?;
+    for fragment_reschedule_plan in plan.split(';') {
+        let captures = regex
+            .captures(fragment_reschedule_plan)
+            .ok_or_else(|| anyhow!("plan \"{}\" format illegal", fragment_reschedule_plan))?;
 
         let fragment_id = captures
             .name(RESCHEDULE_FRAGMENT_KEY)
             .and_then(|mat| mat.as_str().parse::<u32>().ok())
-            .ok_or(anyhow!(
-                "plan \"{}\" does not have a valid fragment id",
-                plan
-            ))?;
+            .ok_or_else(|| anyhow!("plan \"{}\" does not have a valid fragment id", plan))?;
 
         let split_fn = |mat: Match| {
             mat.as_str()
-                .split(",")
+                .split(',')
                 .map(|id_str| id_str.parse::<u32>().map_err(Error::msg))
                 .collect::<Result<Vec<_>>>()
         };
@@ -92,7 +88,6 @@ pub async fn reschedule(plan: String, dry_run: bool) -> Result<()> {
             println!("\tAdd:    {:?}", reschedule.added_parallel_units);
         }
     }
-
 
     if !dry_run {
         println!("---------------------------");
