@@ -587,7 +587,7 @@ where
     pub async fn create_source(&self, source: &Source) -> MetaResult<()> {
         let mut revert_funcs = vec![];
         if let Err(e) = self.create_source_impl(&mut revert_funcs, source).await {
-            for revert_func in revert_funcs {
+            for revert_func in revert_funcs.into_iter().rev() {
                 revert_func.await;
             }
             return Err(e);

@@ -225,7 +225,7 @@ where
             .reschedule_actors_impl(&mut revert_funcs, reschedule)
             .await
         {
-            for revert_func in revert_funcs {
+            for revert_func in revert_funcs.into_iter().rev() {
                 revert_func.await;
             }
             return Err(e);

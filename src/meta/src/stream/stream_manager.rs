@@ -349,7 +349,7 @@ where
             .create_materialized_view_impl(&mut revert_funcs, table_fragments, context)
             .await
         {
-            for revert_func in revert_funcs {
+            for revert_func in revert_funcs.into_iter().rev() {
                 revert_func.await;
             }
             return Err(e);
