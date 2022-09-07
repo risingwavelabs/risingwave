@@ -6,7 +6,7 @@ The Grafana dashboard is generated with grafanalib. You'll need
 - grafanalib
 
   ```
-  pip3 install grafanalib`
+  pip3 install grafanalib
   ```
 
 - jq: [instruction here](https://stedolan.github.io/jq/download/)
