@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
@@ -35,8 +36,8 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{
-    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, MetaSrvEnv, SchemaId,
-    WorkerId,
+    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, IdGeneratorManagerRef,
+    MetaSrvEnv, SchemaId, WorkerId,
 };
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
@@ -91,13 +92,13 @@ impl CreateMaterializedViewContext {
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager<S: MetaStore> {
     /// Manages definition and status of fragments and actors
-    fragment_manager: FragmentManagerRef<S>,
+    pub(super) fragment_manager: FragmentManagerRef<S>,
 
     /// Broadcasts and collect barriers
-    barrier_manager: BarrierManagerRef<S>,
+    pub(crate) barrier_manager: BarrierManagerRef<S>,
 
     /// Maintains information of the cluster
-    cluster_manager: ClusterManagerRef<S>,
+    pub(crate) cluster_manager: ClusterManagerRef<S>,
 
     /// Maintains streaming sources from external system like kafka
     source_manager: SourceManagerRef<S>,
@@ -106,7 +107,10 @@ pub struct GlobalStreamManager<S: MetaStore> {
     scheduler: Scheduler<S>,
 
     /// Client Pool to stream service on compute nodes
-    client_pool: StreamClientPoolRef,
+    pub(crate) client_pool: StreamClientPoolRef,
+
+    /// id generator manager.
+    pub(crate) id_gen_manager: IdGeneratorManagerRef<S>,
 
     compaction_group_manager: CompactionGroupManagerRef<S>,
 }
@@ -131,6 +135,7 @@ where
             source_manager,
             client_pool: env.stream_client_pool_ref(),
             compaction_group_manager,
+            id_gen_manager: env.id_gen_manager_ref(),
         })
     }
 
@@ -337,6 +342,25 @@ where
     pub async fn create_materialized_view(
         &self,
         table_fragments: &mut TableFragments,
+        context: &mut CreateMaterializedViewContext,
+    ) -> MetaResult<()> {
+        let mut revert_funcs = vec![];
+        if let Err(e) = self
+            .create_materialized_view_impl(&mut revert_funcs, table_fragments, context)
+            .await
+        {
+            for revert_func in revert_funcs.into_iter().rev() {
+                revert_func.await;
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    async fn create_materialized_view_impl(
+        &self,
+        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
+        table_fragments: &mut TableFragments,
         CreateMaterializedViewContext {
             dispatchers,
             upstream_worker_actors,
@@ -347,19 +371,6 @@ where
             ..
         }: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
-        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
-        // It MUST be cleared before Ok returns.
-        let mut revert_funcs = scopeguard::guard(
-            vec![],
-            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
-                tokio::spawn(async move {
-                    for revert_func in revert_funcs.into_iter().rev() {
-                        revert_func.await;
-                    }
-                });
-            },
-        );
-
         // Schedule actors to parallel units. `locations` will record the parallel unit that an
         // actor is scheduled to, and the worker node this parallel unit is on.
         let mut locations = {
@@ -680,8 +691,6 @@ where
         self.source_manager
             .patch_update(Some(source_fragments), Some(init_split_assignment))
             .await?;
-
-        revert_funcs.clear();
         Ok(())
     }
 

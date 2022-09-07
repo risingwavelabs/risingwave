@@ -141,7 +141,7 @@ pub async fn put_sst(
         let end_offset = offset + block_meta.len as usize;
         writer.write_block(&data[offset..end_offset], block_meta)?;
     }
-    let writer_output = writer.finish(meta.block_metas.len() as u32)?;
+    let writer_output = writer.finish(&meta)?;
     writer_output.await.unwrap()?;
     sstable_store.put_sst_meta(sst_id, meta).await
 }

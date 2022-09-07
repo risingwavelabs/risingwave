@@ -17,10 +17,10 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
+use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
-use super::SstableMeta;
 use crate::hummock::compactor::TaskProgressTracker;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
@@ -39,11 +39,9 @@ pub trait TableBuilderFactory {
 }
 
 pub struct SplitTableOutput {
-    pub sst_id: HummockSstableId,
-    pub meta: SstableMeta,
+    pub sst_info: SstableInfo,
     pub upload_join_handle: UploadJoinHandle,
     pub bloom_filter_size: usize,
-    pub table_ids: Vec<u32>,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -175,12 +173,21 @@ where
                 .sstable_meta_size
                 .observe(meta.encoded_size() as _);
 
+            let sst_info = SstableInfo {
+                id: builder_output.sstable_id,
+                key_range: Some(risingwave_pb::hummock::KeyRange {
+                    left: meta.smallest_key.clone(),
+                    right: meta.largest_key.clone(),
+                    inf: false,
+                }),
+                file_size: meta.estimated_size as u64,
+                table_ids: builder_output.table_ids,
+            };
+
             self.sst_outputs.push(SplitTableOutput {
-                sst_id: builder_output.sstable_id,
-                meta,
                 upload_join_handle: builder_output.writer_output,
                 bloom_filter_size,
-                table_ids: builder_output.table_ids,
+                sst_info,
             });
         }
         Ok(())
