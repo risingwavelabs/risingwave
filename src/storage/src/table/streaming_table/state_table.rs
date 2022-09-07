@@ -415,9 +415,7 @@ impl<S: StateStore> StateTable<S> {
             .unwrap()
             .into_iter()
             .zip_eq(vnode_and_pks.iter_mut())
-            .for_each(|(h, vnode_and_pk)| {
-                vnode_and_pk.extend_from_slice(h.to_vnode().to_be_bytes().as_slice())
-            });
+            .for_each(|(h, vnode_and_pk)| vnode_and_pk.extend(h.to_vnode().to_be_bytes()));
         let values = chunk.serialize();
 
         let chunk = chunk.reorder_columns(self.pk_indices());

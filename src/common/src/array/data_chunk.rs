@@ -447,7 +447,8 @@ impl DataChunk {
 
     /// Serialize each rows into value encoding bytes.
     ///
-    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
+    /// the returned vector's size is self.capacity() and for the invisible row will give a empty
+    /// vec<u8>
     pub fn serialize(&self) -> Vec<Vec<u8>> {
         match &self.vis2 {
             Vis::Bitmap(vis) => {
@@ -455,8 +456,8 @@ impl DataChunk {
                 let mut buffers = vec![vec![]; rows_num];
                 for c in &self.columns {
                     let c = c.array_ref();
+                    assert_eq!(c.len(), rows_num);
                     for (i, buffer) in buffers.iter_mut().enumerate() {
-                        assert_eq!(c.len(), rows_num);
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
                             if vis.is_set_unchecked(i) {
