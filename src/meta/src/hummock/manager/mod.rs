@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
-    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
+    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -420,7 +420,7 @@ where
             context_id,
             HummockPinnedVersion {
                 context_id,
-                min_pinned_id: 0,
+                min_pinned_id: INVALID_VERSION_ID,
             },
         );
 
@@ -428,7 +428,9 @@ where
 
         let ret = Payload::PinnedVersion(versioning.current_version.clone());
 
-        if context_pinned_version.min_pinned_id == 0 {
+        if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
+            || context_pinned_version.min_pinned_id > version_id
+        {
             context_pinned_version.min_pinned_id = version_id;
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }

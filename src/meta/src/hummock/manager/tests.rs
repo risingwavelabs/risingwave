@@ -555,7 +555,7 @@ async fn test_hummock_manager_basic() {
     );
     assert_eq!(
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        2
+        1
     );
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
@@ -580,7 +580,7 @@ async fn test_hummock_manager_basic() {
     );
     assert_eq!(
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        0
+        1
     );
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
