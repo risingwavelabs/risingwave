@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
@@ -453,14 +454,15 @@ async fn test_context_id_invalidation() {
 
 #[tokio::test]
 async fn test_hummock_manager_basic() {
-    let (_env, hummock_manager, cluster_manager, _worker_node) = setup_compute_env(1).await;
+    let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(1).await;
+    let context_id_1 = worker_node.id;
 
     let fake_host_address_2 = HostAddress {
         host: "127.0.0.1".to_string(),
         port: 2,
     };
     let fake_parallelism = 4;
-    cluster_manager
+    let worker_node_2 = cluster_manager
         .add_worker_node(
             WorkerType::ComputeNode,
             fake_host_address_2,
@@ -468,6 +470,7 @@ async fn test_hummock_manager_basic() {
         )
         .await
         .unwrap();
+    let context_id_2 = worker_node_2.id;
 
     // initial version id
     assert_eq!(
@@ -508,9 +511,24 @@ async fn test_hummock_manager_basic() {
         HummockVersionId::MAX
     );
     for _ in 0..2 {
+        hummock_manager.unpin_version(context_id_1).await.unwrap();
+        assert_eq!(
+            hummock_manager.get_min_pinned_version_id().await,
+            HummockVersionId::MAX
+        );
+
         // should pin latest because u64::MAX
-        let version = hummock_manager.get_current_version().await;
+        let version = match hummock_manager.pin_version(context_id_1).await.unwrap() {
+            Payload::VersionDeltas(_) => {
+                unreachable!("should get full version")
+            }
+            Payload::PinnedVersion(version) => version,
+        };
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
+        assert_eq!(
+            hummock_manager.get_min_pinned_version_id().await,
+            FIRST_VERSION_ID + 1
+        );
     }
 
     commit_one(epoch, hummock_manager.clone()).await;
@@ -518,9 +536,78 @@ async fn test_hummock_manager_basic() {
 
     for _ in 0..2 {
         // should pin latest because deltas cannot contain INVALID_EPOCH
-        let version = hummock_manager.get_current_version().await;
+        let version = match hummock_manager.pin_version(context_id_2).await.unwrap() {
+            Payload::VersionDeltas(_) => {
+                unreachable!("should get full version")
+            }
+            Payload::PinnedVersion(version) => version,
+        };
         assert_eq!(version.id, FIRST_VERSION_ID + 2);
+        // pinned by context_id_1
+        assert_eq!(
+            hummock_manager.get_min_pinned_version_id().await,
+            FIRST_VERSION_ID + 1
+        );
     }
+
+    // ssts_to_delete is always empty because no compaction is ever invoked.
+    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert_eq!(
+        hummock_manager
+            .delete_version_deltas(usize::MAX)
+            .await
+            .unwrap(),
+        (0, 0)
+    );
+    assert_eq!(
+        hummock_manager.proceed_version_checkpoint().await.unwrap(),
+        1
+    );
+    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert_eq!(
+        hummock_manager
+            .delete_version_deltas(usize::MAX)
+            .await
+            .unwrap(),
+        (1, 0)
+    );
+
+    hummock_manager.unpin_version(context_id_1).await.unwrap();
+    assert_eq!(
+        hummock_manager.get_min_pinned_version_id().await,
+        FIRST_VERSION_ID + 2
+    );
+    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert_eq!(
+        hummock_manager
+            .delete_version_deltas(usize::MAX)
+            .await
+            .unwrap(),
+        (0, 0)
+    );
+    assert_eq!(
+        hummock_manager.proceed_version_checkpoint().await.unwrap(),
+        1
+    );
+    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert_eq!(
+        hummock_manager
+            .delete_version_deltas(usize::MAX)
+            .await
+            .unwrap(),
+        (1, 0)
+    );
+
+    hummock_manager.unpin_version(context_id_2).await.unwrap();
+    assert_eq!(
+        hummock_manager.get_min_pinned_version_id().await,
+        HummockVersionId::MAX
+    );
+
+    assert_eq!(
+        hummock_manager.proceed_version_checkpoint().await.unwrap(),
+        0
+    );
 }
 
 #[tokio::test]
