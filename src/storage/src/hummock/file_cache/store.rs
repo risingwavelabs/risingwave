@@ -311,6 +311,7 @@ where
         timer.observe_duration();
         self.metrics.disk_read_throughput.inc_by(buf.len() as f64);
         self.metrics.disk_read_io_size.observe(buf.len() as f64);
+        self.metrics.disk_read_entry_size.observe(bloc.len as f64);
 
         drop(guard);
 

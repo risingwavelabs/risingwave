@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use prometheus::{
     register_counter_vec_with_registry, register_histogram_vec_with_registry,
-    register_int_counter_with_registry, Counter, Histogram, IntCounter, Registry,
+    register_histogram_with_registry, register_int_counter_with_registry, Counter, Histogram,
+    IntCounter, Registry,
 };
 
 pub struct FileCacheMetrics {
@@ -28,6 +29,7 @@ pub struct FileCacheMetrics {
     pub disk_write_latency: Histogram,
     pub disk_read_io_size: Histogram,
     pub disk_write_io_size: Histogram,
+    pub disk_read_entry_size: Histogram,
 
     pub insert_latency: Histogram,
     pub erase_latency: Histogram,
@@ -67,7 +69,21 @@ impl FileCacheMetrics {
                 4.0 * 1024.0,
                 64.0 * 1024.0,
                 1024.0 * 1024.0,
-                8.0 * 1024.0 * 1024.0
+                8.0 * 1024.0 * 1024.0,
+                16.0 * 1024.0 * 1024.0,
+            ],
+            registry,
+        )
+        .unwrap();
+        let disk_read_entry_size = register_histogram_with_registry!(
+            "file_cache_disk_read_entry_size",
+            "file cache disk read entry size",
+            vec![
+                4.0 * 1024.0,
+                64.0 * 1024.0,
+                1024.0 * 1024.0,
+                8.0 * 1024.0 * 1024.0,
+                16.0 * 1024.0 * 1024.0,
             ],
             registry,
         )
@@ -106,6 +122,7 @@ impl FileCacheMetrics {
             disk_write_latency,
             disk_read_io_size,
             disk_write_io_size,
+            disk_read_entry_size,
             insert_latency,
             erase_latency,
             get_latency,
