@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -160,13 +159,7 @@ impl StreamMaterialize {
         }
 
         let ctx = input.ctx();
-        let properties: HashMap<_, _> = ctx
-            .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+        let properties = ctx.inner().with_options.internal_table_subset();
 
         let table = TableCatalog {
             id: TableId::placeholder(),
