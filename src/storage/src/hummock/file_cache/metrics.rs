@@ -29,7 +29,6 @@ pub struct FileCacheMetrics {
     pub disk_write_latency: Histogram,
     pub disk_read_io_size: Histogram,
     pub disk_write_io_size: Histogram,
-    pub disk_read_entry_size: Histogram,
 
     pub insert_latency: Histogram,
     pub erase_latency: Histogram,
@@ -42,7 +41,10 @@ impl FileCacheMetrics {
             "file_cache_latency",
             "file cache latency",
             &["op"],
-            vec![0.000001, 0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0],
+            vec![
+                0.0001, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75,
+                1.0
+            ],
             registry,
         )
         .unwrap();
@@ -57,7 +59,10 @@ impl FileCacheMetrics {
             "file_cache_disk_latency",
             "file cache disk latency",
             &["op"],
-            vec![0.0001, 0.001, 0.005, 0.01, 0.02, 0.03, 0.05, 0.1, 0.5, 1.0],
+            vec![
+                0.0001, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75,
+                1.0
+            ],
             registry,
         )
         .unwrap();
@@ -78,26 +83,9 @@ impl FileCacheMetrics {
             registry,
         )
         .unwrap();
-        let disk_read_entry_size = register_histogram_with_registry!(
-            "file_cache_disk_read_entry_size",
-            "file cache disk read entry size",
-            vec![
-                0.1 * 1024.0 * 1024.0,
-                0.5 * 1024.0 * 1024.0,
-                1.0 * 1024.0 * 1024.0,
-                2.0 * 1024.0 * 1024.0,
-                4.0 * 1024.0 * 1024.0,
-                8.0 * 1024.0 * 1024.0,
-                16.0 * 1024.0 * 1024.0,
-                64.0 * 1024.0 * 1024.0,
-            ],
-            registry,
-        )
-        .unwrap();
         let cache_miss =
             register_int_counter_with_registry!("file_cache_miss", "file cache miss", registry)
                 .unwrap();
-
         let disk_read_throughput = disk_throughput
             .get_metric_with_label_values(&["read"])
             .unwrap();
@@ -128,7 +116,6 @@ impl FileCacheMetrics {
             disk_write_latency,
             disk_read_io_size,
             disk_write_io_size,
-            disk_read_entry_size,
             insert_latency,
             erase_latency,
             get_latency,
