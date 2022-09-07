@@ -15,7 +15,7 @@
 //! Distributed execution for batch query.
 
 mod query;
-use query::*;
+pub use query::*;
 mod stage;
 use stage::*;
 mod query_manager;
