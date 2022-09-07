@@ -118,6 +118,13 @@ message UnpinVersionBeforeResponse {
   common.Status status = 1;
 }
 
+message GetCurrentVersionRequest {}
+
+message GetCurrentVersionResponse {
+  common.Status status = 1;
+  HummockVersion current_version = 2;
+}
+
 message UnpinVersionRequest {
   uint32 context_id = 1;
 }
@@ -368,9 +375,8 @@ message TriggerFullGCResponse {
 }
 
 service HummockManagerService {
-  rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
-  rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
+  rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
@@ -392,7 +398,6 @@ message CompactionConfig {
   enum CompactionMode {
     UNSPECIFIED = 0;
     RANGE = 1;
-    CONSISTENT_HASH = 2;
   }
   uint64 max_bytes_for_level_base = 1;
   uint64 max_level = 2;
