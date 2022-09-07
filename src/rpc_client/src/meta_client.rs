@@ -90,6 +90,7 @@ impl MetaClient {
         let request = SubscribeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
+            worker_id: self.worker_id(),
         };
         self.inner.subscribe(request).await
     }
@@ -448,26 +449,6 @@ impl MetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MetaClient {
-    async fn pin_version(
-        &self,
-        last_pinned: HummockVersionId,
-    ) -> Result<pin_version_response::Payload> {
-        let req = PinVersionRequest {
-            context_id: self.worker_id(),
-            last_pinned,
-        };
-        let resp = self.inner.pin_version(req).await?;
-        Ok(resp.payload.unwrap())
-    }
-
-    async fn unpin_version(&self) -> Result<()> {
-        let req = UnpinVersionRequest {
-            context_id: self.worker_id(),
-        };
-        self.inner.unpin_version(req).await?;
-        Ok(())
-    }
-
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
         let req = UnpinVersionBeforeRequest {
             context_id: self.worker_id(),
@@ -475,6 +456,16 @@ impl HummockMetaClient for MetaClient {
         };
         self.inner.unpin_version_before(req).await?;
         Ok(())
+    }
+
+    async fn get_current_version(&self) -> Result<HummockVersion> {
+        let req = GetCurrentVersionRequest::default();
+        Ok(self
+            .inner
+            .get_current_version(req)
+            .await?
+            .current_version
+            .unwrap())
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
@@ -698,9 +689,8 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
-            ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
-            ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
+            ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
