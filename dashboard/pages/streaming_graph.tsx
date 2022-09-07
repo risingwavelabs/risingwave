@@ -22,6 +22,7 @@ import Head from "next/head"
 import Link from "next/link"
 import { useRouter } from "next/router"
 import { Fragment, useEffect, useState } from "react"
+import { StreamGraph } from "../components/StreamGraph"
 import Title from "../components/Title"
 import { Table as RwTable } from "../proto/gen/catalog"
 import { getMaterializedViews } from "./api/streaming"
@@ -109,6 +110,7 @@ export default function StreamingGraph() {
         </Flex>
         <Box flex={1} height="full" ml={3}>
           <Text fontWeight="semibold">Graph</Text>
+          <StreamGraph />
         </Box>
       </Flex>
     </Flex>

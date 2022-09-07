@@ -44,7 +44,7 @@ function getDagNode(node: GraphNode): DagNode {
   }
 }
 
-function dagLayout(nodes: IterableIterator<GraphNode>) {
+function dagLayout(nodes: GraphNode[]) {
   let sorted = []
   let _nodes = []
   let node2dagNode = new Map()
@@ -72,11 +72,13 @@ function dagLayout(nodes: IterableIterator<GraphNode>) {
     }
     return n.g
   }
+
   for (let node of nodes) {
     let dagNode = getDagNode(node)
     node2dagNode.set(node, dagNode)
     _nodes.push(dagNode)
   }
+
   let maxLayer = 0
   for (let node of _nodes) {
     let g = visit(node)
@@ -84,6 +86,7 @@ function dagLayout(nodes: IterableIterator<GraphNode>) {
       maxLayer = g
     }
   }
+
   // use the bottom up strategy to construct generation number
   // makes the generation number of root node the samllest
   // to make the computation easier, need to flip it back.
@@ -200,11 +203,9 @@ function dagLayout(nodes: IterableIterator<GraphNode>) {
 
   // layers to rtn
   let rtn = new Map<GraphNode, [number, number]>()
-
   for (let node of nodes) {
     rtn.set(node, [node2Layer.get(node), node2Row.get(node)])
   }
-
   return rtn
 }
 
@@ -236,7 +237,8 @@ function gridLayout(
       throw Error(`no such id ${actorboxId}`)
     }
     for (let id of ab.parentIds) {
-      newNode.nextNodes.push(getActorBoxNode(id))
+      // newNode.nextNodes.push(getActorBoxNode(id))
+      getActorBoxNode(id).nextNodes.push(newNode)
     }
     actorBoxIdToNode.set(actorboxId, newNode)
     nodeToActorBoxId.set(newNode, actorboxId)
@@ -248,7 +250,11 @@ function gridLayout(
 
   // run daglayout on GraphNode
   let rtn = new Map<ActorBox, [number, number]>()
-  let resultMap = dagLayout(nodeToActorBoxId.keys())
+  let allNodes = new Array<GraphNode>()
+  for (let _n of nodeToActorBoxId.keys()) {
+    allNodes.push(_n)
+  }
+  let resultMap = dagLayout(allNodes)
   for (let item of resultMap) {
     let abId = nodeToActorBoxId.get(item[0])
     if (!abId) {
@@ -263,15 +269,14 @@ function gridLayout(
   return rtn
 }
 
-const LAYER_MARGIN = 10
-const ROW_MARGIN = 10
-
 /**
  * @param fragments
  * @returns the coordination of the top-left corner of the actor box
  */
 export function layout(
-  fragments: Array<ActorBox>
+  fragments: Array<ActorBox>,
+  layerMargin: number,
+  rowMargin: number
 ): Map<ActorBox, [number, number]> {
   let layoutMap = gridLayout(fragments)
   let layerRequiredWidth = new Map<number, number>()
@@ -305,33 +310,36 @@ export function layout(
     resultMap: Map<number, number>,
     marginMap: Map<number, number>
   ): number => {
+    let rtn = resultMap.get(index)
+    if (rtn) {
+      return rtn
+    }
     if (index === 0) {
-      return 0
+      rtn = 0
     } else {
-      let rtn = resultMap.get(index)
-      if (rtn) {
-        return rtn
-      }
       let delta = marginMap.get(index - 1)
       if (!delta) {
         throw Error(`${index - 1} has no result`)
       }
-      rtn = getCumulativeMargin(index - 1, margin, resultMap, marginMap) + delta
-      resultMap.set(index, rtn)
-      return rtn
+      rtn =
+        getCumulativeMargin(index - 1, margin, resultMap, marginMap) +
+        delta +
+        margin
     }
+    resultMap.set(index, rtn)
+    return rtn
   }
 
-  for (let i = 0; i < maxLayer; ++i) {
+  for (let i = 0; i <= maxLayer; ++i) {
     getCumulativeMargin(
       i,
-      LAYER_MARGIN,
+      layerMargin,
       layerCumulativeWidth,
       layerRequiredWidth
     )
   }
-  for (let i = 0; i < maxRow; ++i) {
-    getCumulativeMargin(i, ROW_MARGIN, rowCumulativeHeight, rowRequiredHeight)
+  for (let i = 0; i <= maxRow; ++i) {
+    getCumulativeMargin(i, rowMargin, rowCumulativeHeight, rowRequiredHeight)
   }
 
   let rtn = new Map<ActorBox, [number, number]>()
@@ -341,7 +349,7 @@ export function layout(
       row = item[1][1]
     let x = layerCumulativeWidth.get(layer)
     let y = rowCumulativeHeight.get(row)
-    if (x && y) {
+    if (x !== undefined && y !== undefined) {
       rtn.set(ab, [x, y])
     } else {
       throw Error(`x of layer ${layer}: ${x}, y of row ${row}: ${y} `)
