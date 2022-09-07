@@ -17,8 +17,6 @@ use std::sync::Arc;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::Op::*;
-use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
@@ -118,7 +116,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             let msg = msg?;
             yield match msg {
                 Message::Chunk(chunk) => {
-                    self.state_table.write_with_chunk(chunk.clone())?;
+                    self.state_table.write_with_chunk(chunk.clone());
                     Message::Chunk(chunk)
                 }
                 Message::Barrier(b) => {
