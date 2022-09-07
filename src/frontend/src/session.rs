@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
@@ -60,11 +59,12 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
+use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts};
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
-    // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
+    // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
     /// For debugging purposes, store the SQL string in Context
     pub sql: Arc<str>,
@@ -78,8 +78,8 @@ pub struct OptimizerContext {
     pub optimizer_trace: Arc<Mutex<Vec<String>>>,
     /// Store correlated id
     pub next_correlated_id: AtomicU32,
-    /// Store handle_with_properties for internal table
-    pub with_properties: HashMap<String, String>,
+    /// Store options or properties from the `with` clause
+    pub with_options: WithOptions,
 }
 
 #[derive(Clone, Debug)]
@@ -136,7 +136,7 @@ impl OptimizerContextRef {
 }
 
 impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>, with_options: WithOptions) -> Self {
         Self {
             session_ctx,
             next_id: AtomicI32::new(0),
@@ -145,7 +145,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
-            with_properties: HashMap::new(),
+            with_options,
         }
     }
 
@@ -161,7 +161,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
-            with_properties: HashMap::new(),
+            with_options: Default::default(),
         }
         .into()
     }
@@ -686,7 +686,7 @@ impl Session for SessionImpl {
 
 /// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session, Arc::from(sql));
+    let context = OptimizerContext::new(session, Arc::from(sql), WithOptions::try_from(&stmt)?);
     let session = context.session_ctx.clone();
 
     let bound = {

@@ -222,7 +222,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Utf8(table.name.clone())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(table.owner as i32)),
-                            Some(ScalarImpl::Utf8("table".to_string())),
+                            Some(ScalarImpl::Utf8("r".to_string())),
                         ])
                     })
                     .collect_vec();
@@ -235,7 +235,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Utf8(mv.name.clone())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(mv.owner as i32)),
-                            Some(ScalarImpl::Utf8("materialized view".to_string())),
+                            Some(ScalarImpl::Utf8("m".to_string())),
                         ])
                     })
                     .collect_vec();
@@ -248,7 +248,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Utf8(index.name.clone())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(index.index_table.owner as i32)),
-                            Some(ScalarImpl::Utf8("index".to_string())),
+                            Some(ScalarImpl::Utf8("i".to_string())),
                         ])
                     })
                     .collect_vec();
@@ -261,7 +261,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Utf8(source.name.clone())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(source.owner as i32)),
-                            Some(ScalarImpl::Utf8("source".to_string())),
+                            Some(ScalarImpl::Utf8("x".to_string())),
                         ])
                     })
                     .collect_vec();
@@ -274,7 +274,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Utf8(table.name.clone())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(table.owner as i32)),
-                            Some(ScalarImpl::Utf8("system table".to_string())),
+                            Some(ScalarImpl::Utf8("r".to_string())),
                         ])
                     })
                     .collect_vec();

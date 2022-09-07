@@ -35,6 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "user",
         "source",
         "monitor_service",
+        "health",
     ];
     let protos: Vec<String> = proto_files
         .iter()
