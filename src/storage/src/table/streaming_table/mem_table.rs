@@ -130,6 +130,29 @@ impl MemTable {
         }
     }
 
+    pub fn upsert(&mut self, pk: Vec<u8>, value: Vec<u8>) {
+        let entry = self.buffer.entry(pk);
+        match entry {
+            Entry::Vacant(e) => {
+                e.insert(RowOp::Insert(value));
+            }
+            Entry::Occupied(mut e) => match e.get_mut() {
+                RowOp::Insert(_) => {
+                    e.insert(RowOp::Insert(value));
+                }
+                RowOp::Delete(ref mut old_value) => {
+                    let old_val = std::mem::take(old_value);
+                    e.insert(RowOp::Update((old_val, value)));
+                }
+                RowOp::Update((old_value, _)) => {
+                    // replace the update op
+                    let old_val = std::mem::take(old_value);
+                    e.insert(RowOp::Update((old_val, value)));
+                }
+            },
+        }
+    }
+
     pub fn into_parts(self) -> BTreeMap<Vec<u8>, RowOp> {
         self.buffer
     }
