@@ -337,7 +337,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn test_smallest_key_and_largest_key() {
+    async fn test_basic() {
         let opt = default_builder_opt_for_test();
         let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opt), opt);
 
@@ -354,6 +354,11 @@ pub(super) mod tests {
             test_key_of(TEST_KEYS_COUNT - 1),
             info.key_range.as_ref().unwrap().right
         );
+        let (data, meta) = output.writer_output;
+        assert_eq!(info.file_size, meta.estimated_size as u64);
+        let offset = info.meta_offset as usize;
+        let meta2 = SstableMeta::decode(&mut &data[offset..]).unwrap();
+        assert_eq!(meta2, meta);
     }
 
     async fn test_with_bloom_filter(with_blooms: bool) {

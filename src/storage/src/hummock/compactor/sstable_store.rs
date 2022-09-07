@@ -15,12 +15,8 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-
-use itertools::Itertools;
-use risingwave_object_store::object::BlockLocation;
-use risingwave_pb::hummock::SstableInfo;
-use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::ObjectError;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
