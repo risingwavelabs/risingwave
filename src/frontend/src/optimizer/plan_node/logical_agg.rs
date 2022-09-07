@@ -42,7 +42,9 @@ use crate::optimizer::property::{
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, Substitute};
 
-/// See also [`crate::expr::OrderByExpr`]
+/// Rewritten version of [`crate::expr::OrderByExpr`] which uses `InputRef` instead of `ExprImpl`.
+/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
+///
 /// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
 #[derive(Clone)]
 pub struct PlanAggOrderByField {
@@ -110,7 +112,8 @@ impl PlanAggOrderByField {
     }
 }
 
-/// Aggregation Call
+/// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
+/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
 #[derive(Clone)]
 pub struct PlanAggCall {
     /// Kind of aggregation function
@@ -120,16 +123,19 @@ pub struct PlanAggCall {
     pub return_type: DataType,
 
     /// Column indexes of input columns.
-    /// It's vary-length by design:
-    /// can be 0-len (`RowCount`), 1-len (`Max`, `Min`), 2-len (`StringAgg`).
+    ///
+    /// Its length can be:
+    /// - 0 (`RowCount`)
+    /// - 1 (`Max`, `Min`)
+    /// - 2 (`StringAgg`).
+    ///
     /// Usually, we mark the first column as the aggregated column.
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
     pub order_by_fields: Vec<PlanAggOrderByField>,
     /// Selective aggregation: only the input rows for which
-    /// the filter_clause evaluates to true will be fed to aggregate function.
-    /// Other rows are discarded.
+    /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,
 }
 
@@ -258,20 +264,19 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                 }
             }
             if !that.order_by_fields.is_empty() {
-                let clause_text = that
-                    .order_by_fields
-                    .iter()
-                    .map(|e| {
-                        format!(
+                write!(
+                    f,
+                    " order_by({})",
+                    that.order_by_fields.iter().format_with(", ", |e, f| {
+                        f(&format_args!(
                             "{:?}",
                             PlanAggOrderByFieldDisplay {
                                 plan_agg_order_by_field: e,
                                 input_schema: self.input_schema,
                             }
-                        )
+                        ))
                     })
-                    .join(", ");
-                write!(f, " order_by({})", clause_text)?;
+                )?;
             }
             write!(f, ")")?;
         }
