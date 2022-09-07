@@ -11,7 +11,7 @@ members = [
   "src/ctl",
   "src/expr",
   "src/frontend",
-  "src/frontend/test_runner",
+  "src/frontend/planner_test",
   "src/meta",
   "src/object_store",
   "src/prost",
