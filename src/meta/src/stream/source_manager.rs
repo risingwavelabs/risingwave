@@ -693,6 +693,11 @@ where
         Ok(())
     }
 
+    pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
+        let core = self.core.lock().await;
+        core.actor_splits.clone()
+    }
+
     async fn tick(&self) -> MetaResult<()> {
         let diff = {
             let mut core_guard = self.core.lock().await;
@@ -701,17 +706,7 @@ where
 
         if !diff.is_empty() {
             let command = Command::Plain(Some(Mutation::Splits(SourceChangeSplitMutation {
-                actor_splits: diff
-                    .iter()
-                    .map(|(&actor_id, splits)| {
-                        (
-                            actor_id,
-                            ConnectorSplits {
-                                splits: splits.iter().map(ConnectorSplit::from).collect(),
-                            },
-                        )
-                    })
-                    .collect(),
+                actor_splits: build_actor_splits(&diff),
             })));
             tracing::debug!("pushing down mutation {:#?}", command);
 
@@ -757,4 +752,19 @@ where
     pub async fn get_actor_splits(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
         self.core.lock().await.get_actor_splits()
     }
+}
+
+pub fn build_actor_splits(
+    diff: &HashMap<ActorId, Vec<SplitImpl>>,
+) -> HashMap<u32, ConnectorSplits> {
+    diff.iter()
+        .map(|(&actor_id, splits)| {
+            (
+                actor_id,
+                ConnectorSplits {
+                    splits: splits.iter().map(ConnectorSplit::from).collect(),
+                },
+            )
+        })
+        .collect()
 }

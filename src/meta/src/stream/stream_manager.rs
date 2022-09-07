@@ -963,16 +963,6 @@ mod tests {
             let (barrier_scheduler, scheduled_barriers) =
                 BarrierScheduler::new_pair(hummock_manager.clone());
 
-            let barrier_manager = Arc::new(GlobalBarrierManager::new(
-                scheduled_barriers,
-                env.clone(),
-                cluster_manager.clone(),
-                catalog_manager.clone(),
-                fragment_manager.clone(),
-                hummock_manager,
-                meta_metrics.clone(),
-            ));
-
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await?);
 
@@ -987,6 +977,17 @@ mod tests {
                 )
                 .await?,
             );
+
+            let barrier_manager = Arc::new(GlobalBarrierManager::new(
+                scheduled_barriers,
+                env.clone(),
+                cluster_manager.clone(),
+                catalog_manager.clone(),
+                fragment_manager.clone(),
+                hummock_manager,
+                source_manager.clone(),
+                meta_metrics.clone(),
+            ));
 
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
