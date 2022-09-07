@@ -1,13 +1,13 @@
 statement ok
 CREATE TABLE supplier (
-        s_suppkey  INTEGER,
-        s_name VARCHAR,
-        s_address VARCHAR,
-        s_nationkey INTEGER,
-        s_phone VARCHAR,
-        s_acctbal NUMERIC,
-        s_comment VARCHAR,
-        PRIMARY KEY (s_suppkey)
+        su_suppkey  INTEGER,
+        su_name VARCHAR,
+        su_address VARCHAR,
+        su_nationkey INTEGER,
+        su_phone VARCHAR,
+        su_acctbal NUMERIC,
+        su_comment VARCHAR,
+        PRIMARY KEY (su_suppkey)
 );
 
 statement ok
