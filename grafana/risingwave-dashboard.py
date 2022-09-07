@@ -987,6 +987,12 @@ def section_hummock_tiered_cache(outer_panels):
                 panels.target(
                     "histogram_quantile(0.5, sum(rate(file_cache_disk_io_size_bucket[$__rate_interval])) by (le, op, instance))", "p50 - file cache disk {{op}} @ {{instance}}"
                 ),
+                panels.target(
+                    "histogram_quantile(0.9, sum(rate(file_cache_disk_io_size_bucket[$__rate_interval])) by (le, op, instance))", "p90 - file cache disk {{op}} @ {{instance}}"
+                ),
+                panels.target(
+                    "histogram_quantile(0.99, sum(rate(file_cache_disk_io_size_bucket[$__rate_interval])) by (le, op, instance))", "p99 - file cache disk {{op}} @ {{instance}}"
+                ),
             ]),
         ])
     ]
