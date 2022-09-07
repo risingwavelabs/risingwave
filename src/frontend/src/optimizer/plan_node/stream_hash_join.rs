@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
@@ -262,20 +260,8 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
 
-    if !base.ctx.inner().with_properties.is_empty() {
-        let properties: HashMap<_, _> = base
-            .ctx
-            .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-
-        if !properties.is_empty() {
-            internal_table_catalog_builder.add_properties(properties);
-        }
-    }
+    internal_table_catalog_builder
+        .set_properties(base.ctx.inner().with_options.internal_table_subset());
 
     internal_table_catalog_builder.build(dist_keys, append_only, None)
 }

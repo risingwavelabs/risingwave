@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
-use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -321,20 +320,10 @@ impl LogicalAgg {
                                             column_mapping: &mut Vec<usize>|
          -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-            if !self.ctx().inner().with_properties.is_empty() {
-                let ctx = self.ctx();
-                let properties: HashMap<_, _> = ctx
-                    .inner()
-                    .with_properties
-                    .iter()
-                    .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect();
 
-                if !properties.is_empty() {
-                    internal_table_catalog_builder.add_properties(properties);
-                }
-            }
+            internal_table_catalog_builder
+                .set_properties(self.ctx().inner().with_options.internal_table_subset());
+
             for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder
@@ -373,20 +362,9 @@ impl LogicalAgg {
                                      column_mapping: &mut Vec<usize>|
          -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-            if !self.ctx().inner().with_properties.is_empty() {
-                let ctx = self.ctx();
-                let properties: HashMap<_, _> = ctx
-                    .inner()
-                    .with_properties
-                    .iter()
-                    .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect();
+            internal_table_catalog_builder
+                .set_properties(self.ctx().inner().with_options.internal_table_subset());
 
-                if !properties.is_empty() {
-                    internal_table_catalog_builder.add_properties(properties);
-                }
-            }
             for &idx in &self.group_key {
                 let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
