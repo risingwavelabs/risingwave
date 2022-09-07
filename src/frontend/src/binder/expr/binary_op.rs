@@ -50,6 +50,10 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Concat => return self.bind_concat_op(bound_left, bound_right),
+            BinaryOperator::PGRegexMatch => return self.bind_regex_match(bound_left, bound_right),
+            BinaryOperator::PGRegexNotMatch => {
+                return self.bind_regex_not_match(bound_left, bound_right)
+            }
 
             _ => {
                 return Err(
@@ -88,5 +92,21 @@ impl Binder {
             }
         };
         Ok(FunctionCall::new(func_type, vec![left, right])?.into())
+    }
+
+    fn bind_regex_match(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
+        Ok(FunctionCall::new(
+            ExprType::IsNotNull,
+            vec![FunctionCall::new(ExprType::RegexpMatch, vec![left, right])?.into()],
+        )?
+        .into())
+    }
+
+    fn bind_regex_not_match(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
+        Ok(FunctionCall::new(
+            ExprType::IsNull,
+            vec![FunctionCall::new(ExprType::RegexpMatch, vec![left, right])?.into()],
+        )?
+        .into())
     }
 }
