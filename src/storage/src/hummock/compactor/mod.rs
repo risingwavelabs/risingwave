@@ -231,11 +231,9 @@ impl Compactor {
         splits.push(KeyRange_vec::new(vec![], vec![]));
         // collect sstable_ids to get meta data
 
-        let sstable_ids = compact_task
-            .input_ssts
+        let sstable_ids = select_table_infos
             .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| table.id)
+            .map(|sstable_info| sstable_info.id)
             .collect_vec();
         let mut indexes = vec![];
 
@@ -260,6 +258,7 @@ impl Compactor {
             );
         }
         indexes.sort();
+        // every 8 index as one group
         const SPLIT_RANGE_STEP: usize = 8;
         let concurrency = indexes.len() / SPLIT_RANGE_STEP;
         let step = (indexes.len() + concurrency - 1) / concurrency;
