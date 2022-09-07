@@ -72,44 +72,41 @@ export default function StreamingGraph() {
   const retVal = (
     <Flex p={3} height="100vh" flexDirection="column">
       <Title>Streaming Graph</Title>
-      <Flex
-        flexDirection="row"
-        height="full"
-        width={SIDEBAR_WIDTH}
-        overflowY="scroll"
-      >
-        <VStack
-          width="xs"
+      <Flex flexDirection="row" height="full">
+        <Flex
+          width={SIDEBAR_WIDTH}
           height="full"
           maxHeight="full"
           mr={3}
           alignItems="flex-start"
-          overflowY="scroll"
+          flexDirection="column"
         >
           <Text fontWeight="semibold" mb={3}>
             All Nodes
           </Text>
-          <VStack width="full" spacing={1}>
-            {mvList?.map((mv) => {
-              const match = router.query.id === mv.id.toString()
-              return (
-                <Link href={`?id=${mv.id}`} key={mv.id}>
-                  <Button
-                    colorScheme={match ? "teal" : "gray"}
-                    color={match ? "teal.600" : "gray.500"}
-                    variant={match ? "outline" : "ghost"}
-                    width="full"
-                    py={0}
-                    height={8}
-                    justifyContent="flex-start"
-                  >
-                    {mv.name}
-                  </Button>
-                </Link>
-              )
-            })}
-          </VStack>
-        </VStack>
+          <Box flex={1} overflowY="scroll">
+            <VStack width="full" spacing={1}>
+              {mvList?.map((mv) => {
+                const match = router.query.id === mv.id.toString()
+                return (
+                  <Link href={`?id=${mv.id}`} key={mv.id}>
+                    <Button
+                      colorScheme={match ? "teal" : "gray"}
+                      color={match ? "teal.600" : "gray.500"}
+                      variant={match ? "outline" : "ghost"}
+                      width="full"
+                      py={0}
+                      height={8}
+                      justifyContent="flex-start"
+                    >
+                      {mv.name}
+                    </Button>
+                  </Link>
+                )
+              })}
+            </VStack>
+          </Box>
+        </Flex>
         <Box flex={1} height="full" ml={3}>
           <Text fontWeight="semibold">Graph</Text>
         </Box>

@@ -137,8 +137,12 @@ struct UncommittedMessages<S: MetaStore> {
     uncommitted_checkpoint_post: VecDeque<CheckpointPost<S>>,
     /// Ssts that need to commit with next checkpoint. We need to save data in reverse order of
     /// epoch, because we will save `uncommitted_ssts` in version, and traverse them in the
-    /// forward direction and return the key when we find it
-    uncommitted_ssts: VecDeque<LocalSstableInfo>,
+    /// forward direction and return the key when we find it.
+    ///
+    /// The inner `Vec<LocalSstableInfo>` is the SST list collected from each CN in the
+    /// `barrier_complete` call. The later collected SST list will be added to the front to
+    /// preserve that the newer data appear at the beginning.
+    uncommitted_ssts: VecDeque<Vec<LocalSstableInfo>>,
     /// Work_ids that need to commit with next checkpoint.
     uncommitted_work_ids: HashMap<HummockSstableId, WorkerId>,
 }
@@ -202,15 +206,28 @@ where
         checkpoint_post: CheckpointPost<S>,
     ) {
         for resp in resps {
-            resp.synced_sstables.iter().cloned().for_each(|grouped| {
-                let sst = grouped.sst.expect("field not None");
-                self.uncommitted_messages
-                    .uncommitted_work_ids
-                    .insert(sst.id, resp.worker_id);
-                self.uncommitted_messages
-                    .uncommitted_ssts
-                    .push_front((grouped.compaction_group_id, sst));
-            });
+            for grouped in &resp.synced_sstables {
+                let sst_id = grouped.sst.as_ref().expect("field not None").id;
+                assert!(
+                    self.uncommitted_messages
+                        .uncommitted_work_ids
+                        .insert(sst_id, resp.worker_id,)
+                        .is_none(),
+                    "an sst id is added again: {}",
+                    sst_id
+                );
+            }
+            self.uncommitted_messages.uncommitted_ssts.push_front(
+                resp.synced_sstables
+                    .iter()
+                    .map(|grouped| {
+                        (
+                            grouped.compaction_group_id,
+                            grouped.sst.as_ref().expect("field not None").clone(),
+                        )
+                    })
+                    .collect(),
+            );
         }
         self.uncommitted_messages
             .uncommitted_checkpoint_post
@@ -816,6 +833,7 @@ where
                                 uncommitted_states
                                     .uncommitted_ssts
                                     .into_iter()
+                                    .flatten()
                                     .collect_vec(),
                                 uncommitted_states.uncommitted_work_ids,
                             )
