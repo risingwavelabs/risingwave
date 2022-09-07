@@ -393,7 +393,6 @@ message CompactionConfig {
   enum CompactionMode {
     UNSPECIFIED = 0;
     RANGE = 1;
-    CONSISTENT_HASH = 2;
   }
   uint64 max_bytes_for_level_base = 1;
   uint64 max_level = 2;

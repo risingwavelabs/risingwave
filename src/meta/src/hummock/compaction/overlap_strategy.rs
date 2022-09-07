@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
-
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
@@ -109,34 +107,6 @@ impl OverlapInfo for RangeOverlapInfo {
 }
 
 #[derive(Default)]
-pub struct HashOverlapInfo {
-    infos: Vec<SstableInfo>,
-}
-
-impl OverlapInfo for HashOverlapInfo {
-    fn check_overlap(&self, a: &SstableInfo) -> bool {
-        for info in &self.infos {
-            if check_key_vnode_overlap(info, a) {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Vec<SstableInfo> {
-        others
-            .iter()
-            .filter(|table| self.check_overlap(table))
-            .cloned()
-            .collect_vec()
-    }
-
-    fn update(&mut self, table: &SstableInfo) {
-        self.infos.push(table.clone());
-    }
-}
-
-#[derive(Default)]
 pub struct RangeOverlapStrategy {}
 
 impl OverlapStrategy for RangeOverlapStrategy {
@@ -153,53 +123,4 @@ impl OverlapStrategy for RangeOverlapStrategy {
 fn check_table_overlap(key_range: &KeyRange, table: &SstableInfo) -> bool {
     let other = table.key_range.as_ref().unwrap();
     key_range.full_key_overlap(other)
-}
-
-/// check whether 2 SSTs may have same key by key range and vnode bitmaps in table info
-fn check_key_vnode_overlap(info: &SstableInfo, table: &SstableInfo) -> bool {
-    if !info
-        .key_range
-        .as_ref()
-        .unwrap()
-        .full_key_overlap(table.key_range.as_ref().unwrap())
-    {
-        return false;
-    }
-    let text_len = info.get_table_ids().len();
-    let other_len = table.get_table_ids().len();
-    if text_len == 0 || other_len == 0 {
-        return true;
-    }
-    let (mut i, mut j) = (0, 0);
-    while i < text_len && j < other_len {
-        let x = &info.get_table_ids()[i];
-        let y = &table.get_table_ids()[j];
-        match x.cmp(y) {
-            Ordering::Less => {
-                i += 1;
-            }
-            Ordering::Greater => {
-                j += 1;
-            }
-            Ordering::Equal => {
-                return true;
-                // i += 1;
-                // j += 1;
-            }
-        }
-    }
-    false
-}
-
-#[derive(Default)]
-pub struct HashStrategy {}
-
-impl OverlapStrategy for HashStrategy {
-    fn check_overlap(&self, a: &SstableInfo, b: &SstableInfo) -> bool {
-        check_key_vnode_overlap(a, b)
-    }
-
-    fn create_overlap_info(&self) -> Box<dyn OverlapInfo> {
-        Box::new(HashOverlapInfo::default())
-    }
 }

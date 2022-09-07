@@ -23,6 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
+use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
@@ -36,6 +37,7 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
+use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
@@ -461,6 +463,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         fragment_manager.clone(),
     );
+    let health_srv = HealthServiceImpl::new();
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -518,6 +521,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(DdlServiceServer::new(ddl_srv))
             .add_service(UserServiceServer::new(user_srv))
             .add_service(ScaleServiceServer::new(scale_srv))
+            .add_service(HealthServer::new(health_srv))
             .serve(address_info.listen_addr)
             .await
             .unwrap();

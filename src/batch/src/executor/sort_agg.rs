@@ -118,10 +118,14 @@ impl SortAggExecutor {
         let mut left_capacity = self.output_size_limit;
         let (mut group_builders, mut agg_builders) =
             SortAggExecutor::create_builders(&self.group_key, &self.agg_states);
+        let mut no_input_data = true;
 
         #[for_await]
         for child_chunk in self.child.execute() {
             let child_chunk = child_chunk?.compact()?;
+            if no_input_data && child_chunk.cardinality() > 0 {
+                no_input_data = false;
+            }
             let group_columns: Vec<_> = self
                 .group_key
                 .iter_mut()
@@ -195,6 +199,11 @@ impl SortAggExecutor {
         }
 
         assert!(left_capacity > 0);
+        // Simple agg should give a Null row if there has been no data input, But the group agg does
+        // not
+        if no_input_data && !self.group_key.is_empty() {
+            return Ok(());
+        }
         Self::output_sorted_groupers(&mut self.sorted_groupers, &mut group_builders)?;
         Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
 
