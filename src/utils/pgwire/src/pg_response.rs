@@ -92,6 +92,13 @@ impl StatementType {
                 | StatementType::SELECT
         )
     }
+
+    pub fn is_dml(&self) -> bool {
+        matches!(
+            self,
+            StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE
+        )
+    }
 }
 
 impl PgResponse {
