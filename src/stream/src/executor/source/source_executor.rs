@@ -178,7 +178,7 @@ impl<S: StateStore> SourceExecutor<S> {
 }
 
 impl<S: StateStore> SourceExecutor<S> {
-    fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
+    fn get_diff(&mut self, rhs: ConnectorState) -> ConnectorState {
         // rhs can not be None because we do not support split number reduction
 
         let split_change = rhs.unwrap();
@@ -191,6 +191,8 @@ impl<S: StateStore> SourceExecutor<S> {
                 Some(s) => target_state.push(s.clone()),
                 None => {
                     no_change_flag = false;
+                    // write new assigned split to state cache. snapshot is base on cache.
+                    self.state_cache.entry(sc.id()).or_insert(sc.clone());
                     target_state.push(sc.clone())
                 }
             }
@@ -286,7 +288,6 @@ impl<S: StateStore> SourceExecutor<S> {
                 Either::Left(barrier) => {
                     let barrier = barrier?;
                     let epoch = barrier.epoch.prev;
-                    self.take_snapshot(epoch).await?;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
@@ -330,6 +331,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             _ => {}
                         }
                     }
+                    self.take_snapshot(epoch).await?;
                     self.state_cache.clear();
                     yield Message::Barrier(barrier);
                 }
