@@ -12,25 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::for_await;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_batch::executor::BoxedDataChunkStream;
-use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
-use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::binder::{Binder, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
-use crate::handler::util::{force_local_mode, to_pg_field, to_pg_rows};
+use crate::handler::util::{force_local_mode, to_pg_field};
 use crate::planner::Planner;
 use crate::scheduler::{
-    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution, SchedulerError,
+    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
 };
 use crate::session::{OptimizerContext, SessionImpl};
 

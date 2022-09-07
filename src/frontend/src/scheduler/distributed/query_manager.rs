@@ -28,8 +28,6 @@ use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tracing::debug;
 
-// use async_stream::try_stream;
-// use futures::stream;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::handler::query::QueryResultSet;
@@ -37,8 +35,7 @@ use crate::handler::util::to_pg_rows;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, LocalQueryExecution,
-    SchedulerError, SchedulerResult,
+    ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError, SchedulerResult,
 };
 
 pub struct QueryResultFetcher {
@@ -101,18 +98,8 @@ impl QueryManager {
         )
         .await;
 
-        // // Create a oneshot channel for QueryResultFetcher to get failed event.
-        // let (shutdown_tx_for_cancel, shutdown_rx_for_cancel) = oneshot::channel();
-
         // Create a oneshot channel for QueryResultFetcher to get failed event.
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        // // Insert shutdown channel into channel map so able to cancel it outside.
-        // // TODO: Find a way to delete it when query ends.
-        // {
-        //     let session_ctx = context.session.clone();
-        //     session_ctx.insert_query_shutdown_sender(query_id.clone(), shutdown_tx_for_cancel);
-        // }
-
         let query_result_fetcher = match query_execution.start(shutdown_tx).await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
@@ -123,8 +110,6 @@ impl QueryManager {
             }
         };
 
-        // Ok(query_result_fetcher.run())
-        // query_result_fetcher.collect_chunks(format).await
         query_result_fetcher.collect_rows(format, shutdown_rx).await
     }
 }
@@ -147,7 +132,7 @@ impl QueryResultFetcher {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn run(self) {
+    async fn run_inner(self) {
         debug!(
             "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
             self.task_output_id, self.task_host
@@ -162,8 +147,8 @@ impl QueryResultFetcher {
         }
     }
 
-    fn run_wrapper(self) -> BoxedDataChunkStream {
-        Box::pin(self.run())
+    fn run(self) -> BoxedDataChunkStream {
+        Box::pin(self.run_inner())
     }
 
     pub async fn collect_rows(
@@ -171,7 +156,7 @@ impl QueryResultFetcher {
         format: bool,
         shutdown_rx: Receiver<SchedulerError>,
     ) -> SchedulerResult<QueryResultSet> {
-        let data_stream = self.run_wrapper();
+        let data_stream = self.run();
         let mut data_stream = data_stream.take_until(shutdown_rx);
         let mut rows = vec![];
         #[for_await]
@@ -182,9 +167,7 @@ impl QueryResultFetcher {
         // Check whether error happen, if yes, returned.
         let execution_ret = data_stream.take_result();
         if let Some(ret) = execution_ret {
-            return Err(ret
-                .expect("The shutdown message receiver should not fail")
-                .into());
+            return Err(ret.expect("The shutdown message receiver should not fail"));
         }
 
         Ok(rows)

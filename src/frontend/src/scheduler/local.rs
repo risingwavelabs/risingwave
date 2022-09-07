@@ -68,7 +68,7 @@ impl LocalQueryExecution {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    pub async fn run(mut self) {
+    pub async fn run_inner(mut self) {
         debug!(
             "Starting to run query: {:?}, sql: '{}'",
             self.query.query_id, self.sql
@@ -103,12 +103,12 @@ impl LocalQueryExecution {
         }
     }
 
-    pub fn run_wrapper(self) -> BoxedDataChunkStream {
-        Box::pin(self.run())
+    pub fn run(self) -> BoxedDataChunkStream {
+        Box::pin(self.run_inner())
     }
 
     pub async fn collect_rows(self, format: bool) -> SchedulerResult<QueryResultSet> {
-        let data_stream = self.run_wrapper();
+        let data_stream = self.run();
         let mut rows = vec![];
         #[for_await]
         for chunk in data_stream {
