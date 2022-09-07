@@ -35,8 +35,6 @@ pub mod epoch;
 mod future_utils;
 pub mod scan_range;
 pub mod schema_check;
-pub mod sync_point;
-
 pub mod value_encoding;
 pub mod worker_util;
 

@@ -27,10 +27,12 @@ import {
   Tr,
   useToast,
 } from "@chakra-ui/react"
+import Head from "next/head"
 
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import Title from "../components/Title"
+import extractColumnInfo from "../lib/extractInfo"
 import { Source } from "../proto/gen/catalog"
 import { getDataSources } from "./api/streaming"
 
@@ -55,10 +57,9 @@ export default function DataSources() {
     }
     doFetch()
     return () => {}
-  }, [])
+  }, [toast])
 
-  console.log(sourceList)
-  return (
+  const retVal = (
     <Box p={3}>
       <Title>Data Sources</Title>
       <TableContainer>
@@ -69,9 +70,9 @@ export default function DataSources() {
               <Th width={5}>Name</Th>
               <Th width={3}>Owner</Th>
               <Th width={3}>Type</Th>
-              <Th width={3}>Metrics</Th>
-              <Th width={3}>Depends</Th>
-              <Th width={3}>Fragments</Th>
+              <Th width={1}>Metrics</Th>
+              <Th width={1}>Depends</Th>
+              <Th width={1}>Fragments</Th>
               <Th>Visible Columns</Th>
             </Tr>
           </Thead>
@@ -95,14 +96,16 @@ export default function DataSources() {
                     </Button>
                   </Td>
                   <Td>
-                    <Button
-                      size="sm"
-                      aria-label="view metrics"
-                      colorScheme="teal"
-                      variant="link"
-                    >
-                      D
-                    </Button>
+                    <Link href={`/streaming_graph/?id=${source.id}`}>
+                      <Button
+                        size="sm"
+                        aria-label="view metrics"
+                        colorScheme="teal"
+                        variant="link"
+                      >
+                        D
+                      </Button>
+                    </Link>
                   </Td>
                   <Td>
                     <Link href={`/streaming_plan/?id=${source.id}`}>
@@ -116,12 +119,35 @@ export default function DataSources() {
                       </Button>
                     </Link>
                   </Td>
-                  <Td overflowWrap="normal"></Td>
+                  <Td overflowWrap="normal">
+                    {(() => {
+                      switch (source.info?.$case) {
+                        case "streamSource":
+                          return source.info?.streamSource?.columns
+                            .map((col) => extractColumnInfo(col))
+                            .join(", ")
+                        case "tableSource":
+                          return source.info?.tableSource?.columns
+                            .map((col) => extractColumnInfo(col))
+                            .join(", ")
+                        default:
+                          return <Fragment />
+                      }
+                    })()}
+                  </Td>
                 </Tr>
               ))}
           </Tbody>
         </Table>
       </TableContainer>
     </Box>
+  )
+  return (
+    <Fragment>
+      <Head>
+        <title>Data Sources</title>
+      </Head>
+      {retVal}
+    </Fragment>
   )
 }

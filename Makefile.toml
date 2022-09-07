@@ -7,7 +7,7 @@ extend = [
   { path = "src/risedevtool/kafka.toml" },
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
-  { path = "src/frontend/test_runner/planner_test.toml" },
+  { path = "src/frontend/planner_test/planner_test.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
