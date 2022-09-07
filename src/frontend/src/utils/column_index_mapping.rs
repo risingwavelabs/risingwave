@@ -234,6 +234,9 @@ impl ColIndexMapping {
         *self.map.get(index)?
     }
 
+    /// # Panics
+    ///
+    /// Will panic if `index >= self.source_size()`
     pub fn map(&self, index: usize) -> usize {
         self.try_map(index).unwrap()
     }
