@@ -15,6 +15,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
+
 mod cmd_impl;
 pub(crate) mod common;
 
@@ -114,6 +115,20 @@ enum MetaCommands {
     /// get cluster info
     ClusterInfo,
     /// Reschedule the parallel unit in the stream graph
+    ///
+    /// The format is `fragment_id-[removed]+[added]`
+    /// You can provide either `removed` only or `added` only, but `removed` should be preceded by
+    /// `added` when both are provided.
+    ///
+    /// For example, for plan `100-[1,2,3]+[4,5]` the follow request will be generated:
+    /// {
+    ///     100: Reschedule {
+    ///         added_parallel_units: [4,5],
+    ///         removed_parallel_units: [1,2,3],
+    ///     }
+    /// }
+    /// Use ; to separate multiple fragment
+    #[clap(verbatim_doc_comment)]
     Reschedule {
         /// Plan of reschedule
         #[clap(long)]
