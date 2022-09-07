@@ -323,7 +323,12 @@ export function layout(
   }
 
   for (let i = 0; i < maxLayer; ++i) {
-    getCumulativeMargin(i, LAYER_MARGIN, layerCumulativeWidth, layerRequiredWidth)
+    getCumulativeMargin(
+      i,
+      LAYER_MARGIN,
+      layerCumulativeWidth,
+      layerRequiredWidth
+    )
   }
   for (let i = 0; i < maxRow; ++i) {
     getCumulativeMargin(i, ROW_MARGIN, rowCumulativeHeight, rowRequiredHeight)
@@ -334,11 +339,11 @@ export function layout(
     let ab = item[0],
       layer = item[1][0],
       row = item[1][1]
-    let x = layerCumulativeWidth.get(layer);
-    let y = rowCumulativeHeight.get(row);
-    if(x && y){
+    let x = layerCumulativeWidth.get(layer)
+    let y = rowCumulativeHeight.get(row)
+    if (x && y) {
       rtn.set(ab, [x, y])
-    }else{
+    } else {
       throw Error(`x of layer ${layer}: ${x}, y of row ${row}: ${y} `)
     }
   }
