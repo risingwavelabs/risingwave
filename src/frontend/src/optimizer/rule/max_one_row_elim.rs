@@ -13,28 +13,38 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalApply, LogicalJoin};
+use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
+use crate::optimizer::plan_node::LogicalApply;
+use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::PlanRef;
 
-/// Convert `LogicalApply` to `LogicalJoin` if it is uncorrelated and doesn't require max one row
-/// restriction.
-pub struct ApplyToJoinRule {}
-impl Rule for ApplyToJoinRule {
+/// Eliminate max one row restriction from `LogicalApply`.
+pub struct MaxOneRowEliminateRule {}
+impl Rule for MaxOneRowEliminateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, _correlated_id, correlated_indices, max_one_row) =
+        let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
 
-        if !max_one_row && correlated_indices.is_empty() {
-            Some(LogicalJoin::new(left, right, join_type, on).into())
+        // Try to eliminate max one row.
+        if max_one_row && MaxOneRowVisitor().visit(right.clone()) {
+            Some(LogicalApply::create(
+                left,
+                right,
+                join_type,
+                on,
+                correlated_id,
+                correlated_indices,
+                false,
+            ))
         } else {
             None
         }
     }
 }
 
-impl ApplyToJoinRule {
+impl MaxOneRowEliminateRule {
     pub fn create() -> BoxedRule {
-        Box::new(ApplyToJoinRule {})
+        Box::new(MaxOneRowEliminateRule {})
     }
 }

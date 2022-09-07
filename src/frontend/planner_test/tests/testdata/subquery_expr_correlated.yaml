@@ -632,7 +632,15 @@
     create table t1 (a int, b int);
     create table t2 (b int, c int);
     select a, (select t1.a), c from t1, t2 where t1.b = t2.b order by c;
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.a, t1.a), output: [t1.a, t1.a, t2.c] }
+      LogicalJoin { type: Inner, on: (t1.b = t2.b), output: [t1.a, t2.c] }
+        LogicalScan { table: t1, columns: [t1.a, t1.b] }
+        LogicalScan { table: t2, columns: [t2.b, t2.c] }
+      LogicalJoin { type: Inner, on: true, output: [t1.a, t1.a] }
+        LogicalAgg { group_key: [t1.a], aggs: [] }
+          LogicalScan { table: t1, columns: [t1.a] }
+        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -663,3 +671,16 @@
     create table t2(x int, y int);
     select * from t1 where exists(select * from t2 where t1.x = t2.x order by x limit 1);
   optimizer_error: 'internal error: Subquery can not be unnested.'
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select t1.x, (select y from t2 where t2.y = t1.y) from t1;
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select t1.x, (select y from t2 where t2._row_id = t1._row_id) from t1;
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftOuter, on: (t2._row_id = t1._row_id), output: [t1.x, t2.y] }
+      LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
+      LogicalScan { table: t2, columns: [t2.y, t2._row_id] }

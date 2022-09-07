@@ -57,11 +57,13 @@ mod apply_join;
 mod apply_to_join;
 mod distinct_agg;
 mod index_selection;
+mod max_one_row_elim;
 mod push_calculation_of_join;
 pub use apply_join::*;
 pub use apply_to_join::*;
 pub use distinct_agg::*;
 pub use index_selection::*;
+pub use max_one_row_elim::*;
 pub use push_calculation_of_join::*;
 
 #[macro_export]
@@ -75,6 +77,7 @@ macro_rules! for_all_rules {
             ,{ApplyScanRule}
             ,{ApplyJoinRule}
             ,{ApplyToJoinRule}
+            ,{MaxOneRowEliminateRule}
             ,{DistinctAggRule}
             ,{IndexDeltaJoinRule}
             ,{MergeMultiJoinRule}

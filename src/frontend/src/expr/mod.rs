@@ -467,6 +467,19 @@ impl ExprImpl {
         }
     }
 
+    pub fn as_eq_correlated_input_ref(&self) -> Option<(InputRef, CorrelatedInputRef)> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+            function_call.get_expr_type() == ExprType::Equal{
+            match function_call.clone().decompose_as_binary() {
+                (_, ExprImpl::InputRef(x), ExprImpl::CorrelatedInputRef(y)) => Some((*x, *y)),
+                (_, ExprImpl::CorrelatedInputRef(x), ExprImpl::InputRef(y)) => Some((*y, *x)),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn as_is_null(&self) -> Option<InputRef> {
         if let ExprImpl::FunctionCall(function_call) = self &&
             function_call.get_expr_type() == ExprType::IsNull{

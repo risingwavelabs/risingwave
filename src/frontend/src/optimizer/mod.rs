@@ -36,7 +36,7 @@ use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterializ
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
-use crate::optimizer::max_one_row_visitor::{HasMaxOneRowApply, HasMaxOneRowUncorrelatedApply};
+use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
 use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply, PlanVisitor};
 use crate::optimizer::property::Distribution;
@@ -140,7 +140,6 @@ impl PlanRoot {
         apply_order: ApplyOrder,
     ) -> PlanRef {
         let mut output_plan = plan;
-
         loop {
             let mut heuristic_optimizer = HeuristicOptimizer::new(&apply_order, &rules);
             output_plan = heuristic_optimizer.optimize(output_plan);
@@ -176,16 +175,17 @@ impl PlanRoot {
             plan,
             "Simple Unnesting".to_string(),
             vec![
-                // Pull correlated predicates up the algebra tree to unnest simple subquery.
-                PullUpCorrelatedPredicateRule::create(),
+                // Eliminate max one row
+                MaxOneRowEliminateRule::create(),
                 // Convert apply to join.
                 ApplyToJoinRule::create(),
+                // Pull correlated predicates up the algebra tree to unnest simple subquery.
+                PullUpCorrelatedPredicateRule::create(),
             ],
             ApplyOrder::TopDown,
         );
 
-        if HasMaxOneRowUncorrelatedApply().visit(plan.clone()) {
-            // return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
+        if HasMaxOneRowApply().visit(plan.clone()) {
             return Err(ErrorCode::InternalError(
                 "Scalar subquery might produce more than one row.".into(),
             )
@@ -214,14 +214,6 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
-
-        if HasMaxOneRowApply().visit(plan.clone()) {
-            // return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
-            return Err(ErrorCode::InternalError(
-                "Scalar subquery might produce more than one row.".into(),
-            )
-            .into());
-        }
 
         if has_logical_apply(plan.clone()) {
             return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());

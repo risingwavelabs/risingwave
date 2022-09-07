@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalExpand, LogicalHopWindow, LogicalLimit, LogicalProjectSet,
-    LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeUnary,
+    LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
+    LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeUnary,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 
@@ -42,6 +44,21 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
         plan.limit() <= 1 || self.visit(plan.input())
     }
 
+    fn visit_logical_filter(&mut self, plan: &LogicalFilter) -> bool {
+        let mut eq_set = HashSet::new();
+        for pred in &plan.predicate().conjunctions {
+            if let Some((input_ref, _value)) = pred.as_eq_const() {
+                eq_set.insert(input_ref.index);
+            } else if let Some((input_ref, _correlated_input_ref)) =
+                pred.as_eq_correlated_input_ref()
+            {
+                eq_set.insert(input_ref.index);
+            }
+        }
+        eq_set.is_superset(&plan.input().logical_pk().iter().copied().collect())
+            || self.visit(plan.input())
+    }
+
     fn visit_logical_union(&mut self, _plan: &LogicalUnion) -> bool {
         false
     }
@@ -56,18 +73,6 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
 
     fn visit_logical_hop_window(&mut self, _plan: &LogicalHopWindow) -> bool {
         false
-    }
-}
-
-pub struct HasMaxOneRowUncorrelatedApply();
-
-impl PlanVisitor<bool> for HasMaxOneRowUncorrelatedApply {
-    fn merge(a: bool, b: bool) -> bool {
-        a | b
-    }
-
-    fn visit_logical_apply(&mut self, plan: &LogicalApply) -> bool {
-        plan.correlated_indices().is_empty() && plan.max_one_row()
     }
 }
 
