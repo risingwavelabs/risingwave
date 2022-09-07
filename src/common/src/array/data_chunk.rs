@@ -28,6 +28,7 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
 use crate::types::{DataType, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
+use crate::util::value_encoding::serialize_datum_ref;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
@@ -441,6 +442,46 @@ impl DataChunk {
         Self {
             columns: new_columns,
             ..self
+        }
+    }
+
+    /// Serialize each rows into value encoding bytes.
+    ///
+    /// the returned vector's size is self.capacity() and for the invisible row will give a empty
+    /// vec<u8>
+    pub fn serialize(&self) -> Vec<Vec<u8>> {
+        match &self.vis2 {
+            Vis::Bitmap(vis) => {
+                let rows_num = vis.len();
+                let mut buffers = vec![vec![]; rows_num];
+                for c in &self.columns {
+                    let c = c.array_ref();
+                    assert_eq!(c.len(), rows_num);
+                    for (i, buffer) in buffers.iter_mut().enumerate() {
+                        // SAFETY(value_at_unchecked): the idx is always in bound.
+                        unsafe {
+                            if vis.is_set_unchecked(i) {
+                                serialize_datum_ref(&c.value_at_unchecked(i), buffer);
+                            }
+                        }
+                    }
+                }
+                buffers
+            }
+            Vis::Compact(rows_num) => {
+                let mut buffers = vec![vec![]; *rows_num];
+                for c in &self.columns {
+                    let c = c.array_ref();
+                    assert_eq!(c.len(), *rows_num);
+                    for (i, buffer) in buffers.iter_mut().enumerate() {
+                        // SAFETY(value_at_unchecked): the idx is always in bound.
+                        unsafe {
+                            serialize_datum_ref(&c.value_at_unchecked(i), buffer);
+                        }
+                    }
+                }
+                buffers
+            }
         }
     }
 }
