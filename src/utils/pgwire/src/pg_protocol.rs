@@ -27,9 +27,9 @@ use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
-    BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCloseMessage,
-    FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage, FePasswordMessage,
-    FeStartupMessage,
+    BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
+    FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
+    FePasswordMessage, FeStartupMessage,
 };
 use crate::pg_response::PgResponse;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
@@ -112,6 +112,7 @@ where
                 match e {
                     PsqlError::SslError(io_err) | PsqlError::IoError(io_err) => {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
+                            tracing::error!("{}", error_msg);
                             return true;
                         }
                     }
@@ -125,6 +126,7 @@ where
 
                     PsqlError::ReadMsgError(io_err) => {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
+                            tracing::error!("{}", error_msg);
                             return true;
                         }
                         self.stream
@@ -142,13 +144,16 @@ where
                     | PsqlError::DescribeError(_)
                     | PsqlError::ParseError(_)
                     | PsqlError::BindError(_)
-                    | PsqlError::ExecuteError(_) => {
+                    | PsqlError::ExecuteError(_)
+                    | PsqlError::CancelNotFound => {
                         self.stream
                             .write_for_error(&BeMessage::ErrorResponse(Box::new(e)));
                     }
 
                     // Never reach this.
-                    PsqlError::CancelMsg(_) => todo!(),
+                    PsqlError::CancelMsg(_) => {
+                        todo!("Support processing cancel query")
+                    }
                 }
                 self.stream.flush_for_error().await;
                 tracing::error!("{}", error_msg);
@@ -164,7 +169,7 @@ where
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg)?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
-            FeMessage::CancelQuery => self.process_cancel_msg()?,
+            FeMessage::CancelQuery(m) => self.process_cancel_msg(m).await?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => self.process_parse_msg(m).await?,
             FeMessage::Bind(m) => self.process_bind_msg(m).await?,
@@ -213,6 +218,13 @@ where
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationOk)
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
+
+                // Cancel request need this for identify and verification. According to postgres
+                // doc, it should be written to buffer after receive AuthenticationOk.
+                // let id = self.session_mgr.insert_session(session.clone());
+                self.stream
+                    .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
+
                 self.stream
                     .write_parameter_status_msg_no_flush()
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
@@ -257,9 +269,16 @@ where
         Ok(())
     }
 
-    fn process_cancel_msg(&mut self) -> PsqlResult<()> {
-        self.stream
-            .write_no_flush(&BeMessage::ErrorResponse(Box::new(PsqlError::cancel())))?;
+    async fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
+        let session = self
+            .session_mgr
+            .connect_for_cancel(m.target_process_id, m.target_secret_key)?;
+        self.session = Some(session);
+        // TODO: Abort running query in `QueryManager`.
+        let session = self.session.clone().unwrap();
+        session.cancel_running_queries().await;
+        self.session = None;
+        self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         Ok(())
     }
 
