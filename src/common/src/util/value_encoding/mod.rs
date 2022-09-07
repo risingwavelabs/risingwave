@@ -29,7 +29,7 @@ use risingwave_pb::data::data_type::TypeName;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
-use crate::array::{ListRef, StructRef};
+use crate::array::StructRef;
 
 /// Serialize datum into cell bytes (Not order guarantee, used in value encoding).
 pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
@@ -94,11 +94,11 @@ fn serialize_value(value: ScalarRefImpl, mut buf: impl BufMut) {
         ScalarRefImpl::Struct(StructRef::ValueRef { val }) => {
             serialize_struct_or_list(val.to_protobuf_owned(), buf);
         }
-        ScalarRefImpl::List(ListRef::ValueRef { val }) => {
-            serialize_struct_or_list(val.to_protobuf_owned(), buf);
+        ScalarRefImpl::List(list) => {
+            serialize_struct_or_list(list.to_protobuf_owned(), buf);
         }
         _ => {
-            panic!("Type is unable to be serialized.")
+            panic!("Type {} is unable to be serialized.", value)
         }
     }
 }
