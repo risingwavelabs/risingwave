@@ -4670,7 +4670,6 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_test_runner",
- "scopeguard",
  "serde",
  "serde_derive",
  "serde_json",

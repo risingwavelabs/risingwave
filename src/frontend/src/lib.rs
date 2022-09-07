@@ -37,6 +37,7 @@
 #![feature(assert_matches)]
 #![feature(map_first_last)]
 #![feature(lint_reasons)]
+#![feature(box_patterns)]
 
 #[macro_use]
 mod catalog;
@@ -55,7 +56,7 @@ mod scheduler;
 pub mod session;
 mod stream_fragmenter;
 mod utils;
-extern crate tracing;
+pub use utils::WithOptions;
 mod meta_client;
 pub mod test_utils;
 mod user;
