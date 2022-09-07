@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -51,6 +52,7 @@ use crate::session::{AuthContext, FrontendEnv, OptimizerContext, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
+use crate::utils::WithOptions;
 use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
@@ -120,10 +122,17 @@ impl LocalFrontend {
                 let mut binder = Binder::new(&session);
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
-                .plan(bound)
-                .unwrap()
-                .gen_batch_distributed_plan()
+            Planner::new(
+                OptimizerContext::new(
+                    session,
+                    Arc::from(raw_sql.as_str()),
+                    WithOptions::try_from(statement)?,
+                )
+                .into(),
+            )
+            .plan(bound)
+            .unwrap()
+            .gen_batch_distributed_plan()
         } else {
             unreachable!()
         }
