@@ -31,15 +31,15 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
     }
 
     fn visit_logical_agg(&mut self, plan: &LogicalAgg) -> bool {
-        plan.group_key().is_empty()
+        plan.group_key().is_empty() || self.visit(plan.input())
     }
 
     fn visit_logical_limit(&mut self, plan: &LogicalLimit) -> bool {
-        plan.limit() <= 1
+        plan.limit() <= 1 || self.visit(plan.input())
     }
 
     fn visit_logical_top_n(&mut self, plan: &LogicalTopN) -> bool {
-        plan.limit() <= 1
+        plan.limit() <= 1 || self.visit(plan.input())
     }
 
     fn visit_logical_union(&mut self, _plan: &LogicalUnion) -> bool {
