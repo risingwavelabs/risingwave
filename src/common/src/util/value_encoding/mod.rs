@@ -29,8 +29,6 @@ use risingwave_pb::data::data_type::TypeName;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
-use crate::array::StructRef;
-
 /// Serialize datum into cell bytes (Not order guarantee, used in value encoding).
 pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
