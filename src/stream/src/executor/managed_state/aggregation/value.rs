@@ -165,7 +165,8 @@ mod tests {
             ManagedValueState::new(create_test_count_state(), Some(0), None, &state_table)
                 .await
                 .unwrap();
-        assert!(!managed_state.is_dirty());
+
+        let epoch: u64 = 0;
 
         // apply a batch and get the output
         managed_state
@@ -175,13 +176,12 @@ mod tests {
                 &[&I64Array::from_slice(&[Some(0), Some(1), Some(2), None])
                     .unwrap()
                     .into()],
+                epoch,
+                &mut state_table,
             )
             .unwrap();
-        assert!(managed_state.is_dirty());
 
         // write to state store
-        let epoch: u64 = 0;
-        managed_state.flush(&mut state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
 
         // get output
@@ -230,7 +230,8 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!managed_state.is_dirty());
+
+        let epoch: u64 = 0;
 
         // apply a batch and get the output
         managed_state
@@ -242,13 +243,12 @@ mod tests {
                         .unwrap()
                         .into(),
                 ],
+                epoch,
+                &mut state_table,
             )
             .unwrap();
-        assert!(managed_state.is_dirty());
 
         // write to state store
-        let epoch: u64 = 0;
-        managed_state.flush(&mut state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
 
         // get output
