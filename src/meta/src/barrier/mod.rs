@@ -35,7 +35,6 @@ use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
 use risingwave_rpc_client::StreamClientPoolRef;
-use smallvec::SmallVec;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
@@ -65,7 +64,15 @@ mod schedule;
 pub use self::command::{Command, Reschedule};
 pub use self::schedule::BarrierScheduler;
 
-type Scheduled = (Command, SmallVec<[Notifier; 1]>);
+/// Scheduled command with its notifiers.
+type Scheduled = (Command, Vec<Notifier>);
+
+/// Post-processing information for barriers.
+type CheckpointPost<S> = (
+    Arc<CommandContext<S>>,
+    Vec<Notifier>,
+    Vec<CreateMviewProgress>,
+);
 
 /// Changes to the actors to be sent or collected after this command is committed.
 ///
@@ -124,12 +131,6 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     pub(crate) env: MetaSrvEnv<S>,
 }
-/// Post-processing information for barriers.
-type CheckpointPost<S> = (
-    Arc<CommandContext<S>>,
-    SmallVec<[Notifier; 1]>,
-    Vec<CreateMviewProgress>,
-);
 
 /// Post-processing information for barriers and previously uncommitted ssts
 struct UncommittedMessages<S: MetaStore> {
@@ -311,11 +312,7 @@ where
     }
 
     /// Enqueue a barrier command, and init its state to `InFlight`.
-    fn enqueue_command(
-        &mut self,
-        command_ctx: Arc<CommandContext<S>>,
-        notifiers: SmallVec<[Notifier; 1]>,
-    ) {
+    fn enqueue_command(&mut self, command_ctx: Arc<CommandContext<S>>, notifiers: Vec<Notifier>) {
         let timer = self.metrics.barrier_latency.start_timer();
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
@@ -422,7 +419,7 @@ pub struct EpochNode<S: MetaStore> {
     /// Context of this command to generate barrier and do some post jobs.
     command_ctx: Arc<CommandContext<S>>,
     /// Notifiers of this barrier.
-    notifiers: SmallVec<[Notifier; 1]>,
+    notifiers: Vec<Notifier>,
 }
 
 /// The state of barrier.

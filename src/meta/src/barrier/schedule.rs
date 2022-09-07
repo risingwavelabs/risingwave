@@ -14,28 +14,33 @@ use crate::manager::META_NODE_ID;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
-/// A buffer or queue for scheduling barriers.
+/// A queue for scheduling barriers.
 ///
 /// We manually implement one here instead of using channels since we may need to update the front
 /// of the queue to add some notifiers for instant flushes.
 struct Inner {
-    buffer: RwLock<VecDeque<Scheduled>>,
+    queue: RwLock<VecDeque<Scheduled>>,
 
-    /// When `buffer` is not empty anymore, all subscribers of this watcher will be notified.
+    /// When `queue` is not empty anymore, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
 }
 
+/// The sender side of the barrier scheduling queue.
+/// Can be cloned and held by other managers to schedule and run barriers.
 #[derive(Clone)]
 pub struct BarrierScheduler<S: MetaStore> {
     inner: Arc<Inner>,
 
+    /// Used for pinning the snapshot when creating a materialized view.
     hummock_manager: HummockManagerRef<S>,
 }
 
 impl<S: MetaStore> BarrierScheduler<S> {
-    pub fn new(hummock_manager: HummockManagerRef<S>) -> (Self, ScheduledBarriers) {
+    /// Create a pair of [`BarrierScheduler`] and [`ScheduledBarriers`], for scheduling barriers
+    /// from different managers, and executing them in the barrier manager, respectively.
+    pub fn new_pair(hummock_manager: HummockManagerRef<S>) -> (Self, ScheduledBarriers) {
         let inner = Arc::new(Inner {
-            buffer: RwLock::new(VecDeque::new()),
+            queue: RwLock::new(VecDeque::new()),
             changed_tx: watch::channel(()).0,
         });
 
@@ -48,12 +53,12 @@ impl<S: MetaStore> BarrierScheduler<S> {
         )
     }
 
-    /// Push a scheduled barrier into the buffer.
+    /// Push a scheduled barrier into the queue.
     async fn push(&self, scheduleds: impl IntoIterator<Item = Scheduled>) {
-        let mut buffer = self.inner.buffer.write().await;
+        let mut queue = self.inner.queue.write().await;
         for scheduled in scheduleds {
-            buffer.push_back(scheduled);
-            if buffer.len() == 1 {
+            queue.push_back(scheduled);
+            if queue.len() == 1 {
                 self.inner.changed_tx.send(()).ok();
             }
         }
@@ -62,13 +67,13 @@ impl<S: MetaStore> BarrierScheduler<S> {
     /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
     /// default checkpoint barrier will be created.
     async fn attach_notifiers(&self, new_notifiers: impl IntoIterator<Item = Notifier>) {
-        let mut buffer = self.inner.buffer.write().await;
-        match buffer.front_mut() {
+        let mut queue = self.inner.queue.write().await;
+        match queue.front_mut() {
             Some((_, notifiers)) => notifiers.extend(new_notifiers),
             None => {
                 // If no command scheduled, create periodic checkpoint barrier by default.
-                buffer.push_back((Command::checkpoint(), new_notifiers.into_iter().collect()));
-                if buffer.len() == 1 {
+                queue.push_back((Command::checkpoint(), new_notifiers.into_iter().collect()));
+                if queue.len() == 1 {
                     self.inner.changed_tx.send(()).ok();
                 }
             }
@@ -165,41 +170,39 @@ impl<S: MetaStore> BarrierScheduler<S> {
     }
 }
 
-/// A buffer or queue for scheduling barriers.
-///
-/// We manually implement one here instead of using channels since we may need to update the front
-/// of the queue to add some notifiers for instant flushes.
+/// The receiver side of the barrier scheduling queue.
+/// Held by the [`super::GlobalBarrierManager`] to execute these commands.
 pub struct ScheduledBarriers {
     inner: Arc<Inner>,
 }
 
 impl ScheduledBarriers {
-    /// Pop a scheduled barrier from the buffer, or a default checkpoint barrier if not exists.
+    /// Pop a scheduled barrier from the queue, or a default checkpoint barrier if not exists.
     pub(super) async fn pop_or_default(&self) -> Scheduled {
-        let mut buffer = self.inner.buffer.write().await;
+        let mut queue = self.inner.queue.write().await;
 
         // If no command scheduled, create periodic checkpoint barrier by default.
-        buffer
+        queue
             .pop_front()
             .unwrap_or_else(|| (Command::checkpoint(), Default::default()))
     }
 
-    /// Wait for at least one scheduled barrier in the buffer.
+    /// Wait for at least one scheduled barrier in the queue.
     pub(super) async fn wait_one(&self) {
-        let buffer = self.inner.buffer.read().await;
-        if buffer.len() > 0 {
+        let queue = self.inner.queue.read().await;
+        if queue.len() > 0 {
             return;
         }
         let mut rx = self.inner.changed_tx.subscribe();
-        drop(buffer);
+        drop(queue);
 
         rx.changed().await.unwrap();
     }
 
-    /// Clear all buffered scheduled barriers, and notify their subscribers with failed as aborted.
+    /// Clear all queueed scheduled barriers, and notify their subscribers with failed as aborted.
     pub(super) async fn abort(&self) {
-        let mut buffer = self.inner.buffer.write().await;
-        while let Some((_, notifiers)) = buffer.pop_front() {
+        let mut queue = self.inner.queue.write().await;
+        while let Some((_, notifiers)) = queue.pop_front() {
             notifiers.into_iter().for_each(|notify| {
                 notify.notify_collection_failed(anyhow!("Scheduled barrier abort.").into())
             })

@@ -961,7 +961,7 @@ mod tests {
             );
 
             let (barrier_scheduler, scheduled_barriers) =
-                BarrierScheduler::new(hummock_manager.clone());
+                BarrierScheduler::new_pair(hummock_manager.clone());
 
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 scheduled_barriers,
