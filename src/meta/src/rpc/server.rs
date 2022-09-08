@@ -352,16 +352,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let (barrier_scheduler, scheduled_barriers) =
         BarrierScheduler::new_pair(hummock_manager.clone());
 
-    let barrier_manager = Arc::new(GlobalBarrierManager::new(
-        scheduled_barriers,
-        env.clone(),
-        cluster_manager.clone(),
-        catalog_manager.clone(),
-        fragment_manager.clone(),
-        hummock_manager.clone(),
-        meta_metrics.clone(),
-    ));
-
     let source_manager = Arc::new(
         SourceManager::new(
             env.clone(),
@@ -374,6 +364,17 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .await
         .unwrap(),
     );
+
+    let barrier_manager = Arc::new(GlobalBarrierManager::new(
+        scheduled_barriers,
+        env.clone(),
+        cluster_manager.clone(),
+        catalog_manager.clone(),
+        fragment_manager.clone(),
+        hummock_manager.clone(),
+        source_manager.clone(),
+        meta_metrics.clone(),
+    ));
 
     {
         let source_manager = source_manager.clone();
