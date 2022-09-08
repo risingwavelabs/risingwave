@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc};
 use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::expr::DataTypeName;
+use risingwave_common::types::DataTypeName;
 use risingwave_sqlparser::ast::{DataType, Expr, Value};
 
 use crate::expr::sql_null;
