@@ -18,7 +18,7 @@ use std::sync::Arc;
 use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse};
+use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, SubscribeCompactTasksResponse};
 use tokio::sync::mpsc::Receiver;
 
 use super::Compactor;
@@ -154,6 +154,11 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
     fn report_compact_task(&mut self, _context_id: HummockContextId, _task: &CompactTask) {}
 }
 
+/// The score must be linear to the input for easy update.
+///
+/// Currently the score >= 0, but we use signed type because the score delta might be < 0.
+type Score = i64;
+
 /// Give priority to compactors with the least score. Currently the score is composed only of
 /// pending bytes compaction tasks.
 #[derive(Default)]
@@ -166,12 +171,30 @@ pub struct ScoredPolicy {
     // node has not yet subscribed to meta node.
     //
     // That is to say `score_to_compactor` should be a subset of `compactor_to_score`.
-    score_to_compactor: BTreeMap<(usize, HummockContextId), Arc<Compactor>>,
-    compactor_to_score: HashMap<HummockContextId, usize>,
+    score_to_compactor: BTreeMap<(Score, HummockContextId), Arc<Compactor>>,
+    compactor_to_score: HashMap<HummockContextId, Score>,
 }
 
 impl ScoredPolicy {
-    pub fn new() -> Self {
+    /// Initialize policy with already assigned tasks.
+    pub fn new_with_task_assignment(task_assignment: &[CompactTaskAssignment]) -> Self {
+        let mut compactor_to_score = HashMap::new();
+        task_assignment.iter().for_each(|assignment| {
+            let score_delta =
+                Self::calculate_score_delta(assignment.compact_task.as_ref().unwrap());
+            compactor_to_score
+                .entry(assignment.context_id)
+                .and_modify(|old_score| *old_score += score_delta)
+                .or_insert(score_delta);
+        });
+        Self {
+            score_to_compactor: BTreeMap::new(),
+            compactor_to_score,
+        }
+    }
+
+    #[cfg(test)]
+    fn new_for_test() -> Self {
         Self {
             ..Default::default()
         }
@@ -180,24 +203,15 @@ impl ScoredPolicy {
     fn update_compactor_score(
         &mut self,
         context_id: HummockContextId,
-        old_score: usize,
+        old_score: Score,
         compact_task: Option<&CompactTask>,
     ) -> Arc<Compactor> {
-        let mut new_score = old_score;
-        if let Some(task) = compact_task {
-            let task_size = task
-                .input_ssts
-                .iter()
-                .flat_map(|level| level.table_infos.iter())
-                .map(|table| table.file_size)
-                .sum::<u64>() as usize;
-            if let TaskStatus::Pending = task.task_status() {
-                new_score += task_size
-            } else {
-                debug_assert!(old_score >= task_size);
-                new_score -= task_size
-            }
+        let new_score = if let Some(task) = compact_task {
+            old_score + Self::calculate_score_delta(task)
+        } else {
+            old_score
         };
+        debug_assert!(new_score >= 0);
         // The element must exist.
         let compactor = self
             .score_to_compactor
@@ -207,6 +221,20 @@ impl ScoredPolicy {
             .insert((new_score, context_id), compactor.clone());
         *self.compactor_to_score.get_mut(&context_id).unwrap() = new_score;
         compactor
+    }
+
+    fn calculate_score_delta(compact_task: &CompactTask) -> Score {
+        let task_size = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table| table.file_size)
+            .sum::<u64>() as usize;
+        if let TaskStatus::Pending = compact_task.task_status() {
+            Score::try_from(task_size).unwrap()
+        } else {
+            -Score::try_from(task_size).unwrap()
+        }
     }
 }
 
@@ -314,9 +342,10 @@ mod tests {
 
     use risingwave_common::try_match_expand;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_hummock_sdk::HummockContextId;
     use risingwave_pb::hummock::compact_task::TaskStatus;
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
-    use risingwave_pb::hummock::{CompactTask, InputLevel, SstableInfo};
+    use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, InputLevel, SstableInfo};
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -329,6 +358,7 @@ mod tests {
         to_local_sstable_info,
     };
     use crate::hummock::{CompactorManager, HummockManager};
+    use crate::model::MetadataModel;
     use crate::storage::MetaStore;
 
     async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
@@ -384,16 +414,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_rr_add_remove_compactor() {
-        let mut compactor_manager = RoundRobinPolicy::new();
+        let mut policy = RoundRobinPolicy::new();
         // No compactors by default.
-        assert_eq!(compactor_manager.compactors.len(), 0);
+        assert_eq!(policy.compactors.len(), 0);
 
-        let mut receiver = compactor_manager.add_compactor(1, u64::MAX);
-        assert_eq!(compactor_manager.compactors.len(), 1);
-        let _receiver_2 = compactor_manager.add_compactor(2, u64::MAX);
-        assert_eq!(compactor_manager.compactors.len(), 2);
-        compactor_manager.remove_compactor(2);
-        assert_eq!(compactor_manager.compactors.len(), 1);
+        let mut receiver = policy.add_compactor(1, u64::MAX);
+        assert_eq!(policy.compactors.len(), 1);
+        let _receiver_2 = policy.add_compactor(2, u64::MAX);
+        assert_eq!(policy.compactors.len(), 2);
+        policy.remove_compactor(2);
+        assert_eq!(policy.compactors.len(), 1);
 
         // No compact task there.
         assert!(matches!(
@@ -403,12 +433,8 @@ mod tests {
 
         let task = dummy_compact_task(123, 0);
         let compactor = {
-            let compactor_id = compactor_manager.compactors.first().unwrap();
-            compactor_manager
-                .compactor_map
-                .get(compactor_id)
-                .unwrap()
-                .clone()
+            let compactor_id = policy.compactors.first().unwrap();
+            policy.compactor_map.get(compactor_id).unwrap().clone()
         };
         compactor
             .send_task(Task::CompactTask(task.clone()))
@@ -419,8 +445,8 @@ mod tests {
         let received_compact_task = try_match_expand!(received_task, Task::CompactTask).unwrap();
         assert_eq!(received_compact_task, task);
 
-        compactor_manager.remove_compactor(compactor.context_id());
-        assert_eq!(compactor_manager.compactors.len(), 0);
+        policy.remove_compactor(compactor.context_id());
+        assert_eq!(policy.compactors.len(), 0);
         drop(compactor);
         assert!(matches!(
             receiver.try_recv().unwrap_err(),
@@ -474,38 +500,75 @@ mod tests {
 
     #[tokio::test]
     async fn test_rr_next_compactor_round_robin() {
-        let mut compactor_manager = RoundRobinPolicy::new();
+        let mut policy = RoundRobinPolicy::new();
         let mut receivers = vec![];
         for context_id in 0..5 {
-            receivers.push(compactor_manager.add_compactor(context_id, u64::MAX));
+            receivers.push(policy.add_compactor(context_id, u64::MAX));
         }
-        assert_eq!(compactor_manager.compactors.len(), 5);
+        assert_eq!(policy.compactors.len(), 5);
         for i in 0..receivers.len() * 3 {
-            let compactor = compactor_manager.next_compactor(None).unwrap();
+            let compactor = policy.next_compactor(None).unwrap();
             assert_eq!(compactor.context_id() as usize, i % receivers.len());
         }
     }
 
     #[tokio::test]
-    async fn test_scored_add_remove_compactor() {
-        let mut compactor_manager = ScoredPolicy::new();
-        // No compactors by default.
-        assert_eq!(compactor_manager.compactor_to_score.len(), 0);
-        assert_eq!(compactor_manager.score_to_compactor.len(), 0);
+    async fn test_scored_with_task_assignment() {
+        let config = CompactionConfigBuilder::new()
+            .level0_tier_compact_file_number(1)
+            .max_bytes_for_level_base(1)
+            .build();
+        let (meta_env, hummock_manager, _, _) = setup_compute_env_with_config(80, config).await;
+        // Assign dummy existing tasks.
+        let existing_tasks = vec![dummy_compact_task(0, 1), dummy_compact_task(1, 1)];
+        for (context_id, task) in existing_tasks.iter().enumerate() {
+            hummock_manager
+                .assign_compaction_task(&task, context_id as HummockContextId)
+                .await
+                .unwrap();
+        }
+        let existing_assignments = CompactTaskAssignment::list(meta_env.meta_store())
+            .await
+            .unwrap();
+        let mut policy = ScoredPolicy::new_with_task_assignment(&existing_assignments);
+        assert_eq!(policy.score_to_compactor.len(), 0);
+        assert_eq!(policy.compactor_to_score.len(), existing_tasks.len());
 
-        let mut receiver = compactor_manager.add_compactor(1, u64::MAX);
-        assert_eq!(compactor_manager.compactor_to_score.len(), 1);
-        assert_eq!(compactor_manager.score_to_compactor.len(), 1);
-        let _receiver_2 = compactor_manager.add_compactor(2, u64::MAX);
-        assert_eq!(compactor_manager.compactor_to_score.len(), 2);
-        assert_eq!(compactor_manager.score_to_compactor.len(), 2);
-        compactor_manager.remove_compactor(2);
-        assert_eq!(compactor_manager.compactor_to_score.len(), 1);
-        assert_eq!(compactor_manager.score_to_compactor.len(), 1);
+        // No compactor available.
+        let new_task = dummy_compact_task(2, 1);
+        assert!(policy
+            .next_idle_compactor(&HashMap::new(), Some(&new_task))
+            .is_none());
+        assert!(policy.next_compactor(Some(&new_task)).is_none());
+        assert!(policy.random_compactor(Some(&new_task)).is_none());
+
+        // Adding existing compactor does not change score.
+        policy.add_compactor(0, u64::MAX);
+        assert_eq!(policy.score_to_compactor.len(), 1);
+        assert_eq!(policy.compactor_to_score.len(), existing_tasks.len());
+        assert_eq!(*policy.compactor_to_score.get(&0).unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_scored_add_remove_compactor() {
+        let mut policy = ScoredPolicy::new_for_test();
+        // No compactors by default.
+        assert_eq!(policy.compactor_to_score.len(), 0);
+        assert_eq!(policy.score_to_compactor.len(), 0);
+
+        let mut receiver = policy.add_compactor(1, u64::MAX);
+        assert_eq!(policy.compactor_to_score.len(), 1);
+        assert_eq!(policy.score_to_compactor.len(), 1);
+        let _receiver_2 = policy.add_compactor(2, u64::MAX);
+        assert_eq!(policy.compactor_to_score.len(), 2);
+        assert_eq!(policy.score_to_compactor.len(), 2);
+        policy.remove_compactor(2);
+        assert_eq!(policy.compactor_to_score.len(), 1);
+        assert_eq!(policy.score_to_compactor.len(), 1);
 
         // Pending bytes are initialized correctly.
-        assert_eq!(*compactor_manager.compactor_to_score.get(&1).unwrap(), 0);
-        assert!(compactor_manager.score_to_compactor.contains_key(&(0, 1)));
+        assert_eq!(*policy.compactor_to_score.get(&1).unwrap(), 0);
+        assert!(policy.score_to_compactor.contains_key(&(0, 1)));
 
         // No compact task there.
         assert!(matches!(
@@ -514,7 +577,7 @@ mod tests {
         ));
 
         let task = dummy_compact_task(123, 0);
-        let compactor = compactor_manager
+        let compactor = policy
             .score_to_compactor
             .first_entry()
             .unwrap()
@@ -529,9 +592,9 @@ mod tests {
         let received_compact_task = try_match_expand!(received_task, Task::CompactTask).unwrap();
         assert_eq!(received_compact_task, task);
 
-        compactor_manager.remove_compactor(compactor.context_id());
-        assert_eq!(compactor_manager.compactor_to_score.len(), 0);
-        assert_eq!(compactor_manager.score_to_compactor.len(), 0);
+        policy.remove_compactor(compactor.context_id());
+        assert_eq!(policy.compactor_to_score.len(), 0);
+        assert_eq!(policy.score_to_compactor.len(), 0);
         drop(compactor);
         assert!(matches!(
             receiver.try_recv().unwrap_err(),
@@ -541,14 +604,14 @@ mod tests {
 
     #[test]
     fn test_scored_next_compactor() {
-        let mut compactor_manager = ScoredPolicy::new();
+        let mut policy = ScoredPolicy::new_for_test();
 
         // No compactor available.
-        assert!(compactor_manager.next_compactor(None).is_none());
+        assert!(policy.next_compactor(None).is_none());
 
         // Add 3 compactors.
         for context_id in 0..3 {
-            compactor_manager.add_compactor(context_id, u64::MAX);
+            policy.add_compactor(context_id, u64::MAX);
         }
 
         let task1 = dummy_compact_task(0, 5);
@@ -557,39 +620,40 @@ mod tests {
         let task4 = dummy_compact_task(3, 1);
 
         // Now the compactors should be (0, 0), (0, 1), (0, 2).
-        let compactor = compactor_manager.next_compactor(Some(&task1)).unwrap();
+        let compactor = policy.next_compactor(Some(&task1)).unwrap();
         assert_eq!(compactor.context_id(), 0);
-        assert_eq!(*compactor_manager.compactor_to_score.get(&0).unwrap(), 5);
-        assert!(compactor_manager.score_to_compactor.contains_key(&(5, 0)));
+        assert_eq!(*policy.compactor_to_score.get(&0).unwrap(), 5);
+        assert!(policy.score_to_compactor.contains_key(&(5, 0)));
 
         // (0, 1), (0, 2), (5, 0).
-        let compactor = compactor_manager.next_compactor(Some(&task2)).unwrap();
+        let compactor = policy.next_compactor(Some(&task2)).unwrap();
         assert_eq!(compactor.context_id(), 1);
-        assert_eq!(*compactor_manager.compactor_to_score.get(&1).unwrap(), 10);
-        assert!(compactor_manager.score_to_compactor.contains_key(&(10, 1)));
+        assert_eq!(*policy.compactor_to_score.get(&1).unwrap(), 10);
+        assert!(policy.score_to_compactor.contains_key(&(10, 1)));
 
         // (0, 2), (5, 0), (10, 1).
-        let compactor = compactor_manager.next_compactor(Some(&task3)).unwrap();
+        let compactor = policy.next_compactor(Some(&task3)).unwrap();
         assert_eq!(compactor.context_id(), 2);
-        assert_eq!(*compactor_manager.compactor_to_score.get(&2).unwrap(), 7);
-        assert!(compactor_manager.score_to_compactor.contains_key(&(10, 1)));
+        assert_eq!(*policy.compactor_to_score.get(&2).unwrap(), 7);
+        assert!(policy.score_to_compactor.contains_key(&(10, 1)));
 
         // (5, 0), (7, 2), (10, 1).
         task2.set_task_status(TaskStatus::Success);
-        compactor_manager.report_compact_task(1, &task2);
-        assert_eq!(*compactor_manager.compactor_to_score.get(&1).unwrap(), 0);
-        assert!(compactor_manager.score_to_compactor.contains_key(&(0, 1)));
+        policy.report_compact_task(1, &task2);
+        assert_eq!(*policy.compactor_to_score.get(&1).unwrap(), 0);
+        assert!(policy.score_to_compactor.contains_key(&(0, 1)));
 
         // (0, 1), (5, 0), (7, 2).
-        let compactor = compactor_manager.next_compactor(Some(&task4)).unwrap();
+        let compactor = policy.next_compactor(Some(&task4)).unwrap();
         assert_eq!(compactor.context_id(), 1);
-        assert_eq!(*compactor_manager.compactor_to_score.get(&1).unwrap(), 1);
-        assert!(compactor_manager.score_to_compactor.contains_key(&(1, 1)));
+        assert_eq!(*policy.compactor_to_score.get(&1).unwrap(), 1);
+        assert!(policy.score_to_compactor.contains_key(&(1, 1)));
     }
 
     #[test]
     fn test_scored_next_idle_compactor() {
-        let compactor_manager = CompactorManager::new_with_policy(Box::new(ScoredPolicy::new()));
+        let compactor_manager =
+            CompactorManager::new_with_policy(Box::new(ScoredPolicy::new_for_test()));
 
         // Add 2 compactors.
         for context_id in 0..2 {

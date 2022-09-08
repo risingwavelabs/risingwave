@@ -125,27 +125,30 @@ impl CompactorManager {
         env: MetaSrvEnv<S>,
         task_expiry_seconds: u64,
     ) -> MetaResult<Self> {
-        let manager = Self::new(task_expiry_seconds);
-        // Initialize the existing task assignments from metastore
-        CompactTaskAssignment::list(env.meta_store())
-            .await?
-            .into_iter()
-            .for_each(|assignment| {
-                manager.initiate_task_heartbeat(
-                    assignment.context_id,
-                    assignment.compact_task.unwrap(),
-                );
-            });
-        Ok(manager)
-    }
-
-    pub fn new(task_expiry_seconds: u64) -> Self {
-        Self {
-            policy: RwLock::new(Box::new(ScoredPolicy::new())),
-            compactor_assigned_task_num: Mutex::new(HashMap::new()),
+        // Retrieve the existing task assignments from metastore.
+        let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
+        // Initialize the number of tasks assigned to each comapctor.
+        let mut compactor_assigned_task_num = HashMap::new();
+        task_assignment.iter().for_each(|assignment| {
+            compactor_assigned_task_num
+                .entry(assignment.context_id)
+                .and_modify(|n| *n += 1)
+                .or_insert(1);
+        });
+        let manager = Self {
+            policy: RwLock::new(Box::new(ScoredPolicy::new_with_task_assignment(
+                &task_assignment,
+            ))),
+            compactor_assigned_task_num: Mutex::new(compactor_assigned_task_num),
             task_expiry_seconds,
             task_heartbeats: Default::default(),
-        }
+        };
+        // Initialize heartbeat for existing tasks.
+        task_assignment.into_iter().for_each(|assignment| {
+            manager
+                .initiate_task_heartbeat(assignment.context_id, assignment.compact_task.unwrap());
+        });
+        Ok(manager)
     }
 
     /// Only used for unit test.
