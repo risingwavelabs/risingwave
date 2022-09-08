@@ -134,7 +134,6 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         self.compactors.retain(|c| *c != context_id);
-        self.compactor_map.remove(&context_id);
         self.compactors.push(context_id);
         self.compactor_map.insert(
             context_id,
@@ -159,9 +158,14 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
 /// pending bytes compaction tasks.
 #[derive(Default)]
 pub struct ScoredPolicy {
-    // These two data structures must be consistent.
-    // We use `(pending_bytes, context_id)` as the key to dedup compactor with the same pending
+    // We use `(score, context_id)` as the key to dedup compactor with the same pending
     // bytes.
+    //
+    // It's possbile that the `context_id` is in `compactor_to_score`, but `Compactor` is not in
+    // `score_to_compactor` when `CompactorManager` recovers from original state, but the compactor
+    // node has not yet subscribed to meta node.
+    //
+    // That is to say `score_to_compactor` should be a subset of `compactor_to_score`.
     score_to_compactor: BTreeMap<(usize, HummockContextId), Arc<Compactor>>,
     compactor_to_score: HashMap<HummockContextId, usize>,
 }
@@ -255,7 +259,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             return None;
         }
 
-        let compactor_index = rand::thread_rng().gen::<usize>() % self.compactor_to_score.len();
+        let compactor_index = rand::thread_rng().gen::<usize>() % self.score_to_compactor.len();
         // `BTreeMap` does not record subtree size, so O(logn) method to find the nth smallest
         // element is not available.
         let (context_id, score) = self.compactor_to_score.iter().nth(compactor_index).unwrap();
@@ -270,16 +274,12 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
-        if let Some(pending_bytes) = self.compactor_to_score.remove(&context_id) {
-            self.score_to_compactor
-                .remove(&(pending_bytes, context_id))
-                .unwrap();
-        }
+        // If `context_id` already exists, we only need to update the task channel.
+        let score = self.compactor_to_score.entry(context_id).or_insert(0);
         self.score_to_compactor.insert(
-            (0, context_id),
+            (*score, context_id),
             Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
         );
-        self.compactor_to_score.insert(context_id, 0);
         rx
     }
 

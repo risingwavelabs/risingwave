@@ -234,6 +234,12 @@ impl CompactorManager {
         }
     }
 
+    /// Retrieve a receiver of tasks for the compactor identified by `context_id`. The sender should
+    /// be obtained by calling one of the compactor getters.
+    ///
+    ///  If `add_compactor` is called with the same `context_id` more than once, the only cause
+    /// would be compactor re-subscription, as `context_id` is a monotonically increasing
+    /// sequence.
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
