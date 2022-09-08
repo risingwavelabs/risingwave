@@ -1101,7 +1101,7 @@ where
                         return;
                     }
                 };
-                let compactor = match self.compactor_manager.random_compactor(None) {
+                let compactor = match self.compactor_manager.next_idle_compactor(None) {
                     None => {
                         tracing::warn!(
                             "Skip committed SST sanity check due to no available worker"
@@ -1469,7 +1469,9 @@ where
         };
 
         // 2. select_compactor
-        let compactor = self.compactor_manager.random_compactor(Some(&compact_task));
+        let compactor = self
+            .compactor_manager
+            .next_idle_compactor(Some(&compact_task));
         let compactor = match compactor {
             None => {
                 tracing::warn!("trigger_manual_compaction No compactor is available.");

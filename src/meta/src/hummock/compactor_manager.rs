@@ -216,27 +216,6 @@ impl CompactorManager {
         }
     }
 
-    /// Gets next compactor to assign task.
-    // TODO: If a compactor is returned and `compact_task` is `Some`, then it is considered to be
-    // already assigned to it. This may cause inconsistency between `CompactorManager` and
-    // `HummockManager, if `HummockManager::assign_compaction_task` and `random_compactor` are
-    // not called together. So we might need to put `HummockManager::assign_compaction_task` in this
-    // function.
-    pub fn random_compactor(&self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
-        let need_update_task_num = compact_task.is_some();
-        let mut policy = self.policy.write();
-        let mut compactor_assigned_task_num = self.compactor_assigned_task_num.lock();
-        let compactor = policy.random_compactor(compact_task);
-        if let Some(compactor) = compactor {
-            if need_update_task_num {
-                Self::update_task_num(&mut compactor_assigned_task_num, compactor.context_id, true);
-            }
-            Some(compactor)
-        } else {
-            None
-        }
-    }
-
     /// Retrieve a receiver of tasks for the compactor identified by `context_id`. The sender should
     /// be obtained by calling one of the compactor getters.
     ///

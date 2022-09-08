@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, SubscribeCompactTasksResponse};
@@ -37,8 +36,6 @@ pub trait CompactionSchedulePolicy: Send + Sync {
 
     /// Get next compactor to assign task.
     fn next_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>>;
-
-    fn random_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>>;
 
     fn add_compactor(
         &mut self,
@@ -78,6 +75,7 @@ impl RoundRobinPolicy {
         }
     }
 }
+
 impl CompactionSchedulePolicy for RoundRobinPolicy {
     fn next_idle_compactor(
         &mut self,
@@ -114,16 +112,6 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         let compactor_index = self.next_compactor % self.compactors.len();
         let compactor = self.compactors[compactor_index];
         self.next_compactor += 1;
-        Some(self.compactor_map.get(&compactor).unwrap().clone())
-    }
-
-    fn random_compactor(&mut self, _compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
-        if self.compactors.is_empty() {
-            return None;
-        }
-
-        let compactor_index = rand::thread_rng().gen::<usize>() % self.compactors.len();
-        let compactor = self.compactors[compactor_index];
         Some(self.compactor_map.get(&compactor).unwrap().clone())
     }
 
@@ -280,20 +268,6 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         } else {
             None
         }
-    }
-
-    fn random_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
-        if self.score_to_compactor.is_empty() {
-            return None;
-        }
-
-        let compactor_index = rand::thread_rng().gen::<usize>() % self.score_to_compactor.len();
-        // `BTreeMap` does not record subtree size, so O(logn) method to find the nth smallest
-        // element is not available.
-        let (context_id, score) = self.compactor_to_score.iter().nth(compactor_index).unwrap();
-
-        let compactor = self.update_compactor_score(*context_id, *score, compact_task);
-        Some(compactor)
     }
 
     fn add_compactor(
@@ -523,7 +497,7 @@ mod tests {
         let existing_tasks = vec![dummy_compact_task(0, 1), dummy_compact_task(1, 1)];
         for (context_id, task) in existing_tasks.iter().enumerate() {
             hummock_manager
-                .assign_compaction_task(&task, context_id as HummockContextId)
+                .assign_compaction_task(task, context_id as HummockContextId)
                 .await
                 .unwrap();
         }
@@ -540,7 +514,6 @@ mod tests {
             .next_idle_compactor(&HashMap::new(), Some(&new_task))
             .is_none());
         assert!(policy.next_compactor(Some(&new_task)).is_none());
-        assert!(policy.random_compactor(Some(&new_task)).is_none());
 
         // Adding existing compactor does not change score.
         policy.add_compactor(0, u64::MAX);
