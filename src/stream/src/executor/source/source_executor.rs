@@ -246,6 +246,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .await
             .unwrap();
 
+        // If the first barrier is configuration change, then the source executor must be newly
+        // created, and we should start with the paused state.
+        let start_with_paused = barrier.is_update();
+
         if let Some(mutation) = barrier.mutation.as_ref() {
             if let Mutation::Add { splits, .. } = mutation.as_ref() {
                 if let Some(splits) = splits.get(&self.ctx.id) {
@@ -283,6 +287,9 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
+        if start_with_paused {
+            stream.pause_source();
+        }
 
         yield Message::Barrier(barrier);
 

@@ -278,6 +278,7 @@ where
     ) -> MetaResult<()> {
         let ctx = self.build_reschedule_context(&reschedule).await?;
         // Index of actors to create/remove
+        // Fragment Id => ( Actor Id => Parallel Unit Id )
         let mut fragment_actors_to_remove = HashMap::with_capacity(reschedule.len());
         let mut fragment_actors_to_create = HashMap::with_capacity(reschedule.len());
 
@@ -290,6 +291,8 @@ where
         ) in &reschedule
         {
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
+
+            // Actor Id => Parallel Unit Id
             let mut actors_to_remove = BTreeMap::new();
             let mut actors_to_create = BTreeMap::new();
 
@@ -331,7 +334,7 @@ where
         let fragment_actors_to_create = fragment_actors_to_create;
 
         // Note: we must create hanging channels at first
-        let mut node_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
+        let mut worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
         let mut new_created_actors = HashMap::new();
         for fragment_id in reschedule.keys() {
             let actors_to_create = fragment_actors_to_create
@@ -350,18 +353,18 @@ where
             for (actor_to_remove, actor_to_create) in
                 actors_to_remove.iter().zip_eq(actors_to_create.iter())
             {
-                // use old actor as simple actor
+                // use old actor as sample actor
                 let mut new_actor = ctx.actor_map.get(actor_to_remove.0).cloned().unwrap();
 
-                let new_parallel_unit_id = actor_to_create.1;
                 let new_actor_id = actor_to_create.0;
+                let new_parallel_unit_id = actor_to_create.1;
 
                 let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
                 for upstream_actor_id in &new_actor.upstream_actor_id {
                     let upstream_worker_id = ctx
                         .actor_id_to_parallel_unit(upstream_actor_id)?
                         .worker_node_id;
-                    node_hanging_channels
+                    worker_hanging_channels
                         .entry(upstream_worker_id)
                         .or_default()
                         .push(HangingChannel {
@@ -442,6 +445,8 @@ where
                                 host: downstream_worker.host.clone(),
                             },
                         );
+
+                        broadcast_worker_ids.insert(downstream_worker_id);
                     }
                 }
 
@@ -468,10 +473,12 @@ where
             let node = ctx.worker_nodes.get(worker_id).unwrap();
             let client = self.client_pool.get(node).await?;
 
+            let actor_infos_to_broadcast = actor_infos_to_broadcast.values().cloned().collect();
+
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                    info: actor_infos_to_broadcast.values().cloned().collect(),
+                    info: actor_infos_to_broadcast,
                 })
                 .await?;
         }
@@ -483,13 +490,13 @@ where
             let request = UpdateActorsRequest {
                 request_id,
                 actors: stream_actors.clone(),
-                hanging_channels: node_hanging_channels.remove(node_id).unwrap_or_default(),
+                hanging_channels: worker_hanging_channels.remove(node_id).unwrap_or_default(),
             };
 
             client.to_owned().update_actors(request).await?;
         }
 
-        for (node_id, hanging_channels) in node_hanging_channels {
+        for (node_id, hanging_channels) in worker_hanging_channels {
             let node = ctx.worker_nodes.get(&node_id).unwrap();
 
             let client = self.client_pool.get(node).await?;
@@ -721,6 +728,8 @@ where
                 .cancel_apply_reschedules(applied_reschedules)
                 .await;
         }));
+
+        tracing::warn!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
             .run_multiple_commands(vec![

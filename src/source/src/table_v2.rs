@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::RwLock;
-
 use anyhow::Context;
-use rand::prelude::SliceRandom;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use rand::seq::IteratorRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
@@ -62,20 +61,34 @@ impl TableSourceV2 {
     /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
     /// and the `usize` represents the cardinality of this chunk.
     pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
-        let tx = {
-            let core = self.core.read().unwrap();
+        let tx = loop {
+            let core = self.core.upgradable_read();
 
-            // The `changes_txs` should not be empty normally, since we ensured that the channels
-            // between the `TableSourceV2` and the `SourceExecutor`s are ready before we making the
-            // table catalog visible to the users. However, when we're recovering, it's possible
-            // that the streaming executors are not ready when the frontend is able to schedule DML
-            // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
-            // error instead of asserting here.
+            // The `changes_txs` should not be empty normally, since we ensured that the
+            // channels between the `TableSourceV2` and the `SourceExecutor`s
+            // are ready before we making the table catalog visible to the
+            // users. However, when we're recovering, it's possible
+            // that the streaming executors are not ready when the frontend is able to schedule
+            // DML tasks to the compute nodes, so this'll be temporarily
+            // unavailable, so we throw an error instead of asserting here.
             // TODO: may reject DML when streaming executors are not recovered.
-            core.changes_txs
+            let (index, tx) = core
+                .changes_txs
+                .iter()
+                .enumerate()
                 .choose(&mut rand::thread_rng())
-                .context("no available table reader in streaming source executors")?
-                .clone()
+                .context("no available table reader in streaming source executors")?;
+
+            // It's possible that the source executor is scaled in or migrated, so the channel
+            // is closed. In this case, we should remove the closed channel and retry.
+            if tx.is_closed() {
+                tracing::info!("find one closed table source channel, remove it and retry");
+                RwLockUpgradableReadGuard::upgrade(core)
+                    .changes_txs
+                    .swap_remove(index);
+            } else {
+                break tx.clone();
+            }
         };
 
         #[cfg(debug_assertions)]
@@ -147,7 +160,7 @@ impl TableSourceV2 {
             })
             .collect();
 
-        let mut core = self.core.write().unwrap();
+        let mut core = self.core.write();
         let (tx, rx) = mpsc::unbounded_channel();
         core.changes_txs.push(tx);
 
