@@ -980,7 +980,7 @@ def section_hummock_tiered_cache(outer_panels):
             ]),
             panels.timeseries_bytes_per_sec("Throughput", [
                 panels.target(
-                    "sum(rate(file_cache_disk_throughput[$__rate_interval])) by (op, instance)", "disk {{op}} @ {{instance}}"
+                    "sum(rate(file_cache_disk_bytes[$__rate_interval])) by (op, instance)", "disk {{op}} @ {{instance}}"
                 ),
             ]),
             panels.timeseries_bytes("Disk IO Size", [

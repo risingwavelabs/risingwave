@@ -22,9 +22,9 @@ use prometheus::{
 pub struct FileCacheMetrics {
     pub cache_miss: IntCounter,
 
-    pub disk_read_throughput: Counter,
+    pub disk_read_bytes: Counter,
     pub disk_read_latency: Histogram,
-    pub disk_write_throughput: Counter,
+    pub disk_write_bytes: Counter,
     pub disk_write_latency: Histogram,
     pub disk_read_io_size: Histogram,
     pub disk_write_io_size: Histogram,
@@ -48,8 +48,8 @@ impl FileCacheMetrics {
         )
         .unwrap();
         let disk_throughput = register_counter_vec_with_registry!(
-            "file_cache_disk_throughput",
-            "file cache disk throughput",
+            "file_cache_disk_bytes",
+            "file cache disk bytes",
             &["op"],
             registry,
         )
@@ -109,9 +109,9 @@ impl FileCacheMetrics {
 
         Self {
             cache_miss,
-            disk_read_throughput,
+            disk_read_bytes: disk_read_throughput,
             disk_read_latency,
-            disk_write_throughput,
+            disk_write_bytes: disk_write_throughput,
             disk_write_latency,
             disk_read_io_size,
             disk_write_io_size,
