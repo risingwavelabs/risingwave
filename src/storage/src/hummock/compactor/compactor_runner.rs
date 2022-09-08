@@ -27,9 +27,7 @@ use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
-use crate::hummock::{
-    CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions, DEFAULT_ENTRY_SIZE,
-};
+use crate::hummock::{CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions};
 
 #[derive(Clone)]
 pub struct CompactorRunner {
@@ -57,13 +55,6 @@ impl CompactorRunner {
         };
         if options.compression_algorithm == CompressionAlgorithm::None {
             options.capacity = std::cmp::min(options.capacity, total_file_size as usize);
-        }
-        options.estimate_bloom_filter_capacity = context
-            .context
-            .filter_key_extractor_manager
-            .estimate_bloom_filter_size(options.capacity);
-        if options.estimate_bloom_filter_capacity == 0 {
-            options.estimate_bloom_filter_capacity = options.capacity / DEFAULT_ENTRY_SIZE;
         }
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
