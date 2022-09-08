@@ -235,7 +235,7 @@ impl SstableMeta {
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
-        let footer = buf.get_u64_le();
+        let meta_offset = buf.get_u64_le();
 
         Ok(Self {
             block_metas,
@@ -244,7 +244,7 @@ impl SstableMeta {
             key_count,
             smallest_key,
             largest_key,
-            meta_offset: footer,
+            meta_offset,
             version,
         })
     }
