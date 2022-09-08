@@ -17,19 +17,13 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
-use risingwave_batch::executor::BoxedDataChunkStream;
-use futures_async_stream::try_stream;
-use futures_async_stream::{for_await, try_stream};
-use log::debug;
-use rand::seq::SliceRandom;
-use risingwave_batch::executor::ExecutorBuilder;
+use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId as TaskIdBatch;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
-use risingwave_pb::batch_plan::TaskOutputId;
+use risingwave_pb::batch_plan::{PlanFragment, TaskOutputId};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
-// use futures_async_stream::try_stream;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tracing::debug;
@@ -38,7 +32,7 @@ use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::handler::query::QueryResultSet;
 use crate::handler::util::to_pg_rows;
-use crate::scheduler::plan_fragmenter::Query;
+use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
     ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError, SchedulerResult,
@@ -53,7 +47,8 @@ pub struct QueryResultFetcher {
     task_host: HostAddress,
     compute_client_pool: ComputeClientPoolRef,
 
-    root_fragment: Option<PlanFragment>,
+    root_fragment: PlanFragment,
+    shutdown_tx: Option<oneshot::Sender<SchedulerError>>,
 }
 
 /// Manages execution of distributed batch queries.
@@ -96,7 +91,7 @@ impl QueryManager {
             .committed_epoch;
 
         let query_execution = QueryExecution::new(
-            context,
+            context.clone(),
             query,
             epoch,
             self.worker_node_manager.clone(),
@@ -118,7 +113,9 @@ impl QueryManager {
             }
         };
 
-        query_result_fetcher.collect_rows(format, shutdown_rx).await
+        query_result_fetcher
+            .collect_rows(context, query_id, format, shutdown_rx)
+            .await
     }
 }
 
@@ -129,7 +126,8 @@ impl QueryResultFetcher {
         task_output_id: TaskOutputId,
         task_host: HostAddress,
         compute_client_pool: ComputeClientPoolRef,
-        root_fragment: Option<PlanFragment>,
+        root_fragment: PlanFragment,
+        shutdown_tx: Option<oneshot::Sender<SchedulerError>>,
     ) -> Self {
         Self {
             epoch,
@@ -138,6 +136,7 @@ impl QueryResultFetcher {
             task_host,
             compute_client_pool,
             root_fragment,
+            shutdown_tx,
         }
     }
 
@@ -163,10 +162,13 @@ impl QueryResultFetcher {
 
     pub async fn collect_rows(
         self,
+        ctx: ExecutionContextRef,
+        query_id: QueryId,
         format: bool,
         shutdown_rx: Receiver<SchedulerError>,
     ) -> SchedulerResult<QueryResultSet> {
-        let data_stream = self.run();
+        // Run root executor locally.
+        let data_stream = self.run_local(ctx, query_id);
         let mut data_stream = data_stream.take_until(shutdown_rx);
         let mut rows = vec![];
         #[for_await]
@@ -184,8 +186,8 @@ impl QueryResultFetcher {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn run_local(self, execution_context: ExecutionContextRef, query_id: QueryId) {
-        let plan_node = self.root_fragment.unwrap().root.unwrap();
+    async fn run_local_inner(self, execution_context: ExecutionContextRef, query_id: QueryId) {
+        let plan_node = self.root_fragment.root.unwrap();
         let task_id = TaskIdBatch {
             query_id: query_id.id.clone(),
             stage_id: 0,
@@ -194,7 +196,7 @@ impl QueryResultFetcher {
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
-            execution_context.to_batch_task(),
+            execution_context.to_batch_task_context(),
             self.epoch,
         );
 
@@ -203,6 +205,14 @@ impl QueryResultFetcher {
         for chunk in executor.execute() {
             yield chunk?;
         }
+    }
+
+    fn run_local(
+        self,
+        execution_context: ExecutionContextRef,
+        query_id: QueryId,
+    ) -> BoxedDataChunkStream {
+        Box::pin(self.run_local_inner(execution_context, query_id))
     }
 }
 

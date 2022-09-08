@@ -18,9 +18,6 @@ use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
-use risingwave_batch::executor::ExecutorBuilder;
-use risingwave_common::bail;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
@@ -32,7 +29,6 @@ use tokio::sync::mpsc::{channel, Receiver};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, warn};
-use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::{QueryResultFetcher, StageEvent};
@@ -222,9 +218,10 @@ impl QueryExecution {
 
 impl QueryRunner {
     async fn run(mut self, shutdown_tx: tokio::sync::oneshot::Sender<SchedulerError>) {
+        // If only contains one stage, channel should not be dropped and execute directly.
         if self.query.stage_graph.stages.len() == 1 {
-            self.send_root_stage_info().await;
-            return Ok(());
+            self.send_root_stage_info(Some(shutdown_tx));
+            return;
         }
 
         // Start leaf stages.
@@ -263,14 +260,13 @@ impl QueryRunner {
                     // to QueryResultFetcher and execute to get a Chunk stream.
                     if self.scheduled_stages_count == self.stage_executions.len() - 1 {
                         // Now all non-root stages have been scheduled, send root stage info.
-                        self.send_root_stage_info().await;
-                        // FIXME: We can not break here, otherwise it will trigger shutdown
-                        // channel of StageRunner and abort some working task, therefore the results set is not complete.
+                        // Note we can not break here: there may be failed event later.
+                        self.send_root_stage_info(None);
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
                             if self.all_children_scheduled(parent).await
                                 // Do not schedule same stage twice.
-                                && self.stage_executions[parent].is_pending().await && *parent != self.query.stage_graph.root_stage_id
+                                && self.stage_executions[parent].is_pending().await
                             {
                                 self.stage_executions[parent].start().await;
                             }
@@ -304,7 +300,9 @@ impl QueryRunner {
         }
     }
 
-    async fn send_root_stage_info(&mut self) {
+    /// The `shutdown_tx` will only be Some if the stage is 1. In that case, we should keep the life
+    /// of shutdown sender so that shutdown receiver won't be triggered.
+    fn send_root_stage_info(&mut self, shutdown_tx: Option<Sender<SchedulerError>>) {
         let root_task_output_id = {
             let root_task_id_prost = TaskIdProst {
                 query_id: self.query.query_id.clone().id,
@@ -319,17 +317,17 @@ impl QueryRunner {
         };
 
         let root_fragment = self.create_plan_fragment();
-        let root_task_status = self.stage_executions[&self.query.root_stage_id()]
-            .get_task_status_unchecked(ROOT_TASK_ID);
         let root_stage_result = QueryResultFetcher::new(
             self.epoch,
             self.hummock_snapshot_manager.clone(),
             root_task_output_id,
+            // Execute in local, so no need to fill meaningful address.
             HostAddress {
                 ..Default::default()
             },
             self.compute_client_pool.clone(),
-            Some(root_fragment),
+            root_fragment,
+            shutdown_tx,
         );
 
         // Consume sender here.
@@ -416,10 +414,6 @@ impl QueryRunner {
                     })
                     .unwrap();
                 let exchange_sources = child_stage.all_exchange_sources_for(task_id);
-                println!(
-                    "get source exchange for self.stage.id {:?} as {:?}",
-                    child_stage.stage.id, exchange_sources
-                );
 
                 match &execution_plan_node.node {
                     NodeBody::Exchange(_exchange_node) => {
