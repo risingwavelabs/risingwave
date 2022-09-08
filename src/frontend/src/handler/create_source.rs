@@ -62,7 +62,6 @@ pub(crate) fn make_prost_source(
             )?;
         }
 
-        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?;
         let db_id = catalog_reader
             .get_database_by_name(session.database())?
             .id();
@@ -171,6 +170,11 @@ pub async fn handle_create_source(
     };
 
     let session = context.session_ctx.clone();
+    {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (schema_name, name) = Binder::resolve_table_name(stmt.source_name.clone())?;
+        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+    }
     let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {

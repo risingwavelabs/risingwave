@@ -73,11 +73,6 @@ pub fn gen_sink_plan(
             )?;
         }
 
-        catalog_reader.check_relation_name_duplicated(
-            session.database(),
-            &schema_name,
-            &sink_name,
-        )?;
         let db_id = catalog_reader
             .get_database_by_name(session.database())?
             .id();
@@ -140,6 +135,16 @@ pub async fn handle_create_sink(
     let session = context.session_ctx.clone();
 
     let (sink, graph) = {
+        {
+            let catalog_reader = session.env().catalog_reader().read_guard();
+            let (schema_name, table_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
+            catalog_reader.check_relation_name_duplicated(
+                session.database(),
+                &schema_name,
+                &table_name,
+            )?;
+        }
+
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
 
         (sink, build_graph(plan))
