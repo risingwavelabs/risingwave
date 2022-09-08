@@ -237,12 +237,12 @@ impl Compactor {
             .flat_map(|level| level.table_infos.iter())
             .map(|table_info| table_info.id)
             .collect_vec();
-        let total_file_size = compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table_info| table_info.file_size)
-            .sum::<u64>();
+        // let _total_file_size = compact_task
+        //     .input_ssts
+        //     .iter()
+        //     .flat_map(|level| level.table_infos.iter())
+        //     .map(|table_info| table_info.file_size)
+        //     .sum::<u64>();
         let mut indexes = vec![];
 
         // preload the meta and get the smallest key to split sub_compaction
