@@ -52,7 +52,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             let id = sstable_info.id;
 
             let sstable_cache = sstable_store
-                .sstable(id, &mut StoreLocalStatistic::default())
+                .sstable(sstable_info, &mut StoreLocalStatistic::default())
                 .await?;
             let sstable = sstable_cache.value().as_ref();
             let sstable_meta = &sstable.meta;
