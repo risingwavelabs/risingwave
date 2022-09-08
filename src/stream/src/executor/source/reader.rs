@@ -146,7 +146,7 @@ mod tests {
 
         let table_source = TableSource::new(vec![]);
         let source_reader =
-            SourceStreamReaderImpl::TableV2(table_source.stream_reader(vec![]).await.unwrap());
+            SourceStreamReaderImpl::Table(table_source.stream_reader(vec![]).await.unwrap());
 
         let stream = SourceReaderStream::new(barrier_rx, Box::new(source_reader));
         pin_mut!(stream);
