@@ -23,6 +23,7 @@ use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, Worker
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     ActorMapping, DispatcherType, FragmentType, PauseMutation, ResumeMutation, StreamActor,
@@ -35,7 +36,7 @@ use uuid::Uuid;
 
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
-use crate::model::{ActorId, DispatcherId, FragmentId};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::GlobalStreamManager;
 use crate::MetaResult;
@@ -127,14 +128,14 @@ where
             })
             .collect();
 
-        let mut chain_actor_ids = HashSet::new();
+        let mut chain_fragment_ids = HashSet::new();
         let mut actor_map = HashMap::new();
         let mut fragment_map = HashMap::new();
         let mut actor_status = BTreeMap::new();
         for table_fragments in self.fragment_manager.list_table_fragments().await? {
             fragment_map.extend(table_fragments.fragments.clone());
             actor_map.extend(table_fragments.actor_map());
-            chain_actor_ids.extend(table_fragments.chain_actor_ids());
+            chain_fragment_ids.extend(table_fragments.chain_fragment_ids());
             actor_status.extend(table_fragments.actor_status.clone());
         }
 
@@ -183,20 +184,61 @@ where
                 .get(fragment_id)
                 .context("fragment id does not exist")?;
 
+            // Check if the reschedule is supported.
+
+            if chain_fragment_ids.contains(fragment_id) {
+                bail!("reschedule chain fragment is not supported");
+            }
             match fragment.get_fragment_type()? {
-                FragmentType::Source => bail!("scaling SourceNode is not supported"),
-                FragmentType::Sink if downstream_fragment_id_map.get(fragment_id).is_some() => {
-                    bail!("scaling of SinkNode / MaterializeNode with downstream is not supported")
+                FragmentType::Source => {
+                    let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
+                    let source_node = TableFragments::find_source_node(stream_node).unwrap();
+                    if source_node.source_type() == SourceType::Source {
+                        bail!("scaling StreamSource is not supported")
+                    }
+                }
+                FragmentType::Sink => {
+                    if downstream_fragment_id_map.get(fragment_id).is_some() {
+                        bail!("scaling of Sink or Materialize with downstream is not supported")
+                    }
                 }
                 _ => {}
             }
 
-            for parallel_unit_id in added_parallel_units
+            // Check if the reschedule plan is valid.
+
+            let current_parallel_units = fragment
+                .actors
                 .iter()
-                .chain(removed_parallel_units.iter())
-            {
-                if !parallel_unit_id_to_worker_id.contains_key(parallel_unit_id) {
-                    bail!("ParallelUnit {} not found", parallel_unit_id);
+                .map(|a| {
+                    actor_status
+                        .get(&a.actor_id)
+                        .unwrap()
+                        .get_parallel_unit()
+                        .unwrap()
+                        .id
+                })
+                .collect::<HashSet<_>>();
+            for removed in removed_parallel_units {
+                if !current_parallel_units.contains(removed) {
+                    bail!(
+                        "no actor on the parallel unit {} of fragment {}",
+                        removed,
+                        fragment_id
+                    );
+                }
+            }
+            for added in added_parallel_units {
+                if !parallel_unit_id_to_worker_id.contains_key(added) {
+                    bail!("parallel unit {} not available", added);
+                }
+                if current_parallel_units.contains(added) && !removed_parallel_units.contains(added)
+                {
+                    bail!(
+                        "parallel unit {} of fragment {} is already in use",
+                        added,
+                        fragment_id
+                    );
                 }
             }
         }
@@ -302,7 +344,7 @@ where
                 .unwrap_or_default();
 
             if actors_to_remove.len() != actors_to_create.len() {
-                bail!("TODO: we only support migration for now")
+                bail!("length of removed and added parallel units mismatches, only migration is supported for now")
             }
 
             for (actor_to_remove, actor_to_create) in
@@ -483,10 +525,7 @@ where
         // Index for fragment -> { parallel_unit -> actor } after reschedule
         let mut fragment_actors_after_reschedule = HashMap::with_capacity(reschedule.len());
         for fragment_id in reschedule.keys() {
-            let fragment = ctx
-                .fragment_map
-                .get(fragment_id)
-                .context("could not find Fragment")?;
+            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
             let mut new_actor_ids = BTreeMap::new();
             for actor in &fragment.actors {
                 if let Some(actors_to_remove) = fragment_actors_to_remove.get(fragment_id) {
@@ -505,6 +544,13 @@ where
                 for (actor_id, parallel_unit_id) in actors_to_create {
                     new_actor_ids.insert(*actor_id, *parallel_unit_id as ParallelUnitId);
                 }
+            }
+
+            if new_actor_ids.is_empty() {
+                bail!(
+                    "should be at least one actor in fragment {} after rescheduling",
+                    fragment_id
+                );
             }
 
             fragment_actors_after_reschedule.insert(*fragment_id, new_actor_ids);
@@ -527,7 +573,7 @@ where
             let replace_parallel_unit_map: BTreeMap<_, _> = removed_parallel_units
                 .clone()
                 .into_iter()
-                .zip_eq(added_parallel_units.clone().into_iter())
+                .zip_eq(added_parallel_units.clone())
                 .collect();
 
             let actors_to_create = fragment_actors_to_create
@@ -552,13 +598,9 @@ where
                         (*parallel_unit_id as ParallelUnitId, *actor_id as ActorId)
                     })
                     .collect();
+            assert!(!parallel_unit_to_actor_after_reschedule.is_empty());
 
             let fragment = ctx.fragment_map.get(&fragment_id).unwrap();
-
-            assert!(
-                !parallel_unit_to_actor_after_reschedule.is_empty(),
-                "hash dispatcher should have at least one downstream actor"
-            );
 
             let upstream_dispatcher_mapping = match fragment.distribution_type() {
                 FragmentDistributionType::Hash => {
@@ -798,7 +840,7 @@ where
                 fragment_actors_to_create.get(&downstream_fragment_id);
 
             match dispatcher.r#type() {
-                DispatcherType::Hash => {
+                d @ (DispatcherType::Hash | DispatcherType::Simple) => {
                     if let Some(downstream_actors_to_remove) = downstream_fragment_actors_to_remove
                     {
                         dispatcher
@@ -812,8 +854,16 @@ where
                             .downstream_actor_id
                             .extend(downstream_actors_to_create.keys().cloned())
                     }
+
+                    // there should be still exactly one downstream actor
+                    if d == DispatcherType::Simple {
+                        assert_eq!(dispatcher.downstream_actor_id.len(), 1);
+                    }
                 }
-                _ => bail!("only hash dispatcher is supported"),
+                d => bail!(
+                    "cascading resolution of {:?} dispatcher is not supported for now",
+                    d
+                ),
             }
 
             if let Some(mapping) = dispatcher.hash_mapping.as_mut() {
@@ -838,7 +888,7 @@ where
                     (None, None) => {
                         // do nothing
                     }
-                    _ => bail!("mapping update for scaling is not supported"),
+                    _ => bail!("vnode mapping update for scaling is not supported for now"),
                 }
             }
         }
