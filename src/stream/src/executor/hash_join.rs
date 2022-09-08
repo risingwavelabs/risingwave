@@ -846,12 +846,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         yield Message::Chunk(chunk);
                     }
 
-                    let degree_to_ins = if need_update_side_update_degree(T, SIDE) {
-                        degree
-                    } else {
-                        0
-                    };
-
                     if append_only_optimize && !append_only_matched_rows.is_empty() {
                         // Since join key contains pk and pk is unique, there should be only
                         // one row if matched
@@ -861,7 +855,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     } else if need_update_side_update_degree(T, SIDE) {
                         side_update
                             .ht
-                            .insert(key, pk, JoinRow::new(value, degree_to_ins))?;
+                            .insert(key, pk, JoinRow::new(value, degree))?;
                     } else {
                         side_update.ht.insert_row(key, pk, value)?;
                     }
