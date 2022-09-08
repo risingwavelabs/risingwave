@@ -194,8 +194,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     }
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
-    /// read. If epoch is `Current`, we will only check whether the storage is updated with this
-    /// `current_epoch`.
+    /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
     fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
 
     /// Syncs buffered data to S3.
