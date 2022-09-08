@@ -178,7 +178,7 @@ impl<S: StateStore> SourceExecutor<S> {
 }
 
 impl<S: StateStore> SourceExecutor<S> {
-    fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
+    fn get_diff(&mut self, rhs: ConnectorState) -> ConnectorState {
         // rhs can not be None because we do not support split number reduction
 
         let split_change = rhs.unwrap();
@@ -191,6 +191,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 Some(s) => target_state.push(s.clone()),
                 None => {
                     no_change_flag = false;
+                    // write new assigned split to state cache. snapshot is base on cache.
+                    self.state_cache
+                        .entry(sc.id())
+                        .or_insert_with(|| sc.clone());
                     target_state.push(sc.clone())
                 }
             }
@@ -292,7 +296,6 @@ impl<S: StateStore> SourceExecutor<S> {
                 Either::Left(barrier) => {
                     let barrier = barrier?;
                     let epoch = barrier.epoch.prev;
-                    self.take_snapshot(epoch).await?;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
@@ -336,6 +339,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             _ => {}
                         }
                     }
+                    self.take_snapshot(epoch).await?;
                     self.state_cache.clear();
                     yield Message::Barrier(barrier);
                 }
@@ -762,6 +766,7 @@ mod tests {
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+        let source_state_handler = SourceStateHandler::new(keyspace.clone());
 
         let source_exec = SourceExecutor::new(
             ActorContext::create(0),
@@ -847,6 +852,12 @@ mod tests {
         barrier_tx.send(change_split_mutation).unwrap();
 
         let _ = materialize.next().await.unwrap(); // barrier
+
+        // there must exist state for new add partition
+        source_state_handler
+            .restore_states("3-1".to_string().into(), curr_epoch + 1)
+            .await?
+            .unwrap();
 
         let chunk_2 = (materialize.next().await.unwrap().unwrap())
             .into_chunk()

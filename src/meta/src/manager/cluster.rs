@@ -276,11 +276,18 @@ where
                 for (worker_id, key) in workers_to_delete {
                     match cluster_manager.delete_worker_node(key.clone()).await {
                         Ok(worker_type) => {
-                            cluster_manager
-                                .env
-                                .notification_manager()
-                                .delete_sender(worker_type, WorkerKey(key.clone()))
-                                .await;
+                            match worker_type {
+                                WorkerType::Frontend
+                                | WorkerType::ComputeNode
+                                | WorkerType::Compactor => {
+                                    cluster_manager
+                                        .env
+                                        .notification_manager()
+                                        .delete_sender(worker_type, WorkerKey(key.clone()))
+                                        .await
+                                }
+                                _ => {}
+                            };
                             tracing::warn!(
                                 "Deleted expired worker {} {:#?}, current timestamp {}",
                                 worker_id,

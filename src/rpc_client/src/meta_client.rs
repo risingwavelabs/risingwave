@@ -122,7 +122,6 @@ impl MetaClient {
         self.host_addr = Some(addr.clone());
         // unpin snapshot before MAX will create a new snapshot with last committed epoch and then
         //  we do not create snapshot during every pin_snapshot.
-        self.pin_snapshot().await?;
         Ok(worker_node.id)
     }
 
