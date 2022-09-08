@@ -1,0 +1,23 @@
+[package]
+edition = "2021"
+name = "risingwave_source_parser_test"
+version = "0.1.11"
+
+[dependencies]
+risingwave_common = { path = "../../common" }
+risingwave_source = { path = "../../source" }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+serde = { version = "1", features = ["derive"] }
+serde-protobuf = "0.8"
+serde-value = "0.7"
+serde_derive = "1"
+serde_json = "1"
+strum = "0.24"
+rand = { version = "0.8", features = ["small_rng"] }
+chrono = "0.4"
+itertools = "0.10"
+float_eq = "1"
+
+[dev-dependencies]

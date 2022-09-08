@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
-use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
@@ -25,7 +25,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_source::{AvroParser, ProtobufParser};
+use risingwave_source::{AvroParser, ProtobufParser, SourceFormat};
 use risingwave_sqlparser::ast::{
     AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema,
 };
@@ -112,12 +112,32 @@ fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstCol
         .collect_vec())
 }
 
+fn source_schema_to_source_format(schema: &SourceSchema) -> SourceFormat {
+    match schema {
+        SourceSchema::Protobuf(_) => SourceFormat::Protobuf,
+        SourceSchema::Json => SourceFormat::Json,
+        SourceSchema::DebeziumJson => SourceFormat::DebeziumJson,
+        SourceSchema::Avro(_) => SourceFormat::Avro,
+    }
+}
+
 pub async fn handle_create_source(
     context: OptimizerContext,
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
+    let format = source_schema_to_source_format(&stmt.source_schema);
+    let col = column_descs
+        .iter()
+        .find(|c| !format.supported_type(&c.data_type));
+    if let Some(c) = col {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "type \"{}\" is not supported by row format \"{:?}\"",
+            c.data_type, format
+        ))
+        .into());
+    }
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
 

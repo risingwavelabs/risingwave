@@ -82,98 +82,10 @@ mod tests {
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnDesc;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
-    use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
+    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use crate::{JsonParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
-
-    #[test]
-    fn test_json_parser() {
-        let parser = JsonParser;
-        let descs = vec![
-            SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
-            SourceColumnDesc::simple("bool", DataType::Boolean, 2.into()),
-            SourceColumnDesc::simple("i16", DataType::Int16, 3.into()),
-            SourceColumnDesc::simple("i64", DataType::Int64, 4.into()),
-            SourceColumnDesc::simple("f32", DataType::Float32, 5.into()),
-            SourceColumnDesc::simple("f64", DataType::Float64, 6.into()),
-            SourceColumnDesc::simple("varchar", DataType::Varchar, 7.into()),
-            SourceColumnDesc::simple("date", DataType::Date, 8.into()),
-            SourceColumnDesc::simple("timestamp", DataType::Timestamp, 9.into()),
-        ];
-
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
-
-        for payload in [
-            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269"}"#.as_slice(),
-            br#"{"i32":1}"#.as_slice(),
-        ] {
-            let writer = builder.row_writer();
-            parser.parse(payload, writer).unwrap();
-        }
-
-        let chunk = builder.finish();
-
-        let mut rows = chunk.rows();
-
-        {
-            let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::Insert);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
-            assert_eq!(
-                row.value_at(1).to_owned_datum(),
-                (Some(ScalarImpl::Bool(true)))
-            );
-            assert_eq!(
-                row.value_at(2).to_owned_datum(),
-                (Some(ScalarImpl::Int16(1)))
-            );
-            assert_eq!(
-                row.value_at(3).to_owned_datum(),
-                (Some(ScalarImpl::Int64(12345678)))
-            );
-            assert_eq!(
-                row.value_at(4).to_owned_datum(),
-                (Some(ScalarImpl::Float32(1.23.into())))
-            );
-            // Usage of avx2 or neon(used by M1) results in a floating point error. Since it is
-            // very small (close to precision of f64) we ignore it.
-            #[cfg(any(target_feature = "avx2", target_feature = "neon"))]
-            assert_eq!(
-                row.value_at(5).to_owned_datum(),
-                (Some(ScalarImpl::Float64(1.2345000000000002.into())))
-            );
-            #[cfg(not(any(target_feature = "avx2", target_feature = "neon")))]
-            assert_eq!(
-                row.value_at(5).to_owned_datum(),
-                (Some(ScalarImpl::Float64(1.2345.into())))
-            );
-            assert_eq!(
-                row.value_at(6).to_owned_datum(),
-                (Some(ScalarImpl::Utf8("varchar".to_string())))
-            );
-            assert_eq!(
-                row.value_at(7).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDate(str_to_date("2021-01-01").unwrap())))
-            );
-            assert_eq!(
-                row.value_at(8).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
-                    str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
-                )))
-            );
-        }
-
-        {
-            let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::Insert);
-            assert_eq!(
-                row.value_at(0).to_owned_datum(),
-                (Some(ScalarImpl::Int32(1)))
-            );
-            assert_eq!(row.value_at(1).to_owned_datum(), None);
-        }
-    }
 
     #[test]
     fn test_json_parser_failed() {

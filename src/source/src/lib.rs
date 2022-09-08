@@ -41,6 +41,7 @@ pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_connector::source::SplitId;
 pub use table::*;
 
@@ -63,6 +64,33 @@ pub enum SourceFormat {
     Protobuf,
     DebeziumJson,
     Avro,
+}
+
+impl SourceFormat {
+    pub fn supported_type(&self, dt: &DataType) -> bool {
+        match self {
+            Self::Json | Self::Protobuf | Self::Avro => {
+                use DataType as T;
+                match dt {
+                    T::Boolean
+                    | T::Int16
+                    | T::Int32
+                    | T::Int64
+                    | T::Float32
+                    | T::Float64
+                    | T::Decimal
+                    | T::Date
+                    | T::Varchar
+                    | T::Time
+                    | T::Timestamp => true,
+                    T::Struct(st) => st.fields.iter().all(|dt| self.supported_type(dt)),
+                    T::Timestampz | T::Interval | T::List { .. } => false,
+                }
+            }
+            Self::DebeziumJson => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, EnumAsInner)]
