@@ -32,23 +32,23 @@ use crate::monitor::StoreLocalStatistic;
 pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef) {
     let mut visited_keys = HashMap::new();
     let mut unused = StoreLocalStatistic::default();
-    for sst_id in task.sst_ids {
+    for sst in task.sst_infos {
         let mut key_counts = 0;
         let worker_id = *task
             .sst_id_to_worker_id
-            .get(&sst_id)
+            .get(&sst.id)
             .expect("valid worker_id");
         tracing::debug!(
             "Validating SST {} from worker {}, epoch {}",
-            sst_id,
+            sst.id,
             worker_id,
             task.epoch
         );
-        let holder = match sstable_store.sstable(sst_id, unused.borrow_mut()).await {
+        let holder = match sstable_store.sstable(&sst, unused.borrow_mut()).await {
             Ok(holder) => holder,
             Err(err) => {
                 // One reasonable cause is the SST has been vacuumed.
-                tracing::warn!("Skip sanity check for SST {}. {}", sst_id, err);
+                tracing::warn!("Skip sanity check for SST {}. {}", sst.id, err);
                 continue;
             }
         };
@@ -62,7 +62,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
         );
         let mut previous_key: Option<Vec<u8>> = None;
         if let Err(err) = iter.rewind().await {
-            tracing::warn!("Skip sanity check for SST {}. {}", sst_id, err);
+            tracing::warn!("Skip sanity check for SST {}. {}", sst.id, err);
         }
         while iter.is_valid() {
             key_counts += 1;
@@ -73,32 +73,32 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             {
                 panic!("SST sanity check failed: Duplicate key {:x?} in SST {} from worker {} and SST {} from worker {}",
                        current_key,
-                       sst_id,
+                       sst.id,
                        worker_id,
                        duplicate_sst_id,
                        duplicate_worker_id)
             }
-            visited_keys.insert(current_key.to_owned(), (sst_id, worker_id));
+            visited_keys.insert(current_key.to_owned(), (sst.id, worker_id));
             // Ordered and Locally unique
             if let Some(previous_key) = previous_key.take() {
                 let cmp = VersionedComparator::compare_key(&previous_key, &current_key);
                 if cmp != cmp::Ordering::Less {
                     panic!(
                         "SST sanity check failed: For SST {}, expect {:x?} < {:x?}, got {:#?}",
-                        sst_id, previous_key, current_key, cmp
+                        sst.id, previous_key, current_key, cmp
                     )
                 }
             }
             previous_key = Some(current_key);
             if let Err(err) = iter.next().await {
-                tracing::warn!("Skip remaining sanity check for SST {}. {}", sst_id, err);
+                tracing::warn!("Skip remaining sanity check for SST {}. {}", sst.id, err);
                 break;
             }
         }
         tracing::debug!(
             "Validated {} keys for SST {},  epoch {}",
             key_counts,
-            sst_id,
+            sst.id,
             task.epoch
         );
         iter.collect_local_statistic(&mut unused);

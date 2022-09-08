@@ -265,7 +265,7 @@ where
         }
 
         timer.observe_duration();
-        self.metrics.cache_miss_counter.inc();
+        self.metrics.cache_miss.inc();
 
         Ok(None)
     }

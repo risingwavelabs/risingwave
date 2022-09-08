@@ -98,6 +98,7 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::
         match conn_ret {
             Ok((stream, peer_addr)) => {
                 tracing::info!("New connection: {}", peer_addr);
+                stream.set_nodelay(true)?;
                 tokio::spawn(async move {
                     // connection succeeded
                     let mut pg_proto = PgProtocol::new(stream, session_mgr);
