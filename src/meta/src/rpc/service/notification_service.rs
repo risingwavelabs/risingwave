@@ -74,6 +74,7 @@ where
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
+        self.hummock_manager.pin_snapshot(req.worker_id).await?;
         let host_address = req.get_host()?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -92,6 +93,9 @@ where
             .collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
+        self.hummock_manager
+            .pin_version(req.get_worker_id())
+            .await?;
         let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;

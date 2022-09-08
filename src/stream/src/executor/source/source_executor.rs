@@ -272,6 +272,12 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
+        tracing::debug!(
+            "source {:?} actor {:?} starts with state {:?}",
+            self.source_id,
+            self.ctx.id,
+            recover_state
+        );
 
         // todo: use epoch from msg to restore state from state store
         let source_chunk_reader = self

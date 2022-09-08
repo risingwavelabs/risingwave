@@ -191,7 +191,7 @@ impl HummockStorage {
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
                         let sstable = self
                             .sstable_store
-                            .sstable(sstable_info.id, &mut local_stats)
+                            .sstable(sstable_info, &mut local_stats)
                             .in_span(Span::enter_with_local_parent("get_sstable"))
                             .await?;
 
@@ -218,7 +218,7 @@ impl HummockStorage {
                 for table_info in table_infos.into_iter().rev() {
                     let sstable = self
                         .sstable_store
-                        .sstable(table_info.id, &mut local_stats)
+                        .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
@@ -359,7 +359,7 @@ impl HummockStorage {
                     for table_info in table_infos {
                         let table = self
                             .sstable_store
-                            .sstable(table_info.id, &mut local_stats)
+                            .sstable(table_info, &mut local_stats)
                             .await?;
                         table_counts += 1;
                         if let Some(v) = self
@@ -401,7 +401,7 @@ impl HummockStorage {
 
                     let table = self
                         .sstable_store
-                        .sstable(level.table_infos[table_info_idx].id, &mut local_stats)
+                        .sstable(&level.table_infos[table_info_idx], &mut local_stats)
                         .await?;
                     table_counts += 1;
                     if let Some(v) = self
