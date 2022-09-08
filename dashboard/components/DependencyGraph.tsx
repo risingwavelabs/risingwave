@@ -1,6 +1,7 @@
 import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { Dag, DagLink, DagNode, zherebko } from "d3-dag"
+import { cloneDeep } from "lodash"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 const nodeRadius = 5
@@ -28,8 +29,9 @@ export default function DependencyGraph({
       (nodeRadius + edgeRadius) * 2,
       nodeRadius,
     ])
-    const { width, height } = layout(mvDependency)
-    return { width, height, dag: mvDependency }
+    const dag = cloneDeep(mvDependency)
+    const { width, height } = layout(dag)
+    return { width, height, dag }
   }, [mvDependency])
 
   const mvDependencyDag = mvDependencyDagCallback()

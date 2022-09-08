@@ -57,6 +57,9 @@ pub enum PsqlError {
 
     #[error("{0}")]
     IoError(#[from] IoError),
+
+    #[error("Cancel Not Found")]
+    CancelNotFound,
 }
 
 impl PsqlError {

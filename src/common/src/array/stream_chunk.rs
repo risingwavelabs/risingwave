@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt;
-use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -24,7 +23,6 @@ use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
 use crate::buffer::Bitmap;
 use crate::types::{DataType, NaiveDateTimeWrapper};
-use crate::util::hash_util::finalize_hashers;
 
 /// `Op` represents three operations in `StreamChunk`.
 ///
@@ -230,20 +228,6 @@ impl StreamChunk {
 
     pub fn visibility(&self) -> Option<&Bitmap> {
         self.data.visibility()
-    }
-
-    pub fn get_hash_values<H: BuildHasher>(
-        &self,
-        keys: &[usize],
-        hasher_builder: H,
-    ) -> ArrayResult<Vec<u64>> {
-        let mut states = vec![];
-        states.resize_with(self.capacity(), || hasher_builder.build_hasher());
-        for key in keys {
-            let array = self.columns()[*key].array();
-            array.hash_vec(&mut states[..]);
-        }
-        Ok(finalize_hashers(&mut states[..]))
     }
 
     /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
