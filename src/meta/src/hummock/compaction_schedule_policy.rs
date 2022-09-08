@@ -166,7 +166,7 @@ pub struct ScoredPolicy {
     // We use `(score, context_id)` as the key to dedup compactor with the same pending
     // bytes.
     //
-    // It's possbile that the `context_id` is in `compactor_to_score`, but `Compactor` is not in
+    // It's possible that the `context_id` is in `compactor_to_score`, but `Compactor` is not in
     // `score_to_compactor` when `CompactorManager` recovers from original state, but the compactor
     // node has not yet subscribed to meta node.
     //
