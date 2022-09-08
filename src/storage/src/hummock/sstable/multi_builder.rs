@@ -262,7 +262,6 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
-            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let mut builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
