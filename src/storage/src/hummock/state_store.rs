@@ -651,6 +651,11 @@ impl StateStore for HummockStorage {
         }
     }
 
+    fn update_current_epoch(&self, current_epoch: u64) {
+        self.local_version_manager
+            .update_current_epoch(current_epoch);
+    }
+
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move {
             self.local_version_manager.clear_shared_buffer().await;

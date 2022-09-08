@@ -48,7 +48,9 @@ pub struct LocalVersion {
     /// because we will traverse `sync_uncommitted_data` in the forward direction and return the
     /// key when we find it
     pub sync_uncommitted_data: VecDeque<(Vec<HummockEpoch>, SyncUncommittedData)>,
-    max_sync_epoch: u64,
+    max_sync_epoch: HummockEpoch,
+    /// The max readable epoch, epochs smaller than it will not be written again.
+    max_local_current_epoch: HummockEpoch,
 }
 
 #[derive(Debug, Clone)]
@@ -119,7 +121,16 @@ impl LocalVersion {
             version_ids_in_use,
             sync_uncommitted_data: Default::default(),
             max_sync_epoch: 0,
+            max_local_current_epoch: 0,
         }
+    }
+
+    pub fn update_local_current_epoch(&mut self, current_epoch: HummockEpoch) {
+        self.max_local_current_epoch = self.max_local_current_epoch.max(current_epoch);
+    }
+
+    pub fn get_local_current_epoch(&self) -> HummockEpoch {
+        self.max_local_current_epoch
     }
 
     pub fn pinned_version(&self) -> &PinnedVersion {

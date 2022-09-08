@@ -135,6 +135,10 @@ impl StateStore for PanicStateStore {
         }
     }
 
+    fn update_current_epoch(&self, _current_epoch: u64) {
+        panic!("should not update current epoch from the panic state store!");
+    }
+
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move {
             panic!("should not clear shared buffer from the panic state store!");

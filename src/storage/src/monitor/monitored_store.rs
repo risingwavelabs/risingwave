@@ -261,6 +261,10 @@ where
         }
     }
 
+    fn update_current_epoch(&self, current_epoch: u64) {
+        self.inner.update_current_epoch(current_epoch);
+    }
+
     fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         panic!("the state store is already monitored")
     }

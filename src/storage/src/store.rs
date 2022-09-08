@@ -193,13 +193,18 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         WriteBatch::new(self, write_options)
     }
 
-    /// Waits until the epoch is committed and its data is ready to read.
+    /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
+    /// read. If epoch is `Current`, we will only check whether the storage is updated with this
+    /// `current_epoch`.
     fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
 
     /// Syncs buffered data to S3.
     /// If the epoch is None, all buffered data will be synced.
     /// Otherwise, only data of the provided epoch will be synced.
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_>;
+
+    /// update max current epoch in storage.
+    fn update_current_epoch(&self, current_epoch: u64);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
