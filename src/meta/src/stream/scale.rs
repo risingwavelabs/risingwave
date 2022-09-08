@@ -680,7 +680,7 @@ where
                 .await;
         }));
 
-        self.barrier_manager
+        self.barrier_scheduler
             .run_multiple_commands(vec![
                 Command::Plain(Some(Mutation::Pause(PauseMutation {}))),
                 Command::RescheduleFragment(reschedule_fragment),
