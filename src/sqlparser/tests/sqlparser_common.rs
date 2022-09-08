@@ -154,7 +154,6 @@ fn parse_update_with_table_alias() {
                             name: Ident::new("u"),
                             columns: vec![]
                         }),
-                        args: vec![],
                     },
                     joins: vec![]
                 },
@@ -2174,10 +2173,9 @@ fn parse_delimited_identifiers() {
     );
     // check FROM
     match only(select.from).relation {
-        TableFactor::Table { name, alias, args } => {
+        TableFactor::Table { name, alias } => {
             assert_eq!(vec![Ident::with_quote('"', "a table")], name.0);
             assert_eq!(Ident::with_quote('"', "alias"), alias.unwrap().name);
-            assert!(args.is_empty());
         }
         _ => panic!("Expecting TableFactor::Table"),
     }
@@ -2301,7 +2299,6 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![],
             },
@@ -2309,7 +2306,6 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![],
             }
@@ -2325,13 +2321,11 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1a".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t1b".into()]),
                         alias: None,
-                        args: vec![],
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2340,13 +2334,11 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2a".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t2b".into()]),
                         alias: None,
-                        args: vec![],
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2365,7 +2357,6 @@ fn parse_cross_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new("t2")]),
                 alias: None,
-                args: vec![],
             },
             join_operator: JoinOperator::CrossJoin
         },
@@ -2384,7 +2375,6 @@ fn parse_joins_on() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new(relation.into())]),
                 alias,
-                args: vec![],
             },
             join_operator: f(JoinConstraint::On(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("c1".into())),
@@ -2436,7 +2426,6 @@ fn parse_joins_using() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new(relation.into())]),
                 alias,
-                args: vec![],
             },
             join_operator: f(JoinConstraint::Using(vec!["c1".into()])),
         }
@@ -2480,7 +2469,6 @@ fn parse_natural_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new("t2")]),
                 alias: None,
-                args: vec![],
             },
             join_operator: f(JoinConstraint::Natural),
         }
@@ -2718,7 +2706,6 @@ fn parse_derived_tables() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 join_operator: JoinOperator::Inner(JoinConstraint::Natural),
             }],
