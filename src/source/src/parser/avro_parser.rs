@@ -412,6 +412,7 @@ mod test {
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Schema, Writer};
     use chrono::NaiveDate;
+    use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
     use risingwave_common::error::ErrorCode::InternalError;
@@ -421,7 +422,7 @@ mod test {
     use crate::parser::avro_parser::{
         load_schema_async, read_schema_from_local, read_schema_from_s3, unix_epoch_days, AvroParser,
     };
-    use crate::{SourceColumnDesc, SourceParser};
+    use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -484,11 +485,15 @@ mod test {
         assert!(flush > 0);
         let input_data = writer.into_inner().unwrap();
         let columns = build_rw_columns();
-        let parse_rs = avro_parser.parse(&input_data[..], &columns[..]);
-        assert!(parse_rs.is_ok());
-        let event = parse_rs.unwrap();
-        let row = event.rows.first().unwrap();
-        assert_eq!(row.len(), columns.len());
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
+        {
+            let writer = builder.row_writer();
+            avro_parser.parse(&input_data[..], writer).unwrap();
+        }
+        let chunk = builder.finish().unwrap();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.to_owned_row();
         for (i, field) in record.fields.iter().enumerate() {
             let value = field.clone().1;
             match value {

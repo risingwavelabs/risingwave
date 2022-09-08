@@ -290,6 +290,7 @@ mod tests {
 
     use itertools::Itertools;
     use maplit::hashmap;
+    use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error::Result;
     use risingwave_common::test_prelude::*;
@@ -299,7 +300,7 @@ mod tests {
     use serde_value::Value;
     use tempfile::Builder;
 
-    use crate::{ProtobufParser, SourceColumnDesc, SourceParser};
+    use crate::{ProtobufParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
     static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";
@@ -448,17 +449,21 @@ mod tests {
             },
         ];
 
-        let result = parser.parse(PRE_GEN_PROTO_DATA, &descs);
-        assert!(result.is_ok());
-        let event = result.unwrap();
-        let data = event.rows.first().unwrap();
-        assert_eq!(data.len(), descs.len());
-        assert!(data[0].eq(&Some(ScalarImpl::Int32(123))));
-        assert!(data[1].eq(&Some(ScalarImpl::Utf8("test address".to_string()))));
-        assert!(data[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
-        assert!(data[3].eq(&Some(ScalarImpl::Int64(456))));
-        assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
-        assert!(data[5].eq(&Some(ScalarImpl::NaiveDate(
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+        {
+            let writer = builder.row_writer();
+            parser.parse(PRE_GEN_PROTO_DATA, writer).unwrap();
+        }
+        let chunk = builder.finish().unwrap();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.to_owned_row();
+        assert!(row[0].eq(&Some(ScalarImpl::Int32(123))));
+        assert!(row[1].eq(&Some(ScalarImpl::Utf8("test address".to_string()))));
+        assert!(row[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
+        assert!(row[3].eq(&Some(ScalarImpl::Int64(456))));
+        assert!(row[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
+        assert!(row[5].eq(&Some(ScalarImpl::NaiveDate(
             str_to_date("2021-01-01").unwrap()
         ))))
     }

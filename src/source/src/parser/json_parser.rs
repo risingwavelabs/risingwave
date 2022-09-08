@@ -44,17 +44,16 @@ impl SourceParser for JSONParser {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::StructValue;
+    use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
-    use crate::{JSONParser, SourceColumnDesc, SourceParser};
+    use crate::{JSONParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
     #[test]
     fn test_json_parser() {
-        let parser = JSONParser {};
-        let payload = r#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269"}"#.as_bytes();
+        let parser = JSONParser;
         let descs = vec![
             SourceColumnDesc {
                 name: "i32".to_string(),
@@ -121,35 +120,69 @@ mod tests {
             },
         ];
 
-        let event = parser.parse(payload, &descs).unwrap();
-        let row = event.rows.first().unwrap();
-        assert_eq!(row.len(), descs.len());
-        assert!(row[0].eq(&Some(ScalarImpl::Int32(1))));
-        assert!(row[1].eq(&Some(ScalarImpl::Bool(true))));
-        assert!(row[2].eq(&Some(ScalarImpl::Int16(1))));
-        assert!(row[3].eq(&Some(ScalarImpl::Int64(12345678))));
-        assert!(row[4].eq(&Some(ScalarImpl::Float32(1.23.into()))));
-        assert!(row[5].eq(&Some(ScalarImpl::Float64(1.2345.into()))));
-        assert!(row[6].eq(&Some(ScalarImpl::Utf8("varchar".to_string()))));
-        assert!(row[7].eq(&Some(ScalarImpl::NaiveDate(
-            str_to_date("2021-01-01").unwrap()
-        ))));
-        assert!(row[8].eq(&Some(ScalarImpl::NaiveDateTime(
-            str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
-        ))));
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
-        let payload = r#"{"i32":1}"#.as_bytes();
-        let result = parser.parse(payload, &descs);
-        assert!(result.is_ok());
-        let event = result.unwrap();
-        let row = event.rows.first().unwrap();
-        assert_eq!(row.len(), descs.len());
-        assert!(row[0].eq(&Some(ScalarImpl::Int32(1))));
-        assert!(row[1].eq(&None));
+        for payload in [
+            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269"}"#.as_slice(),
+            br#"{"i32":1}"#.as_slice(),
+        ] {
+            let writer = builder.row_writer();
+            parser.parse(payload, writer).unwrap();
+        }
 
-        let payload = r#"{"i32:1}"#.as_bytes();
-        let result = parser.parse(payload, &descs);
-        assert!(result.is_err());
+        let chunk = builder.finish().unwrap();
+
+        let mut rows = chunk.rows();
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
+            assert_eq!(
+                row.value_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Bool(true)))
+            );
+            assert_eq!(
+                row.value_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int16(1)))
+            );
+            assert_eq!(
+                row.value_at(3).to_owned_datum(),
+                (Some(ScalarImpl::Int64(12345678)))
+            );
+            assert_eq!(
+                row.value_at(4).to_owned_datum(),
+                (Some(ScalarImpl::Float32(1.23.into())))
+            );
+            assert_eq!(
+                row.value_at(5).to_owned_datum(),
+                (Some(ScalarImpl::Float64(1.2345.into())))
+            );
+            assert_eq!(
+                row.value_at(6).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("varchar".to_string())))
+            );
+            assert_eq!(
+                row.value_at(7).to_owned_datum(),
+                (Some(ScalarImpl::NaiveDate(str_to_date("2021-01-01").unwrap())))
+            );
+            assert_eq!(
+                row.value_at(8).to_owned_datum(),
+                (Some(ScalarImpl::NaiveDateTime(
+                    str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
+                )))
+            );
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.value_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int32(1)))
+            );
+            assert_eq!(row.value_at(1).to_owned_datum(), None);
+        }
     }
 
     #[test]
@@ -183,25 +216,31 @@ mod tests {
         .iter()
         .map(SourceColumnDesc::from)
         .collect_vec();
-        let payload = r#"
+        let payload = br#"
         {
             "data": {
-              "created_at": "2022-07-13 20:48:37.07",
-              "id": "1732524418112319151",
-              "text": "Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.",           
-              "lang": "English"
+                "created_at": "2022-07-13 20:48:37.07",
+                "id": "1732524418112319151",
+                "text": "Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.",
+                "lang": "English"
             },
             "author": {
-              "created_at": "2018-01-29 12:19:11.07",
-              "id": "7772634297",
-              "name": "Lily Frami yet",
-              "username": "Dooley5659"
+                "created_at": "2018-01-29 12:19:11.07",
+                "id": "7772634297",
+                "name": "Lily Frami yet",
+                "username": "Dooley5659"
             }
-          }
-        "#
-        .as_bytes();
-        let event = parser.parse(payload, &descs).unwrap();
-        let row = event.rows[0].clone();
+        }
+        "#;
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+        {
+            let writer = builder.row_writer();
+            parser.parse(payload, writer).unwrap();
+        }
+        let chunk = builder.finish().unwrap();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.to_owned_row().0;
 
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![
