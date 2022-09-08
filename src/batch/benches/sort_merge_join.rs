@@ -12,20 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
+pub mod utils;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::test_utils::{gen_sorted_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, SortMergeJoinExecutor};
 use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use tikv_jemallocator::Jemalloc;
-use tokio::runtime::Runtime;
+use utils::bench_join;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 fn create_sort_merge_join_executor(
+    join_type: JoinType,
+    _with_cond: bool,
     left_chunk_size: usize,
     left_chunk_num: usize,
     right_chunk_size: usize,
@@ -42,7 +45,7 @@ fn create_sort_merge_join_executor(
 
     Box::new(SortMergeJoinExecutor::new(
         OrderType::Ascending,
-        JoinType::Inner,
+        join_type,
         // [field[0] of the left schema, field[0] of the right schema]
         vec![0, 1],
         // field[0] of the left schema
@@ -55,39 +58,16 @@ fn create_sort_merge_join_executor(
     ))
 }
 
-async fn execute_sort_merge_join_executor(executor: BoxedExecutor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
-    }
-}
-
 fn bench_sort_merge_join(c: &mut Criterion) {
-    const LEFT_SIZE: usize = 2 * 1024;
-    const RIGHT_SIZE: usize = 2 * 1024;
-    let rt = Runtime::new().unwrap();
-    for chunk_size in &[32, 128, 512, 1024] {
-        c.bench_with_input(
-            BenchmarkId::new("SortMergeJoinExecutor", format!("{}", chunk_size)),
-            chunk_size,
-            |b, &chunk_size| {
-                let left_chunk_num = LEFT_SIZE / chunk_size;
-                let right_chunk_num = RIGHT_SIZE / chunk_size;
-                b.to_async(&rt).iter_batched(
-                    || {
-                        create_sort_merge_join_executor(
-                            chunk_size,
-                            left_chunk_num,
-                            chunk_size,
-                            right_chunk_num,
-                        )
-                    },
-                    |e| execute_sort_merge_join_executor(e),
-                    BatchSize::SmallInput,
-                );
-            },
-        );
-    }
+    let with_conds = vec![false];
+    let join_types = vec![JoinType::Inner];
+    bench_join(
+        c,
+        "SortMergeJoinExecutor",
+        with_conds,
+        join_types,
+        create_sort_merge_join_executor,
+    );
 }
 
 criterion_group!(benches, bench_sort_merge_join);

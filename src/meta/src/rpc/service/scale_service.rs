@@ -28,14 +28,14 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
-use crate::barrier::{BarrierManagerRef, Command};
+use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManagerRef, ParallelUnitReschedule, SourceManagerRef};
 
 pub struct ScaleServiceImpl<S: MetaStore> {
-    barrier_manager: BarrierManagerRef<S>,
+    barrier_scheduler: BarrierScheduler<S>,
     fragment_manager: FragmentManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     source_manager: SourceManagerRef<S>,
@@ -49,7 +49,7 @@ where
     S: MetaStore,
 {
     pub fn new(
-        barrier_manager: BarrierManagerRef<S>,
+        barrier_scheduler: BarrierScheduler<S>,
         fragment_manager: FragmentManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
@@ -58,7 +58,7 @@ where
         ddl_lock: Arc<RwLock<()>>,
     ) -> Self {
         Self {
-            barrier_manager,
+            barrier_scheduler,
             fragment_manager,
             cluster_manager,
             source_manager,
@@ -77,14 +77,16 @@ where
     #[cfg_attr(coverage, no_coverage)]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
         let _ddl_lock = self.ddl_lock.write().await;
-        self.barrier_manager.run_command(Command::pause()).await?;
+        self.barrier_scheduler.run_command(Command::pause()).await?;
         Ok(Response::new(PauseResponse {}))
     }
 
     #[cfg_attr(coverage, no_coverage)]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
         let _ddl_lock = self.ddl_lock.write().await;
-        self.barrier_manager.run_command(Command::resume()).await?;
+        self.barrier_scheduler
+            .run_command(Command::resume())
+            .await?;
         Ok(Response::new(ResumeResponse {}))
     }
 

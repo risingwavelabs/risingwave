@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use pgwire::error::PsqlResult;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
@@ -70,6 +71,14 @@ impl SessionManager for LocalFrontend {
         _user_name: &str,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
+    }
+
+    fn connect_for_cancel(
+        &self,
+        _process_id: i32,
+        _secret_key: i32,
+    ) -> PsqlResult<Arc<Self::Session>> {
+        todo!()
     }
 }
 
@@ -147,6 +156,8 @@ impl LocalFrontend {
                 DEFAULT_SUPER_USER_ID,
             )),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
 
@@ -160,6 +171,8 @@ impl LocalFrontend {
             self.env.clone(),
             Arc::new(AuthContext::new(database, user_name, user_id)),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
 }

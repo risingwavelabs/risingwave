@@ -41,7 +41,7 @@ use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
-use crate::barrier::GlobalBarrierManager;
+use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
@@ -349,20 +349,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
-    let barrier_manager = Arc::new(GlobalBarrierManager::new(
-        env.clone(),
-        cluster_manager.clone(),
-        catalog_manager.clone(),
-        fragment_manager.clone(),
-        hummock_manager.clone(),
-        meta_metrics.clone(),
-    ));
+    let (barrier_scheduler, scheduled_barriers) =
+        BarrierScheduler::new_pair(hummock_manager.clone());
 
     let source_manager = Arc::new(
         SourceManager::new(
             env.clone(),
             cluster_manager.clone(),
-            barrier_manager.clone(),
+            barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
             compaction_group_manager.clone(),
@@ -370,6 +364,17 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .await
         .unwrap(),
     );
+
+    let barrier_manager = Arc::new(GlobalBarrierManager::new(
+        scheduled_barriers,
+        env.clone(),
+        cluster_manager.clone(),
+        catalog_manager.clone(),
+        fragment_manager.clone(),
+        hummock_manager.clone(),
+        source_manager.clone(),
+        meta_metrics.clone(),
+    ));
 
     {
         let source_manager = source_manager.clone();
@@ -382,7 +387,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         GlobalStreamManager::new(
             env.clone(),
             fragment_manager.clone(),
-            barrier_manager.clone(),
+            barrier_scheduler.clone(),
             cluster_manager.clone(),
             source_manager.clone(),
             compaction_group_manager.clone(),
@@ -433,7 +438,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
 
     let scale_srv = ScaleServiceImpl::<S>::new(
-        barrier_manager.clone(),
+        barrier_scheduler.clone(),
         fragment_manager.clone(),
         cluster_manager.clone(),
         source_manager,
@@ -445,7 +450,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
-        barrier_manager.clone(),
+        barrier_scheduler.clone(),
         fragment_manager.clone(),
     );
     let hummock_srv = HummockServiceImpl::new(
@@ -483,12 +488,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     .await;
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
     sub_tasks.push((lease_handle, lease_shutdown));
-    #[cfg(not(test))]
-    {
+    if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
         );
-
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 

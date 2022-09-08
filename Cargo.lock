@@ -4487,6 +4487,7 @@ dependencies = [
  "futures",
  "madsim-tokio",
  "parking_lot 0.12.1",
+ "regex",
  "risingwave_common",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
