@@ -599,7 +599,7 @@ impl LocalVersionManager {
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         let ssts = self
             .shared_buffer_uploader
-            .flush(task_payload, *epochs.last().unwrap(), epoch)
+            .flush(task_payload, epoch)
             .await?;
         self.local_version
             .write()
@@ -613,10 +613,7 @@ impl LocalVersionManager {
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
     ) -> HummockResult<()> {
-        let task_result = self
-            .shared_buffer_uploader
-            .flush(task_payload, epoch, epoch)
-            .await;
+        let task_result = self.shared_buffer_uploader.flush(task_payload, epoch).await;
 
         let mut local_version_guard = self.local_version.write();
         let shared_buffer_guard = local_version_guard
