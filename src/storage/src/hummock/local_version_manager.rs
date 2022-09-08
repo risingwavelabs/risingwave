@@ -328,19 +328,19 @@ impl LocalVersionManager {
     }
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
-    /// we will only check whether it is le `max_local_current_epoch` and won't wait.
+    /// we will only check whether it is le `sealed_epoch` and won't wait.
     pub async fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> HummockResult<()> {
         let wait_epoch = match wait_epoch {
             HummockReadEpoch::Committed(epoch) => epoch,
             HummockReadEpoch::Current(epoch) => {
-                let local_current_epoch = self.local_version.read().get_local_current_epoch();
+                let sealed_epoch = self.local_version.read().get_sealed_epoch();
                 assert!(
-                    epoch <= local_current_epoch
+                    epoch <= sealed_epoch
                         && epoch != HummockEpoch::MAX
                     ,
-                    "current epoch can't use, because the epoch in storage is not updated, epoch{}, max current epoch{}"
+                    "current epoch can't read, because the epoch in storage is not updated, epoch{}, sealed epoch{}"
                     ,epoch
-                    ,local_current_epoch
+                    ,sealed_epoch
                 );
                 return Ok(());
             }
@@ -440,12 +440,12 @@ impl LocalVersionManager {
         is_remote_batch: bool,
     ) {
         let mut local_version_guard = self.local_version.write();
-        let local_current_epoch = local_version_guard.get_local_current_epoch();
+        let sealed_epoch = local_version_guard.get_sealed_epoch();
         assert!(
-            epoch > local_current_epoch,
-            "write epoch must greater than max current epoch, write epoch{}, max current epoch{}",
+            epoch > sealed_epoch,
+            "write epoch must greater than max current epoch, write epoch{}, sealed epoch{}",
             epoch,
-            local_current_epoch
+            sealed_epoch
         );
         // Write into shared buffer
         if is_remote_batch {
@@ -517,11 +517,9 @@ impl LocalVersionManager {
         Some((epoch, join_handle))
     }
 
-    /// update `local_max_current_epoch` in local version.
-    pub fn update_current_epoch(&self, current_epoch: HummockEpoch) {
-        self.local_version
-            .write()
-            .update_local_current_epoch(current_epoch);
+    /// seal epoch in local version.
+    pub fn seal_epoch(&self, epoch: HummockEpoch) {
+        self.local_version.write().seal_epoch(epoch);
     }
 
     pub async fn sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
@@ -552,7 +550,6 @@ impl LocalVersionManager {
         // lock.
         let (task_payload, epochs, sync_size) = {
             let mut local_version_guard = self.local_version.write();
-            local_version_guard.update_local_current_epoch(epoch);
             let prev_max_sync_epoch = match local_version_guard.swap_max_sync_epoch(epoch) {
                 Some(epoch) => epoch,
                 None => {

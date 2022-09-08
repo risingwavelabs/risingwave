@@ -261,8 +261,8 @@ where
         }
     }
 
-    fn update_current_epoch(&self, current_epoch: u64) {
-        self.inner.update_current_epoch(current_epoch);
+    fn seal_epoch(&self, epoch: u64) {
+        self.inner.seal_epoch(epoch);
     }
 
     fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {

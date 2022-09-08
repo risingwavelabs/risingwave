@@ -135,7 +135,7 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn update_current_epoch(&self, _current_epoch: u64) {
+    fn seal_epoch(&self, _epoch: u64) {
         panic!("should not update current epoch from the panic state store!");
     }
 

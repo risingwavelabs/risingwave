@@ -203,7 +203,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_>;
 
     /// update max current epoch in storage.
-    fn update_current_epoch(&self, current_epoch: u64);
+    fn seal_epoch(&self, epoch: u64);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {

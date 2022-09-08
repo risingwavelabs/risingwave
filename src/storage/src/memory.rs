@@ -246,7 +246,7 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn update_current_epoch(&self, _current_epoch: u64) {}
+    fn seal_epoch(&self, _epoch: u64) {}
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move { Ok(()) }
