@@ -30,6 +30,8 @@ use crate::handler::util::force_local_mode;
 use crate::planner::Planner;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::session::OptimizerContext;
+use crate::stream_fragmenter::build_graph;
+use crate::utils::explain_stream_graph;
 
 pub(super) fn handle_explain(
     context: OptimizerContext,
@@ -53,23 +55,30 @@ pub(super) fn handle_explain(
         .store(options.trace, Ordering::Release);
     // bind, plan, optimize, and serialize here
     let mut planner = Planner::new(context.into());
-    let plan = match stmt {
+    // we need to know if the plan is streaming or batch plan,
+    let (plan, is_streaming) = match stmt {
         Statement::CreateView {
             or_replace: false,
             materialized: true,
             query,
             name,
             ..
-        } => gen_create_mv_plan(&session, planner.ctx(), query, name, true)?.0,
+        } => (
+            gen_create_mv_plan(&session, planner.ctx(), query, name, true)?.0,
+            true,
+        ),
 
-        Statement::CreateSink { stmt } => gen_sink_plan(&session, planner.ctx(), stmt)?.0,
+        Statement::CreateSink { stmt } => (gen_sink_plan(&session, planner.ctx(), stmt)?.0, true),
 
         Statement::CreateTable {
             name,
             columns,
             constraints,
             ..
-        } => gen_create_table_plan(&session, planner.ctx(), name, columns, constraints)?.0,
+        } => (
+            gen_create_table_plan(&session, planner.ctx(), name, columns, constraints)?.0,
+            true,
+        ),
 
         Statement::CreateIndex {
             name,
@@ -77,7 +86,10 @@ pub(super) fn handle_explain(
             columns,
             include,
             ..
-        } => gen_create_index_plan(&session, planner.ctx(), name, table_name, columns, include)?.0,
+        } => (
+            gen_create_index_plan(&session, planner.ctx(), name, table_name, columns, include)?.0,
+            true,
+        ),
 
         stmt => {
             let bound = {
@@ -96,43 +108,16 @@ pub(super) fn handle_explain(
                 QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
             };
 
-            if options.explain_type == ExplainType::DistSQL {
-                let plan_fragmenter = BatchPlanFragmenter::new(
-                    session.env().worker_node_manager_ref(),
-                    session.env().catalog_reader().clone(),
-                );
-                let query = plan_fragmenter.split(plan)?;
-                let stage_graph_json = serde_json::to_string_pretty(&query.stage_graph).unwrap();
-                let rows = vec![stage_graph_json]
-                    .iter()
-                    .flat_map(|s| s.lines())
-                    .map(|s| Row::new(vec![Some(s.to_string().into())]))
-                    .collect::<Vec<_>>();
+            if options.explain_type == ExplainType::DistSQL {}
 
-                return Ok(PgResponse::new(
-                    StatementType::EXPLAIN,
-                    rows.len() as i32,
-                    rows,
-                    vec![PgFieldDescriptor::new(
-                        "QUERY PLAN".to_owned(),
-                        TypeOid::Varchar,
-                    )],
-                    true,
-                ));
-            }
-
-            plan
+            (plan, false)
         }
     };
-
-    if options.explain_type == ExplainType::DistSQL {
-        return Err(ErrorCode::NotImplemented("explain distsql".to_string(), 4856.into()).into());
-    }
 
     let ctx = plan.plan_base().ctx.clone();
     let explain_trace = ctx.is_explain_trace();
 
-    let rows = if explain_trace {
+    let mut rows = if explain_trace {
         let trace = ctx.take_trace();
         trace
             .iter()
@@ -140,12 +125,42 @@ pub(super) fn handle_explain(
             .map(|s| Row::new(vec![Some(s.to_string().into())]))
             .collect::<Vec<_>>()
     } else {
-        let output = plan.explain_to_string()?;
-        output
-            .lines()
-            .map(|s| Row::new(vec![Some(s.to_string().into())]))
-            .collect::<Vec<_>>()
+        vec![]
     };
+
+    if options.explain_type == ExplainType::DistSQL {
+        if is_streaming {
+            let graph = build_graph(plan);
+            rows.extend(
+                explain_stream_graph(&graph)?
+                    .lines()
+                    .map(|s| Row::new(vec![Some(s.to_string().into())])),
+            );
+        } else {
+            let plan_fragmenter = BatchPlanFragmenter::new(
+                session.env().worker_node_manager_ref(),
+                session.env().catalog_reader().clone(),
+            );
+            let query = plan_fragmenter.split(plan)?;
+            let stage_graph_json = serde_json::to_string_pretty(&query.stage_graph).unwrap();
+            rows.extend(
+                vec![stage_graph_json]
+                    .iter()
+                    .flat_map(|s| s.lines())
+                    .map(|s| Row::new(vec![Some(s.to_string().into())])),
+            );
+        }
+    } else {
+        // if explain trace is open, the plan has been in the rows
+        if !explain_trace {
+            let output = plan.explain_to_string()?;
+            rows.extend(
+                output
+                    .lines()
+                    .map(|s| Row::new(vec![Some(s.to_string().into())])),
+            );
+        }
+    }
 
     Ok(PgResponse::new(
         StatementType::EXPLAIN,
