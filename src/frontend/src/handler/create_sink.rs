@@ -56,7 +56,7 @@ pub fn gen_sink_plan(
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
 ) -> Result<(PlanRef, ProstSink)> {
-    let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
+    let (schema_name, _) = Binder::resolve_table_name(stmt.sink_name.clone())?;
 
     let (database_id, schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();

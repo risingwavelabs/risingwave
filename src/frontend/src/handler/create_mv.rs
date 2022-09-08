@@ -35,7 +35,6 @@ pub fn gen_create_mv_plan(
     context: OptimizerContextRef,
     query: Box<Query>,
     name: ObjectName,
-    ignore_name_duplicates: bool,
 ) -> Result<(PlanRef, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(name)?;
     check_schema_writable(&schema_name)?;
@@ -119,7 +118,7 @@ pub async fn handle_create_mv(
             )?;
         }
 
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, false)?;
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
         let graph = build_graph(plan);
 
         (table, graph)
