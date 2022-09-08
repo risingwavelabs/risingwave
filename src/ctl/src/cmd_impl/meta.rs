@@ -14,6 +14,8 @@
 
 mod cluster_info;
 mod pause_resume;
+mod reschedule;
 
 pub use cluster_info::*;
 pub use pause_resume::*;
+pub use reschedule::*;

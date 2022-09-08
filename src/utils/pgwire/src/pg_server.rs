@@ -18,18 +18,25 @@ use std::sync::Arc;
 
 use tokio::net::TcpListener;
 
+use crate::error::PsqlResult;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::PgProtocol;
 use crate::pg_response::PgResponse;
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
-
+pub type SessionId = (i32, i32);
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
     fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
+
+    fn connect_for_cancel(
+        &self,
+        process_id: i32,
+        secret_key: i32,
+    ) -> PsqlResult<Arc<Self::Session>>;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -50,6 +57,9 @@ pub trait Session: Send + Sync {
         sql: &str,
     ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
     fn user_authenticator(&self) -> &UserAuthenticator;
+    async fn cancel_running_queries(&self);
+
+    fn id(&self) -> SessionId;
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +98,7 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::
         match conn_ret {
             Ok((stream, peer_addr)) => {
                 tracing::info!("New connection: {}", peer_addr);
+                stream.set_nodelay(true)?;
                 tokio::spawn(async move {
                     // connection succeeded
                     let mut pg_proto = PgProtocol::new(stream, session_mgr);
@@ -112,9 +123,10 @@ mod tests {
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
+    use crate::error::PsqlResult;
     use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, StatementType};
-    use crate::pg_server::{pg_serve, Session, SessionManager, UserAuthenticator};
+    use crate::pg_server::{pg_serve, Session, SessionId, SessionManager, UserAuthenticator};
     use crate::types::Row;
 
     struct MockSessionManager {}
@@ -128,6 +140,14 @@ mod tests {
             _user_name: &str,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))
+        }
+
+        fn connect_for_cancel(
+            &self,
+            _process_id: i32,
+            _secret_key: i32,
+        ) -> PsqlResult<Arc<Self::Session>> {
+            todo!()
         }
     }
 
@@ -179,6 +199,14 @@ mod tests {
                 PgFieldDescriptor::new("".to_string(), TypeOid::Varchar,);
                 count
             ])
+        }
+
+        async fn cancel_running_queries(&self) {
+            unreachable!("Do not expect mock session to cancel running queries");
+        }
+
+        fn id(&self) -> SessionId {
+            (0, 0)
         }
     }
 
