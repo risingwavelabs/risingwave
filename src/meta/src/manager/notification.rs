@@ -151,6 +151,7 @@ impl NotificationManager {
             WorkerType::Frontend => core_guard.compute_senders.remove(&worker_key),
             WorkerType::ComputeNode => core_guard.frontend_senders.remove(&worker_key),
             WorkerType::Compactor => core_guard.compactor_senders.remove(&worker_key),
+            WorkerType::RiseCtl => None,
             _ => unreachable!(),
         };
     }
