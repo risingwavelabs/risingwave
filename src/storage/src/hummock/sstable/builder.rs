@@ -46,8 +46,6 @@ pub struct SstableBuilderOptions {
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
-    /// Approximate bloom filter capacity.
-    pub estimate_bloom_filter_capacity: usize,
 }
 
 impl From<&StorageConfig> for SstableBuilderOptions {
@@ -59,7 +57,6 @@ impl From<&StorageConfig> for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: capacity / DEFAULT_ENTRY_SIZE,
         }
     }
 }
@@ -72,7 +69,6 @@ impl Default for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: DEFAULT_SSTABLE_SIZE / DEFAULT_ENTRY_SIZE,
         }
     }
 }
@@ -103,7 +99,6 @@ pub struct SstableBuilder<W: SstableWriter> {
     raw_value: BytesMut,
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     last_bloom_filter_key_length: usize,
-    add_bloom_filter_key_counts: usize,
 }
 
 impl<W: SstableWriter> SstableBuilder<W> {
@@ -117,7 +112,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             }),
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
-            user_key_hashes: Vec::with_capacity(options.estimate_bloom_filter_capacity),
+            user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             last_table_id: 0,
             options,
             key_count: 0,
@@ -128,7 +123,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 FullKeyFilterKeyExtractor::default(),
             )),
             last_bloom_filter_key_length: 0,
-            add_bloom_filter_key_counts: 0,
         }
     }
 
@@ -156,7 +150,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
             sstable_id,
             filter_key_extractor,
             last_bloom_filter_key_length: 0,
-            add_bloom_filter_key_counts: 0,
         }
     }
 
@@ -261,11 +254,10 @@ impl<W: SstableWriter> SstableBuilder<W> {
             meta_offset: meta.meta_offset,
         };
         tracing::trace!(
-            "meta_size {} bloom_filter_size {}  add_key_counts {} add_bloom_filter_counts {}",
+            "meta_size {} bloom_filter_size {}  add_key_counts {} ",
             meta.encoded_size(),
             meta.bloom_filter.len(),
             self.key_count,
-            self.add_bloom_filter_key_counts
         );
         let bloom_filter_size = meta.bloom_filter.len();
 
@@ -278,7 +270,9 @@ impl<W: SstableWriter> SstableBuilder<W> {
     }
 
     pub fn approximate_len(&self) -> usize {
-        self.writer.data_len() + self.block_builder.approximate_len() + 4
+        self.writer.data_len()
+            + self.block_builder.approximate_len()
+            + self.user_key_hashes.len() * 4
     }
 
     fn build_block(&mut self) -> HummockResult<()> {

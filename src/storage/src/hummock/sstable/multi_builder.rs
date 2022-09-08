@@ -41,7 +41,6 @@ pub trait TableBuilderFactory {
 pub struct SplitTableOutput {
     pub sst_info: SstableInfo,
     pub upload_join_handle: UploadJoinHandle,
-    pub bloom_filter_size: usize,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -168,7 +167,6 @@ where
 
             self.sst_outputs.push(SplitTableOutput {
                 upload_join_handle: builder_output.writer_output,
-                bloom_filter_size: builder_output.bloom_filter_size,
                 sst_info: builder_output.sst_info,
             });
         }

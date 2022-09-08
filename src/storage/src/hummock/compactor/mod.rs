@@ -86,11 +86,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
         // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
             .limiter
-            .require_memory(
-                (self.options.capacity
-                    + self.options.block_capacity
-                    + self.options.estimate_bloom_filter_capacity) as u64,
-            )
+            .require_memory((self.options.capacity + self.options.block_capacity) as u64)
             .await
             .unwrap();
         let timer = Instant::now();
@@ -661,15 +657,10 @@ impl Compactor {
         let mut upload_join_handles = vec![];
 
         for SplitTableOutput {
-            bloom_filter_size,
             sst_info,
             upload_join_handle,
         } in split_table_outputs
         {
-            // Bloom filter occuppy per thousand keys.
-            self.context
-                .filter_key_extractor_manager
-                .update_bloom_filter_avg_size(sst_info.file_size as usize, bloom_filter_size);
             let sst_size = sst_info.file_size;
             ssts.push(sst_info);
 
