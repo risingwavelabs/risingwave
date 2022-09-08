@@ -512,9 +512,13 @@ struct PinnedVersionGuard {
 
 impl Drop for PinnedVersionGuard {
     fn drop(&mut self) {
-        self.unpin_worker_tx
+        if self
+            .unpin_worker_tx
             .send(PinVersionAction::Unpin(self.version_id))
-            .ok();
+            .is_err()
+        {
+            tracing::warn!("failed to send unpin {}", self.version_id);
+        }
     }
 }
 
@@ -535,7 +539,7 @@ impl PinnedVersion {
             .send(PinVersionAction::Pin(version.id))
             .is_err()
         {
-            tracing::info!("failed to send pin version action")
+            tracing::warn!("failed to send unpin {}", version_id);
         }
 
         PinnedVersion {
