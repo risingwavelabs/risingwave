@@ -187,19 +187,19 @@ where
             // Check if the reschedule is supported.
 
             if chain_fragment_ids.contains(fragment_id) {
-                bail!("reschedule chain fragment is not supported");
+                bail!("rescheduling Chain is not supported");
             }
             match fragment.get_fragment_type()? {
                 FragmentType::Source => {
                     let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
                     let source_node = TableFragments::find_source_node(stream_node).unwrap();
                     if source_node.source_type() == SourceType::Source {
-                        bail!("scaling StreamSource is not supported")
+                        bail!("rescheduling StreamSource is not supported")
                     }
                 }
                 FragmentType::Sink => {
                     if downstream_fragment_id_map.get(fragment_id).is_some() {
-                        bail!("scaling of Sink or Materialize with downstream is not supported")
+                        bail!("rescheduling Materialize with downstream is not supported")
                     }
                 }
                 _ => {}
@@ -729,7 +729,7 @@ where
                 .await;
         }));
 
-        tracing::warn!("reschedule plan: {:#?}", reschedule_fragment);
+        tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
             .run_multiple_commands(vec![
