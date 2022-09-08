@@ -54,22 +54,12 @@ impl<S: StateStore> ManagedTopNState<S> {
         }
     }
 
-    pub fn insert(
-        &mut self,
-        _key: OrderedRow,
-        value: Row,
-        _epoch: u64,
-    ) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, _key: OrderedRow, value: Row) -> StreamExecutorResult<()> {
         self.state_table.insert(value)?;
         Ok(())
     }
 
-    pub fn delete(
-        &mut self,
-        _key: &OrderedRow,
-        value: Row,
-        _epoch: u64,
-    ) -> StreamExecutorResult<()> {
+    pub fn delete(&mut self, _key: &OrderedRow, value: Row) -> StreamExecutorResult<()> {
         self.state_table.delete(value)?;
         Ok(())
     }
@@ -231,7 +221,7 @@ mod tests {
 
         let epoch = 1;
         managed_state
-            .insert(ordered_rows[3].clone(), rows[3].clone(), epoch)
+            .insert(ordered_rows[3].clone(), rows[3].clone())
             .unwrap();
 
         // now ("ab", 4)
@@ -244,7 +234,7 @@ mod tests {
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
 
         managed_state
-            .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
+            .insert(ordered_rows[2].clone(), rows[2].clone())
             .unwrap();
         let valid_rows = managed_state
             .find_range(None, 1, Some(1), epoch)
@@ -254,7 +244,7 @@ mod tests {
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[2].clone());
 
         managed_state
-            .insert(ordered_rows[1].clone(), rows[1].clone(), epoch)
+            .insert(ordered_rows[1].clone(), rows[1].clone())
             .unwrap();
 
         let valid_rows = managed_state
@@ -273,12 +263,12 @@ mod tests {
 
         // delete ("abc", 3)
         managed_state
-            .delete(&ordered_rows[1].clone(), rows[1].clone(), epoch)
+            .delete(&ordered_rows[1].clone(), rows[1].clone())
             .unwrap();
 
         // insert ("abc", 2)
         managed_state
-            .insert(ordered_rows[0].clone(), rows[0].clone(), epoch)
+            .insert(ordered_rows[0].clone(), rows[0].clone())
             .unwrap();
 
         let valid_rows = managed_state
@@ -322,16 +312,16 @@ mod tests {
 
         let epoch = 1;
         managed_state
-            .insert(ordered_rows[3].clone(), rows[3].clone(), epoch)
+            .insert(ordered_rows[3].clone(), rows[3].clone())
             .unwrap();
         managed_state
-            .insert(ordered_rows[1].clone(), rows[1].clone(), epoch)
+            .insert(ordered_rows[1].clone(), rows[1].clone())
             .unwrap();
         managed_state
-            .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
+            .insert(ordered_rows[2].clone(), rows[2].clone())
             .unwrap();
         managed_state
-            .insert(ordered_rows[4].clone(), rows[4].clone(), epoch)
+            .insert(ordered_rows[4].clone(), rows[4].clone())
             .unwrap();
 
         managed_state
