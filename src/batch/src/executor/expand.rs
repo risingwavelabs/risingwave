@@ -79,19 +79,19 @@ impl ExpandExecutor {
         }
     }
 
-    pub fn create(input: BoxedExecutor, column_subsets: Vec<Vec<usize>>) -> BoxedExecutor {
+    pub fn new(input: BoxedExecutor, column_subsets: Vec<Vec<usize>>) -> Self {
         let schema = {
             let mut fields = input.schema().clone().into_fields();
             fields.extend(fields.clone());
             fields.push(Field::with_name(DataType::Int64, "flag"));
             Schema::new(fields)
         };
-        Box::new(Self {
+        Self {
             column_subsets,
             child: input,
             schema,
             identity: "ExpandExecutor".into(),
-        })
+        }
     }
 }
 
@@ -119,7 +119,7 @@ impl BoxedExecutorBuilder for ExpandExecutor {
             .collect_vec();
 
         let [input]: [_; 1] = inputs.try_into().unwrap();
-        Ok(Self::create(input, column_subsets))
+        Ok(Box::new(Self::new(input, column_subsets)))
     }
 }
 

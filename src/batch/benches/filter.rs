@@ -15,8 +15,6 @@
 pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use utils::create_input;
-use utils::execute_executor;
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::build_from_prost;
@@ -28,6 +26,7 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
+use utils::{create_input, execute_executor};
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
