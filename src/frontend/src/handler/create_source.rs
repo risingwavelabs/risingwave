@@ -62,7 +62,14 @@ pub(crate) fn make_prost_source(
             )?;
         }
 
-        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?
+        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &schema_name)?
+            .id();
+        (db_id, schema_id)
     };
 
     Ok(ProstSource {

@@ -130,9 +130,16 @@ pub(crate) fn gen_create_index_plan(
 
         catalog_reader.check_relation_name_duplicated(
             session.database(),
-            &index_schema_name,
+            &schema_name,
             &index_table_name,
-        )?
+        )?;
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &schema_name)?
+            .id();
+        (db_id, schema_id)
     };
 
     let index_table = materialize.table();

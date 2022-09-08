@@ -54,21 +54,20 @@ pub fn gen_create_mv_plan(
             )?;
         }
 
-        if ignore_name_duplicates {
-            let database_id = catalog_reader
-                .get_database_by_name(session.database())?
-                .id();
-            let schema_id = catalog_reader
-                .get_schema_by_name(session.database(), &schema_name)?
-                .id();
-            (database_id, schema_id)
-        } else {
+        if !ignore_name_duplicates {
             catalog_reader.check_relation_name_duplicated(
                 session.database(),
                 &schema_name,
                 &table_name,
-            )?
+            )?;
         }
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &schema_name)?
+            .id();
+        (db_id, schema_id)
     };
 
     let bound = {

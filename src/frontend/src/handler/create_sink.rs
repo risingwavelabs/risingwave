@@ -76,8 +76,15 @@ pub fn gen_sink_plan(
         catalog_reader.check_relation_name_duplicated(
             session.database(),
             &schema_name,
-            sink_name.as_str(),
-        )?
+            &sink_name,
+        )?;
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &schema_name)?
+            .id();
+        (db_id, schema_id)
     };
 
     let (associated_table_id, associated_table_name, associated_table_desc) = {
