@@ -166,7 +166,7 @@ async fn test_update_pinned_version() {
         max_committed_epoch: epochs[0],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert_eq!(
@@ -193,7 +193,7 @@ async fn test_update_pinned_version() {
         max_committed_epoch: epochs[1],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
@@ -209,7 +209,7 @@ async fn test_update_pinned_version() {
         max_committed_epoch: epochs[2],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
     let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
@@ -368,8 +368,9 @@ async fn test_update_uncommitted_ssts() {
         max_committed_epoch: epochs[0],
         ..Default::default()
     };
-    assert!(local_version_manager
-        .try_update_pinned_version(None, Payload::PinnedVersion(version.clone())));
+    assert!(
+        local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version.clone()))
+    );
     let local_version = local_version_manager.get_local_version();
     // Check shared buffer
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
@@ -384,7 +385,7 @@ async fn test_update_uncommitted_ssts() {
         max_committed_epoch: epochs[1],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version.clone()));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version.clone()));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
@@ -524,7 +525,7 @@ async fn test_sst_gc_watermark() {
         ..Default::default()
     };
     // Watermark held by epoch 0 is removed.
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     // Global watermark determined by epoch 1.
     assert_eq!(
         local_version_manager
@@ -538,7 +539,7 @@ async fn test_sst_gc_watermark() {
         max_committed_epoch: epochs[1],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     assert_eq!(
         local_version_manager
             .get_sstable_id_manager()
