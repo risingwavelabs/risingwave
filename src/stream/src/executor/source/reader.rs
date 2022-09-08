@@ -144,7 +144,7 @@ mod tests {
     async fn test_pause_and_resume() {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
-        let table_source = TableSourceV2::new(vec![]);
+        let table_source = TableSource::new(vec![]);
         let source_reader =
             SourceStreamReaderImpl::TableV2(table_source.stream_reader(vec![]).await.unwrap());
 

@@ -65,13 +65,13 @@ pub enum SourceFormat {
 
 #[derive(Debug, EnumAsInner)]
 pub enum SourceImpl {
-    TableV2(TableSourceV2),
+    TableV2(TableSource),
     Connector(ConnectorSource),
 }
 
 #[expect(clippy::large_enum_variant)]
 pub enum SourceStreamReaderImpl {
-    TableV2(TableV2StreamReader),
+    TableV2(TableStreamReader),
     Connector(ConnectorSourceReader),
 }
 
