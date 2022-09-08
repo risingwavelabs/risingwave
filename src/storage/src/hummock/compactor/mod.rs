@@ -231,10 +231,18 @@ impl Compactor {
         splits.push(KeyRange_vec::new(vec![], vec![]));
         // collect sstable_ids to get meta data
 
-        let sstable_ids = select_table_infos
+        let sstable_ids = compact_task
+            .input_ssts
             .iter()
-            .map(|sstable_info| sstable_info.id)
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table_info| table_info.id)
             .collect_vec();
+        let total_file_size = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table_info| table_info.file_size)
+            .sum::<u64>();
         let mut indexes = vec![];
 
         // preload the meta and get the smallest key to split sub_compaction
@@ -257,19 +265,22 @@ impl Compactor {
                     .collect_vec(),
             );
         }
-        indexes.sort();
-        // every 8 index as one group
-        const SPLIT_RANGE_STEP: usize = 8;
-        let concurrency = indexes.len() / SPLIT_RANGE_STEP;
-        let step = (indexes.len() + concurrency - 1) / concurrency;
-        for (idx, key) in indexes.into_iter().enumerate() {
-            if idx > 0 && idx % step == 0 {
-                splits.last_mut().unwrap().right = key.clone();
-                splits.push(KeyRange_vec::new(key, vec![]));
+        indexes.sort_by(|a, b| VersionedComparator::compare_key(a.as_ref(), b.as_ref()));
+
+        if total_file_size > context.options.sstable_size_mb as u64 {
+            // set the max number of splits task
+            let concurrency =
+                std::cmp::min(indexes.len(), context.options.max_sub_compaction as usize);
+            let step = indexes.len() + concurrency - 1 / concurrency;
+            for (idx, key) in indexes.into_iter().enumerate() {
+                if idx > 0 && idx % step == 0 {
+                    splits.last_mut().unwrap().right = key.clone();
+                    splits.push(KeyRange_vec::new(key, vec![]));
+                }
             }
+            compact_task.splits = splits;
         }
 
-        compact_task.splits = splits;
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
