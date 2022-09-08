@@ -41,7 +41,6 @@ pub struct LocalVersion {
     shared_buffer: BTreeMap<HummockEpoch, SharedBuffer>,
     pinned_version: PinnedVersion,
     local_related_version: PinnedVersion,
-    pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
     /// We need to save data in reverse order of epoch,
@@ -111,15 +110,8 @@ impl LocalVersion {
         version: HummockVersion,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
-        if pinned_version_manager_tx
-            .send(PinVersionAction::Pin(version.id))
-            .is_err()
-        {
-            tracing::info!("failed to send pin version action")
-        }
-
         let local_related_version = version.clone();
-        let pinned_version = PinnedVersion::new(version, pinned_version_manager_tx.clone());
+        let pinned_version = PinnedVersion::new(version, pinned_version_manager_tx);
         let local_related_version =
             pinned_version.new_local_related_pin_version(local_related_version);
         Self {
@@ -127,7 +119,6 @@ impl LocalVersion {
             shared_buffer: BTreeMap::default(),
             pinned_version,
             local_related_version,
-            pinned_version_manager_tx,
             sync_uncommitted_data: Default::default(),
             max_sync_epoch: 0,
         }
@@ -251,14 +242,6 @@ impl LocalVersion {
                 .shared_buffer
                 .iter()
                 .all(|(epoch, _)| *epoch > new_pinned_version.max_committed_epoch));
-        }
-
-        if self
-            .pinned_version_manager_tx
-            .send(PinVersionAction::Pin(new_pinned_version.id))
-            .is_err()
-        {
-            tracing::info!("failed to send pin version action")
         }
 
         let new_pinned_version = self.pinned_version.new_pin_version(new_pinned_version);
@@ -542,13 +525,24 @@ pub struct PinnedVersion {
 }
 
 impl PinnedVersion {
-    fn new(version: HummockVersion, unpin_worker_tx: UnboundedSender<PinVersionAction>) -> Self {
+    fn new(
+        version: HummockVersion,
+        pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
+    ) -> Self {
         let version_id = version.id;
+
+        if pinned_version_manager_tx
+            .send(PinVersionAction::Pin(version.id))
+            .is_err()
+        {
+            tracing::info!("failed to send pin version action")
+        }
+
         PinnedVersion {
             version: Arc::new(version),
             guard: Arc::new(PinnedVersionGuard {
                 version_id,
-                unpin_worker_tx,
+                unpin_worker_tx: pinned_version_manager_tx,
             }),
         }
     }
