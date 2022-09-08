@@ -97,3 +97,7 @@ harness = false
 [[bench]]
 name = "hash_agg"
 harness = false
+
+[[bench]]
+name = "expand"
+harness = false

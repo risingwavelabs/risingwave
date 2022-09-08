@@ -248,6 +248,7 @@ pub struct Barrier {
     pub mutation: Option<Arc<Mutation>>,
     pub checkpoint: bool,
 
+    /// The actors that this barrier has passed locally. Used for debugging only.
     pub passed_actors: Vec<ActorId>,
 }
 
@@ -579,6 +580,7 @@ pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
+#[track_caller]
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {

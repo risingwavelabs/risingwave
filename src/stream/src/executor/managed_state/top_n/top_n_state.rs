@@ -27,8 +27,6 @@ use crate::executor::top_n::TopNCache;
 pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
     pub(crate) state_table: StateTable<S>,
-    /// The total number of rows in state table.
-    total_count: usize,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
 }
@@ -47,45 +45,26 @@ impl TopNStateRow {
 
 impl<S: StateStore> ManagedTopNState<S> {
     pub fn new(
-        total_count: usize,
         state_table: StateTable<S>,
         ordered_row_deserializer: OrderedRowDeserializer,
     ) -> Self {
         Self {
             state_table,
-            total_count,
             ordered_row_deserializer,
         }
     }
 
-    pub fn insert(
-        &mut self,
-        _key: OrderedRow,
-        value: Row,
-        _epoch: u64,
-    ) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, _key: OrderedRow, value: Row) -> StreamExecutorResult<()> {
         self.state_table.insert(value)?;
-        self.total_count += 1;
         Ok(())
     }
 
-    pub fn delete(
-        &mut self,
-        _key: &OrderedRow,
-        value: Row,
-        _epoch: u64,
-    ) -> StreamExecutorResult<()> {
+    pub fn delete(&mut self, _key: &OrderedRow, value: Row) -> StreamExecutorResult<()> {
         self.state_table.delete(value)?;
-        self.total_count -= 1;
         Ok(())
     }
 
-    #[cfg(test)]
-    pub fn total_count(&self) -> usize {
-        self.total_count
-    }
-
-    pub fn get_topn_row(&self, row: Row) -> TopNStateRow {
+    fn get_topn_row(&self, row: Row) -> TopNStateRow {
         let mut datums = Vec::with_capacity(self.state_table.pk_indices().len());
         for pk_index in self.state_table.pk_indices() {
             datums.push(row[*pk_index].clone());
@@ -225,7 +204,6 @@ mod tests {
             &[0, 1],
         );
         let mut managed_state = ManagedTopNState::new(
-            0,
             state_table,
             OrderedRowDeserializer::new(data_types, order_types.clone()),
         );
@@ -243,7 +221,7 @@ mod tests {
 
         let epoch = 1;
         managed_state
-            .insert(ordered_rows[3].clone(), rows[3].clone(), epoch)
+            .insert(ordered_rows[3].clone(), rows[3].clone())
             .unwrap();
 
         // now ("ab", 4)
@@ -256,7 +234,7 @@ mod tests {
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
 
         managed_state
-            .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
+            .insert(ordered_rows[2].clone(), rows[2].clone())
             .unwrap();
         let valid_rows = managed_state
             .find_range(None, 1, Some(1), epoch)
@@ -266,9 +244,8 @@ mod tests {
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[2].clone());
 
         managed_state
-            .insert(ordered_rows[1].clone(), rows[1].clone(), epoch)
+            .insert(ordered_rows[1].clone(), rows[1].clone())
             .unwrap();
-        assert_eq!(3, managed_state.total_count());
 
         let valid_rows = managed_state
             .find_range(None, 1, Some(2), epoch)
@@ -286,12 +263,12 @@ mod tests {
 
         // delete ("abc", 3)
         managed_state
-            .delete(&ordered_rows[1].clone(), rows[1].clone(), epoch)
+            .delete(&ordered_rows[1].clone(), rows[1].clone())
             .unwrap();
 
         // insert ("abc", 2)
         managed_state
-            .insert(ordered_rows[0].clone(), rows[0].clone(), epoch)
+            .insert(ordered_rows[0].clone(), rows[0].clone())
             .unwrap();
 
         let valid_rows = managed_state
@@ -315,7 +292,6 @@ mod tests {
             &[0, 1],
         );
         let mut managed_state = ManagedTopNState::new(
-            0,
             state_table,
             OrderedRowDeserializer::new(data_types, order_types.clone()),
         );
@@ -336,16 +312,16 @@ mod tests {
 
         let epoch = 1;
         managed_state
-            .insert(ordered_rows[3].clone(), rows[3].clone(), epoch)
+            .insert(ordered_rows[3].clone(), rows[3].clone())
             .unwrap();
         managed_state
-            .insert(ordered_rows[1].clone(), rows[1].clone(), epoch)
+            .insert(ordered_rows[1].clone(), rows[1].clone())
             .unwrap();
         managed_state
-            .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
+            .insert(ordered_rows[2].clone(), rows[2].clone())
             .unwrap();
         managed_state
-            .insert(ordered_rows[4].clone(), rows[4].clone(), epoch)
+            .insert(ordered_rows[4].clone(), rows[4].clone())
             .unwrap();
 
         managed_state
