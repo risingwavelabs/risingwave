@@ -267,19 +267,16 @@ impl Compactor {
         }
         indexes.sort_by(|a, b| VersionedComparator::compare_key(a.as_ref(), b.as_ref()));
 
-        if total_file_size > context.options.sstable_size_mb as u64 {
-            // set the max number of splits task
-            let concurrency =
-                std::cmp::min(indexes.len(), context.options.max_sub_compaction as usize);
-            let step = indexes.len() + concurrency - 1 / concurrency;
-            for (idx, key) in indexes.into_iter().enumerate() {
-                if idx > 0 && idx % step == 0 {
-                    splits.last_mut().unwrap().right = key.clone();
-                    splits.push(KeyRange_vec::new(key, vec![]));
-                }
+        // set the max number of splits task
+        let concurrency = std::cmp::min(indexes.len(), context.options.max_sub_compaction as usize);
+        let step = indexes.len() + concurrency - 1 / concurrency;
+        for (idx, key) in indexes.into_iter().enumerate() {
+            if idx > 0 && idx % step == 0 {
+                splits.last_mut().unwrap().right = key.clone();
+                splits.push(KeyRange_vec::new(key, vec![]));
             }
-            compact_task.splits = splits;
         }
+        compact_task.splits = splits;
 
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
