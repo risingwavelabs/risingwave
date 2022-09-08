@@ -237,12 +237,6 @@ impl Compactor {
             .flat_map(|level| level.table_infos.iter())
             .map(|table_info| table_info.id)
             .collect_vec();
-        // let _total_file_size = compact_task
-        //     .input_ssts
-        //     .iter()
-        //     .flat_map(|level| level.table_infos.iter())
-        //     .map(|table_info| table_info.file_size)
-        //     .sum::<u64>();
         let mut indexes = vec![];
 
         // preload the meta and get the smallest key to split sub_compaction
@@ -266,7 +260,7 @@ impl Compactor {
             );
         }
         indexes.sort_by(|a, b| VersionedComparator::compare_key(a.as_ref(), b.as_ref()));
-
+        // const SPLIT_RANGE_STEP: usize = 8;
         // set the max number of splits task
         let concurrency = std::cmp::min(indexes.len(), context.options.max_sub_compaction as usize);
         let step = indexes.len() + concurrency - 1 / concurrency;
