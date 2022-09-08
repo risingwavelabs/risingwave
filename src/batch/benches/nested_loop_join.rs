@@ -11,12 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+pub mod utils;
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
-use paste::paste;
-use risingwave_batch::bench_join;
-use risingwave_batch::executor::bench_utils::create_input;
+use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::build_from_prost;
@@ -27,7 +24,7 @@ use risingwave_pb::expr::expr_node::Type::{
 };
 use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
-use tokio::runtime::Runtime;
+use utils::{bench_join, create_input};
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
@@ -149,9 +146,14 @@ fn bench_nested_loop_join(c: &mut Criterion) {
         JoinType::RightSemi,
         JoinType::RightAnti,
     ];
-    bench_nested_loop_join_internal(c, with_conds, join_types);
+    bench_join(
+        c,
+        "NestedLoopJoinExecutor",
+        with_conds,
+        join_types,
+        create_nested_loop_join_executor,
+    );
 }
 
-bench_join!("NestedLoopJoin");
 criterion_group!(benches, bench_nested_loop_join);
 criterion_main!(benches);

@@ -11,11 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+pub mod utils;
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::Itertools;
-use risingwave_batch::executor::bench_utils::create_input;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash;
@@ -26,6 +25,7 @@ use risingwave_pb::expr::agg_call::Arg;
 use risingwave_pb::expr::{AggCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
+use utils::{create_input, execute_executor};
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
@@ -105,13 +105,6 @@ fn create_hash_agg_executor(
     ))
 }
 
-async fn execute_hash_agg_executor(executor: BoxedExecutor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
-    }
-}
-
 fn bench_hash_agg(c: &mut Criterion) {
     const SIZE: usize = 1024 * 1024;
     let rt = Runtime::new().unwrap();
@@ -147,7 +140,7 @@ fn bench_hash_agg(c: &mut Criterion) {
                                 chunk_num,
                             )
                         },
-                        |e| execute_hash_agg_executor(e),
+                        |e| execute_executor(e),
                         BatchSize::SmallInput,
                     );
                 },

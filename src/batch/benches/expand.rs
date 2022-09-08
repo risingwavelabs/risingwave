@@ -11,14 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+pub mod utils;
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
-use risingwave_batch::executor::bench_utils::create_input;
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, ExpandExecutor};
 use risingwave_common::types::DataType;
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
+use utils::{create_input, execute_executor};
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
@@ -33,13 +33,6 @@ fn create_expand_executor(
     ExpandExecutor::create(input, column_subsets)
 }
 
-async fn execute_expand_executor(executor: BoxedExecutor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
-    }
-}
-
 fn bench_expand(c: &mut Criterion) {
     const SIZE: usize = 1024 * 1024;
     let rt = Runtime::new().unwrap();
@@ -51,7 +44,7 @@ fn bench_expand(c: &mut Criterion) {
                 let chunk_num = SIZE / chunk_size;
                 b.to_async(&rt).iter_batched(
                     || create_expand_executor(vec![vec![0, 1], vec![2]], chunk_size, chunk_num),
-                    |e| execute_expand_executor(e),
+                    |e| execute_executor(e),
                     BatchSize::SmallInput,
                 );
             },

@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
-use paste::paste;
-use risingwave_batch::bench_join;
+pub mod utils;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::hash_join::HashJoinExecutor;
 use risingwave_batch::executor::test_utils::{gen_projected_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType};
@@ -30,7 +29,7 @@ use risingwave_pb::expr::expr_node::Type::{
 };
 use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
-use tokio::runtime::Runtime;
+use utils::bench_join;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
@@ -184,9 +183,14 @@ fn bench_hash_join(c: &mut Criterion) {
         JoinType::RightSemi,
         JoinType::RightAnti,
     ];
-    bench_hash_join_internal(c, with_conds, join_types);
+    bench_join(
+        c,
+        "HashJoinExecutor",
+        with_conds,
+        join_types,
+        create_hash_join_executor,
+    );
 }
 
-bench_join!("HashJoin");
 criterion_group!(benches, bench_hash_join);
 criterion_main!(benches);

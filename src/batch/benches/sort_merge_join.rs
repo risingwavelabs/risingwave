@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
-use paste::paste;
-use risingwave_batch::bench_join;
+pub mod utils;
+
+use criterion::{criterion_group, criterion_main, Criterion};
+use utils::bench_join;
 use risingwave_batch::executor::test_utils::{gen_sorted_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, SortMergeJoinExecutor};
 use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use tikv_jemallocator::Jemalloc;
-use tokio::runtime::Runtime;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
@@ -62,9 +61,8 @@ fn create_sort_merge_join_executor(
 fn bench_sort_merge_join(c: &mut Criterion) {
     let with_conds = vec![false];
     let join_types = vec![JoinType::Inner];
-    bench_sort_merge_join_internal(c, with_conds, join_types);
+    bench_join(c, "SortMergeJoinExecutor", with_conds, join_types, create_sort_merge_join_executor);
 }
 
-bench_join!("SortMergeJoin");
 criterion_group!(benches, bench_sort_merge_join);
 criterion_main!(benches);

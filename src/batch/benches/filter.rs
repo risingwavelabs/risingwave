@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
-use risingwave_batch::executor::bench_utils::create_input;
+pub mod utils;
+
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use utils::create_input;
+use utils::execute_executor;
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::build_from_prost;
@@ -98,13 +100,6 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
     ))
 }
 
-async fn execute_filter_executor(executor: BoxedExecutor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
-    }
-}
-
 fn bench_filter(c: &mut Criterion) {
     const TOTAL_SIZE: usize = 1024 * 1024usize;
     let rt = Runtime::new().unwrap();
@@ -116,7 +111,7 @@ fn bench_filter(c: &mut Criterion) {
                 let chunk_num = TOTAL_SIZE / chunk_size;
                 b.to_async(&rt).iter_batched(
                     || create_filter_executor(chunk_size, chunk_num),
-                    |e| execute_filter_executor(e),
+                    |e| execute_executor(e),
                     BatchSize::SmallInput,
                 );
             },
