@@ -23,7 +23,7 @@ pub enum RpcError {
     #[error("Transport error: {0}")]
     TransportError(#[from] tonic::transport::Error),
 
-    #[error("gRPC error: {} ({})", .0.message(), .0.code())]
+    #[error("gRPC error ({}): {}", .0.code(), .0.message())]
     GrpcStatus(#[from] tonic::Status),
 
     #[error(transparent)]
