@@ -162,8 +162,8 @@ pub struct StorageConfig {
     pub file_cache: FileCacheConfig,
 
     /// Whether to enable streaming upload for sstable.
-    #[serde(default = "default::enable_sst_streaming_upload")]
-    pub enable_sst_streaming_upload: bool,
+    #[serde(default = "default::min_sst_size_for_streaming_upload")]
+    pub min_sst_size_for_streaming_upload: u64,
 }
 
 impl Default for StorageConfig {
@@ -293,8 +293,9 @@ mod default {
         96 * 1024 * 1024
     }
 
-    pub fn enable_sst_streaming_upload() -> bool {
-        false
+    pub fn min_sst_size_for_streaming_upload() -> u64 {
+        // 32MB
+        32 * 1024 * 1024
     }
 }
 
@@ -317,7 +318,7 @@ pub mod constant {
             }
         }
 
-        pub const TABLE_OPTION_DUMMY_RETAINTION_SECOND: u32 = 0;
-        pub const PROPERTIES_RETAINTION_SECOND_KEY: &str = "retention_seconds";
+        pub const TABLE_OPTION_DUMMY_RETENTION_SECOND: u32 = 0;
+        pub const PROPERTIES_RETENTION_SECOND_KEY: &str = "retention_seconds";
     }
 }

@@ -157,6 +157,13 @@ Now you can run `./risedev d` to start a new dev cluster. The new dev cluster wi
 
 You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config is an example.
 
+### Configure system variables
+
+You can check `src/common/src/config.rs` to see all the configurable variables. 
+If additional variables are needed, 
+include them in the correct sections (such as `[server]` or `[storage]`) in `src/config/risingwave.toml`.
+
+
 ### Start the playground with RiseDev
 
 If you do not need to start a full cluster to develop, you can issue `./risedev p` to start the playground, where the metadata node, compute nodes and frontend nodes are running in the same process. Logs are printed to stdout instead of separate log files.
@@ -277,7 +284,7 @@ If you want to see the coverage report, run this command:
 
 ### Planner tests
 
-RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/test_runner/README.md).
+RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/plan_test/README.md).
 
 ### End-to-end tests
 

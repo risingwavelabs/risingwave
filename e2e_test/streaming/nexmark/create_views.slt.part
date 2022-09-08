@@ -6,11 +6,13 @@ include ./views/q4.slt.part
 include ./views/q5.slt.part
 include ./views/q7.slt.part
 include ./views/q8.slt.part
+include ./views/q9.slt.part
 include ./views/q10.slt.part
 include ./views/q14.slt.part
 include ./views/q15.slt.part
 include ./views/q16.slt.part
 include ./views/q17.slt.part
+include ./views/q18.slt.part
 include ./views/q20.slt.part
 include ./views/q21.slt.part
 include ./views/q22.slt.part

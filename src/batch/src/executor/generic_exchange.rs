@@ -14,6 +14,7 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use prometheus::{IntCounter, Opts};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -167,7 +168,9 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
         let mut stream = select_all(
             self.sources
                 .into_iter()
-                .map(|source| data_chunk_stream(source, self.metrics.clone()))
+                .map(|source| {
+                    data_chunk_stream(source, self.metrics.clone(), self.identity.clone())
+                })
                 .collect_vec(),
         )
         .boxed();
@@ -180,26 +183,57 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 }
 
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
-async fn data_chunk_stream(mut source: ExchangeSourceImpl, metrics: Option<BatchTaskMetrics>) {
+async fn data_chunk_stream(
+    mut source: ExchangeSourceImpl,
+    metrics: Option<BatchTaskMetrics>,
+    identity: String,
+) {
+    // create the collector
+    let source_id = source.get_task_id();
+    let counter = if let Some(ref metrics) = metrics {
+        let mut labels = metrics.task_labels();
+        labels.insert("executor_id".to_string(), identity.clone());
+        labels.insert(
+            "source_query_id".to_string(),
+            source_id.query_id.to_string(),
+        );
+        labels.insert(
+            "source_stage_id".to_string(),
+            source_id.stage_id.to_string(),
+        );
+        labels.insert("source_task_id".to_string(), source_id.task_id.to_string());
+
+        let opts = Opts::new(
+            "batch_exchange_recv_row_number",
+            "Total number of row that have been received from upstream source",
+        )
+        .const_labels(labels);
+        let counter = IntCounter::with_opts(opts).unwrap();
+        metrics.register(Box::new(counter.clone()))?;
+        Some(counter)
+    } else {
+        // no metrics to collect, no counter
+        None
+    };
+
     loop {
         if let Some(res) = source.take_data().await? {
             if res.cardinality() == 0 {
                 debug!("Exchange source {:?} output empty chunk.", source);
             }
-            if let Some(metrics) = metrics.as_ref() {
-                let source_id = source.get_task_id();
-                metrics
-                    .exchange_recv_row_number
-                    .with_label_values(&[
-                        &source_id.stage_id.to_string(),
-                        &source_id.task_id.to_string(),
-                    ])
-                    .inc_by(res.cardinality().try_into().unwrap());
+
+            if let Some(ref counter) = counter {
+                counter.inc_by(res.cardinality().try_into().unwrap());
             }
+
             yield res;
             continue;
         }
         break;
+    }
+
+    if let (Some(counter), Some(metrics)) = (counter, metrics) {
+        metrics.unregister(Box::new(counter));
     }
 }
 

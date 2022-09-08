@@ -37,6 +37,7 @@ use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
+use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::*;
@@ -89,6 +90,7 @@ impl MetaClient {
         let request = SubscribeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
+            worker_id: self.worker_id(),
         };
         self.inner.subscribe(request).await
     }
@@ -437,30 +439,16 @@ impl MetaClient {
         let resp = self.inner.get_cluster_info(request).await?;
         Ok(resp)
     }
+
+    pub async fn reschedule(&self, reschedules: HashMap<u32, ProstReschedule>) -> Result<bool> {
+        let request = RescheduleRequest { reschedules };
+        let resp = self.inner.reschedule(request).await?;
+        Ok(resp.success)
+    }
 }
 
 #[async_trait]
 impl HummockMetaClient for MetaClient {
-    async fn pin_version(
-        &self,
-        last_pinned: HummockVersionId,
-    ) -> Result<pin_version_response::Payload> {
-        let req = PinVersionRequest {
-            context_id: self.worker_id(),
-            last_pinned,
-        };
-        let resp = self.inner.pin_version(req).await?;
-        Ok(resp.payload.unwrap())
-    }
-
-    async fn unpin_version(&self) -> Result<()> {
-        let req = UnpinVersionRequest {
-            context_id: self.worker_id(),
-        };
-        self.inner.unpin_version(req).await?;
-        Ok(())
-    }
-
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
         let req = UnpinVersionBeforeRequest {
             context_id: self.worker_id(),
@@ -468,6 +456,16 @@ impl HummockMetaClient for MetaClient {
         };
         self.inner.unpin_version_before(req).await?;
         Ok(())
+    }
+
+    async fn get_current_version(&self) -> Result<HummockVersion> {
+        let req = GetCurrentVersionRequest::default();
+        Ok(self
+            .inner
+            .get_current_version(req)
+            .await?
+            .current_version
+            .unwrap())
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
@@ -539,6 +537,18 @@ impl HummockMetaClient for MetaClient {
             max_concurrent_task_number,
         };
         self.inner.subscribe_compact_tasks(req).await
+    }
+
+    async fn report_compaction_task_progress(
+        &self,
+        progress: Vec<CompactTaskProgress>,
+    ) -> Result<()> {
+        let req = ReportCompactionTaskProgressRequest {
+            context_id: self.worker_id(),
+            progress,
+        };
+        self.inner.report_compaction_task_progress(req).await?;
+        Ok(())
     }
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
@@ -679,9 +689,8 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
-            ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
-            ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
+            ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
@@ -689,6 +698,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
+            ,{ hummock_client, report_compaction_task_progress, ReportCompactionTaskProgressRequest, ReportCompactionTaskProgressResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
@@ -702,6 +712,7 @@ macro_rules! for_all_meta_rpc {
             ,{ scale_client, pause, PauseRequest, PauseResponse }
             ,{ scale_client, resume, ResumeRequest, ResumeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
+            ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
         }
     };

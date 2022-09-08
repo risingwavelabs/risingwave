@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::{
     SstIdRange,
 };
 use risingwave_pb::hummock::{
-    pin_version_response, CompactTask, CompactionGroup, HummockSnapshot,
+    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -62,28 +62,15 @@ fn mock_err(error: super::error::Error) -> RpcError {
 
 #[async_trait]
 impl HummockMetaClient for MockHummockMetaClient {
-    async fn pin_version(
-        &self,
-        last_pinned: HummockVersionId,
-    ) -> Result<pin_version_response::Payload> {
-        self.hummock_manager
-            .pin_version(self.context_id, last_pinned)
-            .await
-            .map_err(mock_err)
-    }
-
-    async fn unpin_version(&self) -> Result<()> {
-        self.hummock_manager
-            .unpin_version(self.context_id)
-            .await
-            .map_err(mock_err)
-    }
-
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
         self.hummock_manager
             .unpin_version_before(self.context_id, unpin_version_before)
             .await
             .map_err(mock_err)
+    }
+
+    async fn get_current_version(&self) -> Result<HummockVersion> {
+        Ok(self.hummock_manager.get_current_version().await)
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
@@ -151,6 +138,13 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
         _max_concurrent_task_number: u64,
     ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+        unimplemented!()
+    }
+
+    async fn report_compaction_task_progress(
+        &self,
+        _progress: Vec<CompactTaskProgress>,
+    ) -> Result<()> {
         unimplemented!()
     }
 

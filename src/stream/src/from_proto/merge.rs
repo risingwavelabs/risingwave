@@ -52,10 +52,12 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             Ok(ReceiverExecutor::new(
                 schema,
                 params.pk_indices,
-                inputs.into_iter().next().unwrap(),
                 actor_context,
-                x_node.operator_id,
+                params.fragment_id,
                 upstream_fragment_id,
+                inputs.into_iter().next().unwrap(),
+                stream.context.clone(),
+                x_node.operator_id,
                 stream.streaming_metrics.clone(),
             )
             .boxed())

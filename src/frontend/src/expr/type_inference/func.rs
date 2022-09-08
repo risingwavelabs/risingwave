@@ -75,6 +75,17 @@ macro_rules! ensure_arity {
             .into());
         }
     };
+    ($func:literal, | $inputs:ident | == $num:literal) => {
+        if !($inputs.len() == $num) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes {} arguments ({} given)",
+                $func,
+                $num,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
 }
 
 /// Special exprs that cannot be handled by [`infer_type_name`] and [`FuncSigMap`] are handled here.
@@ -130,6 +141,20 @@ fn infer_type_for_special(
                 .try_collect()?;
             Ok(Some(DataType::Varchar))
         }
+        ExprType::IsNotNull => {
+            ensure_arity!("is_not_null", | inputs | == 1);
+            match inputs[0].return_type() {
+                DataType::Struct(_) | DataType::List { .. } => Ok(Some(DataType::Boolean)),
+                _ => Ok(None),
+            }
+        }
+        ExprType::IsNull => {
+            ensure_arity!("is_null", | inputs | == 1);
+            match inputs[0].return_type() {
+                DataType::Struct(_) | DataType::List { .. } => Ok(Some(DataType::Boolean)),
+                _ => Ok(None),
+            }
+        }
         ExprType::RegexpMatch => {
             ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
             if inputs.len() == 3 {
@@ -142,6 +167,72 @@ fn infer_type_for_special(
             Ok(Some(DataType::List {
                 datatype: Box::new(DataType::Varchar),
             }))
+        }
+        ExprType::ArrayCat => {
+            ensure_arity!("array_cat", | inputs | == 2);
+            let left_type = inputs[0].return_type();
+            let right_type = inputs[1].return_type();
+            let return_type = match (&left_type, &right_type) {
+                (
+                    DataType::List {
+                        datatype: left_elem_type,
+                    },
+                    DataType::List {
+                        datatype: right_elem_type,
+                    },
+                ) => {
+                    if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
+                        Some(left_type.clone())
+                    } else if left_type == **right_elem_type {
+                        Some(right_type.clone())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            Ok(Some(return_type.ok_or_else(|| {
+                ErrorCode::BindError(format!(
+                    "Cannot concatenate {} and {}",
+                    left_type, right_type
+                ))
+            })?))
+        }
+        ExprType::ArrayAppend => {
+            ensure_arity!("array_append", | inputs | == 2);
+            let left_type = inputs[0].return_type();
+            let right_type = inputs[1].return_type();
+            let return_type = match (&left_type, &right_type) {
+                (DataType::List { .. }, DataType::List { .. }) => None,
+                (
+                    DataType::List {
+                        datatype: left_elem_type,
+                    },
+                    _, // non-array
+                ) if **left_elem_type == right_type => Some(left_type.clone()),
+                _ => None,
+            };
+            Ok(Some(return_type.ok_or_else(|| {
+                ErrorCode::BindError(format!("Cannot append {} to {}", right_type, left_type))
+            })?))
+        }
+        ExprType::ArrayPrepend => {
+            ensure_arity!("array_prepend", | inputs | == 2);
+            let left_type = inputs[0].return_type();
+            let right_type = inputs[1].return_type();
+            let return_type = match (&left_type, &right_type) {
+                (DataType::List { .. }, DataType::List { .. }) => None,
+                (
+                    _, // non-array
+                    DataType::List {
+                        datatype: right_elem_type,
+                    },
+                ) if left_type == **right_elem_type => Some(right_type.clone()),
+                _ => None,
+            };
+            Ok(Some(return_type.ok_or_else(|| {
+                ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type))
+            })?))
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);

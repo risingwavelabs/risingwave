@@ -94,7 +94,7 @@ pub async fn compute_node_serve(
     let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
-    let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
+    let batch_metrics = Arc::new(BatchMetrics::new());
     let batch_task_metrics_mgr = Arc::new(BatchTaskMetricsManager::new(registry.clone()));
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
@@ -169,6 +169,7 @@ pub async fn compute_node_serve(
                 filter_key_extractor_manager: filter_key_extractor_manager.clone(),
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
+                task_progress: Default::default(),
             });
             // TODO: use normal sstable store for single-process mode.
             let compactor_sstable_store = CompactorSstableStore::new(
@@ -250,6 +251,7 @@ pub async fn compute_node_serve(
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .tcp_nodelay(true)
             .layer(StackTraceMiddlewareLayer::new_optional(
                 opts.enable_async_stack_trace
                     .then_some(grpc_stack_trace_mgr),
