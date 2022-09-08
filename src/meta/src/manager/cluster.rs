@@ -279,7 +279,8 @@ where
                             match worker_type {
                                 WorkerType::Frontend
                                 | WorkerType::ComputeNode
-                                | WorkerType::Compactor => {
+                                | WorkerType::Compactor
+                                | WorkerType::RiseCtl => {
                                     cluster_manager
                                         .env
                                         .notification_manager()
