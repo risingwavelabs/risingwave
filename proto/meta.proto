@@ -155,6 +155,7 @@ service ClusterService {
 message SubscribeRequest {
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
+  uint32 worker_id = 3;
 }
 
 message MetaSnapshot {
@@ -230,9 +231,23 @@ message GetClusterInfoResponse {
   map<uint32, catalog.StreamSourceInfo> stream_source_infos = 4;
 }
 
+message RescheduleRequest {
+  message Reschedule {
+    repeated uint32 added_parallel_units = 1;
+    repeated uint32 removed_parallel_units = 2;
+  }
+  // reschedule plan for each fragment
+  map<uint32, Reschedule> reschedules = 1;
+}
+
+message RescheduleResponse {
+  bool success = 1;
+}
+
 service ScaleService {
   // TODO(Kexiang): delete them when config change interface is finished
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
+  rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
 }

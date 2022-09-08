@@ -1,0 +1,9 @@
+query T
+select 'foobarbequebazilbarfbonk' ~ '(b[^b]+)(b[^b]+)';
+----
+t
+
+query T
+select 'foobarbequebazilbarfbonk' !~ '(b[^b]+)(b[^b]+)';
+----
+f

@@ -48,6 +48,7 @@
 #![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(assert_matches)]
+#![feature(is_sorted)]
 #![feature(btree_drain_filter)]
 
 pub mod hummock;

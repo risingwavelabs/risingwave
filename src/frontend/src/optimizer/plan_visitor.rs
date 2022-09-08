@@ -56,3 +56,30 @@ macro_rules! def_visitor {
 }
 
 for_all_plan_nodes! { def_visitor }
+
+macro_rules! impl_has_variant {
+    ( $($variant:ty),* ) => {
+        paste! {
+            $(
+                pub fn [<has_ $variant:snake>](plan: PlanRef) -> bool {
+                    struct Has {}
+
+                    impl PlanVisitor<bool> for Has {
+                        fn merge(a: bool, b: bool) -> bool {
+                            a | b
+                        }
+
+                        fn [<visit_ $variant:snake>](&mut self, _: &$variant) -> bool {
+                            true
+                        }
+                    }
+
+                    let mut visitor = Has {};
+                    visitor.visit(plan)
+                }
+            )*
+        }
+    };
+}
+
+impl_has_variant! {LogicalApply, LogicalOverAgg, BatchExchange}

@@ -252,17 +252,17 @@ fn parse_simple_select() {
     assert!(!select.distinct);
     assert_eq!(3, select.projection.len());
     let select = verified_query(sql);
-    assert_eq!(Some(Expr::Value(number("5"))), select.limit);
+    assert_eq!(Some("5".to_string()), select.limit);
 }
 
 #[test]
 fn parse_limit_is_not_an_alias() {
     // In dialects supporting LIMIT it shouldn't be parsed as a table alias
     let ast = verified_query("SELECT id FROM customer LIMIT 1");
-    assert_eq!(Some(Expr::Value(number("1"))), ast.limit);
+    assert_eq!(Some("1".to_string()), ast.limit);
 
     let ast = verified_query("SELECT 1 LIMIT 5");
-    assert_eq!(Some(Expr::Value(number("5"))), ast.limit);
+    assert_eq!(Some("5".to_string()), ast.limit);
 }
 
 #[test]
@@ -486,7 +486,7 @@ fn parse_escaped_single_quote_string_predicate() {
 fn parse_number() {
     let expr = verified_expr("1.0");
 
-    assert_eq!(expr, Expr::Value(Value::Number("1.0".into(), false)));
+    assert_eq!(expr, Expr::Value(Value::Number("1.0".into())));
 }
 
 #[test]
@@ -994,7 +994,7 @@ fn parse_select_order_by_limit() {
         ],
         select.order_by
     );
-    assert_eq!(Some(Expr::Value(number("2"))), select.limit);
+    assert_eq!(Some("2".to_string()), select.limit);
 }
 
 #[test]
@@ -1017,7 +1017,7 @@ fn parse_select_order_by_nulls_order() {
         ],
         select.order_by
     );
-    assert_eq!(Some(Expr::Value(number("2"))), select.limit);
+    assert_eq!(Some("2".to_string()), select.limit);
 }
 
 #[test]
@@ -1952,7 +1952,7 @@ fn parse_aggregate_with_filter() {
                 left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier(Ident::new("a"))),
                     op: BinaryOperator::Gt,
-                    right: Box::new(Expr::Value(Value::Number("0".to_string(), false)))
+                    right: Box::new(Expr::Value(Value::Number("0".to_string())))
                 }))),
                 op: BinaryOperator::And,
                 right: Box::new(Expr::Nested(Box::new(Expr::IsNotNull(Box::new(
@@ -3155,19 +3155,16 @@ fn parse_invalid_subquery_without_parens() {
 
 #[test]
 fn parse_offset() {
-    let expect = Some(Offset {
-        value: Expr::Value(number("2")),
-        rows: OffsetRows::Rows,
-    });
-    let ast = verified_query("SELECT foo FROM bar OFFSET 2 ROWS");
+    let expect = Some("2".to_string());
+    let ast = verified_query("SELECT foo FROM bar OFFSET 2");
     assert_eq!(ast.offset, expect);
-    let ast = verified_query("SELECT foo FROM bar WHERE foo = 4 OFFSET 2 ROWS");
+    let ast = verified_query("SELECT foo FROM bar WHERE foo = 4 OFFSET 2");
     assert_eq!(ast.offset, expect);
-    let ast = verified_query("SELECT foo FROM bar ORDER BY baz OFFSET 2 ROWS");
+    let ast = verified_query("SELECT foo FROM bar ORDER BY baz OFFSET 2");
     assert_eq!(ast.offset, expect);
-    let ast = verified_query("SELECT foo FROM bar WHERE foo = 4 ORDER BY baz OFFSET 2 ROWS");
+    let ast = verified_query("SELECT foo FROM bar WHERE foo = 4 ORDER BY baz OFFSET 2");
     assert_eq!(ast.offset, expect);
-    let ast = verified_query("SELECT foo FROM (SELECT * FROM bar OFFSET 2 ROWS) OFFSET 2 ROWS");
+    let ast = verified_query("SELECT foo FROM (SELECT * FROM bar OFFSET 2) OFFSET 2");
     assert_eq!(ast.offset, expect);
     match ast.body {
         SetExpr::Select(s) => match only(s.from).relation {
@@ -3178,38 +3175,20 @@ fn parse_offset() {
         },
         _ => panic!("Test broke"),
     }
-    let ast = verified_query("SELECT 'foo' OFFSET 0 ROWS");
-    assert_eq!(
-        ast.offset,
-        Some(Offset {
-            value: Expr::Value(number("0")),
-            rows: OffsetRows::Rows,
-        })
-    );
-    let ast = verified_query("SELECT 'foo' OFFSET 1 ROW");
-    assert_eq!(
-        ast.offset,
-        Some(Offset {
-            value: Expr::Value(number("1")),
-            rows: OffsetRows::Row,
-        })
-    );
+    let ast = query("SELECT 'foo' OFFSET 0 ROWS", "SELECT 'foo' OFFSET 0");
+    assert_eq!(ast.offset, Some("0".to_string()));
+    let ast = query("SELECT 'foo' OFFSET 1 ROW", "SELECT 'foo' OFFSET 1");
+    assert_eq!(ast.offset, Some("1".to_string()));
     let ast = verified_query("SELECT 'foo' OFFSET 1");
-    assert_eq!(
-        ast.offset,
-        Some(Offset {
-            value: Expr::Value(number("1")),
-            rows: OffsetRows::None,
-        })
-    );
+    assert_eq!(ast.offset, Some("1".to_string()));
 }
 
 #[test]
 fn parse_fetch() {
     let fetch_first_two_rows_only = Some(Fetch {
         with_ties: false,
-        percent: false,
-        quantity: Some(Expr::Value(number("2"))),
+
+        quantity: Some("2".to_string()),
     });
     let ast = verified_query("SELECT foo FROM bar FETCH FIRST 2 ROWS ONLY");
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
@@ -3220,7 +3199,6 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: false,
-            percent: false,
             quantity: None,
         })
     );
@@ -3235,29 +3213,13 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: true,
-            percent: false,
-            quantity: Some(Expr::Value(number("2"))),
-        })
-    );
-    let ast = verified_query("SELECT foo FROM bar FETCH FIRST 50 PERCENT ROWS ONLY");
-    assert_eq!(
-        ast.fetch,
-        Some(Fetch {
-            with_ties: false,
-            percent: true,
-            quantity: Some(Expr::Value(number("50"))),
+            quantity: Some("2".to_string()),
         })
     );
     let ast = verified_query(
-        "SELECT foo FROM bar WHERE foo = 4 ORDER BY baz OFFSET 2 ROWS FETCH FIRST 2 ROWS ONLY",
+        "SELECT foo FROM bar WHERE foo = 4 ORDER BY baz OFFSET 2 FETCH FIRST 2 ROWS ONLY",
     );
-    assert_eq!(
-        ast.offset,
-        Some(Offset {
-            value: Expr::Value(number("2")),
-            rows: OffsetRows::Rows,
-        })
-    );
+    assert_eq!(ast.offset, Some("2".to_string()));
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
     let ast = verified_query(
         "SELECT foo FROM (SELECT * FROM bar FETCH FIRST 2 ROWS ONLY) FETCH FIRST 2 ROWS ONLY",
@@ -3272,25 +3234,13 @@ fn parse_fetch() {
         },
         _ => panic!("Test broke"),
     }
-    let ast = verified_query("SELECT foo FROM (SELECT * FROM bar OFFSET 2 ROWS FETCH FIRST 2 ROWS ONLY) OFFSET 2 ROWS FETCH FIRST 2 ROWS ONLY");
-    assert_eq!(
-        ast.offset,
-        Some(Offset {
-            value: Expr::Value(number("2")),
-            rows: OffsetRows::Rows,
-        })
-    );
+    let ast = verified_query("SELECT foo FROM (SELECT * FROM bar OFFSET 2 FETCH FIRST 2 ROWS ONLY) OFFSET 2 FETCH FIRST 2 ROWS ONLY");
+    assert_eq!(ast.offset, Some("2".to_string()));
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
     match ast.body {
         SetExpr::Select(s) => match only(s.from).relation {
             TableFactor::Derived { subquery, .. } => {
-                assert_eq!(
-                    subquery.offset,
-                    Some(Offset {
-                        value: Expr::Value(number("2")),
-                        rows: OffsetRows::Rows,
-                    })
-                );
+                assert_eq!(subquery.offset, Some("2".to_string()));
                 assert_eq!(subquery.fetch, fetch_first_two_rows_only);
             }
             _ => panic!("Test broke"),
@@ -3310,12 +3260,12 @@ fn parse_fetch_variations() {
         "SELECT foo FROM bar FETCH FIRST 10 ROWS ONLY",
     );
     one_statement_parses_to(
-        "SELECT foo FROM bar FETCH NEXT 10 ROWS WITH TIES",
-        "SELECT foo FROM bar FETCH FIRST 10 ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH NEXT 10 ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH FIRST 10 ROWS WITH TIES",
     );
     one_statement_parses_to(
-        "SELECT foo FROM bar FETCH NEXT ROWS WITH TIES",
-        "SELECT foo FROM bar FETCH FIRST ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH NEXT ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH FIRST ROWS WITH TIES",
     );
     one_statement_parses_to(
         "SELECT foo FROM bar FETCH FIRST ROWS ONLY",

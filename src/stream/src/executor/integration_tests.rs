@@ -27,7 +27,6 @@ use super::*;
 use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::dispatch::*;
-use crate::executor::exchange::input::LocalInput;
 use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
@@ -45,19 +44,10 @@ async fn test_merger_sum_aggr() {
 
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
-        let schema = Schema {
+        let _schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let metrics = Arc::new(StreamingMetrics::unused());
-        let input = ReceiverExecutor::new(
-            schema,
-            vec![],
-            LocalInput::for_test(input_rx),
-            actor_ctx.clone(),
-            0,
-            0,
-            metrics,
-        );
+        let input = ReceiverExecutor::for_test(input_rx);
         let append_only = false;
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
@@ -122,18 +112,10 @@ async fn test_merger_sum_aggr() {
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (input, rx) = channel(16);
-    let schema = Schema {
+    let _schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
-    let receiver_op = Box::new(ReceiverExecutor::new(
-        schema.clone(),
-        vec![],
-        LocalInput::for_test(rx),
-        actor_ctx.clone(),
-        0,
-        0,
-        Arc::new(StreamingMetrics::unused()),
-    ));
+    let receiver_op = Box::new(ReceiverExecutor::for_test(rx));
     let dispatcher = DispatchExecutor::new(
         receiver_op,
         vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
