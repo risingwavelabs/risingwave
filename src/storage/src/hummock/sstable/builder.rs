@@ -322,7 +322,6 @@ pub(super) mod tests {
             restart_interval: 16,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: 0,
         };
 
         let b = SstableBuilder::new_for_test(0, mock_sst_writer(&opt), opt);
@@ -364,7 +363,6 @@ pub(super) mod tests {
             restart_interval: 16,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: 0,
         };
 
         // build remote table

@@ -81,7 +81,6 @@ fn build_table(
         restart_interval: 16,
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
-        estimate_bloom_filter_capacity: 1024 * 1024,
     };
     let writer = sstable_store.create_sst_writer(
         sstable_id,
@@ -163,7 +162,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         restart_interval: 16,
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
-        estimate_bloom_filter_capacity: 1024 * 1024,
     };
     let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
         32,
