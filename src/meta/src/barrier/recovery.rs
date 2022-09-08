@@ -321,6 +321,15 @@ where
         prev_epoch: &Epoch,
         new_epoch: &Epoch,
     ) -> MetaResult<()> {
+        let all_actors = &self
+            .fragment_manager
+            .load_all_actors(|_, _, _| true)
+            .await
+            .actor_maps
+            .values()
+            .map(|actor_ids| actor_ids.clone().into_iter())
+            .flatten()
+            .collect_vec();
         let futures = info.node_map.iter().map(|(_, worker_node)| async move {
             let client = self.env.stream_client_pool().get(worker_node).await?;
             debug!("force stop actors: {}", worker_node.id);
@@ -331,6 +340,7 @@ where
                         curr: new_epoch.0,
                         prev: prev_epoch.0,
                     }),
+                    actor_ids: all_actors.clone(),
                 })
                 .await
         });
