@@ -15,6 +15,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
+
 mod cmd_impl;
 pub(crate) mod common;
 
@@ -113,6 +114,29 @@ enum MetaCommands {
     Resume,
     /// get cluster info
     ClusterInfo,
+    /// Reschedule the parallel unit in the stream graph
+    ///
+    /// The format is `fragment_id-[removed]+[added]`
+    /// You can provide either `removed` only or `added` only, but `removed` should be preceded by
+    /// `added` when both are provided.
+    ///
+    /// For example, for plan `100-[1,2,3]+[4,5]` the follow request will be generated:
+    /// {
+    ///     100: Reschedule {
+    ///         added_parallel_units: [4,5],
+    ///         removed_parallel_units: [1,2,3],
+    ///     }
+    /// }
+    /// Use ; to separate multiple fragment
+    #[clap(verbatim_doc_comment)]
+    Reschedule {
+        /// Plan of reschedule
+        #[clap(long)]
+        plan: String,
+        /// Show the plan only, no actual operation
+        #[clap(long)]
+        dry_run: bool,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -144,6 +168,9 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause().await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
+        Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
+            cmd_impl::meta::reschedule(plan, dry_run).await?
+        }
         Commands::Trace => cmd_impl::trace::trace().await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(sleep).await?,
     }

@@ -395,7 +395,7 @@ impl ClusterManagerCore {
             .ok_or_else(|| anyhow::anyhow!("Worker node does not exist!").into())
     }
 
-    fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
+    pub fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
         self.workers.get(&WorkerKey(host_address)).cloned()
     }
 

@@ -100,7 +100,7 @@ pub struct HummockStorage {
 
 impl HummockStorage {
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
-    pub async fn for_test(
+    pub fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -116,11 +116,10 @@ impl HummockStorage {
             )),
             filter_key_extractor_manager,
         )
-        .await
     }
 
     /// Creates a [`HummockStorage`].
-    pub async fn new(
+    pub fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -144,11 +143,10 @@ impl HummockStorage {
             write_conflict_detector,
             sstable_id_manager.clone(),
             filter_key_extractor_manager,
-        )
-        .await;
+        );
 
         let instance = Self {
-            options: options.clone(),
+            options,
             local_version_manager,
             hummock_meta_client,
             sstable_store,
