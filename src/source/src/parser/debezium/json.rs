@@ -15,17 +15,13 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
-use itertools::Itertools;
-use risingwave_common::array::Op;
-use risingwave_common::array::Op::{UpdateDelete, UpdateInsert};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::Datum;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::parser::common::json_parse_value;
-use crate::{Event, SourceColumnDesc, SourceParser};
+use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 const DEBEZIUM_READ_OP: &str = "r";
 const DEBEZIUM_CREATE_OP: &str = "c";
@@ -49,28 +45,10 @@ pub struct Payload {
 }
 
 #[derive(Debug)]
-pub struct DebeziumJsonParser {}
-
-impl DebeziumJsonParser {
-    fn value_to_datums(
-        columns: &[SourceColumnDesc],
-        map: &BTreeMap<String, Value>,
-    ) -> Result<Vec<Datum>> {
-        columns
-            .iter()
-            .map(|column| {
-                if column.skip_parse {
-                    Ok(None)
-                } else {
-                    json_parse_value(&column.into(), map.get(&column.name)).map_err(|e| e.into())
-                }
-            })
-            .collect::<Result<Vec<Datum>>>()
-    }
-}
+pub struct DebeziumJsonParser;
 
 impl SourceParser for DebeziumJsonParser {
-    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         let event: DebeziumEvent = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
@@ -90,60 +68,35 @@ impl SourceParser for DebeziumJsonParser {
                     ))
                 })?;
 
-                let mut filtered_before = BTreeMap::new();
-                let mut filtered_after = BTreeMap::new();
+                writer.update(|column| {
+                    let before = json_parse_value(&column.into(), before.get(&column.name))?;
+                    let after = json_parse_value(&column.into(), after.get(&column.name))?;
 
-                for col in columns {
-                    if let Some(value) = before.remove(col.name.as_str()) {
-                        filtered_before.insert(col.name.clone(), value);
-                    }
-
-                    if let Some(value) = after.remove(col.name.as_str()) {
-                        filtered_after.insert(col.name.clone(), value);
-                    }
-                }
-
-                if filtered_before
-                    .iter()
-                    .zip_eq(&filtered_after)
-                    .all(|((_, v1), (_, v2))| v1.eq(v2))
-                {
-                    return Ok(Event {
-                        ops: vec![],
-                        rows: vec![],
-                    });
-                }
-
-                Ok(Event {
-                    ops: vec![UpdateDelete, UpdateInsert],
-                    rows: vec![
-                        Self::value_to_datums(columns, &filtered_before)?,
-                        Self::value_to_datums(columns, &filtered_after)?,
-                    ],
+                    Ok((before, after))
                 })
             }
-            DEBEZIUM_CREATE_OP | DEBEZIUM_READ_OP => Ok(Event {
-                ops: vec![Op::Insert],
-                rows: vec![Self::value_to_datums(
-                    columns,
-                    payload.after.as_ref().ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "after is missing for creating event".to_string(),
-                        ))
-                    })?,
-                )?],
-            }),
-            DEBEZIUM_DELETE_OP => Ok(Event {
-                ops: vec![Op::Delete],
-                rows: vec![Self::value_to_datums(
-                    columns,
-                    payload.before.as_ref().ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "before is missing for deleting event".to_string(),
-                        ))
-                    })?,
-                )?],
-            }),
+            DEBEZIUM_CREATE_OP | DEBEZIUM_READ_OP => {
+                let after = payload.after.as_ref().ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                        "after is missing for creating event".to_string(),
+                    ))
+                })?;
+
+                writer.insert(|column| {
+                    json_parse_value(&column.into(), after.get(&column.name)).map_err(Into::into)
+                })
+            }
+            DEBEZIUM_DELETE_OP => {
+                let before = payload.before.as_ref().ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                        "before is missing for delete event".to_string(),
+                    ))
+                })?;
+
+                writer.delete(|column| {
+                    json_parse_value(&column.into(), before.get(&column.name)).map_err(Into::into)
+                })
+            }
             _ => Err(RwError::from(ProtocolError(format!(
                 "unknown debezium op: {}",
                 payload.op

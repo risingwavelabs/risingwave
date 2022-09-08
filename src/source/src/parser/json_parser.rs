@@ -12,43 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::Datum;
 use serde_json::Value;
 
 use crate::parser::common::json_parse_value;
-use crate::{Event, SourceColumnDesc, SourceParser};
+use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
 #[derive(Debug)]
 pub struct JSONParser;
 
 impl SourceParser for JSONParser {
-    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         let value: Value = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        Ok(Event {
-            ops: vec![Op::Insert],
-            rows: vec![columns
-                .iter()
-                .map(|column| {
-                    if column.skip_parse {
-                        Ok(None)
-                    } else {
-                        json_parse_value(&column.into(), value.get(&column.name)).map_err(|e| {
-                            tracing::error!(
-                                "failed to process value ({}): {}",
-                                String::from_utf8_lossy(payload),
-                                e
-                            );
-                            e.into()
-                        })
-                    }
-                })
-                .collect::<Result<Vec<Datum>>>()?],
+        writer.insert(|desc| {
+            json_parse_value(&desc.into(), value.get(&desc.name)).map_err(|e| {
+                tracing::error!(
+                    "failed to process value ({}): {}",
+                    String::from_utf8_lossy(payload),
+                    e
+                );
+                e.into()
+            })
         })
     }
 }

@@ -22,17 +22,16 @@ use apache_avro::{Reader, Schema};
 use chrono::{Datelike, NaiveDate};
 use itertools::Itertools;
 use num_traits::FromPrimitive;
-use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
+    DataType, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
 };
 use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
-use crate::{Event, SourceColumnDesc, SourceParser};
+use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
@@ -261,38 +260,22 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
 }
 
 impl SourceParser for AvroParser {
-    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
-        let reader_rs = Reader::with_schema(&self.schema, payload);
-        if let Ok(reader) = reader_rs {
-            let mut rows = Vec::new();
-            for record in reader {
-                if let Ok(Value::Record(fields)) = record {
-                    let vals = columns
-                        .iter()
-                        .map(|column| {
-                            if column.skip_parse {
-                                None
-                            } else {
-                                let tuple =
-                                    fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
-                                from_avro_value(column, tuple.clone().1).ok()
-                            }
-                        })
-                        .collect::<Vec<Datum>>();
-                    rows.push(vals);
-                } else {
-                    return Err(RwError::from(ProtocolError(
-                        record.err().unwrap().to_string(),
-                    )));
-                }
-            }
-            Ok(Event {
-                ops: vec![Op::Insert],
-                rows,
-            })
-        } else {
-            let init_reader_err = reader_rs.err().unwrap();
-            Err(RwError::from(ProtocolError(init_reader_err.to_string())))
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter) -> Result<WriteGuard> {
+        match Reader::with_schema(&self.schema, payload) {
+            Ok(mut reader) => match reader.next() {
+                Some(Ok(Value::Record(fields))) => writer.insert(|column| {
+                    let tuple = fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
+                    Ok(from_avro_value(column, tuple.clone().1).ok())
+                }),
+                Some(Ok(_)) => Err(RwError::from(ProtocolError(
+                    "avro parse unexpected value".to_string(),
+                ))),
+                Some(Err(e)) => Err(RwError::from(ProtocolError(e.to_string()))),
+                None => Err(RwError::from(ProtocolError(
+                    "avro parse unexpected eof".to_string(),
+                ))),
+            },
+            Err(e) => Err(RwError::from(ProtocolError(e.to_string()))),
         }
     }
 }
