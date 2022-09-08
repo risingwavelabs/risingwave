@@ -13,6 +13,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 parking_lot = "0.12"
 regex = "1.6.0"
 risingwave_common = { path = "../common" }
+risingwave_common_service = { path = "../common/common_service" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }

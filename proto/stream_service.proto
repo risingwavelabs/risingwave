@@ -54,6 +54,7 @@ message DropActorsResponse {
 message ForceStopActorsRequest {
   string request_id = 1;
   data.Epoch epoch = 2;
+  repeated uint32 actor_ids = 3;
 }
 
 message ForceStopActorsResponse {

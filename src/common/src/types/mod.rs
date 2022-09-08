@@ -52,6 +52,7 @@ pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 use postgres_types::{ToSql, Type};
+use strum_macros::EnumDiscriminants;
 
 use self::struct_type::StructType;
 use crate::array::{
@@ -73,7 +74,12 @@ pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
+/// but without data fields.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EnumDiscriminants)]
+#[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
+#[strum_discriminants(name(DataTypeName))]
+#[strum_discriminants(vis(pub))]
 pub enum DataType {
     Boolean,
     Int16,
@@ -90,6 +96,56 @@ pub enum DataType {
     Interval,
     Struct(Arc<StructType>),
     List { datatype: Box<DataType> },
+}
+
+impl DataTypeName {
+    pub fn is_scalar(&self) -> bool {
+        match self {
+            DataTypeName::Boolean
+            | DataTypeName::Int16
+            | DataTypeName::Int32
+            | DataTypeName::Int64
+            | DataTypeName::Decimal
+            | DataTypeName::Float32
+            | DataTypeName::Float64
+            | DataTypeName::Varchar
+            | DataTypeName::Date
+            | DataTypeName::Timestamp
+            | DataTypeName::Timestampz
+            | DataTypeName::Time
+            | DataTypeName::Interval => true,
+
+            DataTypeName::Struct | DataTypeName::List => false,
+        }
+    }
+
+    pub fn to_type(&self) -> Option<DataType> {
+        let t = match self {
+            DataTypeName::Boolean => DataType::Boolean,
+            DataTypeName::Int16 => DataType::Int16,
+            DataTypeName::Int32 => DataType::Int32,
+            DataTypeName::Int64 => DataType::Int64,
+            DataTypeName::Decimal => DataType::Decimal,
+            DataTypeName::Float32 => DataType::Float32,
+            DataTypeName::Float64 => DataType::Float64,
+            DataTypeName::Varchar => DataType::Varchar,
+            DataTypeName::Date => DataType::Date,
+            DataTypeName::Timestamp => DataType::Timestamp,
+            DataTypeName::Timestampz => DataType::Timestampz,
+            DataTypeName::Time => DataType::Time,
+            DataTypeName::Interval => DataType::Interval,
+            DataTypeName::Struct | DataTypeName::List => {
+                return None;
+            }
+        };
+        Some(t)
+    }
+}
+
+impl From<DataTypeName> for DataType {
+    fn from(type_name: DataTypeName) -> Self {
+        type_name.to_type().unwrap_or_else(|| panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`."))
+    }
 }
 
 pub fn unnested_list_type(datatype: DataType) -> DataType {
