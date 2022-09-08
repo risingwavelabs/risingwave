@@ -4489,6 +4489,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "regex",
  "risingwave_common",
+ "risingwave_common_service",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_object_store",

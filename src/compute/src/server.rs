@@ -145,6 +145,14 @@ pub async fn compute_node_serve(
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
+        assert!(
+            storage
+                .local_version_manager()
+                .get_pinned_version()
+                .is_valid(),
+            "local version should have been initialized by observer_manager"
+        );
+
         extra_info_sources.push(storage.sstable_id_manager());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.

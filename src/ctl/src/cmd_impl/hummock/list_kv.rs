@@ -22,7 +22,13 @@ use crate::common::HummockServiceOpts;
 
 pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
     let mut hummock_opts = HummockServiceOpts::from_env()?;
-    let (_, hummock) = hummock_opts.create_hummock_store().await?;
+    let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
+    let observer_manager = hummock_opts
+        .create_observer_manager(meta_client, hummock.clone())
+        .await?;
+    // This line ensures local version is valid.
+    observer_manager.start().await?;
+
     if epoch == u64::MAX {
         tracing::info!("using u64::MAX as epoch");
     }
