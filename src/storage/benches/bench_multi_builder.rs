@@ -43,7 +43,6 @@ fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {
         restart_interval: 16,
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
-        estimate_bloom_filter_capacity: 1024 * 1024,
     }
 }
 

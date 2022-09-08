@@ -41,7 +41,6 @@ pub trait TableBuilderFactory {
 pub struct SplitTableOutput {
     pub sst_info: SstableInfo,
     pub upload_join_handle: UploadJoinHandle,
-    pub bloom_filter_size: usize,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -159,35 +158,16 @@ where
             if let Some(tracker) = &self.task_progress_tracker {
                 tracker.inc_ssts_sealed();
             }
-            let meta = builder_output.meta;
 
-            let bloom_filter_size = meta.bloom_filter.len();
-
-            if bloom_filter_size != 0 {
+            if builder_output.bloom_filter_size != 0 {
                 self.stats
                     .sstable_bloom_filter_size
-                    .observe(bloom_filter_size as _);
+                    .observe(builder_output.bloom_filter_size as _);
             }
-
-            self.stats
-                .sstable_meta_size
-                .observe(meta.encoded_size() as _);
-
-            let sst_info = SstableInfo {
-                id: builder_output.sstable_id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: meta.smallest_key.clone(),
-                    right: meta.largest_key.clone(),
-                    inf: false,
-                }),
-                file_size: meta.estimated_size as u64,
-                table_ids: builder_output.table_ids,
-            };
 
             self.sst_outputs.push(SplitTableOutput {
                 upload_join_handle: builder_output.writer_output,
-                bloom_filter_size,
-                sst_info,
+                sst_info: builder_output.sst_info,
             });
         }
         Ok(())
@@ -265,7 +245,6 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: 0,
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
@@ -283,7 +262,6 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
-            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let mut builder = CapacitySplitTableBuilder::new_for_test(builder_factory);

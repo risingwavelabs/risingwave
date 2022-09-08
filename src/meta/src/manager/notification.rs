@@ -151,7 +151,8 @@ impl NotificationManager {
             WorkerType::Frontend => core_guard.compute_senders.remove(&worker_key),
             WorkerType::ComputeNode => core_guard.frontend_senders.remove(&worker_key),
             WorkerType::Compactor => core_guard.compactor_senders.remove(&worker_key),
-            _ => None,
+            WorkerType::RiseCtl => core_guard.risectl_senders.remove(&worker_key),
+            _ => unreachable!(),
         };
     }
 
@@ -167,6 +168,7 @@ impl NotificationManager {
             WorkerType::Frontend => &mut core_guard.frontend_senders,
             WorkerType::ComputeNode => &mut core_guard.compute_senders,
             WorkerType::Compactor => &mut core_guard.compactor_senders,
+            WorkerType::RiseCtl => &mut core_guard.risectl_senders,
             _ => unreachable!(),
         };
 
@@ -197,6 +199,8 @@ struct NotificationManagerCore {
     compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to compactor nodes.
     compactor_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    /// The notification sender to risectl nodes.
+    risectl_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
 
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
@@ -211,6 +215,7 @@ impl NotificationManagerCore {
             frontend_senders: HashMap::new(),
             compute_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
+            risectl_senders: HashMap::new(),
             local_senders: vec![],
             /// FIXME: see issue #5145, may cause frontend to wait. Refactor after decouple ckpt.
             current_version: 0,
@@ -222,6 +227,7 @@ impl NotificationManagerCore {
             WorkerType::Frontend => &mut self.frontend_senders,
             WorkerType::ComputeNode => &mut self.compute_senders,
             WorkerType::Compactor => &mut self.compactor_senders,
+            WorkerType::RiseCtl => &mut self.risectl_senders,
             _ => unreachable!(),
         };
 
@@ -249,5 +255,6 @@ impl NotificationManagerCore {
         self.notify(WorkerType::Frontend, operation, info);
         self.notify(WorkerType::ComputeNode, operation, info);
         self.notify(WorkerType::Compactor, operation, info);
+        self.notify(WorkerType::RiseCtl, operation, info);
     }
 }
