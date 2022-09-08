@@ -54,7 +54,6 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             order_pairs,
             (node.offset as usize, node.limit as usize),
             params.pk_indices,
-            0,
             params.executor_id,
             key_indices,
             group_by,

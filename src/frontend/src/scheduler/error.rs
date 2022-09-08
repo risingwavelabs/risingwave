@@ -49,3 +49,9 @@ impl From<SchedulerError> for RwError {
         ErrorCode::SchedulerError(Box::new(s)).into()
     }
 }
+
+impl From<RwError> for SchedulerError {
+    fn from(e: RwError) -> Self {
+        Self::Internal(e.into())
+    }
+}

@@ -24,7 +24,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, summarize_level_deltas, HummockLevelsExt, HummockVersionExt,
     LevelDeltasSummary,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo, INVALID_VERSION_ID,
+};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -565,6 +567,10 @@ impl PinnedVersion {
 
     pub fn id(&self) -> HummockVersionId {
         self.version.id
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.version.id != INVALID_VERSION_ID
     }
 
     pub fn levels(&self, compaction_group_id: Option<CompactionGroupId>) -> Vec<&Level> {

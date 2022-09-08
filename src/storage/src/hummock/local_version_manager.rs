@@ -172,6 +172,7 @@ impl LocalVersionManager {
             tokio::sync::mpsc::unbounded_channel();
         let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
 
+        // This version cannot be used in query. It must be replaced by valid version.
         let pinned_version = HummockVersion {
             id: INVALID_VERSION_ID,
             ..Default::default()
@@ -249,16 +250,9 @@ impl LocalVersionManager {
     /// being referenced by some readers.
     pub fn try_update_pinned_version(
         &self,
-        last_pinned: Option<u64>,
         pin_resp_payload: pin_version_response::Payload,
     ) -> bool {
         let old_version = self.local_version.read();
-        if let Some(last_pinned_id) = last_pinned {
-            if old_version.pinned_version().id() != last_pinned_id {
-                return false;
-            }
-        }
-
         let new_version_id = match &pin_resp_payload {
             Payload::VersionDeltas(version_deltas) => match version_deltas.delta.last() {
                 Some(version_delta) => version_delta.id,
