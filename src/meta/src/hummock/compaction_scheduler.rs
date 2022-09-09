@@ -223,7 +223,7 @@ where
                 .compactor_manager
                 .assign_compact_task(compactor.context_id(), &compact_task)
             {
-                tracing::warn!("Failed to upadte compaction schedule policy: {:#?}", err);
+                tracing::warn!("Failed to update compaction schedule policy: {:#?}", err);
                 if let Error::InvalidContext(_) = err {
                     self.compactor_manager
                         .remove_compactor(compactor.context_id());

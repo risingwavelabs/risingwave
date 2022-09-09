@@ -1499,7 +1499,7 @@ where
             .assign_compact_task(compactor.context_id(), &compact_task)
         {
             is_failed = true;
-            tracing::warn!("Failed to upadte compaction schedule policy: {:#?}", e);
+            tracing::warn!("Failed to update compaction schedule policy: {:#?}", e);
         }
 
         if !is_failed {
