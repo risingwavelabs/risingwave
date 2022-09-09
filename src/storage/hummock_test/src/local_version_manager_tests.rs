@@ -188,12 +188,19 @@ async fn test_update_pinned_version() {
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
+
+    let result = local_version_manager
+        .sync_shared_buffer(epochs[2])
+        .await
+        .unwrap();
+    assert!(result.sync_succeed);
     // Update version for epochs[2]
     let version = HummockVersion {
         id: initial_version_id + 3,
         max_committed_epoch: epochs[2],
         ..Default::default()
     };
+
     local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());

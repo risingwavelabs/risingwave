@@ -245,7 +245,7 @@ impl LocalVersion {
             assert!(self
                 .shared_buffer
                 .iter()
-                .all(|(epoch, _)| *epoch >= new_pinned_version.max_committed_epoch));
+                .all(|(epoch, _)| *epoch > new_pinned_version.max_committed_epoch));
         }
 
         self.version_ids_in_use.insert(new_pinned_version.id);
