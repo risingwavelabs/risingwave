@@ -1,70 +1,29 @@
-# file: src/expr/src/expr/expr_array_concat.rs
+# DO NOT MODIFY THIS FILE
+# This SLT file is generated from `src/expr/src/expr/expr_array_concat.rs`.
+
+# ==== `expr_array_concat` @ L15 ====
 
 statement ok
 create table t (a int);
 
-query T
-select array_prepend(123, array[66]);
-----
-{123,66}
+# ==== `concat_array` @ L112 ====
 
 query T
-select array_prepend(null::int, array[66]);
-----
-{NULL,66}
-
-query T
-select array_prepend(233, null::int[]);
-----
-{233}
-
-query T
-select array_prepend(null::int, null::int[]);
-----
-{NULL}
-
-query T
-select array_cat(array[233], array[array[66]]);
-----
-{{233},{66}}
-
-# ignore NULL, same as PG
-query T
-select array_cat(null::int[], array[array[66]]);
-----
-{{66}}
-
-# different from PG
-query T
-select array_cat(array[233], null::int[][]);
-----
-{{233}}
-
-# same as PG
-query T
-select array_cat(null::int[], null::int[][]);
-----
-NULL
-
-query T
-select array_cat(array[66], 123);
+select array_cat(array[66], array[123]);
 ----
 {66,123}
 
 query T
-select array_cat(array[66], null::int);
+select array_cat(array[66], null::int[]);
 ----
-{66,NULL}
+{66}
 
 query T
-select array_cat(null::int[], 233);
+select array_cat(null::int[], array[123]);
 ----
-{233}
+{123}
 
-query T
-select array_cat(null::int[], null::int);
-----
-{NULL}
+# ==== `append_array` @ L161 ====
 
 query T
 select array_cat(array[array[66]], array[233]);
@@ -89,20 +48,76 @@ select array_cat(null::int[][], null::int[]);
 ----
 NULL
 
+# ==== `append_value` @ L209 ====
+
 query T
-select array_cat(array[66], array[123]);
+select array_cat(array[66], 123);
 ----
 {66,123}
 
 query T
-select array_cat(array[66], null::int[]);
+select array_cat(array[66], null::int);
 ----
-{66}
+{66,NULL}
 
 query T
-select array_cat(null::int[], array[123]);
+select array_cat(null::int[], 233);
 ----
-{123}
+{233}
+
+query T
+select array_cat(null::int[], null::int);
+----
+{NULL}
+
+# ==== `prepend_array` @ L258 ====
+
+query T
+select array_cat(array[233], array[array[66]]);
+----
+{{233},{66}}
+
+# ignore NULL, same as PG
+query T
+select array_cat(null::int[], array[array[66]]);
+----
+{{66}}
+
+# different from PG
+query T
+select array_cat(array[233], null::int[][]);
+----
+{{233}}
+
+# same as PG
+query T
+select array_cat(null::int[], null::int[][]);
+----
+NULL
+
+# ==== `prepend_value` @ L305 ====
+
+query T
+select array_prepend(123, array[66]);
+----
+{123,66}
+
+query T
+select array_prepend(null::int, array[66]);
+----
+{NULL,66}
+
+query T
+select array_prepend(233, null::int[]);
+----
+{233}
+
+query T
+select array_prepend(null::int, null::int[]);
+----
+{NULL}
+
+# ==== `expr_array_concat` @ L15 ====
 
 statement ok
 drop table t;

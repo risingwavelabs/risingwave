@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
@@ -19,59 +20,69 @@ pub struct RiseDevDocSltOpts {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum DocSltBlockType {
+enum SltBlockType {
     Setup,
     General,
     Teardown,
 }
 
-struct DocSltBlock {
-    typ: DocSltBlockType,
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct FilePosition {
+    filepath: PathBuf,
+    line_no: usize,
+    item_name: String,
+}
+
+struct SltBlock {
+    position: Arc<FilePosition>,
+    typ: SltBlockType,
     content: String,
 }
 
-fn extract_docslt_blocks(markdown: &str) -> Vec<DocSltBlock> {
+fn extract_slt_blocks(markdown: &str, position: FilePosition) -> Vec<SltBlock> {
+    let position = Arc::new(position);
     let parser = pulldown_cmark::Parser::new(markdown);
-    let mut docslt_blocks = Vec::new();
-    let mut curr_docslt_typ = None;
-    let mut curr_docslt = String::new();
+    let mut slt_blocks = Vec::new();
+    let mut curr_typ = None;
+    let mut curr_content = String::new();
     for event in parser {
         match event {
             pulldown_cmark::Event::Start(pulldown_cmark::Tag::CodeBlock(
                 pulldown_cmark::CodeBlockKind::Fenced(lang),
             )) => {
-                curr_docslt_typ = Some(match &*lang {
-                    "slt" => DocSltBlockType::General,
-                    "slt-setup" => DocSltBlockType::Setup,
-                    "slt-teardown" => DocSltBlockType::Teardown,
+                curr_typ = Some(match &*lang {
+                    "slt" => SltBlockType::General,
+                    "slt-setup" => SltBlockType::Setup,
+                    "slt-teardown" => SltBlockType::Teardown,
                     _ => continue,
                 });
-                curr_docslt.clear();
+                curr_content.clear();
             }
             pulldown_cmark::Event::Text(text) => {
-                if curr_docslt_typ.is_some() {
-                    curr_docslt.push_str(&text);
-                    curr_docslt.push('\n');
+                if curr_typ.is_some() {
+                    curr_content.push_str(&text);
+                    curr_content.push('\n');
                 }
             }
             pulldown_cmark::Event::End(pulldown_cmark::Tag::CodeBlock(
                 pulldown_cmark::CodeBlockKind::Fenced(_),
             )) => {
-                if let Some(typ) = curr_docslt_typ.take() {
-                    docslt_blocks.push(DocSltBlock {
+                if let Some(typ) = curr_typ.take() {
+                    slt_blocks.push(SltBlock {
+                        position: position.clone(),
                         typ,
-                        content: curr_docslt.trim().to_string(),
+                        content: curr_content.trim().to_string(),
                     });
                 }
             }
             _ => {}
         }
     }
-    docslt_blocks
+    slt_blocks
 }
 
-fn generate_slt_for_package(package_name: &str) -> Result<()> {
-    println!("Generating SQL logic tests for package `{package_name}`...");
+fn generate_slt_files_for_package(package_name: &str) -> Result<()> {
+    println!("Generating SLT files for package `{package_name}`...");
 
     let rustdoc_status = Command::new("cargo")
         .args([
@@ -100,42 +111,49 @@ fn generate_slt_for_package(package_name: &str) -> Result<()> {
         .as_object()
         .ok_or_else(|| anyhow!("failed to access `index` field as object"))?;
 
-    // docslt blocks in each file
-    let mut docslt_map: HashMap<String, Vec<DocSltBlock>> = HashMap::new();
+    // slt blocks in each file
+    let mut slt_blocks_per_file: HashMap<String, Vec<SltBlock>> = HashMap::new();
 
     for item in index.values() {
         let docs = item["docs"].as_str().unwrap_or("");
         if docs.contains("```slt") {
-            let docslt_blocks = extract_docslt_blocks(docs);
-            if docslt_blocks.is_empty() {
-                continue;
-            }
-            // TODO: tmp
-            // let id = item["id"]
-            //     .as_str()
-            //     .ok_or_else(|| anyhow!("failed to access `id` field as string"))?;
-            // let name = item["name"].as_str().unwrap_or("");
             let filename = item["span"]["filename"]
                 .as_str()
                 .ok_or_else(|| anyhow!("docslt blocks are expected to be in files"))?;
-            docslt_map
+            let line_no = item["span"]["begin"][0]
+                .as_u64()
+                .ok_or_else(|| anyhow!("docslt blocks are expected to have line number"))?
+                as usize;
+            let item_name = item["name"].as_str().unwrap_or("").to_string();
+            let slt_blocks = extract_slt_blocks(
+                docs,
+                FilePosition {
+                    filepath: PathBuf::from(filename),
+                    line_no,
+                    item_name,
+                },
+            );
+            if slt_blocks.is_empty() {
+                continue;
+            }
+            slt_blocks_per_file
                 .entry(filename.to_string())
                 .or_default()
-                .extend(docslt_blocks);
+                .extend(slt_blocks);
         }
     }
 
-    for docslt_blocks in docslt_map.values_mut() {
-        docslt_blocks.sort_by_key(|block| block.typ);
+    for slt_blocks in slt_blocks_per_file.values_mut() {
+        slt_blocks.sort_by_key(|block| (block.typ, block.position.line_no));
     }
 
-    let slt_dir = format!("e2e_test/generated/docslt/{}", package_name);
+    let slt_dir = PathBuf::from(format!("e2e_test/generated/docslt/{}", package_name));
     std::fs::remove_dir_all(&slt_dir).ok();
-    if !docslt_map.is_empty() {
+    if !slt_blocks_per_file.is_empty() {
         std::fs::create_dir_all(&slt_dir)?;
     }
 
-    for filename in docslt_map.keys() {
+    for filename in slt_blocks_per_file.keys() {
         let filename_digest = format!("{:x}", md5::compute(filename));
         let file_name = Path::new(filename).file_name().unwrap().to_str().unwrap();
         let file_basename = Path::new(file_name)
@@ -144,10 +162,20 @@ fn generate_slt_for_package(package_name: &str) -> Result<()> {
             .to_str()
             .unwrap();
         let slt_filename = format!("{file_basename}_{filename_digest}.slt");
-        let mut slt_file = std::fs::File::create(format!("{slt_dir}/{slt_filename}"))?;
-        writeln!(slt_file, "# file: {}", filename)?;
-        for docslt in docslt_map[filename].iter() {
-            writeln!(slt_file, "\n{}", docslt.content)?;
+        let mut slt_file = std::fs::File::create(slt_dir.join(slt_filename))?;
+        writeln!(
+            slt_file,
+            "# DO NOT MODIFY THIS FILE\n# This SLT file is generated from `{}`.",
+            filename
+        )?;
+        let blocks = &slt_blocks_per_file[filename];
+        for block in blocks.iter() {
+            writeln!(
+                slt_file,
+                "\n# ==== `{}` @ L{} ====",
+                block.position.item_name, block.position.line_no
+            )?;
+            writeln!(slt_file, "\n{}", block.content)?;
         }
     }
 
@@ -183,7 +211,7 @@ fn main() -> Result<()> {
     // };
     let packages = vec![opts.package.clone()];
     for package_name in packages {
-        generate_slt_for_package(&package_name)?;
+        generate_slt_files_for_package(&package_name)?;
     }
     Ok(())
 }
