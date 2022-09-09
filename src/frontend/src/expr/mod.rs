@@ -54,7 +54,7 @@ pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{
     agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_type,
-    least_restrictive, AggFuncSig, CastContext, CastSig, DataTypeName, FuncSign,
+    least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
 };
 pub use utils::*;
 
