@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use clap::Parser;
-use rand::Rng;
+use rand::{thread_rng, Rng};
 use sqllogictest::ParallelTestError;
 
 #[cfg(not(madsim))]
@@ -231,7 +231,7 @@ async fn main() {
     }
 
     // wait for the service to be ready
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_secs(30)).await;
     // client
     let client_node = handle
         .create_node()
@@ -294,33 +294,19 @@ async fn kill_node() {
         tracing::info!("kill {name}");
         madsim::runtime::Handle::current().kill(&name);
     }
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
     for name in &nodes {
         tracing::info!("restart {name}");
         madsim::runtime::Handle::current().restart(&name);
     }
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 }
 
 #[cfg(not(madsim))]
 async fn kill_node() {}
 
-struct HookImpl;
-
-#[async_trait::async_trait]
-impl sqllogictest::Hook for HookImpl {
-    async fn on_stmt_complete(&mut self, _sql: &str) {
-        kill_node().await;
-    }
-
-    async fn on_query_complete(&mut self, _sql: &str) {
-        kill_node().await;
-    }
-}
-
 async fn run_slt_task(glob: &str, host: &str) {
     let risingwave = Risingwave::connect(host.to_string(), "dev".to_string()).await;
-    if ARGS.kill_compute {
+    if ARGS.kill_compute || ARGS.kill_meta {
         risingwave
             .client
             .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
@@ -328,17 +314,50 @@ async fn run_slt_task(glob: &str, host: &str) {
             .expect("failed to set");
     }
     let mut tester = sqllogictest::Runner::new(risingwave);
-    tester.set_hook(HookImpl);
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
-        tester
-            .run_file_async(path)
-            .await
-            .map_err(|e| panic!("{e}"))
-            .unwrap()
+        for record in sqllogictest::parse_file(path).expect("failed to parse file") {
+            if let sqllogictest::Record::Halt { .. } = record {
+                break;
+            }
+            let is_create = matches!(&record, sqllogictest::Record::Statement { sql, .. } 
+                if sql.starts_with("CREATE") || sql.starts_with("create"));
+            let is_drop = matches!(&record, sqllogictest::Record::Statement { sql, .. } 
+                if sql.starts_with("DROP") || sql.starts_with("drop"));
+            let dont_kill = matches!(&record, sqllogictest::Record::Statement { sql, .. } 
+                if sql.starts_with("INSERT") || sql.starts_with("UPDATE") || sql.starts_with("FLUSH")
+                || sql.starts_with("insert") || sql.starts_with("update") || sql.starts_with("flush"));
+            if dont_kill {
+                match tester.run_async(record).await {
+                    Ok(_) => continue,
+                    Err(e) => panic!("{}", e),
+                }
+            }
+            // spawn a background task to kill nodes
+            let handle = tokio::spawn(async {
+                let t = thread_rng().gen_range(Duration::default()..Duration::from_secs(1));
+                tokio::time::sleep(t).await;
+                kill_node().await;
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            });
+            for i in 0usize.. {
+                let delay = Duration::from_secs(1 << i);
+                match tester.run_async(record.clone()).await {
+                    Ok(_) => break,
+                    // allow 'table exists' error when retry CREATE statement
+                    Err(e) if is_create && e.to_string().contains("exists") => break,
+                    // allow 'not found' error when retry DROP statement
+                    Err(e) if is_drop && e.to_string().contains("not found") => break,
+                    Err(e) if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),
+                    Err(e) => tracing::error!("failed to run test: {e}\nretry after {delay:?}"),
+                }
+                tokio::time::sleep(delay).await;
+            }
+            handle.await.unwrap();
+        }
     }
 }
 
