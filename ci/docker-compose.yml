@@ -7,7 +7,7 @@ services:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     ports:
-      - '5432:5432'
+      - 5432:5432
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
@@ -17,26 +17,26 @@ services:
   zookeeper:
     image: confluentinc/cp-zookeeper
     ports:
-      - "2181:2181"
+      - 2181:2181
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SYNC_LIMIT: 1
+      ZOOKEEPER_SYNC_LIMIT: 2
 
   kafka:
-    image: confluentinc/cp-enterprise-kafka:5.5.3
+    image: confluentinc/cp-kafka
+    ports:
+      - 29092:29092
     depends_on:
       - zookeeper
     environment:
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_BROKER_ID: 1
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_JMX_PORT: 9991
-    ports:
-      - 29092:29092 
     healthcheck:
       test: nc -z ${HOST_IP} 29092 || exit -1
       interval: 5s
@@ -91,7 +91,8 @@ services:
       VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
       CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
       CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
-    depends_on: [kafka]
+    depends_on:
+      - kafka
     ports:
       - 8083:8083
     volumes:
