@@ -19,8 +19,8 @@ use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
-use self::util::handle_with_properties;
 use crate::session::{OptimizerContext, SessionImpl};
+use crate::utils::WithOptions;
 
 pub mod alter_user;
 mod create_database;
@@ -55,26 +55,18 @@ pub async fn handle(
     sql: &str,
     format: bool,
 ) -> Result<PgResponse> {
-    let mut context = OptimizerContext::new(session.clone(), Arc::from(sql));
+    let context = OptimizerContext::new(
+        session.clone(),
+        Arc::from(sql),
+        WithOptions::try_from(&stmt)?,
+    );
     match stmt {
         Statement::Explain {
             statement,
             describe_alias: _,
             analyze,
             options,
-        } => {
-            match statement.as_ref() {
-                Statement::CreateTable { with_options, .. }
-                | Statement::CreateView { with_options, .. } => {
-                    context.with_properties =
-                        handle_with_properties("explain create_table", with_options.clone())?;
-                }
-
-                _ => {}
-            }
-
-            explain::handle_explain(context, *statement, options, analyze)
-        }
+        } => explain::handle_explain(context, *statement, options, analyze),
         Statement::CreateSource {
             is_materialized,
             stmt,
@@ -83,13 +75,9 @@ pub async fn handle(
         Statement::CreateTable {
             name,
             columns,
-            with_options,
             constraints,
             ..
-        } => {
-            context.with_properties = handle_with_properties("handle_create_table", with_options)?;
-            create_table::handle_create_table(context, name, columns, constraints).await
-        }
+        } => create_table::handle_create_table(context, name, columns, constraints).await,
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
@@ -147,12 +135,8 @@ pub async fn handle(
             or_replace: false,
             name,
             query,
-            with_options,
             ..
-        } => {
-            context.with_properties = handle_with_properties("handle_create_mv", with_options)?;
-            create_mv::handle_create_mv(context, name, query).await
-        }
+        } => create_mv::handle_create_mv(context, name, query).await,
         Statement::Flush => flush::handle_flush(context).await,
         Statement::SetVariable {
             local: _,

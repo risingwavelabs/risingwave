@@ -212,7 +212,7 @@ pub(crate) fn gen_create_table_plan(
             row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
             columns,
             pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
-            properties: context.inner().with_properties.clone(),
+            properties: context.inner().with_options.inner().clone(),
         }),
     )?;
     let (plan, table) = gen_materialized_source_plan(context, source.clone(), session.user_id())?;

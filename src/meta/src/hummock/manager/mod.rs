@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
-    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
+    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -135,7 +135,7 @@ macro_rules! read_lock {
     };
 }
 pub(crate) use read_lock;
-use risingwave_pb::hummock::pin_version_response::{HummockVersionDeltas, Payload};
+use risingwave_pb::hummock::pin_version_response::Payload;
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -406,7 +406,6 @@ where
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
-        last_pinned: HummockVersionId,
     ) -> Result<pin_version_response::Payload> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -416,29 +415,17 @@ where
             context_id,
             HummockPinnedVersion {
                 context_id,
-                min_pinned_id: 0,
+                min_pinned_id: INVALID_VERSION_ID,
             },
         );
 
         let version_id = versioning.current_version.id;
 
-        let ret = {
-            if last_pinned <= version_id
-                && versioning.hummock_version_deltas.contains_key(&last_pinned)
-            {
-                Payload::VersionDeltas(HummockVersionDeltas {
-                    delta: versioning
-                        .hummock_version_deltas
-                        .range((Excluded(last_pinned), Included(version_id)))
-                        .map(|(_, delta)| delta.clone())
-                        .collect_vec(),
-                })
-            } else {
-                Payload::PinnedVersion(versioning.current_version.clone())
-            }
-        };
+        let ret = Payload::PinnedVersion(versioning.current_version.clone());
 
-        if context_pinned_version.min_pinned_id == 0 {
+        if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
+            || context_pinned_version.min_pinned_id > version_id
+        {
             context_pinned_version.min_pinned_id = version_id;
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }
@@ -475,26 +462,6 @@ where
 
         context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(self, Some(context_id), context_pinned_version)?;
-
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            self.check_state_consistency().await;
-        }
-
-        Ok(())
-    }
-
-    /// Remove this context from context pin info.
-    #[named]
-    pub async fn unpin_version(&self, context_id: HummockContextId) -> Result<()> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        let _timer = start_measure_real_process_timer!(self);
-        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning_guard.pinned_versions);
-        let release_version = pinned_versions.remove(context_id);
-        if release_version.is_some() {
-            commit_multi_var!(self, Some(context_id), pinned_versions)?;
-        }
 
         #[cfg(test)]
         {
@@ -1073,10 +1040,10 @@ where
                     }
                     Some(compactor) => compactor,
                 };
-                let sst_ids = sstables.iter().map(|(_, sst_id)| sst_id.id).collect_vec();
+                let sst_infos = sstables.iter().map(|(_, sst)| sst.clone()).collect_vec();
                 if compactor
                     .send_task(Task::ValidationTask(ValidationTask {
-                        sst_ids,
+                        sst_infos,
                         sst_id_to_worker_id: sst_to_context.clone(),
                         epoch,
                     }))

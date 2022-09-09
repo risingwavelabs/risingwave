@@ -11,12 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+pub mod utils;
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
-use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
+use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
-use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
@@ -26,26 +24,21 @@ use risingwave_pb::expr::expr_node::Type::{
 };
 use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
-use tokio::runtime::Runtime;
+use utils::{bench_join, create_input};
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 fn create_nested_loop_join_executor(
     join_type: JoinType,
+    _with_cond: bool,
     left_chunk_size: usize,
     left_chunk_num: usize,
     right_chunk_size: usize,
     right_chunk_num: usize,
 ) -> BoxedExecutor {
-    let left_input = gen_data(left_chunk_size, left_chunk_num, &[DataType::Int64]);
-    let right_input = gen_data(right_chunk_size, right_chunk_num, &[DataType::Int64]);
-
-    let mut left_child = Box::new(MockExecutor::new(field_n::<1>(DataType::Int64)));
-    left_input.into_iter().for_each(|c| left_child.add(c));
-
-    let mut right_child = Box::new(MockExecutor::new(field_n::<1>(DataType::Int64)));
-    right_input.into_iter().for_each(|c| right_child.add(c));
+    let left_input = create_input(&[DataType::Int64], left_chunk_size, left_chunk_num);
+    let right_input = create_input(&[DataType::Int64], right_chunk_size, right_chunk_num);
 
     // Expression: $1 % 2 == $2 % 3
     let join_expr = {
@@ -136,24 +129,15 @@ fn create_nested_loop_join_executor(
         build_from_prost(&join_expr).unwrap(),
         join_type,
         output_indices,
-        left_child,
-        right_child,
+        left_input,
+        right_input,
         "NestedLoopJoinExecutor".into(),
     ))
 }
 
-async fn execute_nested_loop_join_executor(executor: BoxedExecutor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
-    }
-}
-
 fn bench_nested_loop_join(c: &mut Criterion) {
-    const LEFT_SIZE: usize = 2 * 1024;
-    const RIGHT_SIZE: usize = 2 * 1024;
-    let rt = Runtime::new().unwrap();
-    for join_type in &[
+    let with_conds = vec![false];
+    let join_types = vec![
         JoinType::Inner,
         JoinType::LeftOuter,
         JoinType::LeftSemi,
@@ -161,35 +145,14 @@ fn bench_nested_loop_join(c: &mut Criterion) {
         JoinType::RightOuter,
         JoinType::RightSemi,
         JoinType::RightAnti,
-        JoinType::FullOuter,
-    ] {
-        for chunk_size in &[32, 128, 512, 1024] {
-            c.bench_with_input(
-                BenchmarkId::new(
-                    "NestedLoopJoinExecutor",
-                    format!("{}({:?})", chunk_size, join_type),
-                ),
-                chunk_size,
-                |b, &chunk_size| {
-                    let left_chunk_num = LEFT_SIZE / chunk_size;
-                    let right_chunk_num = RIGHT_SIZE / chunk_size;
-                    b.to_async(&rt).iter_batched(
-                        || {
-                            create_nested_loop_join_executor(
-                                *join_type,
-                                chunk_size,
-                                left_chunk_num,
-                                chunk_size,
-                                right_chunk_num,
-                            )
-                        },
-                        |e| execute_nested_loop_join_executor(e),
-                        BatchSize::SmallInput,
-                    );
-                },
-            );
-        }
-    }
+    ];
+    bench_join(
+        c,
+        "NestedLoopJoinExecutor",
+        with_conds,
+        join_types,
+        create_nested_loop_join_executor,
+    );
 }
 
 criterion_group!(benches, bench_nested_loop_join);

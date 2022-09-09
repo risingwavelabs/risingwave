@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use anyhow::{anyhow, Context};
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
@@ -219,19 +220,25 @@ where
         &self,
         reschedule: HashMap<FragmentId, ParallelUnitReschedule>,
     ) -> MetaResult<()> {
+        let mut revert_funcs = vec![];
+        if let Err(e) = self
+            .reschedule_actors_impl(&mut revert_funcs, reschedule)
+            .await
+        {
+            for revert_func in revert_funcs.into_iter().rev() {
+                revert_func.await;
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    async fn reschedule_actors_impl(
+        &self,
+        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
+        reschedule: HashMap<FragmentId, ParallelUnitReschedule>,
+    ) -> MetaResult<()> {
         let ctx = self.build_reschedule_context(&reschedule).await?;
-
-        let mut revert_funcs = scopeguard::guard(
-            vec![],
-            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
-                tokio::spawn(async move {
-                    for revert_func in revert_funcs.into_iter().rev() {
-                        revert_func.await;
-                    }
-                });
-            },
-        );
-
         // Index of actors to create/remove
         let mut fragment_actors_to_remove = HashMap::with_capacity(reschedule.len());
         let mut fragment_actors_to_create = HashMap::with_capacity(reschedule.len());
@@ -666,7 +673,7 @@ where
 
         let applied_reschedules = self
             .fragment_manager
-            .pre_apply_reschedules(fragment_created_actors.clone())
+            .pre_apply_reschedules(fragment_created_actors)
             .await;
 
         let fragment_manager_ref = self.fragment_manager.clone();
@@ -677,16 +684,13 @@ where
                 .await;
         }));
 
-        self.barrier_manager
+        self.barrier_scheduler
             .run_multiple_commands(vec![
                 Command::Plain(Some(Mutation::Pause(PauseMutation {}))),
                 Command::RescheduleFragment(reschedule_fragment),
                 Command::Plain(Some(Mutation::Resume(ResumeMutation {}))),
             ])
             .await?;
-
-        revert_funcs.clear();
-
         Ok(())
     }
 

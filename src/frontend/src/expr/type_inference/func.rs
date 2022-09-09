@@ -17,9 +17,9 @@ use std::collections::HashMap;
 use itertools::{iproduct, Itertools as _};
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DataTypeName};
 
-use super::{align_types, cast_ok_base, CastContext, DataTypeName};
+use super::{align_types, cast_ok_base, CastContext};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types

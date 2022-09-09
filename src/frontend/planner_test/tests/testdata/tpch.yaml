@@ -200,7 +200,7 @@
     LogicalTopN { order: "[supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC]", limit: 100, offset: 0 }
       LogicalProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment] }
         LogicalFilter { predicate: (part.p_partkey = partsupp.ps_partkey) AND (supplier.s_suppkey = partsupp.ps_suppkey) AND (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (region.r_name = 'AFRICA':Varchar) AND (partsupp.ps_supplycost = min(partsupp.ps_supplycost)) }
-          LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
+          LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
             LogicalJoin { type: Inner, on: true, output: all }
               LogicalJoin { type: Inner, on: true, output: all }
                 LogicalJoin { type: Inner, on: true, output: all }
@@ -1238,7 +1238,7 @@
   logical_plan: |
     LogicalProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
       LogicalFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) * 0.0001000000:Decimal)) }
-        LogicalJoin { type: LeftOuter, on: true, output: all }
+        LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
           LogicalAgg { group_key: [partsupp.ps_partkey], aggs: [sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
             LogicalProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty)] }
               LogicalFilter { predicate: (partsupp.ps_suppkey = supplier.s_suppkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_name = 'ARGENTINA':Varchar) }
@@ -1581,7 +1581,7 @@
   logical_plan: |
     LogicalProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
       LogicalFilter { predicate: (supplier.s_suppkey = lineitem.l_suppkey) AND (sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))) = max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))) }
-        LogicalJoin { type: LeftOuter, on: true, output: all }
+        LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
           LogicalJoin { type: Inner, on: true, output: all }
             LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
             LogicalProject { exprs: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
@@ -1697,7 +1697,7 @@
       LogicalAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(distinct partsupp.ps_suppkey)] }
         LogicalProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
           LogicalFilter { predicate: (part.p_partkey = partsupp.ps_partkey) AND (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-            LogicalJoin { type: LeftAnti, on: (partsupp.ps_suppkey = supplier.s_suppkey), output: all }
+            LogicalApply { type: LeftAnti, on: (partsupp.ps_suppkey = supplier.s_suppkey), correlated_id: 1 }
               LogicalJoin { type: Inner, on: true, output: all }
                 LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment] }
                 LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
@@ -1775,7 +1775,7 @@
       LogicalAgg { aggs: [sum(lineitem.l_extendedprice)] }
         LogicalProject { exprs: [lineitem.l_extendedprice] }
           LogicalFilter { predicate: (part.p_partkey = lineitem.l_partkey) AND (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) AND (lineitem.l_quantity < (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))) }
-            LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
+            LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
               LogicalJoin { type: Inner, on: true, output: all }
                 LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
                 LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
@@ -1893,7 +1893,7 @@
         LogicalAgg { group_key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice], aggs: [sum(lineitem.l_quantity)] }
           LogicalProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, lineitem.l_quantity] }
             LogicalFilter { predicate: (customer.c_custkey = orders.o_custkey) AND (orders.o_orderkey = lineitem.l_orderkey) }
-              LogicalJoin { type: LeftSemi, on: (orders.o_orderkey = lineitem.l_orderkey), output: all }
+              LogicalApply { type: LeftSemi, on: (orders.o_orderkey = lineitem.l_orderkey), correlated_id: 1 }
                 LogicalJoin { type: Inner, on: true, output: all }
                   LogicalJoin { type: Inner, on: true, output: all }
                     LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
@@ -2089,14 +2089,14 @@
   logical_plan: |
     LogicalProject { exprs: [supplier.s_name, supplier.s_address] }
       LogicalFilter { predicate: (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_name = 'KENYA':Varchar) }
-        LogicalJoin { type: LeftSemi, on: (supplier.s_suppkey = partsupp.ps_suppkey), output: all }
+        LogicalApply { type: LeftSemi, on: (supplier.s_suppkey = partsupp.ps_suppkey), correlated_id: 1 }
           LogicalJoin { type: Inner, on: true, output: all }
             LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
             LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
           LogicalProject { exprs: [partsupp.ps_suppkey] }
             LogicalFilter { predicate: (partsupp.ps_availqty > (0.5:Decimal * sum(lineitem.l_quantity))) }
-              LogicalApply { type: LeftOuter, on: true, correlated_id: 3 }
-                LogicalJoin { type: LeftSemi, on: (partsupp.ps_partkey = part.p_partkey), output: all }
+              LogicalApply { type: LeftOuter, on: true, correlated_id: 3, max_one_row: true }
+                LogicalApply { type: LeftSemi, on: (partsupp.ps_partkey = part.p_partkey), correlated_id: 2 }
                   LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment] }
                   LogicalProject { exprs: [part.p_partkey] }
                     LogicalFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
@@ -2385,7 +2385,7 @@
         LogicalProject { exprs: [Substr(customer.c_phone, 1:Int32, 2:Int32), customer.c_acctbal] }
           LogicalProject { exprs: [Substr(customer.c_phone, 1:Int32, 2:Int32), customer.c_acctbal] }
             LogicalFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) AND (customer.c_acctbal > (sum(customer.c_acctbal) / count(customer.c_acctbal))) }
-              LogicalJoin { type: LeftOuter, on: true, output: all }
+              LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
                 LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
                   LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
                   LogicalProject { exprs: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }

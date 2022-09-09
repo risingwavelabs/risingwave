@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,6 +21,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use tokio::io::AsyncRead;
 use tokio::sync::Mutex;
 
 use super::{
@@ -116,6 +118,36 @@ impl ObjectStore for InMemObjectStore {
             .map(|block_loc| self.read(path, Some(*block_loc)))
             .collect_vec();
         try_join_all(futures).await
+    }
+
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    async fn streaming_read(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        fail_point!("mem_streaming_read_err", |_| Err(ObjectError::internal(
+            "mem streaming read error"
+        )));
+
+        let bytes = if let Some(pos) = start_pos {
+            self.get_object(path, |obj| {
+                find_block(
+                    obj,
+                    BlockLocation {
+                        offset: pos,
+                        size: obj.len() - pos,
+                    },
+                )
+            })
+            .await?
+        } else {
+            self.get_object(path, |obj| Ok(obj.clone())).await?
+        };
+
+        Ok(Box::new(Cursor::new(bytes?)))
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
