@@ -1,0 +1,19 @@
+statement ok
+CREATE MATERIALIZED SOURCE orderline (
+    ol_o_id INTEGER,
+    ol_d_id INTEGER,
+    ol_w_id INTEGER,
+    ol_number INTEGER,
+    ol_i_id INTEGER,
+    ol_supply_w_id INTEGER,
+    ol_delivery_d TIMESTAMP,
+    ol_quantity INTEGER,
+    ol_amount REAL,
+    ol_dist_info VARCHAR,
+    PRIMARY KEY (ol_o_id, ol_d_id, ol_w_id, ol_number)
+) with (
+    connector = 'kafka',
+    topic = 'postgres.public.orderline',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;

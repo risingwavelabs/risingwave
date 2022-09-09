@@ -1,0 +1,16 @@
+statement ok
+CREATE MATERIALIZED SOURCE history (
+    h_c_id INTEGER,
+    h_c_d_id INTEGER,
+    h_c_w_id INTEGER,
+    h_d_id INTEGER,
+    h_w_id INTEGER,
+    h_date TIMESTAMP,
+    h_amount REAL,
+    h_data VARCHAR
+) with (
+    connector = 'kafka',
+    topic = 'postgres.public.history',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;

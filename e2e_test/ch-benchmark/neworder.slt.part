@@ -1,0 +1,12 @@
+statement ok
+CREATE MATERIALIZED SOURCE neworder (
+    no_o_id INTEGER,
+    no_d_id INTEGER,
+    no_w_id INTEGER,
+    PRIMARY KEY (no_o_id, no_d_id, no_w_id)
+) with (
+    connector = 'kafka',
+    topic = 'postgres.public.neworder',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;

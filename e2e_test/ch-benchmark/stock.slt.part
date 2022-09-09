@@ -1,0 +1,26 @@
+statement ok
+CREATE MATERIALIZED SOURCE stock (
+    st_i_id INTEGER,
+    st_w_id INTEGER,
+    st_quantity INTEGER,
+    st_dist_01 VARCHAR,
+    st_dist_02 VARCHAR,
+    st_dist_03 VARCHAR,
+    st_dist_04 VARCHAR,
+    st_dist_05 VARCHAR,
+    st_dist_06 VARCHAR,
+    st_dist_07 VARCHAR,
+    st_dist_08 VARCHAR,
+    st_dist_09 VARCHAR,
+    st_dist_10 VARCHAR,
+    st_ytd INTEGER,
+    st_order_cnt INTEGER,
+    st_remote_cnt INTEGER,
+    st_data VARCHAR,
+    PRIMARY KEY (st_i_id, st_w_id)
+) with (
+    connector = 'kafka',
+    topic = 'postgres.public.stock',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
