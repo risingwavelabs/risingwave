@@ -23,6 +23,7 @@ use crate::array::DataChunk;
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, ToOwnedDatum};
+use crate::util::ordered::OrderedRowSerializer;
 use crate::util::value_encoding;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
@@ -285,6 +286,17 @@ impl Row {
         Ok(result)
     }
 
+    /// Serialize part of the row into memcomparable bytes.
+    pub fn extract_memcomparable_by_indices(
+        &self,
+        serializer: &OrderedRowSerializer,
+        key_indices: &[usize],
+    ) -> Vec<u8> {
+        let mut bytes = vec![];
+        serializer.serialize_datums(self.datums_by_indices(key_indices), &mut bytes);
+        bytes
+    }
+
     /// Return number of cells in the row.
     pub fn size(&self) -> usize {
         self.0.len()
@@ -327,6 +339,11 @@ impl Row {
     /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
     pub fn by_indices(&self, indices: &[usize]) -> Row {
         Row(indices.iter().map(|&idx| self.0[idx].clone()).collect_vec())
+    }
+
+    /// Get a reference to the datums in the row by the given `indices`.
+    pub fn datums_by_indices<'a>(&'a self, indices: &'a [usize]) -> impl Iterator<Item = &Datum> {
+        indices.iter().map(|&idx| &self.0[idx])
     }
 }
 

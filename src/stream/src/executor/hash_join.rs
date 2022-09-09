@@ -794,7 +794,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
         for ((op, row), key) in chunk.rows().zip_eq(keys.iter()) {
             let value = row.to_owned_row();
-            let pk = row.row_by_indices(&side_update.pk_indices);
             let matched_rows: Option<HashValueType> =
                 Self::hash_eq_match(key, &mut side_match.ht).await?;
             match op {
@@ -850,14 +849,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         // Since join key contains pk and pk is unique, there should be only
                         // one row if matched
                         let [row]: [_; 1] = append_only_matched_rows.try_into().unwrap();
-                        let pk = row.row_by_indices(&side_match.pk_indices);
-                        side_match.ht.delete(key, pk, row)?;
+                        side_match.ht.delete(key, row)?;
                     } else if need_update_side_update_degree(T, SIDE) {
-                        side_update
-                            .ht
-                            .insert(key, pk, JoinRow::new(value, degree))?;
+                        side_update.ht.insert(key, JoinRow::new(value, degree))?;
                     } else {
-                        side_update.ht.insert_row(key, pk, value)?;
+                        side_update.ht.insert_row(key, value)?;
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -901,11 +897,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         yield Message::Chunk(chunk);
                     }
                     if need_update_side_update_degree(T, SIDE) {
-                        side_update
-                            .ht
-                            .delete(key, pk, JoinRow::new(value, degree))?;
+                        side_update.ht.delete(key, JoinRow::new(value, degree))?;
                     } else {
-                        side_update.ht.delete_row(key, pk, value)?;
+                        side_update.ht.delete_row(key, value)?;
                     };
                 }
             }
@@ -2280,8 +2274,8 @@ mod tests {
             chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
-                + 3 . 3 10
                 + 3 8 3 10
+                + 3 . 3 10
                 + 6 . 6 11"
             )
         );
