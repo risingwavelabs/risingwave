@@ -2,8 +2,8 @@ curl -H 'Content-Type: application/json' debezium:8083/connectors --data '
 {
   "name": "simple-connector",  
   "config": {
-    "connector.class": "io.debezium.connector.postgresql.PostgresConnector", 
-    "plugin.name": "pgoutput",
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "plugin.name": "wal2json",
     "database.hostname": "postgres", 
     "database.port": "5432", 
     "database.user": "user", 
