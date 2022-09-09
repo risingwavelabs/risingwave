@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
+use console::style;
+use itertools::Itertools;
 use serde_json::Value as JsonValue;
 
 #[derive(Parser)]
@@ -15,6 +17,7 @@ use serde_json::Value as JsonValue;
 #[clap(propagate_version = true)]
 #[clap(infer_subcommands = true)]
 pub struct RiseDevDocSltOpts {
+    /// Specify package name to extract DocSlt from. `all` for all packages.
     #[clap(short, long)]
     package: String,
 }
@@ -82,9 +85,10 @@ fn extract_slt_blocks(markdown: &str, position: FilePosition) -> Vec<SltBlock> {
 }
 
 fn generate_slt_files_for_package(package_name: &str) -> Result<()> {
-    println!("Generating SLT files for package `{package_name}`...");
+    print!("Generating SLT files for package `{package_name}`...");
+    std::io::stdout().flush().unwrap();
 
-    let rustdoc_status = Command::new("cargo")
+    let rustdoc_output = Command::new("cargo")
         .args([
             "rustdoc",
             "-p",
@@ -96,12 +100,20 @@ fn generate_slt_files_for_package(package_name: &str) -> Result<()> {
             "json",
             "--document-private-items",
         ])
-        .status()?;
-    if !rustdoc_status.success() {
-        return Err(anyhow!(
-            "`cargo rustdoc` failed with exit code {}",
-            rustdoc_status.code().unwrap()
-        ));
+        .output()?;
+    if !rustdoc_output.status.success() {
+        let stderr = String::from_utf8(rustdoc_output.stderr)?;
+        if stderr.contains("no library targets found") {
+            println!("{}", style("IGNORED").yellow().bold());
+            return Ok(());
+        } else {
+            println!("{}", style("FAILED").red().bold());
+            println!("{}\n{}", style("Error output:").red().bold(), stderr);
+            return Err(anyhow!(
+                "`cargo rustdoc` failed with exit code {}",
+                rustdoc_output.status.code().unwrap()
+            ));
+        }
     }
 
     let rustdoc: JsonValue = serde_json::from_reader(std::io::BufReader::new(
@@ -179,37 +191,38 @@ fn generate_slt_files_for_package(package_name: &str) -> Result<()> {
         }
     }
 
+    println!("{}", style("OK").green().bold());
     Ok(())
 }
 
 fn main() -> Result<()> {
     let opts = RiseDevDocSltOpts::parse();
-    // TODO: tmp
-    // let packages = if opts.package == "all" {
-    //     let metadata_output = Command::new("cargo").arg("metadata").output()?;
-    //     if !metadata_output.status.success() {
-    //         return Err(anyhow!(
-    //             "cargo metadata failed with exit code {}",
-    //             metadata_output.status.code().unwrap()
-    //         ));
-    //     }
-    //     let metadata_json = String::from_utf8(metadata_output.stdout)?;
-    //     let metadata: JsonValue = serde_json::from_str(&metadata_json)?;
-    //     let workspace_members = metadata["workspace_members"]
-    //         .as_array()
-    //         .ok_or_else(|| anyhow!("cargo metadata output did not contain
-    // `workspace_members`"))?;     workspace_members
-    //         .iter()
-    //         .map(|member| {
-    //             let member_info = member.as_str().unwrap();
-    //             member_info.split_once(" ").unwrap().0.to_string()
-    //         })
-    //         .filter(|package_name| package_name.starts_with("risingwave_"))
-    //         .collect_vec()
-    // } else {
-    //     vec![opts.package.clone()]
-    // };
-    let packages = vec![opts.package.clone()];
+    let packages = if opts.package == "all" {
+        let metadata_output = Command::new("cargo").arg("metadata").output()?;
+        if !metadata_output.status.success() {
+            return Err(anyhow!(
+                "cargo metadata failed with exit code {}",
+                metadata_output.status.code().unwrap()
+            ));
+        }
+        let metadata_json = String::from_utf8(metadata_output.stdout)?;
+        let metadata: JsonValue = serde_json::from_str(&metadata_json)?;
+        let workspace_members = metadata["workspace_members"]
+            .as_array()
+            .ok_or_else(|| anyhow!("cargo metadata output did not contain `workspace_members`"))?;
+        let packages = workspace_members
+            .iter()
+            .map(|member| {
+                let member_info = member.as_str().unwrap();
+                member_info.split_once(" ").unwrap().0.to_string()
+            })
+            .filter(|package_name| package_name.starts_with("risingwave_"))
+            .collect_vec();
+        println!("Extracting DocSlt for all packages: {:#?}", packages);
+        packages
+    } else {
+        vec![opts.package.clone()]
+    };
     for package_name in packages {
         generate_slt_files_for_package(&package_name)?;
     }
