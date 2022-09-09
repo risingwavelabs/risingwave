@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::mem::swap;
 use std::ops::{Deref, RangeBounds};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
@@ -31,7 +31,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use super::shared_buffer::SharedBuffer;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
-    KeyIndexSharedBufferBatch, OrderSortedUncommittedData, UncommittedData,
+    to_order_sorted, KeyIndexSharedBufferBatch, OrderSortedUncommittedData, UncommittedData,
 };
 use crate::hummock::utils::{check_subset_preserve_order, filter_single_sst, range_overlap};
 
@@ -53,11 +53,61 @@ pub struct LocalVersion {
 
 #[derive(Debug, Clone)]
 pub enum SyncUncommittedData {
-    /// Before we start syncing, we need to mv data from shared buffer to `sync_uncommitted_data`
-    /// as `Syncing`.
+    /// Before we start syncing, we need to mv the shared buffer to `sync_uncommitted_data` and
+    /// wait for flush task to complete
+    AwaitFlush(BTreeMap<HummockEpoch, SharedBuffer>),
+    /// We may start syncing after the flush task complete
     Syncing(OrderSortedUncommittedData),
     /// After we finish syncing, we changed `Syncing` to `Synced`.
     Synced(Vec<LocalSstableInfo>),
+    /// A temporary enum value. We may use `std::mem::swap` to take the ownership of current stage,
+    /// do something and set the state to a new valid stage
+    _Temporary,
+}
+
+// state transition
+impl SyncUncommittedData {
+    fn new(shared_buffer_data: BTreeMap<HummockEpoch, SharedBuffer>) -> Self {
+        SyncUncommittedData::AwaitFlush(shared_buffer_data)
+    }
+
+    fn start_syncing(&mut self) -> (OrderSortedUncommittedData, usize) {
+        let mut current_stage = SyncUncommittedData::_Temporary;
+        swap(&mut current_stage, self);
+        let (new_state, task_payload, task_size) = match current_stage {
+            SyncUncommittedData::AwaitFlush(shared_buffer_data) => {
+                let mut sync_size = 0;
+                let mut all_uncommitted_data = vec![];
+                for (_, shared_buffer) in shared_buffer_data {
+                    if let Some((uncommitted_data, size)) = shared_buffer.into_uncommitted_data() {
+                        all_uncommitted_data.push(uncommitted_data);
+                        sync_size += size;
+                    };
+                }
+                // Data of smaller epoch was added first. Take a `reverse` to make the data of
+                // greater epoch appear first.
+                all_uncommitted_data.reverse();
+                let task_payload = all_uncommitted_data
+                    .into_iter()
+                    .flat_map(to_order_sorted)
+                    .collect_vec();
+                (
+                    SyncUncommittedData::Syncing(task_payload.clone()),
+                    task_payload,
+                    sync_size,
+                )
+            }
+            invalid_stage => {
+                unreachable!("start syncing from an invalid stage: {:?}", invalid_stage)
+            }
+        };
+        *self = new_state;
+        (task_payload, task_size)
+    }
+
+    fn synced(&mut self, ssts: Vec<LocalSstableInfo>) {
+        *self = SyncUncommittedData::Synced(ssts);
+    }
 }
 
 impl SyncUncommittedData {
@@ -71,6 +121,11 @@ impl SyncUncommittedData {
         B: AsRef<[u8]>,
     {
         match self {
+            SyncUncommittedData::AwaitFlush(shared_buffer_data) => shared_buffer_data
+                .range(..=epoch)
+                .rev() // take rev so that data of newer epoch comes first
+                .flat_map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
+                .collect(),
             SyncUncommittedData::Syncing(task) => task
                 .iter()
                 .map(|order_vec_data| {
@@ -96,6 +151,9 @@ impl SyncUncommittedData {
                 .filter(|(_, info)| filter_single_sst(info, key_range))
                 .map(|info| UncommittedData::Sst(info.clone()))
                 .collect()],
+            SyncUncommittedData::_Temporary => {
+                unreachable!()
+            }
         }
     }
 }
@@ -126,13 +184,25 @@ impl LocalVersion {
         &self.pinned_version
     }
 
-    pub fn swap_max_sync_epoch(&mut self, epoch: HummockEpoch) -> Option<HummockEpoch> {
-        if self.max_sync_epoch > epoch {
+    /// Advance the `max_sync_epoch` to at least `new_epoch`.
+    ///
+    /// Return `Some(prev max_sync_epoch)` if `new_epoch > max_sync_epoch`
+    /// Return `None` if `new_epoch <= max_sync_epoch`
+    pub fn advance_max_sync_epoch(&mut self, new_epoch: HummockEpoch) -> Option<Vec<HummockEpoch>> {
+        if self.max_sync_epoch > new_epoch {
             None
         } else {
-            let last_epoch = self.max_sync_epoch;
-            self.max_sync_epoch = epoch;
-            Some(last_epoch)
+            let mut shared_buffer_to_sync = self.shared_buffer.split_off(&(new_epoch + 1));
+            // After `split_off`, epochs greater than `epoch` will be in `shared_buffer_to_sync`. We
+            // use a swap to reach the expected setting.
+            swap(&mut shared_buffer_to_sync, &mut self.shared_buffer);
+            let epochs = if shared_buffer_to_sync.is_empty() {
+                Vec::new()
+            } else {
+                self.add_sync_data(shared_buffer_to_sync)
+            };
+            self.max_sync_epoch = new_epoch;
+            Some(epochs)
         }
     }
 
@@ -141,79 +211,73 @@ impl LocalVersion {
     }
 
     pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
-        self.shared_buffer.get_mut(&epoch)
+        self.shared_buffer.get_mut(&epoch).or_else(|| {
+            for &mut (_, ref mut sync_data) in &mut self.sync_uncommitted_data {
+                if let SyncUncommittedData::AwaitFlush(shared_buffer_data) = sync_data {
+                    if let Some(shared_buffer) = shared_buffer_data.get_mut(&epoch) {
+                        return Some(shared_buffer);
+                    }
+                }
+            }
+            None
+        })
     }
 
+    #[cfg(any(test, feature = "test"))]
     pub fn get_shared_buffer(&self, epoch: HummockEpoch) -> Option<&SharedBuffer> {
         self.shared_buffer.get(&epoch)
     }
 
-    /// Returns all shared buffer less than or equal to epoch
-    pub fn drain_shared_buffer<'a, R>(
-        &'a mut self,
-        epoch_range: R,
-    ) -> impl Iterator<Item = (HummockEpoch, SharedBuffer)> + 'a
-    where
-        R: RangeBounds<u64> + 'a,
-    {
-        self.shared_buffer
-            .drain_filter(move |epoch, _| epoch_range.contains(epoch))
+    pub fn add_sync_data(
+        &mut self,
+        shared_buffer_data: BTreeMap<HummockEpoch, SharedBuffer>,
+    ) -> Vec<HummockEpoch> {
+        let epochs = shared_buffer_data.keys().rev().cloned().collect_vec(); // newer epoch comes first
+        if let Some((prev_sync_epochs, _)) = self.sync_uncommitted_data.front() {
+            let current_min_epoch = epochs.last().expect("non empty");
+            let prev_max_epoch = prev_sync_epochs.first().expect("non empty");
+            assert!(
+                current_min_epoch > prev_max_epoch,
+                "newly added sync data must be newer than prev data: {:?} {:?}",
+                epochs,
+                prev_sync_epochs
+            );
+        }
+        self.sync_uncommitted_data
+            .push_front((epochs.clone(), SyncUncommittedData::new(shared_buffer_data)));
+        epochs
     }
 
-    /// Returns all shared buffer less than or equal to epoch
-    pub fn scan_shared_buffer<R>(
-        &self,
-        epoch_range: R,
-    ) -> impl Iterator<Item = (&HummockEpoch, &SharedBuffer)>
-    where
-        R: RangeBounds<u64>,
-    {
-        self.shared_buffer.range(epoch_range)
-    }
-
-    pub fn add_sync_state(
+    pub fn start_syncing(
         &mut self,
         sync_epochs: Vec<HummockEpoch>,
-        sync_uncommitted_data: SyncUncommittedData,
-    ) {
-        assert!(sync_epochs.iter().rev().is_sorted());
-        let node = self
+    ) -> (OrderSortedUncommittedData, usize) {
+        let &mut (_, ref mut stage) = self
             .sync_uncommitted_data
             .iter_mut()
-            .find(|(epochs, _)| epochs == &sync_epochs);
-        match &node {
-            None => {
-                assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
-                if let Some(front) = self.sync_uncommitted_data.front() {
-                    assert!(
-                        front.0.first().lt(&sync_epochs.last()),
-                        "front epoch:{:?} >= sync epoch:{:?}",
-                        front,
-                        sync_epochs
-                    );
-                }
-                self.sync_uncommitted_data
-                    .push_front((sync_epochs, sync_uncommitted_data));
-                return;
-            }
-            Some((_, SyncUncommittedData::Syncing(_))) => {
-                assert_matches!(sync_uncommitted_data, SyncUncommittedData::Synced(_));
-            }
-            Some((_, SyncUncommittedData::Synced(_))) => {
-                panic!("sync over, can't modify uncommitted sst state");
-            }
-        }
-        *node.unwrap() = (sync_epochs, sync_uncommitted_data);
+            .find(|(epochs, _)| epochs == &sync_epochs)
+            .expect("should find");
+        stage.start_syncing()
     }
 
+    pub fn data_synced(&mut self, sync_epochs: Vec<HummockEpoch>, ssts: Vec<LocalSstableInfo>) {
+        let &mut (_, ref mut stage) = self
+            .sync_uncommitted_data
+            .iter_mut()
+            .find(|(epochs, _)| epochs == &sync_epochs)
+            .expect("should find");
+        stage.synced(ssts);
+    }
+
+    #[cfg(any(test, feature = "test"))]
     pub fn iter_shared_buffer(&self) -> impl Iterator<Item = (&HummockEpoch, &SharedBuffer)> {
         self.shared_buffer.iter()
     }
 
-    pub fn iter_mut_shared_buffer(
+    pub fn iter_mut_unsynced_shared_buffer(
         &mut self,
     ) -> impl Iterator<Item = (&HummockEpoch, &mut SharedBuffer)> {
-        self.shared_buffer.iter_mut()
+        self.shared_buffer.range_mut(self.max_sync_epoch + 1..)
     }
 
     pub fn new_shared_buffer(
@@ -403,12 +467,10 @@ impl LocalVersion {
                     (
                         epoch,
                         match data {
-                            SyncUncommittedData::Syncing(_) => {
-                                unreachable!(
-                                    "an epoch is synced while some data of it is not synced yet"
-                                )
-                            }
                             SyncUncommittedData::Synced(ssts) => ssts,
+                            invalid_stage => {
+                                unreachable!("expect synced. Now is {:?}", invalid_stage)
+                            }
                         },
                     )
                 })

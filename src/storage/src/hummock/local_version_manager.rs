@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
@@ -45,10 +45,9 @@ use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use super::SstableStoreRef;
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version::SyncUncommittedData::{Synced, Syncing};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
-use crate::hummock::shared_buffer::{to_order_sorted, OrderIndex, SharedBufferEvent, WriteRequest};
+use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef, TrackerId,
@@ -457,18 +456,11 @@ impl LocalVersionManager {
     /// Return:
     ///   - Some(task join handle) when there is new upload task
     ///   - None when there is no new task
-    pub fn flush_shared_buffer(
-        self: Arc<Self>,
-        syncing_epoch: &HashSet<HummockEpoch>,
-    ) -> Option<(HummockEpoch, JoinHandle<()>)> {
+    pub fn flush_shared_buffer(self: Arc<Self>) -> Option<(HummockEpoch, JoinHandle<()>)> {
         // The current implementation is a trivial one, which issue only one flush task and wait for
         // the task to finish.
         let mut task = None;
-        for (epoch, shared_buffer) in self.local_version.write().iter_mut_shared_buffer() {
-            // skip the epoch that is being synced
-            if syncing_epoch.get(epoch).is_some() {
-                continue;
-            }
+        for (epoch, shared_buffer) in self.local_version.write().iter_mut_unsynced_shared_buffer() {
             if let Some(upload_task) = shared_buffer.new_upload_task() {
                 task = Some((*epoch, upload_task));
                 break;
@@ -504,81 +496,50 @@ impl LocalVersionManager {
 
     pub async fn sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
         tracing::trace!("sync epoch {}", epoch);
+        let epochs_to_sync =
+            if let Some(t) = self.local_version.write().advance_max_sync_epoch(epoch) {
+                t
+            } else {
+                return Ok(SyncResult::default());
+            };
+
+        if epochs_to_sync.is_empty() {
+            return Ok(SyncResult {
+                sync_size: 0,
+                uncommitted_ssts: vec![],
+                sync_succeed: true,
+            });
+        }
+
         // Wait all epochs' task that less than epoch.
-        let epochs = self
-            .local_version
-            .read()
-            .scan_shared_buffer(..=epoch)
-            .map(|(&key, _)| key)
-            .collect_vec();
         let (tx, rx) = oneshot::channel();
         self.buffer_tracker
-            .send_event(SharedBufferEvent::SyncEpoch(epochs, tx));
+            .send_event(SharedBufferEvent::SyncEpoch(epochs_to_sync.clone(), tx));
         let join_handles = rx.await.unwrap();
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        self.sync_shared_buffer_le_epoch(epoch).await
+        self.sync_shared_buffer_epochs(epoch, epochs_to_sync).await
     }
 
     /// Sync all shared buffer that less than or equal to the `epoch`.
-    pub async fn sync_shared_buffer_le_epoch(
+    async fn sync_shared_buffer_epochs(
         &self,
-        epoch: HummockEpoch,
+        new_sync_epoch: HummockEpoch,
+        epochs: Vec<HummockEpoch>,
     ) -> HummockResult<SyncResult> {
         // Get epochs that less than epoch and add to sync_uncommitted_data, we must keep the write
         // lock.
-        let (task_payload, epochs, sync_size) = {
-            let mut local_version_guard = self.local_version.write();
-            let prev_max_sync_epoch = match local_version_guard.swap_max_sync_epoch(epoch) {
-                Some(epoch) => epoch,
-                None => {
-                    return Ok(SyncResult::default());
-                }
-            };
-            let mut sync_size = 0;
-            let mut all_uncommitted_data = vec![];
-            let mut epochs = local_version_guard
-                .drain_shared_buffer(..=epoch)
-                .into_iter()
-                .map(|(key, value)| {
-                    if let Some((uncommitted_data, size)) = value.into_uncommitted_data() {
-                        all_uncommitted_data.push(uncommitted_data);
-                        sync_size += size;
-                    };
-                    key
-                })
-                .collect_vec();
-            assert!(
-                epochs
-                    .iter()
-                    .all(|epoch| *epoch > prev_max_sync_epoch),
-                "data is written to shared buffer of older than the max_sync_epoch {}. Synced epoch: {:?}",
-                prev_max_sync_epoch,
-                epochs,
-            );
-            if epochs.is_empty() {
-                tracing::trace!("sync epoch {} has no more task to do", epoch);
-                return Ok(SyncResult {
-                    sync_succeed: true,
-                    ..Default::default()
-                });
-            }
-            // Data of smaller epoch was added first. Take a `reverse` to make the data of greater
-            // epoch appear first.
-            all_uncommitted_data.reverse();
-            epochs.reverse();
-            let task_payload = all_uncommitted_data
-                .into_iter()
-                .flat_map(to_order_sorted)
-                .collect_vec();
-            local_version_guard.add_sync_state(epochs.clone(), Syncing(task_payload.clone()));
-            (task_payload, epochs, sync_size)
-        };
+        let (task_payload, sync_size) =
+            { self.local_version.write().start_syncing(epochs.clone()) };
         let uncommitted_ssts = self
-            .run_sync_upload_task(task_payload, epochs.clone(), epoch)
+            .run_sync_upload_task(task_payload, epochs.clone(), new_sync_epoch)
             .await?;
-        tracing::trace!("sync epoch {} finished. Task size {}", epoch, sync_size);
+        tracing::info!(
+            "sync epoch {} finished. Task size {}",
+            new_sync_epoch,
+            sync_size
+        );
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.archive_epoch(epochs.clone());
         }
@@ -603,7 +564,7 @@ impl LocalVersionManager {
             .await?;
         self.local_version
             .write()
-            .add_sync_state(epochs.clone(), Synced(ssts.clone()));
+            .data_synced(epochs.clone(), ssts.clone());
         Ok(ssts)
     }
 
@@ -738,17 +699,14 @@ impl LocalVersionManager {
         local_version_manager: Arc<LocalVersionManager>,
         mut buffer_size_change_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
     ) {
-        let mut syncing_epoch = HashSet::new();
         let mut epoch_join_handle = HashMap::new();
         let try_flush_shared_buffer =
-            |syncing_epoch: &HashSet<HummockEpoch>,
-             epoch_join_handle: &mut HashMap<HummockEpoch, Vec<JoinHandle<()>>>| {
+            |epoch_join_handle: &mut HashMap<HummockEpoch, Vec<JoinHandle<()>>>| {
                 // Keep issuing new flush task until flush is not needed or we can issue
                 // no more task
                 while local_version_manager.buffer_tracker.need_more_flush() {
-                    if let Some((epoch, join_handle)) = local_version_manager
-                        .clone()
-                        .flush_shared_buffer(syncing_epoch)
+                    if let Some((epoch, join_handle)) =
+                        local_version_manager.clone().flush_shared_buffer()
                     {
                         epoch_join_handle
                             .entry(epoch)
@@ -787,7 +745,7 @@ impl LocalVersionManager {
                     SharedBufferEvent::WriteRequest(request) => {
                         if local_version_manager.buffer_tracker.can_write() {
                             grant_write_request(request);
-                            try_flush_shared_buffer(&syncing_epoch, &mut epoch_join_handle);
+                            try_flush_shared_buffer(&mut epoch_join_handle);
                         } else {
                             info!(
                                 "write request is blocked: epoch {}, size: {}",
@@ -800,7 +758,7 @@ impl LocalVersionManager {
                     SharedBufferEvent::MayFlush => {
                         // Only check and flush shared buffer after batch has been added to shared
                         // buffer.
-                        try_flush_shared_buffer(&syncing_epoch, &mut epoch_join_handle);
+                        try_flush_shared_buffer(&mut epoch_join_handle);
                     }
                     SharedBufferEvent::BufferRelease(size) => {
                         local_version_manager
@@ -821,29 +779,20 @@ impl LocalVersionManager {
                             has_granted = true;
                         }
                         if has_granted {
-                            try_flush_shared_buffer(&syncing_epoch, &mut epoch_join_handle);
+                            try_flush_shared_buffer(&mut epoch_join_handle);
                         }
                     }
                     SharedBufferEvent::SyncEpoch(epochs, join_handle_sender) => {
                         let join_handle = epochs
                             .into_iter()
-                            .flat_map(|epoch| {
-                                syncing_epoch.insert(epoch);
-                                epoch_join_handle.remove(&epoch).unwrap_or_default()
-                            })
+                            .flat_map(|epoch| epoch_join_handle.remove(&epoch).unwrap_or_default())
                             .collect_vec();
                         let _ = join_handle_sender.send(join_handle).inspect_err(|e| {
                             error!("unable to send join handles Err {:?}", e);
                         });
                     }
-                    SharedBufferEvent::EpochSynced(epochs) => {
-                        epochs.into_iter().for_each(|epoch| {
-                            assert!(
-                                syncing_epoch.remove(&epoch),
-                                "removing a previous not synced epoch {}",
-                                epoch
-                            )
-                        });
+                    SharedBufferEvent::EpochSynced(_epochs) => {
+                        // TODO: may remove this event
                     }
 
                     SharedBufferEvent::Clear(notifier) => {
