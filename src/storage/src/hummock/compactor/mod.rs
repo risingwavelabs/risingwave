@@ -227,18 +227,23 @@ impl Compactor {
             .await;
         let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
-        let mut splits: Vec<KeyRange_vec> = vec![];
-        splits.push(KeyRange_vec::new(vec![], vec![]));
-        // collect sstable_ids to get meta data
-
         let sstable_ids = compact_task
             .input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
             .map(|table_info| table_info.id)
             .collect_vec();
+
+        let compaction_size = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table_info| table_info.file_size)
+            .sum::<u64>();
+
         let mut indexes = vec![];
 
+        // blcok
         // preload the meta and get the smallest key to split sub_compaction
         for sstable_id in sstable_ids {
             // extend
@@ -253,21 +258,42 @@ impl Compactor {
                     .block_metas
                     .iter()
                     .map(|block| {
-                        FullKey::from_user_key_slice(user_key(&block.smallest_key), u64::MAX)
-                            .into_inner()
+                        let data_size = block.len;
+                        (data_size, user_key(&block.smallest_key).to_vec())
                     })
                     .collect_vec(),
             );
         }
-        indexes.sort_by(|a, b| VersionedComparator::compare_key(a.as_ref(), b.as_ref()));
-        // const SPLIT_RANGE_STEP: usize = 8;
-        // set the max number of splits task
-        let concurrency = std::cmp::min(indexes.len(), context.options.max_sub_compaction as usize);
-        let step = indexes.len() + concurrency - 1 / concurrency;
-        for (idx, key) in indexes.into_iter().enumerate() {
-            if idx > 0 && idx % step == 0 {
-                splits.last_mut().unwrap().right = key.clone();
-                splits.push(KeyRange_vec::new(key, vec![]));
+
+        // sort_by key, as for every data block has the same size;
+        indexes.sort_by(|a, b| VersionedComparator::compare_key(a.1.as_ref(), b.1.as_ref()));
+        let mut splits: Vec<KeyRange_vec> = vec![];
+        splits.push(KeyRange_vec::new(vec![], vec![]));
+
+        let sstable_size = (context.options.sstable_size_mb as u64) << 20;
+        let parallelism = std::cmp::min(
+            indexes.len() as u64,
+            context.options.max_sub_compaction as u64,
+        );
+        let sub_compaction_data_size = if compaction_size > sstable_size && parallelism > 1 {
+            compaction_size / parallelism
+        } else {
+            compaction_size
+        };
+        // let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size);
+        if parallelism > 1 && compaction_size > sstable_size {
+            let mut last_buffer_size = 0;
+            let mut last_user_key: Vec<u8> = vec![];
+            for (data_size, user_key) in indexes {
+                if last_buffer_size >= sub_compaction_data_size && !last_user_key.eq(&user_key) {
+                    let full_key = FullKey::from_user_key(user_key.clone(), u64::MAX).into_inner();
+                    splits.last_mut().unwrap().right = full_key.clone();
+                    splits.push(KeyRange_vec::new(full_key, vec![]));
+                    last_buffer_size = data_size as u64;
+                } else {
+                    last_buffer_size += data_size as u64;
+                }
+                last_user_key = user_key;
             }
         }
         compact_task.splits = splits;
