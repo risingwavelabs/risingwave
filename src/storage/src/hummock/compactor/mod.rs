@@ -243,10 +243,8 @@ impl Compactor {
 
         let mut indexes = vec![];
 
-        // blcok
         // preload the meta and get the smallest key to split sub_compaction
         for sstable_id in sstable_ids {
-            // extend
             indexes.extend(
                 context
                     .sstable_store
@@ -259,7 +257,10 @@ impl Compactor {
                     .iter()
                     .map(|block| {
                         let data_size = block.len;
-                        (data_size, user_key(&block.smallest_key).to_vec())
+                        let full_key =
+                            FullKey::from_user_key_slice(user_key(&block.smallest_key), u64::MAX)
+                                .into_inner();
+                        (data_size, full_key.to_vec())
                     })
                     .collect_vec(),
             );
@@ -280,20 +281,19 @@ impl Compactor {
         } else {
             compaction_size
         };
-        // let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size);
+
         if parallelism > 1 && compaction_size > sstable_size {
             let mut last_buffer_size = 0;
-            let mut last_user_key: Vec<u8> = vec![];
-            for (data_size, user_key) in indexes {
-                if last_buffer_size >= sub_compaction_data_size && !last_user_key.eq(&user_key) {
-                    let full_key = FullKey::from_user_key(user_key.clone(), u64::MAX).into_inner();
-                    splits.last_mut().unwrap().right = full_key.clone();
-                    splits.push(KeyRange_vec::new(full_key, vec![]));
+            let mut last_key: Vec<u8> = vec![];
+            for (data_size, key) in indexes {
+                if last_buffer_size >= sub_compaction_data_size && !last_key.eq(&key) {
+                    splits.last_mut().unwrap().right = key.clone();
+                    splits.push(KeyRange_vec::new(key.clone(), vec![]));
                     last_buffer_size = data_size as u64;
                 } else {
                     last_buffer_size += data_size as u64;
                 }
-                last_user_key = user_key;
+                last_key = key;
             }
         }
         compact_task.splits = splits;
