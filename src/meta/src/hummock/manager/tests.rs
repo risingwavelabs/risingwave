@@ -1161,7 +1161,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         .unwrap()
         .unwrap();
     let compactor = hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
     assert_eq!(

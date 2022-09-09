@@ -840,16 +840,30 @@ where
         let _timer = start_measure_real_process_timer!(self);
 
         let compaction = compaction_guard.deref_mut();
-        let mut compact_task_assignment =
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+
+        // Calculate the number of tasks assigned to each compactor.
+        let mut compactor_assigned_task_num = HashMap::new();
+        compaction
+            .compact_task_assignment
+            .values()
+            .for_each(|assignment| {
+                compactor_assigned_task_num
+                    .entry(assignment.context_id)
+                    .and_modify(|n| *n += 1)
+                    .or_insert(1);
+            });
 
         // Pick a compactor.
-        let compactor = self.compactor_manager.next_idle_compactor();
+        let compactor = self
+            .compactor_manager
+            .next_idle_compactor(&compactor_assigned_task_num);
         if compactor.is_none() {
             return Err(Error::NoIdleCompactor);
         }
 
         // Assign the task.
+        let mut compact_task_assignment =
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         let compactor = compactor.unwrap();
         let assignee_context_id = compactor.context_id();
         if let Some(assignment) = compact_task_assignment.get(&compact_task.task_id) {
@@ -1118,7 +1132,7 @@ where
                         return;
                     }
                 };
-                let compactor = match self.compactor_manager.next_idle_compactor() {
+                let compactor = match self.compactor_manager.next_compactor() {
                     None => {
                         tracing::warn!(
                             "Skip committed SST sanity check due to no available worker"

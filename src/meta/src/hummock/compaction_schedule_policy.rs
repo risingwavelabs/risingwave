@@ -103,7 +103,7 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
             let compactor = self.compactor_map.get(context_id).unwrap();
             if *compactor_assigned_task_num
                 .get(&compactor.context_id())
-                .unwrap()
+                .unwrap_or(&0)
                 < compactor.max_concurrent_task_number()
             {
                 return Some(compactor.clone());
@@ -248,7 +248,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         for compactor in self.score_to_compactor.values() {
             if *compactor_assigned_task_num
                 .get(&compactor.context_id())
-                .unwrap()
+                .unwrap_or(&0)
                 < compactor.max_concurrent_task_number()
             {
                 return Some(compactor.clone());

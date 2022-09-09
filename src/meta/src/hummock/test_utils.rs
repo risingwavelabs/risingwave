@@ -73,19 +73,12 @@ where
         .await
         .unwrap()
         .unwrap();
-    debug_assert_eq!(
-        hummock_manager
-            .compactor_manager_ref_for_test()
-            .next_idle_compactor()
-            .unwrap()
-            .context_id(),
-        context_id
-    );
     compact_task.target_level = 6;
-    hummock_manager
+    let compactor = hummock_manager
         .assign_compaction_task(&compact_task)
         .await
         .unwrap();
+    assert_eq!(compactor.context_id(), context_id);
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager(),
