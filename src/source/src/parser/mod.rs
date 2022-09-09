@@ -83,11 +83,18 @@ pub struct SourceStreamChunkRowWriter<'a> {
     op_builder: &'a mut Vec<Op>,
 }
 
-/// `WriteGuard` can't be constructed directly in other mods, so it can be used to ensure that the
-/// write methods are called at least once.
+/// `WriteGuard` can't be constructed directly in other mods due to a private field, so it can be
+/// used to ensure that all methods on [`SourceStreamChunkRowWriter`] are called at least once in
+/// the [`SourceParser::parse`] implementation.
 pub struct WriteGuard(());
 
 impl SourceStreamChunkRowWriter<'_> {
+    /// Write an `Insert` record to the [`StreamChunk`].
+    ///
+    /// # Arguments
+    ///
+    /// * `self`: Ownership is consumed so only one record can be written.
+    /// * `f`: A closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
     pub fn insert(
         self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
@@ -105,6 +112,12 @@ impl SourceStreamChunkRowWriter<'_> {
         Ok(WriteGuard(()))
     }
 
+    /// Write a `Delete` record to the [`StreamChunk`].
+    ///
+    /// # Arguments
+    ///
+    /// * `self`: Ownership is consumed so only one record can be written.
+    /// * `f`: A closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
     pub fn delete(
         self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
@@ -122,6 +135,13 @@ impl SourceStreamChunkRowWriter<'_> {
         Ok(WriteGuard(()))
     }
 
+    /// Write a `Delete` record to the [`StreamChunk`].
+    ///
+    /// # Arguments
+    ///
+    /// * `self`: Ownership is consumed so only one record can be written.
+    /// * `f`: A closure that produced two [`Datum`]s as old and new value by corresponding
+    ///   [`SourceColumnDesc`].
     pub fn update(
         self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<(Datum, Datum)>,
@@ -151,7 +171,17 @@ impl SourceStreamChunkRowWriter<'_> {
 /// Note that the `skip_parse` parameter in `SourceColumnDesc`, when it is true, should skip the
 /// parse and return `Datum` of `None`
 pub trait SourceParser: Send + Sync + Debug + 'static {
-    /// parse needs to be a member method because some format like Protobuf needs to be pre-compiled
+    /// Parse the payload and append the result to the [`StreamChunk`] directly.
+    ///
+    /// # Arguments
+    ///
+    /// - `self`: A needs to be a member method because some format like Protobuf needs to be
+    ///   pre-compiled.
+    /// - writer: Write exactly one record during a `parse` call.
+    ///
+    /// # Returns
+    ///
+    /// A [`WriteGuard`] to ensure that at least one record was appended or error occurred.
     fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard>;
 }
 
