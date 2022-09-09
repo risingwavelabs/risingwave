@@ -77,8 +77,8 @@
             LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimizer_error: |
     internal error: OverAgg can not be transformed. Plan:
-    LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
-      LogicalProject { exprs: [t.x, ROW_NUMBER] }
+    LogicalProject { exprs: [t.x, ROW_NUMBER] }
+      LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
         LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
           LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
@@ -146,9 +146,8 @@
     internal error: OverAgg can not be transformed. Plan:
     LogicalProject { exprs: [t.x, t.y] }
       LogicalFilter { predicate: (3:Int32 <= ROW_NUMBER) AND (ROW_NUMBER <= 5:Int32) }
-        LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
-          LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
-            LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+        LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
+          LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
 - id: create_bid
   sql: |
     /*
@@ -193,14 +192,15 @@
         GROUP BY window_start, window_end, supplier_id
       )
     ) WHERE rownum <= 3;
-  optimizer_error: |
-    internal error: OverAgg can not be transformed. Plan:
-    LogicalProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id, sum(bid.price), count] }
-      LogicalFilter { predicate: (ROW_NUMBER <= 3:Int32) }
-        LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval) ORDER BY sum(bid.price) DESC NULLS FIRST) }
-          LogicalAgg { group_key: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id], aggs: [sum(bid.price), count] }
-            LogicalProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id, bid.price] }
-              LogicalScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id] }
+  stream_plan: |
+    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, cnt], pk_columns: [window_start, window_end, supplier_id] }
+      StreamGroupTopN { order: "[sum(bid.price) DESC]", limit: 3, offset: 0, group_key: [0, 1] }
+        StreamExchange { dist: HashShard(TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)) }
+          StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id, sum(bid.price), count] }
+            StreamHashAgg { group_key: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id], aggs: [count, sum(bid.price), count] }
+              StreamExchange { dist: HashShard(TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id) }
+                StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id, bid.price, bid._row_id] }
+                  StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
 - before:
   - create_bid
   sql: |
