@@ -487,5 +487,6 @@ mod tests {
                 .await,
             ScheduleStatus::Ok
         );
+        assert_eq!(1, hummock_manager.list_all_tasks().await.len());
     }
 }
