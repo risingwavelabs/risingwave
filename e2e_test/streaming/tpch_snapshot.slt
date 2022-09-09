@@ -25,6 +25,7 @@ include ./tpch/q11.slt.part
 include ./tpch/q12.slt.part
 include ./tpch/q13.slt.part
 include ./tpch/q14.slt.part
+include ./tpch/q15.slt.part
 include ./tpch/q17.slt.part
 include ./tpch/q18.slt.part
 include ./tpch/q19.slt.part

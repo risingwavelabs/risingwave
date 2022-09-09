@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
-use risingwave_common::util::sync_point::on_sync_point;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
@@ -69,30 +68,6 @@ where
 {
     type SubscribeCompactTasksStream = RwReceiverStream<SubscribeCompactTasksResponse>;
 
-    async fn pin_version(
-        &self,
-        request: Request<PinVersionRequest>,
-    ) -> Result<Response<PinVersionResponse>, Status> {
-        let req = request.into_inner();
-        let payload = self
-            .hummock_manager
-            .pin_version(req.context_id, req.last_pinned)
-            .await?;
-        Ok(Response::new(PinVersionResponse {
-            status: None,
-            payload: Some(payload),
-        }))
-    }
-
-    async fn unpin_version(
-        &self,
-        request: Request<UnpinVersionRequest>,
-    ) -> Result<Response<UnpinVersionResponse>, Status> {
-        let req = request.into_inner();
-        self.hummock_manager.unpin_version(req.context_id).await?;
-        Ok(Response::new(UnpinVersionResponse { status: None }))
-    }
-
     async fn unpin_version_before(
         &self,
         request: Request<UnpinVersionBeforeRequest>,
@@ -102,6 +77,17 @@ where
             .unpin_version_before(req.context_id, req.unpin_version_before)
             .await?;
         Ok(Response::new(UnpinVersionBeforeResponse { status: None }))
+    }
+
+    async fn get_current_version(
+        &self,
+        _request: Request<GetCurrentVersionRequest>,
+    ) -> Result<Response<GetCurrentVersionResponse>, Status> {
+        let current_version = self.hummock_manager.get_current_version().await;
+        Ok(Response::new(GetCurrentVersionResponse {
+            status: None,
+            current_version: Some(current_version),
+        }))
     }
 
     async fn report_compaction_tasks(
@@ -211,7 +197,7 @@ where
         if let Some(vacuum_task) = request.into_inner().vacuum_task {
             self.vacuum_manager.report_vacuum_task(vacuum_task).await?;
         }
-        on_sync_point("AFTER_REPORT_VACUUM").await.unwrap();
+        sync_point::on("AFTER_REPORT_VACUUM").await;
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
     }
 

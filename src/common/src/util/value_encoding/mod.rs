@@ -19,8 +19,8 @@ use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 
 use crate::types::{
-    DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
+    to_datum_ref, DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper,
+    NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
 };
 
 pub mod error;
@@ -28,8 +28,6 @@ use error::ValueEncodingError;
 use risingwave_pb::data::data_type::TypeName;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
-
-use crate::array::{ListRef, StructRef};
 
 /// Serialize datum into cell bytes (Not order guarantee, used in value encoding).
 pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
@@ -49,15 +47,18 @@ pub fn deserialize_cell(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
 }
 
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
-pub fn serialize_datum(cell: &Datum) -> Result<Vec<u8>> {
-    let mut buf: Vec<u8> = vec![];
-    if let Some(datum) = cell {
+pub fn serialize_datum(cell: &Datum, buf: impl BufMut) {
+    serialize_datum_ref(&to_datum_ref(cell), buf);
+}
+
+/// Serialize a datum into bytes (Not order guarantee, used in value encoding).
+pub fn serialize_datum_ref(datum_ref: &DatumRef, mut buf: impl BufMut) {
+    if let Some(d) = datum_ref {
         buf.put_u8(1);
-        serialize_value(datum.as_scalar_ref_impl(), &mut buf)
+        serialize_value(*d, &mut buf)
     } else {
         buf.put_u8(0);
     }
-    Ok(buf)
 }
 
 /// Deserialize bytes into a datum (Not order guarantee, used in value encoding).
@@ -88,14 +89,11 @@ fn serialize_value(value: ScalarRefImpl, mut buf: impl BufMut) {
         ScalarRefImpl::NaiveTime(v) => {
             serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
-        ScalarRefImpl::Struct(StructRef::ValueRef { val }) => {
-            serialize_struct_or_list(val.to_protobuf_owned(), buf);
+        ScalarRefImpl::Struct(s) => {
+            serialize_struct_or_list(s.to_protobuf_owned(), buf);
         }
-        ScalarRefImpl::List(ListRef::ValueRef { val }) => {
-            serialize_struct_or_list(val.to_protobuf_owned(), buf);
-        }
-        _ => {
-            panic!("Type is unable to be serialized.")
+        ScalarRefImpl::List(list) => {
+            serialize_struct_or_list(list.to_protobuf_owned(), buf);
         }
     }
 }

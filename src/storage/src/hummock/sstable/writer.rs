@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 
 use super::BlockMeta;
-use crate::hummock::{HummockResult, SstableBuilderOptions};
+use crate::hummock::{HummockResult, SstableBuilderOptions, SstableMeta};
 
 /// A consumer of SST data.
 pub trait SstableWriter: Send {
@@ -25,7 +25,7 @@ pub trait SstableWriter: Send {
     fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()>;
 
     /// Finish writing the SST.
-    fn finish(self, size_footer: u32) -> HummockResult<Self::Output>;
+    fn finish(self, meta: SstableMeta) -> HummockResult<Self::Output>;
 
     /// Get the length of data that has already been written.
     fn data_len(&self) -> usize;
@@ -33,13 +33,13 @@ pub trait SstableWriter: Send {
 
 /// Append SST data to a buffer. Used for tests and benchmarks.
 pub struct InMemWriter {
-    buf: BytesMut,
+    buf: Vec<u8>,
 }
 
 impl InMemWriter {
     pub fn new(capacity: usize) -> Self {
         Self {
-            buf: BytesMut::with_capacity(capacity),
+            buf: Vec::with_capacity(capacity),
         }
     }
 }
@@ -51,17 +51,16 @@ impl From<&SstableBuilderOptions> for InMemWriter {
 }
 
 impl SstableWriter for InMemWriter {
-    type Output = Bytes;
+    type Output = (Bytes, SstableMeta);
 
     fn write_block(&mut self, block: &[u8], _meta: &BlockMeta) -> HummockResult<()> {
-        self.buf.put_slice(block);
+        self.buf.extend_from_slice(block);
         Ok(())
     }
 
-    fn finish(mut self, size_footer: u32) -> HummockResult<Self::Output> {
-        self.buf.put_slice(&size_footer.to_le_bytes());
-        let data = self.buf.freeze();
-        Ok(data)
+    fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
+        meta.encode_to(&mut self.buf);
+        Ok((Bytes::from(self.buf), meta))
     }
 
     fn data_len(&self) -> usize {
@@ -104,6 +103,7 @@ mod tests {
             key_count: 0,
             smallest_key: Vec::new(),
             largest_key: Vec::new(),
+            meta_offset: data.len() as u64,
             version: VERSION,
         };
 
@@ -120,7 +120,8 @@ mod tests {
             .for_each(|(block, meta)| {
                 writer.write_block(&block[..], meta).unwrap();
             });
-        let output_data = writer.finish(blocks.len() as u32).unwrap();
-        assert_eq!(output_data, data);
+        let meta_offset = meta.meta_offset as usize;
+        let (output_data, _) = writer.finish(meta).unwrap();
+        assert_eq!(output_data.slice(0..meta_offset), data);
     }
 }

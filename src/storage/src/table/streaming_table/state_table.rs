@@ -22,12 +22,13 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
-use risingwave_common::array::Row;
+use itertools::{izip, Itertools};
+use risingwave_common::array::{Op, Row, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
 use risingwave_common::types::VirtualNode;
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
@@ -38,7 +39,7 @@ use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
-    serialize_pk, serialize_pk_with_vnode, serialize_value, streaming_deserialize,
+    serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -365,7 +366,7 @@ impl<S: StateStore> StateTable<S> {
 
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = serialize_value(value).map_err(err)?;
+        let value_bytes = value.serialize().map_err(err)?;
         self.mem_table.insert(key_bytes, value_bytes);
         Ok(())
     }
@@ -376,7 +377,7 @@ impl<S: StateStore> StateTable<S> {
         let pk = old_value.by_indices(self.pk_indices());
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = serialize_value(old_value).map_err(err)?;
+        let value_bytes = old_value.serialize().map_err(err)?;
         self.mem_table.delete(key_bytes, value_bytes);
         Ok(())
     }
@@ -393,11 +394,61 @@ impl<S: StateStore> StateTable<S> {
             self.compute_vnode_by_pk(&new_pk),
         );
 
-        let old_value_bytes = serialize_value(old_value).map_err(err)?;
-        let new_value_bytes = serialize_value(new_value).map_err(err)?;
+        let old_value_bytes = old_value.serialize().map_err(err)?;
+        let new_value_bytes = new_value.serialize().map_err(err)?;
         self.mem_table
             .update(new_key_bytes, old_value_bytes, new_value_bytes);
         Ok(())
+    }
+
+    /// Write batch with a `StreamChunk` which should have the same schema with the table.
+    // allow(izip, which use zip instead of zip_eq)
+    #[allow(clippy::disallowed_methods)]
+    pub fn write_chunk(&mut self, chunk: StreamChunk) {
+        let (chunk, op) = chunk.into_parts();
+        let hash_builder = CRC32FastBuilder {};
+
+        let mut vnode_and_pks = vec![vec![]; chunk.capacity()];
+
+        chunk
+            .get_hash_values(&self.dist_key_indices, hash_builder)
+            .unwrap()
+            .into_iter()
+            .zip_eq(vnode_and_pks.iter_mut())
+            .for_each(|(h, vnode_and_pk)| vnode_and_pk.extend(h.to_vnode().to_be_bytes()));
+        let values = chunk.serialize();
+
+        let chunk = chunk.reorder_columns(self.pk_indices());
+        chunk
+            .rows_with_holes()
+            .zip_eq(vnode_and_pks.iter_mut())
+            .for_each(|(r, vnode_and_pk)| {
+                if let Some(r) = r {
+                    self.pk_serializer.serialize_ref(r, vnode_and_pk);
+                }
+            });
+
+        let (_, vis) = chunk.into_parts();
+        match vis {
+            Vis::Bitmap(vis) => {
+                for ((op, key, value), vis) in izip!(op, vnode_and_pks, values).zip_eq(vis.iter()) {
+                    if vis {
+                        match op {
+                            Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
+                            Op::Delete | Op::UpdateDelete => self.mem_table.delete(key, value),
+                        }
+                    }
+                }
+            }
+            Vis::Compact(_) => {
+                for (op, key, value) in izip!(op, vnode_and_pks, values) {
+                    match op {
+                        Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
+                        Op::Delete | Op::UpdateDelete => self.mem_table.delete(key, value),
+                    }
+                }
+            }
+        }
     }
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
@@ -407,7 +458,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Write to state store.
-    pub async fn batch_write_rows(
+    async fn batch_write_rows(
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,

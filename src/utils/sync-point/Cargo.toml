@@ -1,0 +1,11 @@
+[package]
+name = "sync-point"
+version = "0.1.0"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures-util = "0.3"
+spin = "0.9"
+thiserror = "1"
+tokio = { version = "0.2", package = "madsim-tokio", features = ["sync", "time"] }

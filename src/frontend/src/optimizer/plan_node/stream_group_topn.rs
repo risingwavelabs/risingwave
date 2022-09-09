@@ -25,16 +25,16 @@ use crate::PlanRef;
 pub struct StreamGroupTopN {
     pub base: PlanBase,
     logical: LogicalTopN,
-    group_key: Vec<usize>,
 }
 
 impl StreamGroupTopN {
-    pub fn new(logical: LogicalTopN, group_key: Vec<usize>) -> Self {
+    pub fn new(logical: LogicalTopN) -> Self {
+        assert!(!logical.group_key().is_empty());
         let input = logical.input();
         let dist = match input.distribution() {
-            Distribution::HashShard(_) => Distribution::HashShard(group_key.clone()),
+            Distribution::HashShard(_) => Distribution::HashShard(logical.group_key().to_vec()),
             Distribution::UpstreamHashShard(_) => {
-                Distribution::UpstreamHashShard(group_key.clone())
+                Distribution::UpstreamHashShard(logical.group_key().to_vec())
             }
             _ => input.distribution().clone(),
         };
@@ -46,31 +46,26 @@ impl StreamGroupTopN {
             dist,
             false,
         );
-        StreamGroupTopN {
-            base,
-            logical,
-            group_key,
-        }
+        StreamGroupTopN { base, logical }
     }
 }
 
 impl StreamNode for StreamGroupTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let group_key = self.group_key.iter().map(|idx| *idx as u32).collect();
-
+        let group_key = self.logical.group_key();
         if self.logical.limit() == 0 {
             panic!("topN's limit shouldn't be 0.");
         }
         let table = self
             .logical
-            .infer_internal_table_catalog(Some(&self.group_key))
+            .infer_internal_table_catalog(Some(group_key))
             .with_id(state.gen_table_id_wrapped());
         let group_topn_node = GroupTopNNode {
             limit: self.logical.limit() as u64,
             offset: self.logical.offset() as u64,
-            group_key,
-            table: Some(table.to_state_table_prost()),
+            group_key: group_key.iter().map(|idx| *idx as u32).collect(),
+            table: Some(table.to_internal_table_prost()),
         };
 
         ProstStreamNode::GroupTopN(group_topn_node)
@@ -95,7 +90,7 @@ impl fmt::Display for StreamGroupTopN {
         builder
             .field("limit", &format_args!("{}", self.logical.limit()))
             .field("offset", &format_args!("{}", self.logical.offset()))
-            .field("group_key", &format_args!("{:?}", self.group_key))
+            .field("group_key", &format_args!("{:?}", self.logical.group_key()))
             .finish()
     }
 }
@@ -108,6 +103,6 @@ impl PlanTreeNodeUnary for StreamGroupTopN {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input), self.group_key.clone())
+        Self::new(self.logical.clone_with_input(input))
     }
 }

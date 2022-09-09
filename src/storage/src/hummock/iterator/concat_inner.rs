@@ -70,7 +70,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
         } else {
             let table = self
                 .sstable_store
-                .sstable(self.tables[idx].id, &mut self.stats)
+                .sstable(&self.tables[idx], &mut self.stats)
                 .await?;
             let mut sstable_iter =
                 TI::create(table, self.sstable_store.clone(), self.read_options.clone());

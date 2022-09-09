@@ -56,7 +56,7 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum StageState {
     Pending,
     Started,
@@ -201,17 +201,6 @@ impl StageExecution {
     }
 
     pub async fn stop(&self) {
-        // Set state to failed.
-        {
-            let mut state = self.state.write().await;
-            // Ignore if already finished.
-            if *state == StageState::Completed {
-                return;
-            }
-            // FIXME: Be careful for state jump back.
-            *state = StageState::Failed
-        }
-
         // Send message to tell Stage Runner stop.
         if let Some(shutdown_tx) = self.shutdown_rx.write().await.take() {
             // It's possible that the stage has not been scheduled, so the channel sender is
@@ -453,11 +442,15 @@ impl StageRunner {
         {
             // Changing state
             let mut s = self.state.write().await;
-            match mem::replace(&mut *s, StageState::Failed) {
+            let state = mem::replace(&mut *s, StageState::Failed);
+            match state {
                 StageState::Started => {
                     *s = StageState::Running;
                 }
-                _ => unreachable!(),
+                _ => unreachable!(
+                    "The state can not be {:?} for query-{:?}-{:?} to do notify ",
+                    state, self.stage.query_id.id, self.stage.id
+                ),
             }
         }
         self.send_event(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
@@ -468,6 +461,17 @@ impl StageRunner {
     /// failed or completed, cuz the abort task will not fail if the task has already die.
     /// See PR (#4560).
     async fn abort_all_running_tasks(&self) -> SchedulerResult<()> {
+        // Set state to failed.
+        {
+            let mut state = self.state.write().await;
+            // Ignore if already finished.
+            if *state == StageState::Completed {
+                return Ok(());
+            }
+            // FIXME: Be careful for state jump back.
+            *state = StageState::Failed
+        }
+
         for (task, task_status) in self.tasks.iter() {
             // 1. Collect task info and client.
             let loc = &task_status.get_status().location;
