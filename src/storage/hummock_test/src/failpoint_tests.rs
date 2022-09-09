@@ -118,7 +118,7 @@ async fn test_failpoints_state_store_read_upload() {
     let ssts = hummock_storage.sync(1).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(1, ssts).await.unwrap();
     local_version_manager
-        .wait_epoch(HummockReadEpoch::Committed(1))
+        .try_wait_epoch(HummockReadEpoch::Committed(1))
         .await
         .unwrap();
     // clear block cache
@@ -175,7 +175,7 @@ async fn test_failpoints_state_store_read_upload() {
     let ssts = hummock_storage.sync(3).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(3, ssts).await.unwrap();
     local_version_manager
-        .wait_epoch(HummockReadEpoch::Committed(3))
+        .try_wait_epoch(HummockReadEpoch::Committed(3))
         .await
         .unwrap();
 
