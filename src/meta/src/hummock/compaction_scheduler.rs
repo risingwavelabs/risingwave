@@ -161,21 +161,24 @@ where
             .await;
         let cancel_task = match &schedule_status {
             ScheduleStatus::Ok => None,
-            ScheduleStatus::NoTask => None,
-            ScheduleStatus::NoAvailableCompactor(task) => Some(task.clone()),
-            ScheduleStatus::AssignFailure(task) => Some(task.clone()),
-            ScheduleStatus::SendFailure(task) => Some(task.clone()),
-            ScheduleStatus::PickFailure => None,
+            ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
+            ScheduleStatus::NoAvailableCompactor(task)
+            | ScheduleStatus::AssignFailure(task)
+            | ScheduleStatus::SendFailure(task) => Some(task.clone()),
         };
         if let Some(mut compact_task) = cancel_task {
             // Try to cancel task immediately.
-            if self
+            if let Err(err) = self
                 .hummock_manager
                 .cancel_compact_task(&mut compact_task)
                 .await
-                .is_err()
             {
                 // Cancel task asynchronously.
+                tracing::warn!(
+                    "Failed to cancel task {}. {}. It will be cancelled asynchronously.",
+                    compact_task.task_id,
+                    err
+                );
                 self.env
                     .notification_manager()
                     .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(
@@ -460,7 +463,7 @@ mod tests {
             ScheduleStatus::AssignFailure(_)
         );
         fail::remove(fp_assign_compaction_task_fail);
-        assert!(hummock_manager.list_all_tasks().await.is_empty());
+        assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
 
         // Send failed and task cancelled.
         let fp_compaction_send_task_fail = "compaction_send_task_fail";
@@ -475,7 +478,7 @@ mod tests {
             ScheduleStatus::SendFailure(_)
         );
         fail::remove(fp_compaction_send_task_fail);
-        assert!(hummock_manager.list_all_tasks().await.is_empty());
+        assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
 
         // Succeeded.
         assert_matches!(
@@ -487,6 +490,6 @@ mod tests {
                 .await,
             ScheduleStatus::Ok
         );
-        assert_eq!(1, hummock_manager.list_all_tasks().await.len());
+        assert_eq!(1, hummock_manager.list_all_tasks_ids().await.len());
     }
 }

@@ -124,7 +124,7 @@ where
     }
 
     #[named]
-    pub async fn list_all_tasks(&self) -> Vec<HummockCompactionTaskId> {
+    pub async fn list_all_tasks_ids(&self) -> Vec<HummockCompactionTaskId> {
         let compaction = read_lock!(self, compaction).await;
         compaction
             .compaction_statuses
