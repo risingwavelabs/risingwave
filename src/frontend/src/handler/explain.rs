@@ -116,6 +116,7 @@ pub(super) fn handle_explain(
 
     let ctx = plan.plan_base().ctx.clone();
     let explain_trace = ctx.is_explain_trace();
+    let explain_verbose = ctx.is_explain_verbose();
 
     let mut rows = if explain_trace {
         let trace = ctx.take_trace();
@@ -132,7 +133,7 @@ pub(super) fn handle_explain(
         if is_streaming {
             let graph = build_graph(plan);
             rows.extend(
-                explain_stream_graph(&graph)?
+                explain_stream_graph(&graph, explain_verbose)?
                     .lines()
                     .map(|s| Row::new(vec![Some(s.to_string().into())])),
             );
