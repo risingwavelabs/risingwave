@@ -385,7 +385,6 @@ impl LocalVersionManager {
         epoch: HummockEpoch,
         compaction_group_id: CompactionGroupId,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        is_remote_batch: bool,
         table_id: u32,
     ) -> HummockResult<usize> {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
@@ -398,7 +397,7 @@ impl LocalVersionManager {
         );
         let batch_size = batch.size();
         if self.buffer_tracker.try_write(batch_size) {
-            self.write_shared_buffer_inner(epoch, batch, is_remote_batch);
+            self.write_shared_buffer_inner(epoch, batch);
             self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
         } else {
             let (tx, rx) = oneshot::channel();
@@ -406,7 +405,6 @@ impl LocalVersionManager {
                 .send_event(SharedBufferEvent::WriteRequest(WriteRequest {
                     batch,
                     epoch,
-                    is_remote_batch,
                     grant_sender: tx,
                 }));
             rx.await.unwrap();
@@ -414,12 +412,7 @@ impl LocalVersionManager {
         Ok(batch_size)
     }
 
-    fn write_shared_buffer_inner(
-        &self,
-        epoch: HummockEpoch,
-        batch: SharedBufferBatch,
-        is_remote_batch: bool,
-    ) {
+    fn write_shared_buffer_inner(&self, epoch: HummockEpoch, batch: SharedBufferBatch) {
         let mut local_version_guard = self.local_version.write();
         let sealed_epoch = local_version_guard.get_sealed_epoch();
         assert!(
@@ -429,18 +422,14 @@ impl LocalVersionManager {
             sealed_epoch
         );
         // Write into shared buffer
-        if is_remote_batch {
-            // The batch won't be synced to S3 asynchronously if it is a remote batch
-            local_version_guard.replicate_batch(epoch, batch);
-        } else {
-            let shared_buffer = match local_version_guard.get_mut_shared_buffer(epoch) {
-                Some(shared_buffer) => shared_buffer,
-                None => local_version_guard
-                    .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size.clone()),
-            };
-            // The batch will be synced to S3 asynchronously if it is a local batch
-            shared_buffer.write_batch(batch);
-        }
+
+        let shared_buffer = match local_version_guard.get_mut_shared_buffer(epoch) {
+            Some(shared_buffer) => shared_buffer,
+            None => local_version_guard
+                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size.clone()),
+        };
+        // The batch will be synced to S3 asynchronously if it is a local batch
+        shared_buffer.write_batch(batch);
 
         // Notify the buffer tracker after the batch has been added to shared buffer.
         self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
@@ -765,11 +754,10 @@ impl LocalVersionManager {
             let WriteRequest {
                 batch,
                 epoch,
-                is_remote_batch,
                 grant_sender: sender,
             } = request;
             let size = batch.size();
-            local_version_manager.write_shared_buffer_inner(epoch, batch, is_remote_batch);
+            local_version_manager.write_shared_buffer_inner(epoch, batch);
             local_version_manager
                 .buffer_tracker
                 .global_buffer_size
