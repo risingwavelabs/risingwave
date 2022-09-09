@@ -1,9 +1,9 @@
 query ITIIT
 SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 6;
 ----
-1 pg_type 1 system table
-2 pg_namespace 1 system table
-3 pg_cast 1 system table
-4 pg_matviews_info 1 system table
-5 pg_user 1 system table
-6 pg_class 1 system table
+1 pg_type 1 r
+2 pg_namespace 1 r
+3 pg_cast 1 r
+4 pg_matviews_info 1 r
+5 pg_user 1 r
+6 pg_class 1 r

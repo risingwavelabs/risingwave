@@ -246,7 +246,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             let row = {
                                 keyspace
                                     .state_store()
-                                    .wait_epoch(HummockReadEpoch::Committed(source.epoch))
+                                    .try_wait_epoch(HummockReadEpoch::Committed(source.epoch))
                                     .await?;
                                 table.get_row(&pk_prefix_value, source.epoch).await?
                             };

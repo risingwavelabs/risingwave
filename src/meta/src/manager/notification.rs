@@ -15,7 +15,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::{self, UnboundedSender};
@@ -26,11 +27,8 @@ use crate::manager::cluster::WorkerKey;
 
 pub type MessageStatus = Status;
 pub type Notification = Result<SubscribeResponse, Status>;
-
+pub type NotificationManagerRef = Arc<NotificationManager>;
 pub type NotificationVersion = u64;
-
-use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::CompactTask;
 
 #[derive(Clone)]
 pub enum LocalNotification {
@@ -53,8 +51,6 @@ pub struct NotificationManager {
     task_tx: UnboundedSender<Task>,
 }
 
-pub type NotificationManagerRef = Arc<NotificationManager>;
-
 impl NotificationManager {
     pub fn new() -> Self {
         // notification waiting queue.
@@ -65,13 +61,10 @@ impl NotificationManager {
         tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
                 let mut guard = core.lock().await;
-                let version = match task.target {
-                    WorkerType::Generic => guard.notify_all(task.operation, &task.info),
-
-                    _ => guard.notify(task.target, task.operation, &task.info),
-                };
+                guard.current_version += 1;
+                guard.notify(task.target, task.operation, &task.info);
                 if let Some(tx) = task.callback_tx {
-                    tx.send(version).unwrap();
+                    tx.send(guard.current_version).unwrap();
                 }
             }
         });
@@ -132,11 +125,6 @@ impl NotificationManager {
         self.notify_asynchronously(WorkerType::ComputeNode, operation, info);
     }
 
-    /// To notify all the `worker_type` sender
-    pub async fn notify_all_node(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(WorkerType::Generic, operation, info).await
-    }
-
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
         let mut core_guard = self.core.lock().await;
         core_guard.local_senders.retain(|sender| {
@@ -149,10 +137,15 @@ impl NotificationManager {
     }
 
     /// Tell `NotificationManagerCore` to delete sender.
-    pub async fn delete_sender(&self, worker_key: WorkerKey) {
+    pub async fn delete_sender(&self, worker_type: WorkerType, worker_key: WorkerKey) {
         let mut core_guard = self.core.lock().await;
-        core_guard.compute_senders.remove(&worker_key);
-        core_guard.frontend_senders.remove(&worker_key);
+        match worker_type {
+            WorkerType::Frontend => core_guard.compute_senders.remove(&worker_key),
+            WorkerType::ComputeNode => core_guard.frontend_senders.remove(&worker_key),
+            WorkerType::Compactor => core_guard.compactor_senders.remove(&worker_key),
+            WorkerType::RiseCtl => core_guard.risectl_senders.remove(&worker_key),
+            _ => unreachable!(),
+        };
     }
 
     /// Tell `NotificationManagerCore` to insert sender by `worker_type`.
@@ -167,7 +160,7 @@ impl NotificationManager {
             WorkerType::Frontend => &mut core_guard.frontend_senders,
             WorkerType::ComputeNode => &mut core_guard.compute_senders,
             WorkerType::Compactor => &mut core_guard.compactor_senders,
-
+            WorkerType::RiseCtl => &mut core_guard.risectl_senders,
             _ => unreachable!(),
         };
 
@@ -198,6 +191,8 @@ struct NotificationManagerCore {
     compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to compactor nodes.
     compactor_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    /// The notification sender to risectl nodes.
+    risectl_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
 
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
@@ -212,91 +207,39 @@ impl NotificationManagerCore {
             frontend_senders: HashMap::new(),
             compute_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
+            risectl_senders: HashMap::new(),
             local_senders: vec![],
+            /// FIXME: see issue #5145, may cause frontend to wait. Refactor after decouple ckpt.
             current_version: 0,
         }
     }
 
-    fn notify(
-        &mut self,
-        worker_type: WorkerType,
-        operation: Operation,
-        info: &Info,
-    ) -> NotificationVersion {
-        self.current_version += 1;
-
+    fn notify(&mut self, worker_type: WorkerType, operation: Operation, info: &Info) {
         let senders = match worker_type {
             WorkerType::Frontend => &mut self.frontend_senders,
             WorkerType::ComputeNode => &mut self.compute_senders,
             WorkerType::Compactor => &mut self.compactor_senders,
-
+            WorkerType::RiseCtl => &mut self.risectl_senders,
             _ => unreachable!(),
         };
 
-        let mut bad_keys = vec![];
-        for (worker_key, sender) in senders.iter() {
-            if let Err(err) = sender.send(Ok(SubscribeResponse {
-                status: None,
-                operation: operation as i32,
-                info: Some(info.clone()),
-                version: self.current_version,
-            })) {
-                tracing::warn!(
-                    "Failed to notify {:?} {:?}: {}",
-                    worker_type,
-                    worker_key,
-                    err
-                );
-                bad_keys.push(worker_key.clone());
-            }
-        }
-        for worker_key in bad_keys {
-            senders.remove(&worker_key);
-        }
-
-        self.current_version
-    }
-
-    fn notify_all(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
-        self.current_version += 1;
-
-        let mut bad_keys = vec![];
-        for (worker_type, worker_key, sender) in self
-            .frontend_senders
-            .iter()
-            .map(|(worker_key, sender)| (WorkerType::Frontend, worker_key, sender))
-            .chain(
-                self.compute_senders
-                    .iter()
-                    .map(|(worker_key, sender)| (WorkerType::ComputeNode, worker_key, sender)),
-            )
-            .chain(
-                self.compactor_senders
-                    .iter()
-                    .map(|(worker_key, sender)| (WorkerType::Compactor, worker_key, sender)),
-            )
-        {
-            if let Err(err) = sender.send(Ok(SubscribeResponse {
-                status: None,
-                operation: operation as i32,
-                info: Some(info.clone()),
-                version: self.current_version,
-            })) {
-                tracing::warn!("Failed to notify_all {:?}: {}", worker_key, err);
-                bad_keys.push((worker_type, worker_key.clone()));
-            }
-        }
-        for (worker_type, worker_key) in bad_keys {
-            let senders = match worker_type {
-                WorkerType::Frontend => &mut self.frontend_senders,
-                WorkerType::ComputeNode => &mut self.compute_senders,
-                WorkerType::Compactor => &mut self.compactor_senders,
-
-                _ => unreachable!(),
-            };
-            senders.remove(&worker_key);
-        }
-
-        self.current_version
+        senders.retain(|worker_key, sender| {
+            sender
+                .send(Ok(SubscribeResponse {
+                    status: None,
+                    operation: operation as i32,
+                    info: Some(info.clone()),
+                    version: self.current_version,
+                }))
+                .inspect_err(|err| {
+                    tracing::warn!(
+                        "Failed to notify {:?} {:?}: {}",
+                        worker_type,
+                        worker_key,
+                        err
+                    )
+                })
+                .is_ok()
+        });
     }
 }

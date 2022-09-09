@@ -112,6 +112,7 @@ impl EstimateSize for JoinEntryState {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::array::*;
     use risingwave_common::types::ScalarImpl;
 

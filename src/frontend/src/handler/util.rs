@@ -12,18 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use bytes::Bytes;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, ScalarRefImpl};
-use risingwave_sqlparser::ast::{SqlOption, Value};
 
 use crate::binder::{BoundSetExpr, BoundStatement};
 
@@ -97,24 +92,6 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
         DataType::Struct { .. } => TypeOid::Varchar,
         DataType::List { .. } => TypeOid::Varchar,
     }
-}
-
-pub fn handle_with_properties(
-    ctx: &str,
-    options: Vec<SqlOption>,
-) -> Result<HashMap<String, String>> {
-    options
-        .into_iter()
-        .map(|x| match x.value {
-            Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
-            Value::Number(n) => Ok((x.name.real_value(), n)),
-            Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
-            _ => Err(RwError::from(ProtocolError(format!(
-                "{} with properties only support single quoted string value",
-                ctx
-            )))),
-        })
-        .collect()
 }
 
 /// Check whether need to force query mode to local.
