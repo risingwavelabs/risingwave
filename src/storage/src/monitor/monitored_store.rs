@@ -269,20 +269,6 @@ where
         panic!("the state store is already monitored")
     }
 
-    fn replicate_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_> {
-        async move {
-            self.inner
-                .replicate_batch(kv_pairs, write_options)
-                .stack_trace("store_replicate_batch")
-                .await
-                .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
-        }
-    }
-
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move {
             self.inner

@@ -84,7 +84,6 @@ impl UncommittedData {
 
 pub(crate) type OrderIndex = usize;
 /// `{ end_key -> batch }`
-pub(crate) type KeyIndexSharedBufferBatch = BTreeMap<Vec<u8>, SharedBufferBatch>;
 /// `{ (end key, order_id) -> batch }`
 pub(crate) type KeyIndexedUncommittedData = BTreeMap<(Vec<u8>, OrderIndex), UncommittedData>;
 /// uncommitted data sorted by order index in descending order. Data in the same inner list share
@@ -169,7 +168,6 @@ pub struct SharedBuffer {
     // OrderIndex -> (task payload, task write batch size)
     uploading_tasks: HashMap<OrderIndex, (KeyIndexedUncommittedData, usize)>,
     upload_batches_size: usize,
-    replicate_batches_size: usize,
 
     global_upload_task_size: Arc<AtomicUsize>,
 
@@ -180,7 +178,6 @@ pub struct SharedBuffer {
 pub struct WriteRequest {
     pub batch: SharedBufferBatch,
     pub epoch: HummockEpoch,
-    pub is_remote_batch: bool,
     pub grant_sender: oneshot::Sender<()>,
 }
 
@@ -215,7 +212,6 @@ impl SharedBuffer {
             uncommitted_data: Default::default(),
             uploading_tasks: Default::default(),
             upload_batches_size: 0,
-            replicate_batches_size: 0,
             global_upload_task_size,
             next_order_index: 0,
         }
@@ -451,7 +447,7 @@ impl SharedBuffer {
     }
 
     pub fn size(&self) -> usize {
-        self.upload_batches_size + self.replicate_batches_size
+        self.upload_batches_size
     }
 
     fn get_next_order_index(&mut self) -> OrderIndex {

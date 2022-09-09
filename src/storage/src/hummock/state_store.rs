@@ -102,19 +102,12 @@ impl HummockStorage {
         let mut overlapped_iters = vec![];
 
         let ReadVersion {
-            replicated_batches,
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
         } = self.read_filter(&read_options, &key_range)?;
 
         let mut local_stats = StoreLocalStatistic::default();
-
-        for epoch_replicated_batches in replicated_batches {
-            for batch in epoch_replicated_batches {
-                overlapped_iters.push(HummockIteratorUnion::First(batch.into_directed_iter()));
-            }
-        }
         for uncommitted_data in shared_buffer_data {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
@@ -293,7 +286,6 @@ impl HummockStorage {
         };
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
-            replicated_batches,
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
@@ -301,16 +293,6 @@ impl HummockStorage {
 
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
-
-        // Query replicated batches. Return the value without iterating SSTs if found
-        for epoch_replicated_batches in replicated_batches {
-            for batch in epoch_replicated_batches {
-                if let Some(v) = self.get_from_batch(&batch, key) {
-                    local_stats.report(self.stats.as_ref());
-                    return Ok(v.into_user_value());
-                }
-            }
-        }
 
         // Query shared buffer. Return the value without iterating SSTs if found
         for uncommitted_data in shared_buffer_data {
@@ -518,36 +500,10 @@ impl StateStore for HummockStorage {
                     epoch,
                     compaction_group_id,
                     kv_pairs,
-                    false,
                     write_options.table_id.into(),
                 )
                 .await?;
             Ok(size)
-        }
-    }
-
-    /// Replicates a batch to shared buffer, without uploading to the storage backend.
-    fn replicate_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_> {
-        async move {
-            let epoch = write_options.epoch;
-            let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
-            // See comments in HummockStorage::iter_inner for details about using
-            // compaction_group_id in read/write path.
-            self.local_version_manager
-                .write_shared_buffer(
-                    epoch,
-                    compaction_group_id,
-                    kv_pairs,
-                    true,
-                    write_options.table_id.into(),
-                )
-                .await?;
-
-            Ok(())
         }
     }
 
