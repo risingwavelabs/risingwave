@@ -15,8 +15,8 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::ObjectError;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
@@ -42,10 +42,10 @@ impl CompactorSstableStore {
 
     pub async fn sstable(
         &self,
-        sst_id: HummockSstableId,
+        sst: &SstableInfo,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
-        self.sstable_store.sstable(sst_id, stats).await
+        self.sstable_store.sstable(sst, stats).await
     }
 
     pub async fn get_stream(
