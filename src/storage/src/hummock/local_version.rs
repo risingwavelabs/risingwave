@@ -130,12 +130,12 @@ impl LocalVersion {
     ///
     /// Return `Some(prev max_sync_epoch)` if `new_epoch > max_sync_epoch`
     /// Return `None` if `new_epoch <= max_sync_epoch`
-    pub fn advance_max_sync_epoch(&mut self, epoch: HummockEpoch) -> Option<HummockEpoch> {
-        if self.max_sync_epoch >= epoch {
+    pub fn advance_max_sync_epoch(&mut self, new_epoch: HummockEpoch) -> Option<HummockEpoch> {
+        if self.max_sync_epoch >= new_epoch {
             None
         } else {
             let last_epoch = self.max_sync_epoch;
-            self.max_sync_epoch = epoch;
+            self.max_sync_epoch = new_epoch;
             Some(last_epoch)
         }
     }
