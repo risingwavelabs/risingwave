@@ -16,6 +16,8 @@ indicatif = "0.16"
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = "0.10"
 kafka = { version = "0.9", default-features = false }
+md5 = "0.7"
+pulldown-cmark = "0.9"
 redis = "0.21"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
@@ -25,5 +27,3 @@ serde_yaml = "0.8"
 tempfile = "3"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 yaml-rust = "0.4"
-pulldown-cmark = "0.9"
-md5 = "0.7"

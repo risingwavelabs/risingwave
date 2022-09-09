@@ -221,14 +221,14 @@ fn main() -> Result<()> {
             .iter()
             .map(|member| {
                 let member_info = member.as_str().unwrap();
-                member_info.split_once(" ").unwrap().0.to_string()
+                member_info.split_once(' ').unwrap().0.to_string()
             })
             .filter(|package_name| package_name.starts_with("risingwave_"))
             .collect_vec();
         println!("Extracting DocSlt for all packages: {:#?}", packages);
         packages
     } else {
-        vec![opts.package.clone()]
+        vec![opts.package]
     };
     for package_name in packages {
         generate_slt_files_for_package(&package_name)?;
