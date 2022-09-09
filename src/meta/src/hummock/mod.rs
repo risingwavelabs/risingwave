@@ -185,35 +185,3 @@ where
     });
     (join_handle, shutdown_tx)
 }
-
-// As we have supported manual full GC in risectl,
-// this auto full GC scheduler is not used for now.
-#[allow(unused)]
-pub fn start_full_gc_scheduler<S>(
-    vacuum: Arc<VacuumManager<S>>,
-    interval: Duration,
-    sst_retention_time: Duration,
-) -> (JoinHandle<()>, Sender<()>)
-where
-    S: MetaStore,
-{
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
-        let mut min_trigger_interval = tokio::time::interval(interval);
-        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        min_trigger_interval.tick().await;
-        loop {
-            tokio::select! {
-                _ = min_trigger_interval.tick() => {},
-                _ = &mut shutdown_rx => {
-                    tracing::info!("Full GC scheduler is stopped");
-                    return;
-                }
-            }
-            if let Err(err) = vacuum.start_full_gc(sst_retention_time).await {
-                tracing::warn!("Full GC error {:#?}", err);
-            }
-        }
-    });
-    (join_handle, shutdown_tx)
-}
