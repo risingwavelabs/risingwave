@@ -17,91 +17,59 @@
 
 import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
-import { cloneDeep } from "lodash"
 import { useCallback, useEffect, useRef } from "react"
-import { layout } from "../lib/layout"
-import { ActorBox } from "./FragmentGraph"
+import {
+  ActorPoint,
+  ActorPointPosition,
+  flipLayoutPoint,
+  generatePointLinks,
+} from "../lib/layout"
 
-function boundBox(actorPosition: Map<ActorBox, [number, number]>): {
+function boundBox(
+  actorPosition: ActorPointPosition[],
+  nodeRadius: number
+): {
   width: number
   height: number
 } {
   let width = 0
   let height = 0
-  for (const [box, [x, y]] of actorPosition) {
-    width = Math.max(width, x + box.width)
-    height = Math.max(height, y + box.height)
+  for (const { x, y, data } of actorPosition) {
+    width = Math.max(width, x + nodeRadius)
+    height = Math.max(height, y + nodeRadius)
   }
   return { width, height }
 }
 
 const layerMargin = 50
 const rowMargin = 200
-
-function flipLayout(
-  fragments: Array<ActorBox>,
-  layerMargin: number,
-  rowMargin: number
-): Map<ActorBox, [number, number]> {
-  const fragments_ = cloneDeep(fragments)
-  for (let fragment of fragments_) {
-    ;[fragment.width, fragment.height] = [fragment.height, fragment.width]
-  }
-  const actorPosition = layout(fragments_, rowMargin, layerMargin)
-  for (const [fragment, [x, y]] of actorPosition) {
-    actorPosition.set(fragment, [y, x])
-  }
-  return actorPosition
-}
-
-type ActorLayout = [ActorBox, [number, number]]
+const nodeRadius = 10
 const layoutMargin = 100
 
 export function StreamGraph({
   nodes,
   selectedId,
 }: {
-  nodes: ActorBox[]
+  nodes: ActorPoint[]
   selectedId?: string
 }) {
   const svgRef = useRef<any>()
 
   const layoutMapCallback = useCallback(() => {
-    const layoutMap = flipLayout(nodes, layerMargin, rowMargin)
-    const links = []
-    const fragmentMap = new Map<string, [ActorBox, { x: number; y: number }]>()
-    for (const [fragment, [x, y]] of layoutMap) {
-      fragmentMap.set(fragment.id, [
-        fragment,
-        {
-          x: x + layoutMargin + fragment.width / 2,
-          y: y + layoutMargin + fragment.height / 2,
-        },
-      ])
-    }
-    for (const [fragment, [x, y]] of layoutMap) {
-      for (const parentId of fragment.parentIds) {
-        links.push({
-          points: [
-            {
-              x: x + layoutMargin + fragment.width / 2,
-              y: y + layoutMargin + fragment.height / 2,
-            },
-            fragmentMap.get(parentId)![1],
-          ],
-          source: fragment.id,
-          target: parentId,
-        })
-      }
-    }
-    const { width, height } = boundBox(layoutMap)
+    const layoutMap = flipLayoutPoint(
+      nodes,
+      layerMargin,
+      rowMargin,
+      nodeRadius
+    ).map(({ x, y, ...data }) => ({
+      x: x + layoutMargin,
+      y: y + layoutMargin,
+      ...data,
+    }))
+    const links = generatePointLinks(layoutMap)
+    const { width, height } = boundBox(layoutMap, nodeRadius)
     return {
-      layoutMap: Array.from(layoutMap.entries()).map(
-        ([fragment, [x, y]]: ActorLayout) => [
-          fragment,
-          [x + layoutMargin, y + layoutMargin],
-        ]
-      ),
+      layoutMap,
       links,
       width: width + rowMargin + layoutMargin * 2,
       height: height + layerMargin + layoutMargin * 2,
@@ -155,8 +123,7 @@ export function StreamGraph({
     const applyNode = (g: any) => {
       g.attr(
         "transform",
-        ([fragment, [x, y]]: ActorLayout) =>
-          `translate(${x + fragment.width / 2},${y + fragment.height / 2})`
+        ({ x, y }: ActorPointPosition) => `translate(${x},${y})`
       )
 
       let circle = g.select("circle")
@@ -165,12 +132,10 @@ export function StreamGraph({
       }
 
       circle
-        .attr("r", ([fragment, _]: ActorLayout) => fragment.width / 2)
+        .attr("r", nodeRadius)
         .style("cursor", "pointer")
-        .attr("fill", ([fragment, _]: ActorLayout) =>
-          isSelected(fragment.id)
-            ? theme.colors.teal["500"]
-            : theme.colors.gray["500"]
+        .attr("fill", ({ id }: ActorPointPosition) =>
+          isSelected(id) ? theme.colors.teal["500"] : theme.colors.gray["500"]
         )
 
       let text = g.select("text")
@@ -180,10 +145,10 @@ export function StreamGraph({
 
       text
         .attr("fill", "black")
-        .text(([fragment, _]: ActorLayout) => fragment.name)
+        .text(({ data: { name } }: ActorPointPosition) => name)
         .attr("font-family", "inherit")
         .attr("text-anchor", "middle")
-        .attr("dy", ([fragment, _]: ActorLayout) => fragment.width)
+        .attr("dy", nodeRadius * 2)
         .attr("fill", "black")
         .attr("font-size", 12)
         .attr("transform", "rotate(-8)")
