@@ -124,3 +124,6 @@ select * from mv order by window_start, price desc, supplier_id;
 2020-04-15 08:10:00 2020-04-15 08:20:00 supplier5 6 1
 2020-04-15 08:10:00 2020-04-15 08:20:00 supplier2 3 1
 2020-04-15 08:10:00 2020-04-15 08:20:00 supplier3 2 1
+
+statement ok
+drop materialized view mv;
