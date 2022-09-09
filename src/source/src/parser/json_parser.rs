@@ -21,9 +21,9 @@ use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
 #[derive(Debug)]
-pub struct JSONParser;
+pub struct JsonParser;
 
-impl SourceParser for JSONParser {
+impl SourceParser for JsonParser {
     fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         let value: Value = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
@@ -49,11 +49,11 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
-    use crate::{JSONParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
+    use crate::{JsonParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
     #[test]
     fn test_json_parser() {
-        let parser = JSONParser;
+        let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc {
                 name: "i32".to_string(),
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_json_parse_struct() {
-        let parser = JSONParser {};
+        let parser = JsonParser {};
 
         let descs = vec![
             ColumnDesc::new_struct(

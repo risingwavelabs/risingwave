@@ -187,7 +187,7 @@ pub trait SourceParser: Send + Sync + Debug + 'static {
 
 #[derive(Debug)]
 pub enum SourceParserImpl {
-    Json(JSONParser),
+    Json(JsonParser),
     Protobuf(ProtobufParser),
     DebeziumJson(DebeziumJsonParser),
     Avro(AvroParser),
@@ -214,7 +214,7 @@ impl SourceParserImpl {
     ) -> Result<Arc<Self>> {
         const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
         let parser = match format {
-            SourceFormat::Json => SourceParserImpl::Json(JSONParser {}),
+            SourceFormat::Json => SourceParserImpl::Json(JsonParser {}),
             SourceFormat::Protobuf => {
                 let message_name = properties.get(PROTOBUF_MESSAGE_KEY).ok_or_else(|| {
                     RwError::from(ProtocolError(format!(
