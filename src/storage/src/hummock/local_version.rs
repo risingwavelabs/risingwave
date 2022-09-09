@@ -24,7 +24,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, summarize_level_deltas, HummockLevelsExt, HummockVersionExt,
     LevelDeltasSummary,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo, INVALID_VERSION_ID,
+};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -48,7 +50,9 @@ pub struct LocalVersion {
     /// because we will traverse `sync_uncommitted_data` in the forward direction and return the
     /// key when we find it
     pub sync_uncommitted_data: VecDeque<(Vec<HummockEpoch>, SyncUncommittedData)>,
-    max_sync_epoch: u64,
+    max_sync_epoch: HummockEpoch,
+    /// The max readable epoch, and epochs smaller than it will not be written again.
+    sealed_epoch: HummockEpoch,
 }
 
 #[derive(Debug, Clone)]
@@ -119,7 +123,16 @@ impl LocalVersion {
             version_ids_in_use,
             sync_uncommitted_data: Default::default(),
             max_sync_epoch: 0,
+            sealed_epoch: 0,
         }
+    }
+
+    pub fn seal_epoch(&mut self, epoch: HummockEpoch) {
+        self.sealed_epoch = self.sealed_epoch.max(epoch);
+    }
+
+    pub fn get_sealed_epoch(&self) -> HummockEpoch {
+        self.sealed_epoch
     }
 
     pub fn pinned_version(&self) -> &PinnedVersion {
@@ -281,7 +294,6 @@ impl LocalVersion {
                     cleaned_epochs
                 }
             };
-
         // update pinned version
         self.pinned_version = new_pinned_version;
 
@@ -498,7 +510,6 @@ impl LocalVersion {
         }
         version.id = version_delta.id;
         version.max_committed_epoch = version_delta.max_committed_epoch;
-        version.max_current_epoch = version_delta.max_current_epoch;
         version.safe_epoch = version_delta.safe_epoch;
 
         clean_epochs
@@ -567,6 +578,10 @@ impl PinnedVersion {
         self.version.id
     }
 
+    pub fn is_valid(&self) -> bool {
+        self.version.id != INVALID_VERSION_ID
+    }
+
     pub fn levels(&self, compaction_group_id: Option<CompactionGroupId>) -> Vec<&Level> {
         match compaction_group_id {
             None => self.version.get_combined_levels(),
@@ -584,10 +599,6 @@ impl PinnedVersion {
 
     pub fn max_committed_epoch(&self) -> u64 {
         self.version.max_committed_epoch
-    }
-
-    pub fn max_current_epoch(&self) -> u64 {
-        self.version.max_current_epoch
     }
 
     pub fn safe_epoch(&self) -> u64 {
