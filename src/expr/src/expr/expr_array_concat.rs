@@ -12,21 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! TODO: to remove, now just for demonstration.
-//!
-//! To setup and teardown docslt environment, you can use `slt-setup`
-//! and `slt-teardown` code blocks:
-//!
-//! ```slt-setup
-//! statement ok
-//! create table t (a int);
-//! ```
-//!
-//! ```slt-teardown
-//! statement ok
-//! drop table t;
-//! ```
-
 use std::sync::Arc;
 
 use itertools::Itertools;
