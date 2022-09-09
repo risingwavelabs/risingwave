@@ -200,7 +200,11 @@ pub enum SharedBufferEvent {
     /// An epoch is going to be synced. Once the event is processed, there will be no more flush
     /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
     /// handle sender.
-    SyncEpoch(Vec<HummockEpoch>, oneshot::Sender<Vec<JoinHandle<()>>>),
+    SyncEpoch {
+        prev_max_sync_epoch: HummockEpoch,
+        new_sync_epoch: HummockEpoch,
+        join_handle_sender: oneshot::Sender<Vec<JoinHandle<()>>>,
+    },
 
     /// An epoch has been synced.
     EpochSynced(Vec<HummockEpoch>),
