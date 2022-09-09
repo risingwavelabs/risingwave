@@ -165,18 +165,38 @@ where
         );
 
         // 2. Assign the compaction task to a compactor.
-        'send_task: loop {
-            // TODO
-            // 2.1 Select a compactor.
-            let compactor = match self.compactor_manager.next_idle_compactor() {
-                None => {
-                    let current_compactor_tasks =
-                        self.hummock_manager.list_assigned_tasks_number().await;
-                    tracing::warn!("No idle compactor available. The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
-                    tokio::time::sleep(Duration::from_secs(
-                        self.env.opts.compactor_selection_retry_interval_sec,
-                    ))
-                    .await;
+        'assign_and_send_task: loop {
+            // 2.1 Pick a compactor and assign the compaction task.
+            let compactor = match self
+                .hummock_manager
+                .assign_compaction_task(&compact_task)
+                .await
+            {
+                Ok(compactor) => {
+                    tracing::trace!(
+                        "Assigned compaction task. {}",
+                        compact_task_to_string(&compact_task)
+                    );
+                    compactor
+                }
+                Err(err) => {
+                    tracing::warn!("Failed to assign compaction task to compactor: {:#?}", err);
+                    match err {
+                        Error::InvalidContext(context_id)
+                        | Error::CompactorUnreachable(context_id) => {
+                            self.compactor_manager.remove_compactor(context_id);
+                        }
+                        Error::NoIdleCompactor => {
+                            let current_compactor_tasks =
+                                self.hummock_manager.list_assigned_tasks_number().await;
+                            tracing::warn!("The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
+                            tokio::time::sleep(Duration::from_secs(
+                                self.env.opts.compactor_selection_retry_interval_sec,
+                            ))
+                            .await;
+                        }
+                        _ => {}
+                    }
                     match self
                         .hummock_manager
                         .cancel_compact_task(&mut compact_task)
@@ -184,54 +204,12 @@ where
                     {
                         Ok(_) => return false,
                         // failed to cancel, try assign to compactor again.
-                        Err(_) => continue 'send_task,
+                        Err(_) => continue 'assign_and_send_task,
                     }
                 }
-                Some(compactor) => compactor,
             };
 
-            // 2.2 Assign the compaction task.
-            match self
-                .hummock_manager
-                .assign_compaction_task(&compact_task, compactor.context_id())
-                .await
-            {
-                Ok(_) => {
-                    tracing::trace!(
-                        "Assigned compaction task. {}",
-                        compact_task_to_string(&compact_task)
-                    );
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        "Failed to assign compaction task to compactor {}: {:#?}",
-                        compactor.context_id(),
-                        err
-                    );
-                    match err {
-                        Error::InvalidContext(_) | Error::CompactorUnreachable(_) => {
-                            self.compactor_manager
-                                .remove_compactor(compactor.context_id());
-                        }
-                        _ => {}
-                    }
-                    continue 'send_task;
-                }
-            }
-
-            if let Err(err) = self
-                .compactor_manager
-                .assign_compact_task(compactor.context_id(), &compact_task)
-            {
-                tracing::warn!("Failed to update compaction schedule policy: {:#?}", err);
-                if let Error::InvalidContext(_) = err {
-                    self.compactor_manager
-                        .remove_compactor(compactor.context_id());
-                }
-                continue 'send_task;
-            }
-
-            // 2.3 Send the compaction task.
+            // 2.2 Send the compaction task.
             if let Err(e) = compactor
                 .send_task(Task::CompactTask(compact_task.clone()))
                 .await
@@ -252,7 +230,7 @@ where
                     // handle cancellation via compaction heartbeat
                     return false;
                 }
-                continue 'send_task;
+                continue 'assign_and_send_task;
             }
 
             // Reschedule it in case there are more tasks from this compaction group.

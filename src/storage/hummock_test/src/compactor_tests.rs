@@ -219,18 +219,11 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let context_id = compactor_manager
-            .next_idle_compactor()
-            .unwrap()
-            .context_id();
-        debug_assert_eq!(context_id, worker_node.id);
-        compactor_manager
-            .assign_compact_task(context_id, &compact_task)
-            .unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, context_id)
+        let compactor = hummock_manager_ref
+            .assign_compaction_task(&compact_task)
             .await
             .unwrap();
+        assert_eq!(compactor.context_id(), worker_node.id);
 
         // assert compact_task
         assert_eq!(compact_task.input_ssts.len(), 128);
@@ -331,18 +324,11 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let context_id = compactor_manager
-            .next_idle_compactor()
-            .unwrap()
-            .context_id();
-        debug_assert_eq!(context_id, worker_node.id);
-        compactor_manager
-            .assign_compact_task(context_id, &compact_task)
-            .unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, context_id)
+        let compactor = hummock_manager_ref
+            .assign_compaction_task(&compact_task)
             .await
             .unwrap();
+        assert_eq!(compactor.context_id(), worker_node.id);
 
         // assert compact_task
         assert_eq!(
@@ -625,19 +611,11 @@ mod tests {
         // 3. pick compactor and assign
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let context_id = compactor_manager
-            .next_idle_compactor()
-            .unwrap()
-            .context_id();
-        debug_assert_eq!(context_id, worker_node.id);
-        compactor_manager
-            .assign_compact_task(context_id, &compact_task)
-            .unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, context_id)
+        let compactor = hummock_manager_ref
+            .assign_compaction_task(&compact_task)
             .await
             .unwrap();
-
+        assert_eq!(compactor.context_id(), worker_node.id);
         // assert compact_task
         assert_eq!(
             compact_task
@@ -797,18 +775,11 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let context_id = compactor_manager
-            .next_idle_compactor()
-            .unwrap()
-            .context_id();
-        debug_assert_eq!(context_id, worker_node.id);
-        compactor_manager
-            .assign_compact_task(context_id, &compact_task)
-            .unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, context_id)
+        let compactor = hummock_manager_ref
+            .assign_compaction_task(&compact_task)
             .await
             .unwrap();
+        assert_eq!(compactor.context_id(), worker_node.id);
 
         // assert compact_task
         assert_eq!(
@@ -976,18 +947,11 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let context_id = compactor_manager
-            .next_idle_compactor()
-            .unwrap()
-            .context_id();
-        debug_assert_eq!(context_id, context_id);
-        compactor_manager
-            .assign_compact_task(context_id, &compact_task)
-            .unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id)
+        let compactor = hummock_manager_ref
+            .assign_compaction_task(&compact_task)
             .await
             .unwrap();
+        assert_eq!(compactor.context_id(), worker_node.id);
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();

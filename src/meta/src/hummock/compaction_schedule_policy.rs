@@ -340,7 +340,6 @@ mod tests {
         to_local_sstable_info,
     };
     use crate::hummock::HummockManager;
-    use crate::model::MetadataModel;
     use crate::storage::MetaStore;
 
     async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
@@ -500,22 +499,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_scored_with_task_assignment() {
-        let config = CompactionConfigBuilder::new()
-            .level0_tier_compact_file_number(1)
-            .max_bytes_for_level_base(1)
-            .build();
-        let (meta_env, hummock_manager, _, _) = setup_compute_env_with_config(80, config).await;
         // Assign dummy existing tasks.
         let existing_tasks = vec![dummy_compact_task(0, 1), dummy_compact_task(1, 1)];
-        for (context_id, task) in existing_tasks.iter().enumerate() {
-            hummock_manager
-                .assign_compaction_task(task, context_id as HummockContextId)
-                .await
-                .unwrap();
-        }
-        let existing_assignments = CompactTaskAssignment::list(meta_env.meta_store())
-            .await
-            .unwrap();
+        let mut existing_assignments = vec![];
+        existing_tasks
+            .iter()
+            .enumerate()
+            .for_each(|(context_id, task)| {
+                existing_assignments.push(CompactTaskAssignment {
+                    compact_task: Some(task.clone()),
+                    context_id: context_id as HummockContextId,
+                });
+            });
+
         let mut policy = ScoredPolicy::new_with_task_assignment(&existing_assignments);
         assert_eq!(policy.score_to_compactor.len(), 0);
         assert_eq!(policy.compactor_to_score.len(), existing_tasks.len());

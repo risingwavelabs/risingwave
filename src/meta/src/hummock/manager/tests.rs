@@ -196,18 +196,11 @@ async fn test_hummock_compaction_task() {
         .unwrap();
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     compactor_manager.add_compactor(worker_node.id, u64::MAX);
-    let context_id = compactor_manager
-        .next_idle_compactor()
-        .unwrap()
-        .context_id();
-    debug_assert_eq!(context_id, worker_node.id);
-    compactor_manager
-        .assign_compact_task(context_id, &compact_task)
-        .unwrap();
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
+    assert_eq!(compactor.context_id(), worker_node.id);
     assert_eq!(
         compact_task
             .get_input_ssts()
@@ -235,8 +228,8 @@ async fn test_hummock_compaction_task() {
         .await
         .unwrap()
         .unwrap();
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
@@ -244,12 +237,12 @@ async fn test_hummock_compaction_task() {
     compact_task.set_task_status(TaskStatus::Success);
 
     assert!(hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .report_compact_task(compactor.context_id(), &compact_task)
         .await
         .unwrap());
     // Finish the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .report_compact_task(compactor.context_id(), &compact_task)
         .await
         .unwrap());
 }
@@ -1051,10 +1044,11 @@ async fn test_hummock_compaction_task_heartbeat() {
         .await
         .unwrap()
         .unwrap();
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
+
     assert_eq!(
         compact_task
             .get_input_ssts()
@@ -1065,9 +1059,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     );
     assert_eq!(compact_task.get_task_id(), 2);
     // send task
-    compactor_manager
-        .next_idle_compactor(Some(&compact_task))
-        .unwrap()
+    compactor
         .send_task(Task::CompactTask(compact_task.clone()))
         .await
         .unwrap();
@@ -1097,15 +1089,13 @@ async fn test_hummock_compaction_task_heartbeat() {
         .await
         .unwrap()
         .unwrap();
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
     // send task
-    compactor_manager
-        .next_idle_compactor(Some(&compact_task))
-        .unwrap()
+    compactor
         .send_task(Task::CompactTask(compact_task.clone()))
         .await
         .unwrap();
@@ -1170,7 +1160,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         .await
         .unwrap()
         .unwrap();
-    hummock_manager
+    let compactor = hummock_manager
         .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
@@ -1184,9 +1174,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     );
     assert_eq!(compact_task.get_task_id(), 2);
     // send task
-    compactor_manager
-        .next_idle_compactor(Some(&compact_task))
-        .unwrap()
+    compactor
         .send_task(Task::CompactTask(compact_task.clone()))
         .await
         .unwrap();
