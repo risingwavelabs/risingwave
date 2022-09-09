@@ -76,7 +76,7 @@ where
     debug_assert_eq!(
         hummock_manager
             .compactor_manager_ref_for_test()
-            .next_idle_compactor(Some(&compact_task))
+            .next_idle_compactor()
             .unwrap()
             .context_id(),
         context_id
@@ -85,6 +85,10 @@ where
     hummock_manager
         .assign_compaction_task(&compact_task, context_id)
         .await
+        .unwrap();
+    hummock_manager
+        .compactor_manager_ref_for_test()
+        .assign_compact_task(context_id, &compact_task)
         .unwrap();
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(

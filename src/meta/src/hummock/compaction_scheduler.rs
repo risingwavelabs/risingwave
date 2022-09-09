@@ -166,11 +166,9 @@ where
 
         // 2. Assign the compaction task to a compactor.
         'send_task: loop {
+            // TODO
             // 2.1 Select a compactor.
-            let compactor = match self
-                .compactor_manager
-                .next_idle_compactor(Some(&compact_task))
-            {
+            let compactor = match self.compactor_manager.next_idle_compactor() {
                 None => {
                     let current_compactor_tasks =
                         self.hummock_manager.list_assigned_tasks_number().await;
@@ -219,6 +217,18 @@ where
                     }
                     continue 'send_task;
                 }
+            }
+
+            if let Err(err) = self
+                .compactor_manager
+                .assign_compact_task(compactor.context_id(), &compact_task)
+            {
+                tracing::warn!("Failed to upadte compaction schedule policy: {:#?}", err);
+                if let Error::InvalidContext(_) = err {
+                    self.compactor_manager
+                        .remove_compactor(compactor.context_id());
+                }
+                continue 'send_task;
             }
 
             // 2.3 Send the compaction task.

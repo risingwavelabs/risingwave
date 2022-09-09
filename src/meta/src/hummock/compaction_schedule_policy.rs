@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockContextId;
@@ -21,6 +21,7 @@ use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, SubscribeCompac
 use tokio::sync::mpsc::Receiver;
 
 use super::Compactor;
+use crate::hummock::error::{Error, Result};
 use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
@@ -29,13 +30,12 @@ const STREAM_BUFFER_SIZE: usize = 4;
 pub trait CompactionSchedulePolicy: Send + Sync {
     /// Get next idle compactor to assign task.
     fn next_idle_compactor(
-        &mut self,
+        &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
-        compact_task: Option<&CompactTask>,
     ) -> Option<Arc<Compactor>>;
 
     /// Get next compactor to assign task.
-    fn next_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>>;
+    fn next_compactor(&self) -> Option<Arc<Compactor>>;
 
     fn add_compactor(
         &mut self,
@@ -47,9 +47,20 @@ pub trait CompactionSchedulePolicy: Send + Sync {
 
     fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>>;
 
-    /// Notify the `CompactorManagerInner` of the completion of a task to adjust the next compactor
+    /// Notify the policy of the assignment of a compaction task to adjust the next compactor to
+    /// schedule.
+    ///
+    /// It is possible that the compactor with `context_id` does not exist. An error will be
+    /// returned in this case.
+    fn assign_compact_task(
+        &mut self,
+        context_id: HummockContextId,
+        compact_task: &CompactTask,
+    ) -> Result<()>;
+
+    /// Notify the policy of the completion of a compaction task to adjust the next compactor
     /// to schedule.
-    fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask);
+    fn report_compact_task(&mut self, context_id: HummockContextId, compact_task: &CompactTask);
 }
 
 // This strategy is retained just for reference, it is not used.
@@ -78,40 +89,35 @@ impl RoundRobinPolicy {
 
 impl CompactionSchedulePolicy for RoundRobinPolicy {
     fn next_idle_compactor(
-        &mut self,
+        &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
-        compact_task: Option<&CompactTask>,
     ) -> Option<Arc<Compactor>> {
-        let mut visited = HashSet::new();
-        loop {
-            match self.next_compactor(compact_task) {
-                None => {
-                    return None;
-                }
-                Some(compactor) => {
-                    if visited.contains(&compactor.context_id()) {
-                        return None;
-                    }
-                    if *compactor_assigned_task_num
-                        .get(&compactor.context_id())
-                        .unwrap()
-                        < compactor.max_concurrent_task_number()
-                    {
-                        return Some(compactor);
-                    }
-                    visited.insert(compactor.context_id());
-                }
+        if self.compactors.is_empty() {
+            return None;
+        }
+        let compactor_index = self.next_compactor % self.compactors.len();
+        for context_id in self.compactors[compactor_index..]
+            .iter()
+            .chain(&self.compactors[..compactor_index])
+        {
+            let compactor = self.compactor_map.get(context_id).unwrap();
+            if *compactor_assigned_task_num
+                .get(&compactor.context_id())
+                .unwrap()
+                < compactor.max_concurrent_task_number()
+            {
+                return Some(compactor.clone());
             }
         }
+        None
     }
 
-    fn next_compactor(&mut self, _compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
+    fn next_compactor(&self) -> Option<Arc<Compactor>> {
         if self.compactors.is_empty() {
             return None;
         }
         let compactor_index = self.next_compactor % self.compactors.len();
         let compactor = self.compactors[compactor_index];
-        self.next_compactor += 1;
         Some(self.compactor_map.get(&compactor).unwrap().clone())
     }
 
@@ -139,7 +145,19 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         self.compactor_map.get(&context_id).cloned()
     }
 
-    fn report_compact_task(&mut self, _context_id: HummockContextId, _task: &CompactTask) {}
+    fn assign_compact_task(
+        &mut self,
+        context_id: HummockContextId,
+        _compact_task: &CompactTask,
+    ) -> Result<()> {
+        if !self.compactor_map.contains_key(&context_id) {
+            return Err(Error::InvalidContext(context_id));
+        }
+        self.next_compactor += 1;
+        Ok(())
+    }
+
+    fn report_compact_task(&mut self, _context_id: HummockContextId, _compact_task: &CompactTask) {}
 }
 
 /// The score must be linear to the input for easy update.
@@ -192,23 +210,19 @@ impl ScoredPolicy {
         &mut self,
         context_id: HummockContextId,
         old_score: Score,
-        compact_task: Option<&CompactTask>,
-    ) -> Arc<Compactor> {
-        let new_score = if let Some(task) = compact_task {
-            old_score + Self::calculate_score_delta(task)
-        } else {
-            old_score
-        };
+        compact_task: &CompactTask,
+    ) {
+        let new_score = old_score + Self::calculate_score_delta(compact_task);
         debug_assert!(new_score >= 0);
+
         // The element must exist.
         let compactor = self
             .score_to_compactor
             .remove(&(old_score, context_id))
             .unwrap();
         self.score_to_compactor
-            .insert((new_score, context_id), compactor.clone());
+            .insert((new_score, context_id), compactor);
         *self.compactor_to_score.get_mut(&context_id).unwrap() = new_score;
-        compactor
     }
 
     fn calculate_score_delta(compact_task: &CompactTask) -> Score {
@@ -228,43 +242,24 @@ impl ScoredPolicy {
 
 impl CompactionSchedulePolicy for ScoredPolicy {
     fn next_idle_compactor(
-        &mut self,
+        &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
-        compact_task: Option<&CompactTask>,
     ) -> Option<Arc<Compactor>> {
-        let mut next_idle_compactor = None;
-        for ((score, context_id), compactor) in &self.score_to_compactor {
+        for compactor in self.score_to_compactor.values() {
             if *compactor_assigned_task_num
                 .get(&compactor.context_id())
                 .unwrap()
                 < compactor.max_concurrent_task_number()
             {
-                next_idle_compactor = Some((*score, *context_id));
-                break;
+                return Some(compactor.clone());
             }
         }
-
-        if let Some((score, context_id)) = next_idle_compactor {
-            let compactor = self.update_compactor_score(context_id, score, compact_task);
-            Some(compactor)
-        } else {
-            None
-        }
+        None
     }
 
-    fn next_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
-        let mut next_compactor = None;
-        if let Some((score, context_id)) = self
-            .score_to_compactor
-            .keys()
-            .min_by(|(pb1, _), (pb2, _)| pb1.cmp(pb2))
-        {
-            next_compactor = Some((*score, *context_id));
-        }
-
-        if let Some((score, context_id)) = next_compactor {
-            let compactor = self.update_compactor_score(context_id, score, compact_task);
-            Some(compactor)
+    fn next_compactor(&self) -> Option<Arc<Compactor>> {
+        if let Some((_, compactor)) = self.score_to_compactor.first_key_value() {
+            Some(compactor.clone())
         } else {
             None
         }
@@ -302,10 +297,23 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         }
     }
 
+    fn assign_compact_task(
+        &mut self,
+        context_id: HummockContextId,
+        compact_task: &CompactTask,
+    ) -> Result<()> {
+        if let Some(score) = self.compactor_to_score.get(&context_id) {
+            self.update_compactor_score(context_id, *score, compact_task);
+            Ok(())
+        } else {
+            Err(Error::InvalidContext(context_id))
+        }
+    }
+
     fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask) {
         debug_assert_ne!(task.task_status(), TaskStatus::Pending);
         if let Some(score) = self.compactor_to_score.get(&context_id) {
-            self.update_compactor_score(context_id, *score, Some(task));
+            self.update_compactor_score(context_id, *score, task);
         }
     }
 }
@@ -331,7 +339,7 @@ mod tests {
         register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
         to_local_sstable_info,
     };
-    use crate::hummock::{CompactorManager, HummockManager};
+    use crate::hummock::HummockManager;
     use crate::model::MetadataModel;
     use crate::storage::MetaStore;
 
@@ -440,12 +448,12 @@ mod tests {
         add_compact_task(hummock_manager.as_ref(), context_id, 1).await;
 
         // No compactor available.
-        assert!(compactor_manager.next_compactor(None).is_none());
+        assert!(compactor_manager.next_compactor().is_none());
 
         // Add a compactor.
         let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX);
         assert_eq!(compactor_manager.compactors.len(), 1);
-        let compactor = compactor_manager.next_compactor(None).unwrap();
+        let compactor = compactor_manager.next_compactor().unwrap();
         // No compact task.
         assert!(matches!(
             receiver.try_recv().unwrap_err(),
@@ -469,7 +477,7 @@ mod tests {
 
         compactor_manager.remove_compactor(compactor.context_id());
         assert_eq!(compactor_manager.compactors.len(), 0);
-        assert!(compactor_manager.next_compactor(None).is_none());
+        assert!(compactor_manager.next_compactor().is_none());
     }
 
     #[tokio::test]
@@ -480,8 +488,12 @@ mod tests {
             receivers.push(policy.add_compactor(context_id, u64::MAX));
         }
         assert_eq!(policy.compactors.len(), 5);
+        let task = dummy_compact_task(0, 1);
         for i in 0..receivers.len() * 3 {
-            let compactor = policy.next_compactor(None).unwrap();
+            let compactor = policy.next_compactor().unwrap();
+            policy
+                .assign_compact_task(compactor.context_id(), &task)
+                .unwrap();
             assert_eq!(compactor.context_id() as usize, i % receivers.len());
         }
     }
@@ -509,11 +521,8 @@ mod tests {
         assert_eq!(policy.compactor_to_score.len(), existing_tasks.len());
 
         // No compactor available.
-        let new_task = dummy_compact_task(2, 1);
-        assert!(policy
-            .next_idle_compactor(&HashMap::new(), Some(&new_task))
-            .is_none());
-        assert!(policy.next_compactor(Some(&new_task)).is_none());
+        assert!(policy.next_idle_compactor(&HashMap::new()).is_none());
+        assert!(policy.next_compactor().is_none());
 
         // Adding existing compactor does not change score.
         policy.add_compactor(0, u64::MAX);
@@ -580,7 +589,7 @@ mod tests {
         let mut policy = ScoredPolicy::new_for_test();
 
         // No compactor available.
-        assert!(policy.next_compactor(None).is_none());
+        assert!(policy.next_compactor().is_none());
 
         // Add 3 compactors.
         for context_id in 0..3 {
@@ -593,19 +602,28 @@ mod tests {
         let task4 = dummy_compact_task(3, 1);
 
         // Now the compactors should be (0, 0), (0, 1), (0, 2).
-        let compactor = policy.next_compactor(Some(&task1)).unwrap();
+        let compactor = policy.next_compactor().unwrap();
+        policy
+            .assign_compact_task(compactor.context_id(), &task1)
+            .unwrap();
         assert_eq!(compactor.context_id(), 0);
         assert_eq!(*policy.compactor_to_score.get(&0).unwrap(), 5);
         assert!(policy.score_to_compactor.contains_key(&(5, 0)));
 
         // (0, 1), (0, 2), (5, 0).
-        let compactor = policy.next_compactor(Some(&task2)).unwrap();
+        let compactor = policy.next_compactor().unwrap();
+        policy
+            .assign_compact_task(compactor.context_id(), &task2)
+            .unwrap();
         assert_eq!(compactor.context_id(), 1);
         assert_eq!(*policy.compactor_to_score.get(&1).unwrap(), 10);
         assert!(policy.score_to_compactor.contains_key(&(10, 1)));
 
         // (0, 2), (5, 0), (10, 1).
-        let compactor = policy.next_compactor(Some(&task3)).unwrap();
+        let compactor = policy.next_compactor().unwrap();
+        policy
+            .assign_compact_task(compactor.context_id(), &task3)
+            .unwrap();
         assert_eq!(compactor.context_id(), 2);
         assert_eq!(*policy.compactor_to_score.get(&2).unwrap(), 7);
         assert!(policy.score_to_compactor.contains_key(&(10, 1)));
@@ -617,7 +635,10 @@ mod tests {
         assert!(policy.score_to_compactor.contains_key(&(0, 1)));
 
         // (0, 1), (5, 0), (7, 2).
-        let compactor = policy.next_compactor(Some(&task4)).unwrap();
+        let compactor = policy.next_compactor().unwrap();
+        policy
+            .assign_compact_task(compactor.context_id(), &task4)
+            .unwrap();
         assert_eq!(compactor.context_id(), 1);
         assert_eq!(*policy.compactor_to_score.get(&1).unwrap(), 1);
         assert!(policy.score_to_compactor.contains_key(&(1, 1)));
@@ -625,12 +646,11 @@ mod tests {
 
     #[test]
     fn test_scored_next_idle_compactor() {
-        let compactor_manager =
-            CompactorManager::new_with_policy(Box::new(ScoredPolicy::new_for_test()));
+        let mut policy = Box::new(ScoredPolicy::new_for_test());
 
         // Add 2 compactors.
         for context_id in 0..2 {
-            compactor_manager.add_compactor(context_id, 2);
+            policy.add_compactor(context_id, 2);
         }
 
         let task1 = dummy_compact_task(0, 1);
@@ -638,15 +658,29 @@ mod tests {
         let task3 = dummy_compact_task(2, 5);
 
         // Fill compactor 0 with small tasks.
-        let compactor = compactor_manager.next_compactor(Some(&task1)).unwrap();
+        let compactor = policy.next_compactor().unwrap();
+        policy
+            .assign_compact_task(compactor.context_id(), &task1)
+            .unwrap();
         assert_eq!(compactor.context_id(), 0);
-        let compactor = compactor_manager.next_compactor(Some(&task3)).unwrap();
+        let compactor = policy.next_compactor().unwrap();
+        policy
+            .assign_compact_task(compactor.context_id(), &task3)
+            .unwrap();
         assert_eq!(compactor.context_id(), 1);
-        let compactor = compactor_manager.next_compactor(Some(&task2)).unwrap();
+        let compactor = policy.next_compactor().unwrap();
+        policy
+            .assign_compact_task(compactor.context_id(), &task2)
+            .unwrap();
         assert_eq!(compactor.context_id(), 0);
 
         // Next compactor should be compactor 1.
-        let compactor = compactor_manager.next_idle_compactor(None).unwrap();
+        let mut compactor_assigned_task_num = HashMap::new();
+        compactor_assigned_task_num.insert(0, 2);
+        compactor_assigned_task_num.insert(1, 1);
+        let compactor = policy
+            .next_idle_compactor(&compactor_assigned_task_num)
+            .unwrap();
         assert_eq!(compactor.context_id(), 1);
     }
 }

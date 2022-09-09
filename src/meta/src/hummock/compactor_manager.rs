@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use parking_lot::{Mutex, MutexGuard, RwLock};
+use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -26,6 +26,7 @@ use risingwave_pb::hummock::{
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use super::compaction_schedule_policy::{CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy};
+use crate::hummock::error::Result;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
@@ -113,7 +114,7 @@ pub struct CompactorManager {
     // `policy` must be locked before `compactor_assigned_task_num`.
     policy: RwLock<Box<dyn CompactionSchedulePolicy>>,
     // Map compactor to the number of assigned tasks.
-    compactor_assigned_task_num: Mutex<HashMap<HummockContextId, u64>>,
+    compactor_assigned_task_num: RwLock<HashMap<HummockContextId, u64>>,
 
     pub task_expiry_seconds: u64,
     // A map: { context_id -> { task_id -> heartbeat } }
@@ -139,7 +140,7 @@ impl CompactorManager {
             policy: RwLock::new(Box::new(ScoredPolicy::new_with_task_assignment(
                 &task_assignment,
             ))),
-            compactor_assigned_task_num: Mutex::new(compactor_assigned_task_num),
+            compactor_assigned_task_num: RwLock::new(compactor_assigned_task_num),
             task_expiry_seconds,
             task_heartbeats: Default::default(),
         };
@@ -155,7 +156,7 @@ impl CompactorManager {
     pub fn new_for_test() -> Self {
         Self {
             policy: RwLock::new(Box::new(RoundRobinPolicy::new())),
-            compactor_assigned_task_num: Mutex::new(HashMap::new()),
+            compactor_assigned_task_num: RwLock::new(HashMap::new()),
             task_expiry_seconds: 1,
             task_heartbeats: Default::default(),
         }
@@ -165,7 +166,7 @@ impl CompactorManager {
     pub fn new_with_policy(policy: Box<dyn CompactionSchedulePolicy>) -> Self {
         Self {
             policy: RwLock::new(policy),
-            compactor_assigned_task_num: Mutex::new(HashMap::new()),
+            compactor_assigned_task_num: RwLock::new(HashMap::new()),
             task_expiry_seconds: 1,
             task_heartbeats: Default::default(),
         }
@@ -177,22 +178,10 @@ impl CompactorManager {
     // `HummockManager, if `HummockManager::assign_compaction_task` and `next_idle_compactor` are
     // not called together. So we might need to put `HummockManager::assign_compaction_task` in this
     // function.
-    pub fn next_idle_compactor(
-        &self,
-        compact_task: Option<&CompactTask>,
-    ) -> Option<Arc<Compactor>> {
-        let need_update_task_num = compact_task.is_some();
-        let mut policy = self.policy.write();
-        let mut compactor_assigned_task_num = self.compactor_assigned_task_num.lock();
-        let compactor = policy.next_idle_compactor(&compactor_assigned_task_num, compact_task);
-        if let Some(compactor) = compactor {
-            if need_update_task_num {
-                Self::update_task_num(&mut compactor_assigned_task_num, compactor.context_id, true);
-            }
-            Some(compactor)
-        } else {
-            None
-        }
+    pub fn next_idle_compactor(&self) -> Option<Arc<Compactor>> {
+        let policy = self.policy.read();
+        let compactor_assigned_task_num = self.compactor_assigned_task_num.read();
+        policy.next_idle_compactor(&compactor_assigned_task_num)
     }
 
     /// Gets next compactor to assign task.
@@ -201,19 +190,9 @@ impl CompactorManager {
     // `HummockManager, if `HummockManager::assign_compaction_task` and `next_compactor` are
     // not called together. So we might need to put `HummockManager::assign_compaction_task` in this
     // function.
-    pub fn next_compactor(&self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
-        let need_update_task_num = compact_task.is_some();
-        let mut policy = self.policy.write();
-        let mut compactor_assigned_task_num = self.compactor_assigned_task_num.lock();
-        let compactor = policy.next_compactor(compact_task);
-        if let Some(compactor) = compactor {
-            if need_update_task_num {
-                Self::update_task_num(&mut compactor_assigned_task_num, compactor.context_id, true);
-            }
-            Some(compactor)
-        } else {
-            None
-        }
+    pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
+        let policy = self.policy.read();
+        policy.next_compactor()
     }
 
     /// Retrieve a receiver of tasks for the compactor identified by `context_id`. The sender should
@@ -228,7 +207,7 @@ impl CompactorManager {
         max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let mut policy = self.policy.write();
-        let mut compactor_assigned_task_num = self.compactor_assigned_task_num.lock();
+        let mut compactor_assigned_task_num = self.compactor_assigned_task_num.write();
         compactor_assigned_task_num.insert(context_id, 0);
         let rx = policy.add_compactor(context_id, max_concurrent_task_number);
         tracing::info!("Added compactor session {}", context_id);
@@ -237,7 +216,7 @@ impl CompactorManager {
 
     pub fn remove_compactor(&self, context_id: HummockContextId) {
         let mut policy = self.policy.write();
-        let mut compactor_assigned_task_num = self.compactor_assigned_task_num.lock();
+        let mut compactor_assigned_task_num = self.compactor_assigned_task_num.write();
         compactor_assigned_task_num.remove(&context_id);
         policy.remove_compactor(context_id);
 
@@ -250,10 +229,24 @@ impl CompactorManager {
         self.policy.read().get_compactor(context_id)
     }
 
-    pub fn report_compact_task(&self, context_id: HummockContextId, task: &CompactTask) {
+    pub fn assign_compact_task(
+        &self,
+        context_id: HummockContextId,
+        compact_task: &CompactTask,
+    ) -> Result<()> {
         let mut policy = self.policy.write();
-        let mut compactor_assigned_task_num = self.compactor_assigned_task_num.lock();
-        policy.report_compact_task(context_id, task);
+        let policy_assign_result = policy.assign_compact_task(context_id, compact_task);
+        let mut compactor_assigned_task_num = self.compactor_assigned_task_num.write();
+        if policy_assign_result.is_ok() {
+            Self::update_task_num(&mut compactor_assigned_task_num, context_id, true);
+        }
+        policy_assign_result
+    }
+
+    pub fn report_compact_task(&self, context_id: HummockContextId, compact_task: &CompactTask) {
+        let mut policy = self.policy.write();
+        let mut compactor_assigned_task_num = self.compactor_assigned_task_num.write();
+        policy.report_compact_task(context_id, compact_task);
         Self::update_task_num(&mut compactor_assigned_task_num, context_id, false);
     }
 
@@ -348,7 +341,7 @@ impl CompactorManager {
     }
 
     fn update_task_num(
-        compactor_assigned_task_num: &mut MutexGuard<HashMap<HummockContextId, u64>>,
+        compactor_assigned_task_num: &mut RwLockWriteGuard<HashMap<HummockContextId, u64>>,
         context_id: HummockContextId,
         inc: bool,
     ) {

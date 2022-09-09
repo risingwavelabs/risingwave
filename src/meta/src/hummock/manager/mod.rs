@@ -1101,7 +1101,7 @@ where
                         return;
                     }
                 };
-                let compactor = match self.compactor_manager.next_idle_compactor(None) {
+                let compactor = match self.compactor_manager.next_idle_compactor() {
                     None => {
                         tracing::warn!(
                             "Skip committed SST sanity check due to no available worker"
@@ -1469,9 +1469,7 @@ where
         };
 
         // 2. select_compactor
-        let compactor = self
-            .compactor_manager
-            .next_idle_compactor(Some(&compact_task));
+        let compactor = self.compactor_manager.next_idle_compactor();
         let compactor = match compactor {
             None => {
                 tracing::warn!("trigger_manual_compaction No compactor is available.");
@@ -1484,7 +1482,6 @@ where
 
             Some(compactor) => compactor,
         };
-
         let mut is_failed = false;
         if let Err(e) = self
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -1496,6 +1493,13 @@ where
                 compactor.context_id(),
                 e
             );
+        }
+        if let Err(e) = self
+            .compactor_manager
+            .assign_compact_task(compactor.context_id(), &compact_task)
+        {
+            is_failed = true;
+            tracing::warn!("Failed to upadte compaction schedule policy: {:#?}", e);
         }
 
         if !is_failed {

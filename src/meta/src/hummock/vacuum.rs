@@ -116,7 +116,7 @@ where
                 .cloned()
                 .collect_vec();
             // 1. Pick a worker.
-            let compactor = match self.compactor_manager.next_compactor(None) {
+            let compactor = match self.compactor_manager.next_compactor() {
                 None => {
                     tracing::warn!("No vacuum worker is available.");
                     break;
@@ -192,7 +192,7 @@ where
             "run full GC with sst_retention_time = {} secs",
             sst_retention_time.as_secs()
         );
-        let compactor = match self.compactor_manager.next_idle_compactor(None) {
+        let compactor = match self.compactor_manager.next_idle_compactor() {
             None => {
                 tracing::warn!("Try full GC but no available idle worker.");
                 return Ok(());

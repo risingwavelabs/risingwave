@@ -197,10 +197,13 @@ async fn test_hummock_compaction_task() {
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     compactor_manager.add_compactor(worker_node.id, u64::MAX);
     let context_id = compactor_manager
-        .next_idle_compactor(Some(&compact_task))
+        .next_idle_compactor()
         .unwrap()
         .context_id();
     debug_assert_eq!(context_id, worker_node.id);
+    compactor_manager
+        .assign_compact_task(context_id, &compact_task)
+        .unwrap();
     hummock_manager
         .assign_compaction_task(&compact_task, context_id)
         .await
