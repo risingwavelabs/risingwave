@@ -1,6 +1,9 @@
 # DO NOT MODIFY THIS FILE
 # This SLT file is generated from `src/expr/src/expr/expr_array_concat.rs`.
 
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
 # ==== `expr_array_concat` @ L15 ====
 
 statement ok

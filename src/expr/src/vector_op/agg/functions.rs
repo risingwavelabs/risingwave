@@ -130,20 +130,21 @@ pub fn max_list<'a>(r: Option<ListRef<'a>>, i: Option<ListRef<'a>>) -> Result<Op
 /// ```slt
 /// statement ok
 /// create table t(v1 int);
+///
 /// statement ok
 /// insert into t values (null);
 ///
-/// query i
+/// query I
 /// select count(*) from t;
 /// ----
 /// 1
 ///
-/// query i
+/// query I
 /// select count(v1) from t;
 /// ----
 /// 0
 ///
-/// query i
+/// query I
 /// select sum(v1) from t;
 /// ----
 /// NULL

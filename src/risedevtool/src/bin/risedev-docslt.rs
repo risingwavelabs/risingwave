@@ -175,19 +175,26 @@ fn generate_slt_files_for_package(package_name: &str) -> Result<()> {
             .unwrap();
         let slt_filename = format!("{file_basename}_{filename_digest}.slt");
         let mut slt_file = std::fs::File::create(slt_dir.join(slt_filename))?;
-        writeln!(
+        write!(
             slt_file,
-            "# DO NOT MODIFY THIS FILE\n# This SLT file is generated from `{}`.",
+            "\
+            # DO NOT MODIFY THIS FILE\n\
+            # This SLT file is generated from `{}`.\n\
+            \n\
+            statement ok\n\
+            set RW_IMPLICIT_FLUSH to true;\n",
             filename
         )?;
         let blocks = &slt_blocks_per_file[filename];
         for block in blocks.iter() {
-            writeln!(
+            write!(
                 slt_file,
-                "\n# ==== `{}` @ L{} ====",
-                block.position.item_name, block.position.line_no
+                "\n\
+                # ==== `{}` @ L{} ====\n\
+                \n\
+                {}\n",
+                block.position.item_name, block.position.line_no, block.content
             )?;
-            writeln!(slt_file, "\n{}", block.content)?;
         }
     }
 
