@@ -22,7 +22,7 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::{Barrier, Epoch};
+use risingwave_stream::executor::{Barrier, Epoch, Mutation};
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
@@ -117,12 +117,20 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
         let epoch = req.epoch.unwrap();
-        self.mgr
-            .stop_all_actors(Epoch {
+
+        let barrier = &Barrier {
+            epoch: Epoch {
                 curr: epoch.curr,
                 prev: epoch.prev,
-            })
-            .await?;
+            },
+            mutation: Some(Arc::new(Mutation::Stop(
+                req.actor_ids.into_iter().collect(),
+            ))),
+            checkpoint: true,
+            passed_actors: vec![],
+        };
+
+        self.mgr.stop_all_actors(barrier).await?;
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,

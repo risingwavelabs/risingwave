@@ -45,7 +45,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
       LogicalProject { exprs: [t1.x] }
-        LogicalJoin { type: LeftSemi, on: true, output: all }
+        LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
           LogicalAgg { group_key: [t1.x], aggs: [] }
             LogicalProject { exprs: [t1.x] }
               LogicalScan { table: t1, columns: [t1.x, t1._row_id] }

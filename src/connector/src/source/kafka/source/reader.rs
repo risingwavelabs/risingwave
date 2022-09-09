@@ -82,6 +82,7 @@ impl SplitReader for KafkaSplitReader {
             for split in splits {
                 if let SplitImpl::Kafka(k) = split {
                     if let Some(offset) = k.start_offset {
+                        let offset = if offset == 0 { 0 } else { offset + 1 };
                         tpl.add_partition_offset(
                             k.topic.as_str(),
                             k.partition,

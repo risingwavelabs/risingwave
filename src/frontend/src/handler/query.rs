@@ -12,25 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::for_await;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_batch::executor::BoxedDataChunkStream;
+use pgwire::types::Row;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
-use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::binder::{Binder, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
-use crate::handler::util::{force_local_mode, to_pg_field, to_pg_rows};
+use crate::handler::util::{force_local_mode, to_pg_field};
 use crate::planner::Planner;
 use crate::scheduler::{
-    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution, SchedulerError,
+    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
 };
 use crate::session::{OptimizerContext, SessionImpl};
+
+pub type QueryResultSet = Vec<Row>;
 
 pub async fn handle_query(
     context: OptimizerContext,
@@ -56,34 +55,18 @@ pub async fn handle_query(
     };
     debug!("query_mode:{:?}", query_mode);
 
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let (data_stream, pg_descs) = match query_mode {
+    let (rows, pg_descs) = match query_mode {
         QueryMode::Local => {
             if stmt_type.is_dml() {
                 // DML do not support local mode yet.
-                distribute_execute(context, bound, shutdown_tx).await?
+                distribute_execute(context, bound, format).await?
             } else {
-                local_execute(context, bound)?
+                local_execute(context, bound, format).await?
             }
         }
         // Local mode do not support cancel tasks.
-        QueryMode::Distributed => distribute_execute(context, bound, shutdown_tx).await?,
+        QueryMode::Distributed => distribute_execute(context, bound, format).await?,
     };
-
-    let mut data_stream = data_stream.take_until(shutdown_rx);
-    let mut rows = vec![];
-    #[for_await]
-    for chunk in &mut data_stream {
-        rows.extend(to_pg_rows(chunk?, format));
-    }
-
-    // Check whether error happen, if yes, returned.
-    let execution_ret = data_stream.take_result();
-    if let Some(ret) = execution_ret {
-        return Err(ret
-            .expect("The shutdown message receiver should not fail")
-            .into());
-    }
 
     let rows_count = match stmt_type {
         StatementType::SELECT => rows.len() as i32,
@@ -104,6 +87,7 @@ pub async fn handle_query(
     if session.config().get_implicit_flush() {
         flush_for_write(&session, stmt_type).await?;
     }
+
     Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
 }
 
@@ -122,8 +106,8 @@ fn to_statement_type(stmt: &Statement) -> StatementType {
 pub async fn distribute_execute(
     context: OptimizerContext,
     stmt: BoundStatement,
-    shutdown_tx: oneshot::Sender<SchedulerError>,
-) -> Result<(BoxedDataChunkStream, Vec<PgFieldDescriptor>)> {
+    format: bool,
+) -> Result<(QueryResultSet, Vec<PgFieldDescriptor>)> {
     let session = context.session_ctx.clone();
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, pg_descs) = {
@@ -155,19 +139,18 @@ pub async fn distribute_execute(
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
     let query_manager = execution_context.session().env().query_manager().clone();
     Ok((
-        Box::pin(
-            query_manager
-                .schedule(execution_context, query, shutdown_tx)
-                .await?,
-        ),
+        query_manager
+            .schedule(execution_context, query, format)
+            .await?,
         pg_descs,
     ))
 }
 
-fn local_execute(
+async fn local_execute(
     context: OptimizerContext,
     stmt: BoundStatement,
-) -> Result<(BoxedDataChunkStream, Vec<PgFieldDescriptor>)> {
+    format: bool,
+) -> Result<(QueryResultSet, Vec<PgFieldDescriptor>)> {
     let session = context.session_ctx.clone();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
@@ -196,7 +179,7 @@ fn local_execute(
 
     // TODO: Passing sql here
     let execution = LocalQueryExecution::new(query, front_env.clone(), "", session.auth_context());
-    Ok((Box::pin(execution.run()), pg_descs))
+    Ok((execution.collect_rows(format).await?, pg_descs))
 }
 
 async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {

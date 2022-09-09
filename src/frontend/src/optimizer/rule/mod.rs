@@ -53,14 +53,20 @@ mod translate_apply;
 pub use translate_apply::*;
 mod merge_multijoin;
 pub use merge_multijoin::*;
+mod max_one_row_elim;
+pub use max_one_row_elim::*;
 mod apply_join;
-mod distinct_agg;
-mod index_selection;
-mod push_calculation_of_join;
 pub use apply_join::*;
+mod apply_to_join;
+pub use apply_to_join::*;
+mod distinct_agg;
 pub use distinct_agg::*;
+mod index_selection;
 pub use index_selection::*;
+mod push_calculation_of_join;
 pub use push_calculation_of_join::*;
+mod over_agg_to_topn;
+pub use over_agg_to_topn::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -72,6 +78,8 @@ macro_rules! for_all_rules {
             ,{ApplyProjRule}
             ,{ApplyScanRule}
             ,{ApplyJoinRule}
+            ,{ApplyToJoinRule}
+            ,{MaxOneRowEliminateRule}
             ,{DistinctAggRule}
             ,{IndexDeltaJoinRule}
             ,{MergeMultiJoinRule}
@@ -83,6 +91,7 @@ macro_rules! for_all_rules {
             ,{TranslateApplyRule}
             ,{PushCalculationOfJoinRule}
             ,{IndexSelectionRule}
+            ,{OverAggToTopNRule}
         }
     };
 }

@@ -30,8 +30,8 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockReadEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::{pin_version_response, HummockVersion};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -159,7 +159,7 @@ pub struct LocalVersionManager {
 }
 
 impl LocalVersionManager {
-    pub async fn new(
+    pub fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
@@ -172,21 +172,10 @@ impl LocalVersionManager {
             tokio::sync::mpsc::unbounded_channel();
         let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
 
-        let pinned_version = match Self::pin_version_with_retry(
-            hummock_meta_client.clone(),
-            INVALID_VERSION_ID,
-            10,
-            // never break until max retry
-            || false,
-        )
-        .await
-        .expect("should be `Some` since `break_condition` is always false")
-        .expect("should be able to pinned the first version")
-        {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should fetch the full hummock version in initialization")
-            }
-            Payload::PinnedVersion(version) => version,
+        // This version cannot be used in query. It must be replaced by valid version.
+        let pinned_version = HummockVersion {
+            id: INVALID_VERSION_ID,
+            ..Default::default()
         };
 
         let (buffer_event_sender, buffer_event_receiver) = mpsc::unbounded_channel();
@@ -208,13 +197,13 @@ impl LocalVersionManager {
             write_conflict_detector: write_conflict_detector.clone(),
 
             shared_buffer_uploader: Arc::new(SharedBufferUploader::new(
-                options.clone(),
+                options,
                 sstable_store,
                 hummock_meta_client.clone(),
                 stats,
                 write_conflict_detector,
                 sstable_id_manager.clone(),
-                filter_key_extractor_manager.clone(),
+                filter_key_extractor_manager,
             )),
             sstable_id_manager,
         });
@@ -236,7 +225,7 @@ impl LocalVersionManager {
     }
 
     #[cfg(any(test, feature = "test"))]
-    pub async fn for_test(
+    pub fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -254,7 +243,6 @@ impl LocalVersionManager {
             )),
             Arc::new(FilterKeyExtractorManager::default()),
         )
-        .await
     }
 
     /// Updates cached version if the new version is of greater id.
@@ -262,16 +250,9 @@ impl LocalVersionManager {
     /// being referenced by some readers.
     pub fn try_update_pinned_version(
         &self,
-        last_pinned: Option<u64>,
         pin_resp_payload: pin_version_response::Payload,
     ) -> bool {
         let old_version = self.local_version.read();
-        if let Some(last_pinned_id) = last_pinned {
-            if old_version.pinned_version().id() != last_pinned_id {
-                return false;
-            }
-        }
-
         let new_version_id = match &pin_resp_payload {
             Payload::VersionDeltas(version_deltas) => match version_deltas.delta.last() {
                 Some(version_delta) => version_delta.id,
@@ -327,37 +308,39 @@ impl LocalVersionManager {
         true
     }
 
-    /// Waits until the local hummock version contains the epoch. We will wait for different epochs
-    /// according to `HummockReadEpoch`'s type
-    pub async fn wait_epoch(&self, wait_epoch: HummockReadEpoch) -> HummockResult<()> {
-        if wait_epoch.get_epoch() == HummockEpoch::MAX {
+    /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
+    /// we will only check whether it is le `sealed_epoch` and won't wait.
+    pub async fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> HummockResult<()> {
+        let wait_epoch = match wait_epoch {
+            HummockReadEpoch::Committed(epoch) => epoch,
+            HummockReadEpoch::Current(epoch) => {
+                let sealed_epoch = self.local_version.read().get_sealed_epoch();
+                assert!(
+                    epoch <= sealed_epoch
+                        && epoch != HummockEpoch::MAX
+                    ,
+                    "current epoch can't read, because the epoch in storage is not updated, epoch{}, sealed epoch{}"
+                    ,epoch
+                    ,sealed_epoch
+                );
+                return Ok(());
+            }
+            HummockReadEpoch::NoWait(_) => panic!("No wait can't wait epoch"),
+        };
+        if wait_epoch == HummockEpoch::MAX {
             panic!("epoch should not be u64::MAX");
         }
         let mut receiver = self.worker_context.version_update_notifier_tx.subscribe();
         loop {
             let (pinned_version_id, pinned_version_epoch) = {
                 let current_version = self.local_version.read();
-                match wait_epoch {
-                    HummockReadEpoch::Committed(epoch) => {
-                        if current_version.pinned_version().max_committed_epoch() >= epoch {
-                            return Ok(());
-                        }
-                        (
-                            current_version.pinned_version().id(),
-                            current_version.pinned_version().max_committed_epoch(),
-                        )
-                    }
-                    HummockReadEpoch::Current(epoch) => {
-                        if current_version.pinned_version().max_current_epoch() >= epoch {
-                            return Ok(());
-                        }
-                        (
-                            current_version.pinned_version().id(),
-                            current_version.pinned_version().max_current_epoch(),
-                        )
-                    }
-                    HummockReadEpoch::NoWait(_) => panic!("No wait can't wait epoch"),
+                if current_version.pinned_version().max_committed_epoch() >= wait_epoch {
+                    return Ok(());
                 }
+                (
+                    current_version.pinned_version().id(),
+                    current_version.pinned_version().max_committed_epoch(),
+                )
             };
             match tokio::time::timeout(Duration::from_secs(10), receiver.changed()).await {
                 Err(_) => {
@@ -438,12 +421,12 @@ impl LocalVersionManager {
         is_remote_batch: bool,
     ) {
         let mut local_version_guard = self.local_version.write();
-        let max_sync_epoch = local_version_guard.get_max_sync_epoch();
+        let sealed_epoch = local_version_guard.get_sealed_epoch();
         assert!(
-            epoch > max_sync_epoch,
-            "write epoch must greater than sync epoch, write epoch{}, sync epoch{}",
+            epoch > sealed_epoch,
+            "write epoch must greater than max current epoch, write epoch{}, sealed epoch{}",
             epoch,
-            max_sync_epoch
+            sealed_epoch
         );
         // Write into shared buffer
         if is_remote_batch {
@@ -513,6 +496,11 @@ impl LocalVersionManager {
             );
         });
         Some((epoch, join_handle))
+    }
+
+    /// seal epoch in local version.
+    pub fn seal_epoch(&self, epoch: HummockEpoch) {
+        self.local_version.write().seal_epoch(epoch);
     }
 
     pub async fn sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
@@ -664,52 +652,6 @@ impl LocalVersionManager {
 
     pub fn get_pinned_version(&self) -> PinnedVersion {
         self.local_version.read().pinned_version().clone()
-    }
-
-    /// Pin a version with retry.
-    ///
-    /// Return:
-    ///   - `Some(Ok(pinned_version))` if success
-    ///   - `Some(Err(err))` if exceed the retry limit
-    ///   - `None` if meet the break condition
-    async fn pin_version_with_retry(
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-        last_pinned: HummockVersionId,
-        max_retry: usize,
-        break_condition: impl Fn() -> bool,
-    ) -> Option<HummockResult<pin_version_response::Payload>> {
-        let max_retry_interval = Duration::from_secs(10);
-        let mut retry_backoff = tokio_retry::strategy::ExponentialBackoff::from_millis(10)
-            .max_delay(max_retry_interval)
-            .map(jitter);
-
-        let mut retry_count = 0;
-        loop {
-            if retry_count > max_retry {
-                break Some(Err(HummockError::meta_error(format!(
-                    "pin_version max retry reached: {}.",
-                    max_retry
-                ))));
-            }
-            if break_condition() {
-                break None;
-            }
-            match hummock_meta_client.pin_version(last_pinned).await {
-                Ok(version) => {
-                    break Some(Ok(version));
-                }
-                Err(err) => {
-                    let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
-                    tracing::warn!(
-                        "Failed to pin version {:?}. Will retry after about {} milliseconds",
-                        err,
-                        retry_after.as_millis()
-                    );
-                    tokio::time::sleep(retry_after).await;
-                }
-            }
-            retry_count += 1;
-        }
     }
 }
 
@@ -948,12 +890,6 @@ impl LocalVersionManager {
 #[cfg(any(test, feature = "test"))]
 // Some method specially for tests of `LocalVersionManager`
 impl LocalVersionManager {
-    pub async fn refresh_version(&self, hummock_meta_client: &dyn HummockMetaClient) -> bool {
-        let last_pinned = self.get_pinned_version().id();
-        let version = hummock_meta_client.pin_version(last_pinned).await.unwrap();
-        self.try_update_pinned_version(Some(last_pinned), version)
-    }
-
     pub fn local_version(&self) -> &RwLock<LocalVersion> {
         &self.local_version
     }

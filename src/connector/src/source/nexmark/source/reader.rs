@@ -23,7 +23,7 @@ use crate::source::nexmark::source::generator::NexmarkEventGenerator;
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
     spawn_data_generation_stream, Column, ConnectorState, DataGenerationReceiver, SourceMessage,
-    SplitId, SplitImpl, SplitMetaData, SplitReader,
+    SplitImpl, SplitMetaData, SplitReader,
 };
 
 #[derive(Debug)]
@@ -75,7 +75,7 @@ impl SplitReader for NexmarkSplitReader {
             event_num,
             split_index: 0,
             split_num: 0,
-            split_id: SplitId::default(),
+            split_id: "".into(),
             last_event: None,
             event_type,
             use_real_time,
