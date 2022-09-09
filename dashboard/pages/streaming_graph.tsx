@@ -21,16 +21,15 @@ import Head from "next/head"
 import Link from "next/link"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
-import { ActorBox } from "../components/FragmentGraph"
 import { StreamGraph } from "../components/StreamGraph"
 import Title from "../components/Title"
+import { ActorPoint } from "../lib/layout"
 import { Table as RwTable } from "../proto/gen/catalog"
 import { getMaterializedViews } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
-const nodeRadius = 20
 
-function buildMvDependencyAsEdges(mvList: RwTable[]): ActorBox[] {
+function buildMvDependencyAsEdges(mvList: RwTable[]): ActorPoint[] {
   const edges = []
   for (const mv of reverse(sortBy(mvList, "id"))) {
     if (!mv.name.startsWith("__")) {
@@ -38,8 +37,6 @@ function buildMvDependencyAsEdges(mvList: RwTable[]): ActorBox[] {
         id: mv.id.toString(),
         name: mv.name,
         parentIds: mv.dependentRelations.map((r) => r.toString()),
-        width: nodeRadius,
-        height: nodeRadius,
         order: mv.id,
       })
     }
