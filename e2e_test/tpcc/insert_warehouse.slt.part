@@ -1,3 +1,0 @@
-statement ok
-INSERT INTO tpcc_warehouse (w_id,w_name,w_street_1,w_street_2,w_city,w_state,w_zip,w_tax,w_ytd) VALUES
-(1,'mwLkm4','N20BRLw P6g06PN2Lm4i',' kR ggN PkkkL','Pw 0Rii4kNL4ggLgR','mR','718311111',0.0356,585362);
