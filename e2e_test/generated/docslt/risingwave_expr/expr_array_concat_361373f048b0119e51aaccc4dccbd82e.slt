@@ -4,12 +4,7 @@
 statement ok
 set RW_IMPLICIT_FLUSH to true;
 
-# ==== `expr_array_concat` @ L15 ====
-
-statement ok
-create table t (a int);
-
-# ==== `concat_array` @ L112 ====
+# ==== `concat_array` @ L97 ====
 
 query T
 select array_cat(array[66], array[123]);
@@ -26,7 +21,7 @@ select array_cat(null::int[], array[123]);
 ----
 {123}
 
-# ==== `append_array` @ L161 ====
+# ==== `append_array` @ L146 ====
 
 query T
 select array_cat(array[array[66]], array[233]);
@@ -51,7 +46,7 @@ select array_cat(null::int[][], null::int[]);
 ----
 NULL
 
-# ==== `append_value` @ L209 ====
+# ==== `append_value` @ L194 ====
 
 query T
 select array_append(array[66], 123);
@@ -73,7 +68,7 @@ select array_append(null::int[], null::int);
 ----
 {NULL}
 
-# ==== `prepend_array` @ L258 ====
+# ==== `prepend_array` @ L243 ====
 
 query T
 select array_cat(array[233], array[array[66]]);
@@ -98,7 +93,7 @@ select array_cat(null::int[], null::int[][]);
 ----
 NULL
 
-# ==== `prepend_value` @ L305 ====
+# ==== `prepend_value` @ L290 ====
 
 query T
 select array_prepend(123, array[66]);
@@ -119,8 +114,3 @@ query T
 select array_prepend(null::int, null::int[]);
 ----
 {NULL}
-
-# ==== `expr_array_concat` @ L15 ====
-
-statement ok
-drop table t;
