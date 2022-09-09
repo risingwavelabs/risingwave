@@ -127,3 +127,6 @@ select * from mv order by window_start, price desc, supplier_id;
 
 statement ok
 drop materialized view mv;
+
+statement ok
+drop table bid;
