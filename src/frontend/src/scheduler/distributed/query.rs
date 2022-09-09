@@ -221,18 +221,7 @@ impl QueryRunner {
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
 
-        // Schedule other stages after leaf stages are all scheduled.
-        // let mut shutdown_rx = shutdown_rx_for_cancel;
-        // loop {
-        //     tokio::select! {
-        //         _ = &mut shutdown_rx => {
-        //
-        //             self.handle_cancel_or_failed_stage(shutdown_tx,
-        // SchedulerError::QueryCancelError).await;             break;
-        //         }
-
         while let Some(msg_inner) = self.msg_receiver.recv().await {
-            // if let Some(msg_inner) = msg {
             match msg_inner {
                 Stage(Scheduled(stage_id)) => {
                     tracing::trace!(

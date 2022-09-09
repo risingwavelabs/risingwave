@@ -185,7 +185,6 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
-
         if HasMaxOneRowApply().visit(plan.clone()) {
             return Err(ErrorCode::InternalError(
                 "Scalar subquery might produce more than one row.".into(),
@@ -202,7 +201,6 @@ impl PlanRoot {
             vec![TranslateApplyRule::create()],
             ApplyOrder::BottomUp,
         );
-
         plan = self.optimize_by_rules_until_fix_point(
             plan,
             "General Unnesting(Push Down Apply)".to_string(),
@@ -215,14 +213,12 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
-
         if has_logical_apply(plan.clone()) {
             return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
         }
 
         // Predicate Push-down
         plan = plan.predicate_pushdown(Condition::true_cond());
-
         if explain_trace {
             ctx.trace("Predicate Push Down:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
@@ -249,7 +245,6 @@ impl PlanRoot {
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
         plan = plan.predicate_pushdown(Condition::true_cond());
-
         if explain_trace {
             ctx.trace("Predicate Push Down:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
@@ -271,9 +266,14 @@ impl PlanRoot {
         // `self.out_fields` as `required_cols` here.
         let required_cols = (0..self.plan.schema().len()).collect_vec();
         plan = plan.prune_col(&required_cols);
-
+        // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:".to_string());
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+        plan = plan.predicate_pushdown(Condition::true_cond());
+        if explain_trace {
+            ctx.trace("Predicate Push Down:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
