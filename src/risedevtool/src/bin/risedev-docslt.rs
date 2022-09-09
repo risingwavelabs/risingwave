@@ -17,7 +17,7 @@ use serde_json::Value as JsonValue;
 #[clap(propagate_version = true)]
 #[clap(infer_subcommands = true)]
 pub struct RiseDevDocSltOpts {
-    /// Specify package name to extract DocSlt from. `all` for all packages.
+    /// Specify the package name to extract DocSlt from. `all` for all packages.
     #[clap(short, long)]
     package: String,
 }
