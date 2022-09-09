@@ -642,6 +642,23 @@ category = "RiseDev - SQLLogicTest"
 run_task = { name = ["slt-streaming", "slt-batch"] }
 description = "Run all batch and streaming e2e tests"
 
+[tasks.docslt]
+category = "RiseDev - DocSlt"
+description = "Extract DocSlt from Rust doc comments."
+script = '''
+#!/bin/bash
+set -e
+if [ $# -eq 0 ]
+then
+    cargo run --bin risedev-docslt -- -p all
+else
+    for package in "$@"
+    do
+        cargo run --bin risedev-docslt -- -p $package
+    done
+fi
+'''
+
 [tasks.compose]
 category = "RiseDev - Compose"
 description = "Compose a docker-compose.yaml file"
