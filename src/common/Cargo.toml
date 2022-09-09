@@ -61,7 +61,7 @@ procfs = { version = "0.12", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", recv = "a502be24bd0971463f5bcbfe035a248d8ba503b7"}
+darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7"}
 libc = "0.2.72"
 
 [dev-dependencies]
