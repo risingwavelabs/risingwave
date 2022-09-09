@@ -105,8 +105,8 @@ impl StreamNode for StreamDynamicFilter {
         NodeBody::DynamicFilter(DynamicFilterNode {
             left_key: self.left_index as u32,
             condition,
-            left_table: Some(left_table.to_state_table_prost()),
-            right_table: Some(right_table.to_state_table_prost()),
+            left_table: Some(left_table.to_internal_table_prost()),
+            right_table: Some(right_table.to_internal_table_prost()),
         })
     }
 }
