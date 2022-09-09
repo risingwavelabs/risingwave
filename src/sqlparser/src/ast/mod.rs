@@ -867,10 +867,9 @@ pub enum Statement {
         /// Optional schema
         columns: Vec<ColumnDef>,
         constraints: Vec<TableConstraint>,
-        table_properties: Vec<SqlOption>,
         with_options: Vec<SqlOption>,
+        /// `AS ( query )`
         query: Option<Box<Query>>,
-        like: Option<ObjectName>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -949,8 +948,6 @@ pub enum Statement {
     CreateDatabase {
         db_name: ObjectName,
         if_not_exists: bool,
-        location: Option<String>,
-        managed_location: Option<String>,
     },
     /// GRANT privileges ON objects TO grantees
     Grant {
@@ -987,8 +984,6 @@ pub enum Statement {
     },
     /// EXPLAIN / DESCRIBE for select_statement
     Explain {
-        // If true, query used the MySQL `DESCRIBE` alias for explain
-        describe_alias: bool,
         /// Carry out the command and show actual run times and other statistics.
         analyze: bool,
         /// A SQL query that specifies what to explain
@@ -1013,16 +1008,11 @@ impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Statement::Explain {
-                describe_alias,
                 analyze,
                 statement,
                 options,
             } => {
-                if *describe_alias {
-                    write!(f, "DESCRIBE ")?;
-                } else {
-                    write!(f, "EXPLAIN ")?;
-                }
+                write!(f, "EXPLAIN ")?;
 
                 if *analyze {
                     write!(f, "ANALYZE ")?;
@@ -1112,20 +1102,12 @@ impl fmt::Display for Statement {
             Statement::CreateDatabase {
                 db_name,
                 if_not_exists,
-                location,
-                managed_location,
             } => {
                 write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
                     write!(f, " IF NOT EXISTS")?;
                 }
                 write!(f, " {}", db_name)?;
-                if let Some(l) = location {
-                    write!(f, " LOCATION '{}'", l)?;
-                }
-                if let Some(ml) = managed_location {
-                    write!(f, " MANAGEDLOCATION '{}'", ml)?;
-                }
                 Ok(())
             }
             Statement::CreateView {
@@ -1155,13 +1137,11 @@ impl fmt::Display for Statement {
                 name,
                 columns,
                 constraints,
-                table_properties,
                 with_options,
                 or_replace,
                 if_not_exists,
                 temporary,
                 query,
-                like,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1184,12 +1164,9 @@ impl fmt::Display for Statement {
                         write!(f, ", ")?;
                     }
                     write!(f, "{})", display_comma_separated(constraints))?;
-                } else if query.is_none() && like.is_none() {
+                } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
-                }
-                if !table_properties.is_empty() {
-                    write!(f, " WITH ({})", display_comma_separated(table_properties))?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;

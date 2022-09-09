@@ -84,16 +84,6 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn replicate_batch(
-        &self,
-        _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_> {
-        async move {
-            panic!("should not replicate batch from the state store!");
-        }
-    }
-
     fn iter<R, B>(
         &self,
         _prefix_hint: Option<Vec<u8>>,
