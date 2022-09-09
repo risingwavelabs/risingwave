@@ -19,6 +19,7 @@ pub mod property;
 
 mod delta_join_solver;
 mod heuristic;
+mod max_one_row_visitor;
 mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
@@ -36,8 +37,9 @@ use self::plan_visitor::has_logical_over_agg;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
+use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
-use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply};
+use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply, PlanVisitor};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
@@ -139,7 +141,6 @@ impl PlanRoot {
         apply_order: ApplyOrder,
     ) -> PlanRef {
         let mut output_plan = plan;
-
         loop {
             let mut heuristic_optimizer = HeuristicOptimizer::new(&apply_order, &rules);
             output_plan = heuristic_optimizer.optimize(output_plan);
@@ -171,13 +172,26 @@ impl PlanRoot {
         }
 
         // Simple Unnesting.
-        // Pull correlated predicates up the algebra tree to unnest simple subquery.
         plan = self.optimize_by_rules(
             plan,
             "Simple Unnesting".to_string(),
-            vec![PullUpCorrelatedPredicateRule::create()],
+            vec![
+                // Eliminate max one row
+                MaxOneRowEliminateRule::create(),
+                // Convert apply to join.
+                ApplyToJoinRule::create(),
+                // Pull correlated predicates up the algebra tree to unnest simple subquery.
+                PullUpCorrelatedPredicateRule::create(),
+            ],
             ApplyOrder::TopDown,
         );
+
+        if HasMaxOneRowApply().visit(plan.clone()) {
+            return Err(ErrorCode::InternalError(
+                "Scalar subquery might produce more than one row.".into(),
+            )
+            .into());
+        }
 
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner

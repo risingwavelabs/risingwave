@@ -232,10 +232,10 @@ where
         }
     }
 
-    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             self.inner
-                .wait_epoch(epoch)
+                .try_wait_epoch(epoch)
                 .stack_trace("store_wait_epoch")
                 .await
                 .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
@@ -261,22 +261,12 @@ where
         }
     }
 
-    fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
-        panic!("the state store is already monitored")
+    fn seal_epoch(&self, epoch: u64) {
+        self.inner.seal_epoch(epoch);
     }
 
-    fn replicate_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_> {
-        async move {
-            self.inner
-                .replicate_batch(kv_pairs, write_options)
-                .stack_trace("store_replicate_batch")
-                .await
-                .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
-        }
+    fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
+        panic!("the state store is already monitored")
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
