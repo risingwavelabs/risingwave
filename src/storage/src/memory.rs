@@ -229,7 +229,7 @@ impl StateStore for MemoryStateStore {
         async move { unimplemented!() }
     }
 
-    fn wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             // memory backend doesn't support wait for epoch, so this is a no-op.
             Ok(())
@@ -245,6 +245,8 @@ impl StateStore for MemoryStateStore {
             })
         }
     }
+
+    fn seal_epoch(&self, _epoch: u64) {}
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move { Ok(()) }
