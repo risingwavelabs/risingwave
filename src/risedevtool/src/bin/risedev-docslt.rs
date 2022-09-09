@@ -23,7 +23,6 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
-use itertools::Itertools;
 use serde_json::Value as JsonValue;
 
 #[derive(Parser)]
@@ -31,9 +30,9 @@ use serde_json::Value as JsonValue;
 #[clap(propagate_version = true)]
 #[clap(infer_subcommands = true)]
 pub struct RiseDevDocSltOpts {
-    /// Specify the package name to extract DocSlt from. `all` for all packages.
+    /// Specify the package name to extract DocSlt from.
     #[clap(short, long)]
-    package: String,
+    package: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -218,34 +217,24 @@ fn generate_slt_files_for_package(package_name: &str) -> Result<()> {
 
 fn main() -> Result<()> {
     let opts = RiseDevDocSltOpts::parse();
-    let packages = if opts.package == "all" {
-        let metadata_output = Command::new("cargo").arg("metadata").output()?;
-        if !metadata_output.status.success() {
-            return Err(anyhow!(
-                "cargo metadata failed with exit code {}",
-                metadata_output.status.code().unwrap()
-            ));
-        }
-        let metadata_json = String::from_utf8(metadata_output.stdout)?;
-        let metadata: JsonValue = serde_json::from_str(&metadata_json)?;
-        let workspace_members = metadata["workspace_members"]
-            .as_array()
-            .ok_or_else(|| anyhow!("cargo metadata output did not contain `workspace_members`"))?;
-        let packages = workspace_members
-            .iter()
-            .map(|member| {
-                let member_info = member.as_str().unwrap();
-                member_info.split_once(' ').unwrap().0.to_string()
-            })
-            .filter(|package_name| package_name.starts_with("risingwave_"))
-            .collect_vec();
-        println!("Extracting DocSlt for all packages: {:#?}", packages);
-        packages
+    let packages = if let Some(ref package) = opts.package {
+        vec![package.as_ref()]
     } else {
-        vec![opts.package]
+        let default_packages = vec![
+            "risingwave_common",
+            "risingwave_frontend",
+            "risingwave_stream",
+            "risingwave_batch",
+            "risingwave_expr",
+        ];
+        println!(
+            "Extracting DocSlt for default packages: {:#?}",
+            default_packages
+        );
+        default_packages
     };
-    for package_name in packages {
-        generate_slt_files_for_package(&package_name)?;
+    for package in packages {
+        generate_slt_files_for_package(package)?;
     }
     Ok(())
 }
