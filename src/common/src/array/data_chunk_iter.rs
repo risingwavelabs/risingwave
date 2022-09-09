@@ -23,6 +23,7 @@ use crate::array::DataChunk;
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, ToOwnedDatum};
+use crate::util::ordered::OrderedRowSerializer;
 use crate::util::value_encoding;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
@@ -283,6 +284,17 @@ impl Row {
             serialize_datum(cell, &mut result);
         }
         Ok(result)
+    }
+
+    /// Serialize part of the row into memcomparable bytes.
+    pub fn extract_memcomparable_by_indices(
+        &self,
+        serializer: &OrderedRowSerializer,
+        key_indices: &[usize],
+    ) -> Vec<u8> {
+        let mut bytes = vec![];
+        serializer.serialize_datums(self.datums_by_indices(key_indices), &mut bytes);
+        bytes
     }
 
     /// Return number of cells in the row.

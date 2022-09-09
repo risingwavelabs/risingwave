@@ -108,10 +108,6 @@ impl JoinRow {
             degree: self.degree,
         })
     }
-
-    pub fn datums_by_indices<'a>(&'a self, indices: &'a [usize]) -> impl Iterator<Item = &Datum> {
-        self.row.datums_by_indices(indices)
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -335,13 +331,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.degree_state.table.update_vnode_bitmap(vnode_bitmap);
     }
 
-    fn extract_pk_from_row(&self, row: &Row) -> Vec<u8> {
-        let mut pk = vec![];
-        self.pk_serializer
-            .serialize_datums(row.datums_by_indices(&self.state.pk_indices), &mut pk);
-        pk
-    }
-
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
@@ -431,7 +420,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             for row_and_degree in zipped_iter {
                 let (row, degree) = row_and_degree?;
                 debug_assert_eq!(degree.size(), self.degree_state.order_key_indices.len() + 1);
-                let pk = self.extract_pk_from_row(row.as_ref());
+                let pk = row
+                    .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
                 let degree_i64 = degree
                     .0
                     .last()
@@ -449,7 +439,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             #[for_await]
             for row in table_iter {
                 let row = row?;
-                let pk = self.extract_pk_from_row(row.as_ref());
+                let pk = row
+                    .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
                 entry_state.insert(pk, JoinRow::new(row.into_owned(), 0).encode()?);
             }
         };
@@ -466,8 +457,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Insert a join row
     pub fn insert(&mut self, key: &K, value: JoinRow) -> StreamExecutorResult<()> {
-        let pk = self.extract_pk_from_row(&value.row);
         if let Some(entry) = self.inner.get_mut(key) {
+            let pk = value
+                .row
+                .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
             entry.insert(pk, value.encode()?);
         }
         // If no cache maintained, only update the flush buffer.
@@ -482,8 +475,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     pub fn insert_row(&mut self, key: &K, value: Row) -> StreamExecutorResult<()> {
         let join_row = JoinRow::new(value.clone(), 0);
 
-        let pk = self.extract_pk_from_row(&value);
         if let Some(entry) = self.inner.get_mut(key) {
+            let pk =
+                value.extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
             entry.insert(pk, join_row.encode()?);
         }
         // If no cache maintained, only update the state table.
@@ -494,9 +488,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Delete a join row
     pub fn delete(&mut self, key: &K, value: JoinRow) -> StreamExecutorResult<()> {
         if let Some(entry) = self.inner.get_mut(key) {
-            let mut pk = vec![];
-            self.pk_serializer
-                .serialize_datums(value.datums_by_indices(&self.state.pk_indices), &mut pk);
+            let pk = value
+                .row
+                .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
             entry.remove(pk);
         }
 
@@ -511,9 +505,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Used when the side does not need to update degree.
     pub fn delete_row(&mut self, key: &K, value: Row) -> StreamExecutorResult<()> {
         if let Some(entry) = self.inner.get_mut(key) {
-            let mut pk = vec![];
-            self.pk_serializer
-                .serialize_datums(value.datums_by_indices(&self.state.pk_indices), &mut pk);
+            let pk =
+                value.extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
             entry.remove(pk);
         }
 
