@@ -774,7 +774,3 @@ impl<S: StateStore> StorageIterInner<S> {
 fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::StateTable(rw.into())
 }
-
-pub fn append_pk_prefix(value: Row, prefix: Row) -> Row {
-    Row::new([prefix.0, value.0].concat())
-}

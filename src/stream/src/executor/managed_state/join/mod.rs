@@ -32,7 +32,6 @@ use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_storage::table::streaming_table::state_table;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
@@ -43,6 +42,13 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
 
 type DegreeType = u64;
+
+pub fn build_degree_row(mut order_key: Row, degree: DegreeType) -> Row {
+    let degree_datum = Some(ScalarImpl::Int64(degree as i64));
+    order_key.0.push(degree_datum);
+    order_key
+}
+
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
 pub struct JoinRow {
@@ -97,9 +103,8 @@ impl JoinRow {
     ///
     /// * `state_order_key_indices` - the order key of `row`
     pub fn into_table_rows(self, state_order_key_indices: &[usize]) -> (Row, Row) {
-        let degree_datum = Some(ScalarImpl::Int64(self.degree as i64));
-        let pk_prefix = self.row.by_indices(state_order_key_indices);
-        let degree = state_table::append_pk_prefix(Row::new(vec![degree_datum]), pk_prefix);
+        let order_key = self.row.by_indices(state_order_key_indices);
+        let degree = build_degree_row(order_key, self.degree);
         (self.row, degree)
     }
 
@@ -156,11 +161,10 @@ impl EncodedJoinRow {
         row_data_types: &[DataType],
         state_order_key_indices: &[usize],
     ) -> StreamExecutorResult<Row> {
-        let degree_datum = Some(ScalarImpl::Int64(self.degree as i64));
-        let prefix = self
+        let order_key = self
             .decode_row(row_data_types)?
             .by_indices(state_order_key_indices);
-        let schemaed_degree = state_table::append_pk_prefix(Row::new(vec![degree_datum]), prefix);
+        let schemaed_degree = build_degree_row(order_key, self.degree);
         Ok(schemaed_degree)
     }
 }
@@ -229,9 +233,20 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     null_matched: FixedBitSet,
     /// Current epoch
     current_epoch: u64,
-    /// State table
+    /// State table. Contains the data from upstream.
     state: TableInner<S>,
-    /// Degree table
+    /// Degree table.
+    ///
+    /// The degree is generated from the hash join executor.
+    /// Each row in `state` has a corresponding degree in `degree state`.
+    /// A degree value `d` in for a row means the row has `d` matched row in the other join side.
+    ///
+    /// It will only be used when needed in a side.
+    ///
+    /// - Full Outer: both side
+    /// - Left Outer/Semi/Anti: left side
+    /// - Right Outer/Semi/Anti: right side
+    /// - Inner: None.
     degree_state: TableInner<S>,
     /// If degree table is need
     need_degree_table: bool,
@@ -449,7 +464,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(())
     }
 
-    /// Insert a row
+    /// Insert a row.
+    /// Used when the side does not need to update degree.
     pub fn insert_row(&mut self, key: &K, pk: Row, value: Row) -> StreamExecutorResult<()> {
         let join_row = JoinRow::new(value.clone(), 0);
 
@@ -475,6 +491,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a row
+    /// Used when the side does not need to update degree.
     pub fn delete_row(&mut self, key: &K, pk: Row, value: Row) -> StreamExecutorResult<()> {
         if let Some(entry) = self.inner.get_mut(key) {
             entry.remove(pk);

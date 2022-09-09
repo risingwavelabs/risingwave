@@ -1022,7 +1022,7 @@ impl ActorGraphBuilder {
         stream_node: &StreamNode,
         fragment: &mut Fragment,
     ) -> MetaResult<()> {
-        let mut table_ids = match stream_node.get_node_body()? {
+        let table_ids = match stream_node.get_node_body()? {
             NodeBody::Materialize(node) => {
                 vec![node.get_table_id()]
             }
@@ -1069,7 +1069,7 @@ impl ActorGraphBuilder {
                 vec![]
             }
         };
-        fragment.state_table_ids.append(&mut table_ids);
+        fragment.state_table_ids.extend(table_ids);
         let input_nodes = stream_node.get_input();
         for input_node in input_nodes {
             Self::record_internal_state_tables(input_node, fragment)?;
