@@ -2691,11 +2691,11 @@ fn parse_derived_tables() {
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
-    let sql = "SELECT * FROM (((SELECT 1)))";
+    let sql = "SELECT * FROM (SELECT 1)";
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
-    let sql = "SELECT * FROM t NATURAL JOIN (((SELECT 1)))";
+    let sql = "SELECT * FROM t NATURAL JOIN (SELECT 1)";
     let _ = verified_only_select(sql);
     // TODO: add assertions
 

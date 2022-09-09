@@ -33,7 +33,7 @@ use crate::stream_fragmenter::build_graph;
 pub fn gen_create_mv_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
-    query: Box<Query>,
+    query: Query,
     name: ObjectName,
     ignore_name_duplicates: bool,
 ) -> Result<(PlanRef, ProstTable)> {
@@ -73,7 +73,7 @@ pub fn gen_create_mv_plan(
 
     let bound = {
         let mut binder = Binder::new(session);
-        binder.bind_query(*query)?
+        binder.bind_query(query)?
     };
 
     if let BoundSetExpr::Select(select) = &bound.body {
@@ -112,7 +112,7 @@ pub fn gen_create_mv_plan(
 pub async fn handle_create_mv(
     context: OptimizerContext,
     name: ObjectName,
-    query: Box<Query>,
+    query: Query,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
