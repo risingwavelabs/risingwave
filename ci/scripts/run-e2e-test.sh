@@ -62,6 +62,13 @@ timeout 2m sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/extended
 echo "--- Kill cluster"
 cargo make ci-kill
 
+echo "--- e2e, ci-3cn-1fe, generated"
+cargo make ci-start ci-3cn-1fe
+timeout 2m sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/generated/**/*.slt'
+
+echo "--- Kill cluster"
+cargo make ci-kill
+
 if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     echo "--- e2e, ci-3cn-1fe, fuzzing"
     buildkite-agent artifact download sqlsmith-"$profile" target/debug/
