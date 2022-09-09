@@ -188,22 +188,22 @@ impl ArrayConcatExpression {
     ///
     /// ```slt
     /// query T
-    /// select array_cat(array[66], 123);
+    /// select array_append(array[66], 123);
     /// ----
     /// {66,123}
     ///
     /// query T
-    /// select array_cat(array[66], null::int);
+    /// select array_append(array[66], null::int);
     /// ----
     /// {66,NULL}
     ///
     /// query T
-    /// select array_cat(null::int[], 233);
+    /// select array_append(null::int[], 233);
     /// ----
     /// {233}
     ///
     /// query T
-    /// select array_cat(null::int[], null::int);
+    /// select array_append(null::int[], null::int);
     /// ----
     /// {NULL}
     fn append_value(left: DatumRef, right: DatumRef) -> Datum {
