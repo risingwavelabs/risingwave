@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
 use prost::Message;
@@ -797,6 +798,10 @@ where
         compact_task: &CompactTask,
         assignee_context_id: HummockContextId,
     ) -> Result<()> {
+        fail_point!("assign_compaction_task_fail", |_| Err(anyhow::anyhow!(
+            "assign_compaction_task_fail"
+        )
+        .into()));
         let mut compaction_guard = write_lock!(self, compaction).await;
         let _timer = start_measure_real_process_timer!(self);
         let compaction = compaction_guard.deref_mut();
