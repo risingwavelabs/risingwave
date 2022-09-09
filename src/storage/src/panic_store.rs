@@ -123,7 +123,7 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             panic!("should not wait epoch from the panic state store!");
         }
@@ -133,6 +133,10 @@ impl StateStore for PanicStateStore {
         async move {
             panic!("should not sync from the panic state store!");
         }
+    }
+
+    fn seal_epoch(&self, _epoch: u64) {
+        panic!("should not update current epoch from the panic state store!");
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
