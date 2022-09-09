@@ -53,8 +53,12 @@ mod translate_apply;
 pub use translate_apply::*;
 mod merge_multijoin;
 pub use merge_multijoin::*;
+mod max_one_row_elim;
+pub use max_one_row_elim::*;
 mod apply_join;
 pub use apply_join::*;
+mod apply_to_join;
+pub use apply_to_join::*;
 mod distinct_agg;
 pub use distinct_agg::*;
 mod index_selection;
@@ -74,6 +78,8 @@ macro_rules! for_all_rules {
             ,{ApplyProjRule}
             ,{ApplyScanRule}
             ,{ApplyJoinRule}
+            ,{ApplyToJoinRule}
+            ,{MaxOneRowEliminateRule}
             ,{DistinctAggRule}
             ,{IndexDeltaJoinRule}
             ,{MergeMultiJoinRule}
