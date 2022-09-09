@@ -68,13 +68,13 @@ services:
     ports:
       - 25432:5432
     healthcheck:
-      test: "pg_isready -U user -d ch_benchmark_db"
-      interval: 2s
-      timeout: 20s
-      retries: 10
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d ch_benchmark_db" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=pw
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=ch_benchmark_db
       - PGPASSWORD=pw
     volumes:
@@ -84,7 +84,7 @@ services:
     image: debezium/connect:1.4
     environment:
       BOOTSTRAP_SERVERS: kafka:9092
-      GROUP_ID: 2
+      GROUP_ID: 1
       CONFIG_STORAGE_TOPIC: connect_configs
       OFFSET_STORAGE_TOPIC: connect_offsets
       KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
