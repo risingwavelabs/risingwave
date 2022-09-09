@@ -165,7 +165,7 @@ impl Parser {
     pub fn parse_statement(&mut self) -> Result<Statement, ParserError> {
         match self.next_token() {
             Token::Word(w) => match w.keyword {
-                Keyword::EXPLAIN => Ok(self.parse_explain(false)?),
+                Keyword::EXPLAIN => Ok(self.parse_explain()?),
                 Keyword::ANALYZE => Ok(self.parse_analyze()?),
                 Keyword::SELECT | Keyword::WITH | Keyword::VALUES => {
                     self.prev_token();
@@ -1455,8 +1455,6 @@ impl Parser {
         Ok(Statement::CreateDatabase {
             db_name,
             if_not_exists,
-            location: None,
-            managed_location: None,
         })
     }
 
@@ -1565,17 +1563,11 @@ impl Parser {
     ) -> Result<Statement, ParserError> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let table_name = self.parse_object_name()?;
-        let like = if self.parse_keyword(Keyword::LIKE) || self.parse_keyword(Keyword::ILIKE) {
-            self.parse_object_name().ok()
-        } else {
-            None
-        };
         // parse optional column list (schema)
         let (columns, constraints) = self.parse_columns()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
-        let table_properties = self.parse_options(Keyword::TBLPROPERTIES)?;
         // Parse optional `AS ( query )`
         let query = if self.parse_keyword(Keyword::AS) {
             Some(Box::new(self.parse_query()?))
@@ -1589,11 +1581,9 @@ impl Parser {
             columns,
             constraints,
             with_options,
-            table_properties,
             or_replace,
             if_not_exists,
             query,
-            like,
         })
     }
 
@@ -2364,7 +2354,7 @@ impl Parser {
         }
     }
 
-    pub fn parse_explain(&mut self, describe_alias: bool) -> Result<Statement, ParserError> {
+    pub fn parse_explain(&mut self) -> Result<Statement, ParserError> {
         let mut options = ExplainOptions::default();
         let parse_explain_option = |parser: &mut Parser| -> Result<(), ParserError> {
             while let Some(keyword) = parser.parse_one_of_keywords(&[
@@ -2408,7 +2398,6 @@ impl Parser {
 
         let statement = self.parse_statement()?;
         Ok(Statement::Explain {
-            describe_alias,
             analyze,
             statement: Box::new(statement),
             options,
