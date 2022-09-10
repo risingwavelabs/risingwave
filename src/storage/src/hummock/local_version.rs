@@ -511,7 +511,7 @@ struct PinnedVersionGuard {
 }
 
 impl PinnedVersionGuard {
-    /// Creates a new PinnedVersionGuard and send a pin request to pinned_version_worker.
+    /// Creates a new `PinnedVersionGuard` and send a pin request to `pinned_version_worker`.
     fn new(
         version_id: HummockVersionId,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
