@@ -507,17 +507,37 @@ impl LocalVersion {
 
 struct PinnedVersionGuard {
     version_id: HummockVersionId,
-    unpin_worker_tx: UnboundedSender<PinVersionAction>,
+    pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
+}
+
+impl PinnedVersionGuard {
+    /// Creates a new PinnedVersionGuard and send a pin request to PinedVersionManager.
+    fn new(
+        version_id: HummockVersionId,
+        pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
+    ) -> Self {
+        if pinned_version_manager_tx
+            .send(PinVersionAction::Pin(version_id))
+            .is_err()
+        {
+            tracing::warn!("failed to send req pin version id{}", version_id);
+        }
+
+        Self {
+            version_id,
+            pinned_version_manager_tx,
+        }
+    }
 }
 
 impl Drop for PinnedVersionGuard {
     fn drop(&mut self) {
         if self
-            .unpin_worker_tx
+            .pinned_version_manager_tx
             .send(PinVersionAction::Unpin(self.version_id))
             .is_err()
         {
-            tracing::warn!("failed to send unpin {}", self.version_id);
+            tracing::warn!("failed to send req unpin version id:{}", self.version_id);
         }
     }
 }
@@ -535,19 +555,12 @@ impl PinnedVersion {
     ) -> Self {
         let version_id = version.id;
 
-        if pinned_version_manager_tx
-            .send(PinVersionAction::Pin(version.id))
-            .is_err()
-        {
-            tracing::warn!("failed to send unpin {}", version_id);
-        }
-
         PinnedVersion {
             version: Arc::new(version),
-            guard: Arc::new(PinnedVersionGuard {
+            guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
-                unpin_worker_tx: pinned_version_manager_tx,
-            }),
+                pinned_version_manager_tx,
+            )),
         }
     }
 
@@ -561,10 +574,10 @@ impl PinnedVersion {
         let version_id = version.id;
         PinnedVersion {
             version: Arc::new(version),
-            guard: Arc::new(PinnedVersionGuard {
+            guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
-                unpin_worker_tx: self.guard.unpin_worker_tx.clone(),
-            }),
+                self.guard.pinned_version_manager_tx.clone(),
+            )),
         }
     }
 
