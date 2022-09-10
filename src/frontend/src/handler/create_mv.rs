@@ -35,7 +35,6 @@ pub fn gen_create_mv_plan(
     context: OptimizerContextRef,
     query: Box<Query>,
     name: ObjectName,
-    ignore_name_duplicates: bool,
 ) -> Result<(PlanRef, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(name)?;
     check_schema_writable(&schema_name)?;
@@ -54,21 +53,13 @@ pub fn gen_create_mv_plan(
             )?;
         }
 
-        if ignore_name_duplicates {
-            let database_id = catalog_reader
-                .get_database_by_name(session.database())?
-                .id();
-            let schema_id = catalog_reader
-                .get_schema_by_name(session.database(), &schema_name)?
-                .id();
-            (database_id, schema_id)
-        } else {
-            catalog_reader.check_relation_name_duplicated(
-                session.database(),
-                &schema_name,
-                &table_name,
-            )?
-        }
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &schema_name)?
+            .id();
+        (db_id, schema_id)
     };
 
     let bound = {
@@ -117,7 +108,17 @@ pub async fn handle_create_mv(
     let session = context.session_ctx.clone();
 
     let (table, graph) = {
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, false)?;
+        {
+            let catalog_reader = session.env().catalog_reader().read_guard();
+            let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
+            catalog_reader.check_relation_name_duplicated(
+                session.database(),
+                &schema_name,
+                &table_name,
+            )?;
+        }
+
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
         let graph = build_graph(plan);
 
         (table, graph)
