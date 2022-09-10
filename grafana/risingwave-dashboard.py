@@ -676,10 +676,17 @@ def frontend(outer_panels):
                     "rate(frontend_query_counter_local_execution[$__rate_interval])",""
                 ),
             ]),
-            panels.timeseries_latency("Query Average Latency in Local Execution Mode", [
+            panels.timeseries_latency("Query Latency in Local Execution Mode", [
                 panels.target(
-                    "frontend_latency_local_execution_sum / frontend_latency_local_execution_count",""
+                    "histogram_quantile(0.5, sum(rate(frontend_latency_local_execution_bucket[$__rate_interval])) by (le, job, instance))", "p50 - {{job}} @ {{instance}}"
                 ),
+                panels.target(
+                    "histogram_quantile(0.9, sum(rate(frontend_latency_local_execution_bucket[$__rate_interval])) by (le, job, instance))", "p90 - {{job}} @ {{instance}}"
+                ),
+                panels.target(
+                    "histogram_quantile(0.95, sum(rate(frontend_latency_local_execution_bucket[$__rate_interval])) by (le, job, instance))", "p99 - {{job}} @ {{instance}}"
+                ),
+
             ]),
         ]),
     ]
