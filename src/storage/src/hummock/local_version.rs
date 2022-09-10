@@ -24,20 +24,18 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, summarize_level_deltas, HummockLevelsExt, HummockVersionExt,
     LevelDeltasSummary,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo, INVALID_VERSION_ID,
+};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::shared_buffer::{
-    KeyIndexSharedBufferBatch, OrderSortedUncommittedData, UncommittedData,
-};
+use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::utils::{check_subset_preserve_order, filter_single_sst, range_overlap};
 
 #[derive(Clone)]
 pub struct LocalVersion {
-    replicated_batches: BTreeMap<HummockEpoch, KeyIndexSharedBufferBatch>,
     shared_buffer: BTreeMap<HummockEpoch, SharedBuffer>,
     pinned_version: PinnedVersion,
     local_related_version: PinnedVersion,
@@ -47,7 +45,9 @@ pub struct LocalVersion {
     /// because we will traverse `sync_uncommitted_data` in the forward direction and return the
     /// key when we find it
     pub sync_uncommitted_data: VecDeque<(Vec<HummockEpoch>, SyncUncommittedData)>,
-    max_sync_epoch: u64,
+    max_sync_epoch: HummockEpoch,
+    /// The max readable epoch, and epochs smaller than it will not be written again.
+    sealed_epoch: HummockEpoch,
 }
 
 #[derive(Debug, Clone)]
@@ -115,13 +115,21 @@ impl LocalVersion {
         let local_related_version =
             pinned_version.new_local_related_pin_version(local_related_version);
         Self {
-            replicated_batches: BTreeMap::default(),
             shared_buffer: BTreeMap::default(),
             pinned_version,
             local_related_version,
             sync_uncommitted_data: Default::default(),
             max_sync_epoch: 0,
+            sealed_epoch: 0,
         }
+    }
+
+    pub fn seal_epoch(&mut self, epoch: HummockEpoch) {
+        self.sealed_epoch = self.sealed_epoch.max(epoch);
+    }
+
+    pub fn get_sealed_epoch(&self) -> HummockEpoch {
+        self.sealed_epoch
     }
 
     pub fn pinned_version(&self) -> &PinnedVersion {
@@ -236,8 +244,6 @@ impl LocalVersion {
     ) -> Vec<HummockEpoch> {
         let new_max_committed_epoch = new_pinned_version.max_committed_epoch;
         if self.pinned_version.max_committed_epoch() < new_max_committed_epoch {
-            self.replicated_batches
-                .retain(|epoch, _| *epoch > new_pinned_version.max_committed_epoch);
             assert!(self
                 .shared_buffer
                 .iter()
@@ -281,7 +287,6 @@ impl LocalVersion {
                     cleaned_epochs
                 }
             };
-
         // update pinned version
         self.pinned_version = new_pinned_version;
 
@@ -298,35 +303,13 @@ impl LocalVersion {
         B: AsRef<[u8]>,
     {
         use parking_lot::RwLockReadGuard;
-        let (pinned_version, (replicated_batches, shared_buffer_data, sync_uncommitted_data)) = {
+        let (pinned_version, (shared_buffer_data, sync_uncommitted_data)) = {
             let guard = this.read();
             let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
             let pinned_version = guard.pinned_version.clone();
             (
                 pinned_version,
                 if read_epoch >= smallest_uncommitted_epoch {
-                    let replicated_batches = guard
-                        .replicated_batches
-                        .range(smallest_uncommitted_epoch..=read_epoch)
-                        .rev() // Important: order by epoch descendingly
-                        .map(|(_, key_indexed_batches)| {
-                            key_indexed_batches
-                                .range((
-                                    key_range.start_bound().map(|b| b.as_ref().to_vec()),
-                                    std::ops::Bound::Unbounded,
-                                ))
-                                .filter(|(_, batch)| {
-                                    range_overlap(
-                                        key_range,
-                                        batch.start_user_key(),
-                                        batch.end_user_key(),
-                                    )
-                                })
-                                .map(|(_, batches)| batches.clone())
-                                .collect_vec()
-                        })
-                        .collect_vec();
-
                     let shared_buffer_data = guard
                         .shared_buffer
                         .range(smallest_uncommitted_epoch..=read_epoch)
@@ -343,27 +326,19 @@ impl LocalVersion {
                         .map(|(_, value)| value.get_overlap_data(key_range, read_epoch))
                         .collect();
                     RwLockReadGuard::unlock_fair(guard);
-                    (replicated_batches, shared_buffer_data, sync_data)
+                    (shared_buffer_data, sync_data)
                 } else {
                     RwLockReadGuard::unlock_fair(guard);
-                    (Vec::new(), Vec::new(), Vec::new())
+                    (Vec::new(), Vec::new())
                 },
             )
         };
 
         ReadVersion {
-            replicated_batches,
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
         }
-    }
-
-    pub fn replicate_batch(&mut self, epoch: HummockEpoch, batch: SharedBufferBatch) {
-        self.replicated_batches
-            .entry(epoch)
-            .or_default()
-            .insert(batch.end_user_key().to_vec(), batch);
     }
 
     pub fn clear_shared_buffer(&mut self) -> Vec<HummockEpoch> {
@@ -375,7 +350,6 @@ impl LocalVersion {
         }
         self.sync_uncommitted_data.clear();
         self.shared_buffer.clear();
-        self.replicated_batches.clear();
         cleaned_epoch
     }
 
@@ -498,7 +472,6 @@ impl LocalVersion {
         }
         version.id = version_delta.id;
         version.max_committed_epoch = version_delta.max_committed_epoch;
-        version.max_current_epoch = version_delta.max_current_epoch;
         version.safe_epoch = version_delta.safe_epoch;
 
         clean_epochs
@@ -597,6 +570,10 @@ impl PinnedVersion {
         self.version.id
     }
 
+    pub fn is_valid(&self) -> bool {
+        self.version.id != INVALID_VERSION_ID
+    }
+
     pub fn levels(&self, compaction_group_id: Option<CompactionGroupId>) -> Vec<&Level> {
         match compaction_group_id {
             None => self.version.get_combined_levels(),
@@ -616,10 +593,6 @@ impl PinnedVersion {
         self.version.max_committed_epoch
     }
 
-    pub fn max_current_epoch(&self) -> u64 {
-        self.version.max_current_epoch
-    }
-
     pub fn safe_epoch(&self) -> u64 {
         self.version.safe_epoch
     }
@@ -631,8 +604,6 @@ impl PinnedVersion {
 }
 
 pub struct ReadVersion {
-    // The replicated batches are sorted by epoch descendingly
-    pub replicated_batches: Vec<Vec<SharedBufferBatch>>,
     // The shared buffers are sorted by epoch descendingly
     pub shared_buffer_data: Vec<OrderSortedUncommittedData>,
     pub pinned_version: PinnedVersion,

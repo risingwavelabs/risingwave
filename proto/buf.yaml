@@ -2,6 +2,8 @@ version: v1
 lint:
   use:
     - DEFAULT
+  ignore:
+    - health.proto # service must be named "Health", without "Service" suffix. Ignore to pass CI.
   # enum_zero_value_suffix: INVALID # The zero value enum should be named "INVALID".
   except:
     - ENUM_VALUE_PREFIX # Enum variant doesn't have to prefix with enum name.

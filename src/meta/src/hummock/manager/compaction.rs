@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::ops::DerefMut;
 
 use function_name::named;
 use itertools::Itertools;
@@ -22,10 +21,10 @@ use risingwave_pb::hummock::{CompactTaskAssignment, CompactionConfig};
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::{commit_multi_var, read_lock, write_lock};
+use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
-use crate::model::{BTreeMapTransaction, ValTransaction};
-use crate::storage::{MetaStore, Transaction};
+use crate::model::BTreeMapTransaction;
+use crate::storage::MetaStore;
 
 #[derive(Default)]
 pub struct Compaction {
@@ -125,15 +124,16 @@ where
     }
 
     #[named]
-    pub async fn cancel_assigned_tasks_for_context_ids(
-        &self,
-        context_id: HummockContextId,
-    ) -> Result<()> {
-        let mut compaction_guard = write_lock!(self, compaction).await;
-        let compaction = compaction_guard.deref_mut();
-        let (compact_statuses, compact_task_assignment) =
-            compaction.cancel_assigned_tasks_for_context_ids(&[context_id])?;
-        commit_multi_var!(self, None, compact_statuses, compact_task_assignment)?;
-        Ok(())
+    pub async fn list_all_tasks_ids(&self) -> Vec<HummockCompactionTaskId> {
+        let compaction = read_lock!(self, compaction).await;
+        compaction
+            .compaction_statuses
+            .iter()
+            .flat_map(|(_, cs)| {
+                cs.level_handlers
+                    .iter()
+                    .flat_map(|lh| lh.pending_tasks_ids())
+            })
+            .collect_vec()
     }
 }

@@ -19,8 +19,8 @@ use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
-use self::util::handle_with_properties;
 use crate::session::{OptimizerContext, SessionImpl};
+use crate::utils::WithOptions;
 
 pub mod alter_user;
 mod create_database;
@@ -32,7 +32,6 @@ pub mod create_source;
 pub mod create_table;
 pub mod create_user;
 mod describe;
-pub mod dml;
 mod drop_database;
 mod drop_index;
 pub mod drop_mv;
@@ -56,26 +55,17 @@ pub async fn handle(
     sql: &str,
     format: bool,
 ) -> Result<PgResponse> {
-    let mut context = OptimizerContext::new(session.clone(), Arc::from(sql));
+    let context = OptimizerContext::new(
+        session.clone(),
+        Arc::from(sql),
+        WithOptions::try_from(&stmt)?,
+    );
     match stmt {
         Statement::Explain {
             statement,
-            describe_alias: _,
             analyze,
             options,
-        } => {
-            match statement.as_ref() {
-                Statement::CreateTable { with_options, .. }
-                | Statement::CreateView { with_options, .. } => {
-                    context.with_properties =
-                        handle_with_properties("explain create_table", with_options.clone())?;
-                }
-
-                _ => {}
-            }
-
-            explain::handle_explain(context, *statement, options, analyze)
-        }
+        } => explain::handle_explain(context, *statement, options, analyze),
         Statement::CreateSource {
             is_materialized,
             stmt,
@@ -84,22 +74,48 @@ pub async fn handle(
         Statement::CreateTable {
             name,
             columns,
-            with_options,
             constraints,
-            ..
+            with_options: _, // It is put in OptimizerContext
+
+            // Not supported things
+            or_replace,
+            temporary,
+            if_not_exists,
+            query,
         } => {
-            context.with_properties = handle_with_properties("handle_create_table", with_options)?;
+            if or_replace {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE OR REPLACE TABLE".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if temporary {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE TEMPORARY TABLE".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if if_not_exists {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE TABLE IF NOT EXISTS".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if query.is_some() {
+                return Err(ErrorCode::NotImplemented("CREATE AS".to_string(), None.into()).into());
+            }
             create_table::handle_create_table(context, name, columns, constraints).await
         }
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
-            ..
         } => create_database::handle_create_database(context, db_name, if_not_exists).await,
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
-            ..
         } => create_schema::handle_create_schema(context, schema_name, if_not_exists).await,
         Statement::CreateUser(stmt) => create_user::handle_create_user(context, stmt).await,
         Statement::AlterUser(stmt) => alter_user::handle_alter_user(context, stmt).await,
@@ -139,21 +155,17 @@ pub async fn handle(
                     .into(),
             ),
         },
-        Statement::Query(_) => query::handle_query(context, stmt, format).await,
-        Statement::Insert { .. } | Statement::Delete { .. } | Statement::Update { .. } => {
-            dml::handle_dml(context, stmt).await
-        }
+        Statement::Query(_)
+        | Statement::Insert { .. }
+        | Statement::Delete { .. }
+        | Statement::Update { .. } => query::handle_query(context, stmt, format).await,
         Statement::CreateView {
             materialized: true,
             or_replace: false,
             name,
             query,
-            with_options,
             ..
-        } => {
-            context.with_properties = handle_with_properties("handle_create_mv", with_options)?;
-            create_mv::handle_create_mv(context, name, query).await
-        }
+        } => create_mv::handle_create_mv(context, name, query).await,
         Statement::Flush => flush::handle_flush(context).await,
         Statement::SetVariable {
             local: _,

@@ -54,7 +54,7 @@ where
     let table_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_tables(epoch, table_ids);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -80,7 +80,7 @@ where
         .unwrap();
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables_2,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -97,7 +97,7 @@ where
     epoch += 1;
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables_3,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -125,6 +125,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
             }),
             file_size: 2,
             table_ids: vec![(i + 1) as u32, (i + 2) as u32],
+            meta_offset: 0,
         });
     }
     sst_info

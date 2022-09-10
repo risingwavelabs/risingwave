@@ -29,6 +29,7 @@ pub struct StreamTopN {
 
 impl StreamTopN {
     pub fn new(logical: LogicalTopN) -> Self {
+        assert!(logical.group_key().is_empty());
         let ctx = logical.base.ctx.clone();
         let dist = match logical.input().distribution() {
             Distribution::Single => Distribution::Single,
@@ -79,7 +80,7 @@ impl StreamNode for StreamTopN {
                 self.logical
                     .infer_internal_table_catalog(None)
                     .with_id(state.gen_table_id_wrapped())
-                    .to_state_table_prost(),
+                    .to_internal_table_prost(),
             ),
         };
         if self.input().append_only() {

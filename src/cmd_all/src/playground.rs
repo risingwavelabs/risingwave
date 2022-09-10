@@ -198,9 +198,7 @@ pub async fn playground() -> Result<()> {
         }
     }
 
-    risingwave_common::util::sync_point::on_sync_point("CLUSTER_READY")
-        .await
-        .unwrap();
+    sync_point::on("CLUSTER_READY").await;
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.

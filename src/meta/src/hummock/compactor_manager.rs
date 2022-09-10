@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use fail::fail_point;
 use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -53,6 +54,10 @@ struct TaskHeartbeat {
 
 impl Compactor {
     pub async fn send_task(&self, task: Task) -> MetaResult<()> {
+        fail_point!("compaction_send_task_fail", |_| Err(anyhow::anyhow!(
+            "compaction_send_task_fail"
+        )
+        .into()));
         self.sender
             .send(Ok(SubscribeCompactTasksResponse { task: Some(task) }))
             .await
@@ -165,7 +170,7 @@ impl CompactorManager {
                     if hummock_manager
                         .get_assigned_tasks_number(compactor.context_id())
                         .await
-                        <= compactor.max_concurrent_task_number()
+                        < compactor.max_concurrent_task_number()
                     {
                         return Some(compactor);
                     }
@@ -231,7 +236,7 @@ impl CompactorManager {
 
     /// Forcefully purging the heartbeats for a task is only safe when the
     /// context has been completely removed from meta.
-    /// Returns true if there were remanining heartbeats for the task.
+    /// Returns true if there were remaining heartbeats for the task.
     pub fn purge_heartbeats_for_context(&self, context_id: HummockContextId) -> bool {
         self.task_heartbeats.write().remove(&context_id).is_some()
     }
@@ -322,6 +327,10 @@ impl CompactorManager {
             }
         }
     }
+
+    pub fn compactor_num(&self) -> usize {
+        self.inner.read().compactors.len()
+    }
 }
 
 #[cfg(test)]
@@ -350,7 +359,7 @@ mod tests {
     {
         let original_tables = generate_test_tables(epoch, get_sst_ids(hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager_ref_for_test(),
+            hummock_manager.compaction_group_manager(),
             &original_tables,
             StaticCompactionGroupId::StateDefault.into(),
         )

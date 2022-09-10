@@ -31,13 +31,16 @@ use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::{HummockSnapshotManagerRef, SchedulerError, SchedulerResult};
+use crate::scheduler::{
+    ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError, SchedulerResult,
+};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
 pub enum QueryMessage {
     /// Events passed running execution.
     Stage(StageEvent),
+    CancelQuery,
 }
 
 enum QueryState {
@@ -86,7 +89,8 @@ struct QueryRunner {
 }
 
 impl QueryExecution {
-    pub fn new(
+    pub async fn new(
+        context: ExecutionContextRef,
         query: Query,
         epoch: u64,
         worker_node_manager: WorkerNodeManagerRef,
@@ -123,6 +127,15 @@ impl QueryExecution {
             Arc::new(stage_executions)
         };
 
+        // Insert shutdown channel into channel map so able to cancel it outside.
+        // TODO: Find a way to delete it when query ends.
+        {
+            let session_ctx = context.session.clone();
+            session_ctx
+                .insert_query_shutdown_sender(query.query_id.clone(), sender)
+                .await;
+        }
+
         let state = QueryState::Pending {
             msg_receiver: receiver,
         };
@@ -138,6 +151,9 @@ impl QueryExecution {
     }
 
     /// Start execution of this query.
+    /// Note the two shutdown channel sender and receivers are not dual.
+    /// One is used for propagate error to `QueryResultFetcher`, one is used for listening on
+    /// cancel request (from ctrl-c, cli, ui etc).
     pub async fn start(
         &self,
         shutdown_tx: Sender<SchedulerError>,
@@ -205,9 +221,8 @@ impl QueryRunner {
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
 
-        // Schedule other stages after leaf stages are all scheduled.
-        while let Some(msg) = self.msg_receiver.recv().await {
-            match msg {
+        while let Some(msg_inner) = self.msg_receiver.recv().await {
+            match msg_inner {
                 Stage(Scheduled(stage_id)) => {
                     tracing::trace!(
                         "Query stage {:?}-{:?} scheduled.",
@@ -232,8 +247,8 @@ impl QueryRunner {
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
                             if self.all_children_scheduled(parent).await
-                                // Do not schedule same stage twice.
-                                && self.stage_executions[parent].is_pending().await
+                                            // Do not schedule same stage twice.
+                                            && self.stage_executions[parent].is_pending().await
                             {
                                 self.stage_executions[parent].start().await;
                             }
@@ -246,35 +261,17 @@ impl QueryRunner {
                         self.query.query_id, id, reason
                     );
 
-                    // Consume sender here and send error to root stage.
-                    let root_stage_sender = mem::take(&mut self.root_stage_sender);
-                    // It's possible we receive stage failed event message multi times and the
-                    // sender has been consumed in first failed event.
-                    if let Some(sender) = root_stage_sender {
-                        if let Err(e) = sender.send(Err(reason)) {
-                            warn!("Query execution dropped: {:?}", e);
-                        } else {
-                            debug!(
-                                "Root stage failure event for {:?} sent.",
-                                self.query.query_id
-                            );
-                        }
-                    } else {
-                        // If root stage has been taken, then use channel to send error to
-                        // `QueryResultFetcher`. This may happen if some execution error received
-                        // after we have scheduled are events.
-
-                        if shutdown_tx.send(reason).is_err() {
-                            warn!("Sending error to query result fetcher fail!");
-                        }
-                    }
-
-                    // Stop all running stages.
-                    for (_stage_id, stage_execution) in self.stage_executions.iter() {
-                        // The stop is return immediately so no need to spawn tasks.
-                        stage_execution.stop().await;
-                    }
-
+                    self.handle_cancel_or_failed_stage(shutdown_tx, reason)
+                        .await;
+                    // One stage failed, not necessary to execute schedule stages.
+                    break;
+                }
+                QueryMessage::CancelQuery => {
+                    self.handle_cancel_or_failed_stage(
+                        shutdown_tx,
+                        SchedulerError::QueryCancelError,
+                    )
+                    .await;
                     // One stage failed, not necessary to execute schedule stages.
                     break;
                 }
@@ -329,6 +326,43 @@ impl QueryRunner {
         }
         true
     }
+
+    /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
+    /// result fetcher.
+    async fn handle_cancel_or_failed_stage(
+        mut self,
+        shutdown_tx: Sender<SchedulerError>,
+        reason: SchedulerError,
+    ) {
+        // Consume sender here and send error to root stage.
+        let root_stage_sender = mem::take(&mut self.root_stage_sender);
+        // It's possible we receive stage failed event message multi times and the
+        // sender has been consumed in first failed event.
+        if let Some(sender) = root_stage_sender {
+            if let Err(e) = sender.send(Err(reason)) {
+                warn!("Query execution dropped: {:?}", e);
+            } else {
+                debug!(
+                    "Root stage failure event for {:?} sent.",
+                    self.query.query_id
+                );
+            }
+        } else {
+            // If root stage has been taken, then use channel to send error to
+            // `QueryResultFetcher`. This may happen if some execution error received
+            // after we have scheduled are events.
+
+            if shutdown_tx.send(reason).is_err() {
+                warn!("Sending error to query result fetcher fail!");
+            }
+        }
+
+        // Stop all running stages.
+        for (_stage_id, stage_execution) in self.stage_executions.iter() {
+            // The stop is return immediately so no need to spawn tasks.
+            stage_execution.stop().await;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -338,7 +372,7 @@ mod tests {
 
     use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
+    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
@@ -356,8 +390,8 @@ mod tests {
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
-    use crate::scheduler::{HummockSnapshotManager, SchedulerError};
-    use crate::session::OptimizerContext;
+    use crate::scheduler::{ExecutionContext, HummockSnapshotManager, SchedulerError};
+    use crate::session::{OptimizerContext, SessionImpl};
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
 
@@ -367,6 +401,7 @@ mod tests {
         let compute_client_pool = Arc::new(ComputeClientPool::new(1024));
         let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
         let query_execution = QueryExecution::new(
+            ExecutionContext::new(SessionImpl::mock().into()).into(),
             create_query().await,
             100,
             worker_node_manager,
@@ -375,7 +410,8 @@ mod tests {
             ))),
             compute_client_pool,
             catalog_reader,
-        );
+        )
+        .await;
         // Channel just used to pass compiler.
         let (shutdown_tx, _shutdown_rx) = oneshot::channel::<SchedulerError>();
         assert!(query_execution.start(shutdown_tx).await.is_err());
@@ -416,7 +452,7 @@ mod tests {
                 ],
                 distribution_key: vec![],
                 appendonly: false,
-                retention_seconds: TABLE_OPTION_DUMMY_RETAINTION_SECOND,
+                retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
             }),
             vec![],
             ctx,

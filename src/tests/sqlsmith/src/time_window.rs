@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::expr::DataTypeName;
+use risingwave_common::types::DataTypeName;
 use risingwave_sqlparser::ast::{
     DataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
