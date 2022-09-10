@@ -43,26 +43,6 @@ services:
       timeout: 10s
       retries: 5
 
-  rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220826
-    volumes:
-      - ..:/risingwave
-
-  regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220826
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - ..:/risingwave
-
-  benchmark-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
-    depends_on:
-      - kafka
-    volumes:
-      - ..:/risingwave
-
   postgres:
     image: debezium/postgres:13
     ports:
@@ -84,24 +64,31 @@ services:
     image: debezium/connect:1.4
     environment:
       BOOTSTRAP_SERVERS: kafka:9092
-      GROUP_ID: 1
       CONFIG_STORAGE_TOPIC: connect_configs
       OFFSET_STORAGE_TOPIC: connect_offsets
-      KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
-      VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
-      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
-      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
     depends_on:
       - kafka
     ports:
       - 8083:8083
     volumes:
       - ./connectors:/connectors
-      
-  schema-registry:
-    image: confluentinc/cp-schema-registry:5.5.3
-    environment:
-     - SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL=zookeeper:2181
-     - SCHEMA_REGISTRY_HOST_NAME=schema-registry
-     - SCHEMA_REGISTRY_LISTENERS=http://schema-registry:8081,http://localhost:8081
-    depends_on: [zookeeper, kafka]
+
+  rw-build-env:
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220826
+    volumes:
+      - ..:/risingwave
+
+  regress-test-env:
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220826
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ..:/risingwave
+
+  benchmark-env:
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
+    depends_on:
+      - kafka
+    volumes:
+      - ..:/risingwave
