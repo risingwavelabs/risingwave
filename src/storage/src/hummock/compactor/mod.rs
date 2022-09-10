@@ -41,7 +41,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{get_epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockSstableId, VersionedComparator};
+use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -671,14 +671,15 @@ impl Compactor {
                 .filter_key_extractor_manager
                 .update_bloom_filter_avg_size(sst_info.file_size as usize, bloom_filter_size);
             let sst_size = sst_info.file_size;
-            let sst_id = sst_info.id;
             ssts.push(sst_info);
 
             let tracker_cloned = task_progress_tracker.clone();
             let context_cloned = self.context.clone();
-            upload_join_handles.push(upload_join_handle.and_then(
-                move |upload_result| async move {
-                    if upload_result.is_ok() {
+            upload_join_handles.push(
+                upload_join_handle
+                    .map_err(HummockError::sstable_upload_error)
+                    .and_then(move |upload_result| async move {
+                        upload_result?;
                         if let Some(tracker) = tracker_cloned {
                             tracker.inc_ssts_uploaded();
                         }
@@ -690,36 +691,19 @@ impl Compactor {
                         } else {
                             context_cloned.stats.compaction_upload_sst_counts.inc();
                         }
-                    }
-                    Ok((sst_id, upload_result))
-                },
-            ));
+                        Ok(())
+                    }),
+            );
         }
 
         // Check if there are any failed uploads. Report all of those SSTs.
-        let mut failed_uploads = vec![];
-        try_join_all(upload_join_handles)
-            .await
-            .map_err(HummockError::sstable_upload_error)?
-            .into_iter()
-            .for_each(|(sst_id, upload_result)| {
-                let _ = upload_result.inspect_err(|upload_err| {
-                    failed_uploads.push((sst_id, upload_err.to_string()));
-                });
-            });
-
+        try_join_all(upload_join_handles).await?;
         self.context
             .stats
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
 
-        if !failed_uploads.is_empty() {
-            Err(HummockError::sstable_upload_error(
-                format_failed_sst_uploads(failed_uploads),
-            ))
-        } else {
-            Ok(ssts)
-        }
+        Ok(ssts)
     }
 
     async fn compact_key_range_impl<F: SstableWriterFactory>(
@@ -806,17 +790,4 @@ fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionF
     }
 
     multi_filter
-}
-
-fn format_failed_sst_uploads(
-    failed_uploads: impl IntoIterator<Item = (HummockSstableId, String)>,
-) -> String {
-    format!(
-        "Failed to upload some ssts:\n{}",
-        failed_uploads
-            .into_iter()
-            .format_with("\n", |(sst_id, reason), f| {
-                f(&format!("id: {}, reason: {}", sst_id, reason))
-            })
-    )
 }
