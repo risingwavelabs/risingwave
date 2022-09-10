@@ -55,18 +55,6 @@ pub async fn handle_query(
     };
     debug!("query_mode:{:?}", query_mode);
 
-    let timer = if query_mode == QueryMode::Local && stmt_type == StatementType::SELECT {
-        Some(
-            session
-                .env()
-                .frontend_metrics
-                .latency_local_execution
-                .start_timer(),
-        )
-    } else {
-        None
-    };
-
     let (rows, pg_descs) = match query_mode {
         QueryMode::Local => {
             if stmt_type.is_dml() {
@@ -98,15 +86,6 @@ pub async fn handle_query(
     // Implicitly flush the writes.
     if session.config().get_implicit_flush() {
         flush_for_write(&session, stmt_type).await?;
-    }
-
-    if let Some(timer) = timer {
-        timer.observe_duration();
-        session
-            .env()
-            .frontend_metrics
-            .query_counter_local_execution
-            .inc();
     }
 
     Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
@@ -174,6 +153,12 @@ async fn local_execute(
 ) -> Result<(QueryResultSet, Vec<PgFieldDescriptor>)> {
     let session = context.session_ctx.clone();
 
+    let timer = session
+        .env()
+        .frontend_metrics
+        .latency_local_execution
+        .start_timer();
+
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, pg_descs) = {
         let root = Planner::new(context.into()).plan(stmt)?;
@@ -200,7 +185,17 @@ async fn local_execute(
 
     // TODO: Passing sql here
     let execution = LocalQueryExecution::new(query, front_env.clone(), "", session.auth_context());
-    Ok((execution.collect_rows(format).await?, pg_descs))
+    let rsp = Ok((execution.collect_rows(format).await?, pg_descs));
+
+    // Collect metrics
+    timer.observe_duration();
+    session
+        .env()
+        .frontend_metrics
+        .query_counter_local_execution
+        .inc();
+
+    rsp
 }
 
 async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
