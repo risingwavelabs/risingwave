@@ -111,6 +111,19 @@ impl ArrayBuilder for StructArrayBuilder {
         Ok(())
     }
 
+    fn pop(&mut self) -> Option<()> {
+        if self.bitmap.pop().is_some() {
+            for child in &mut self.children_array {
+                child.pop().unwrap()
+            }
+            self.len -= 1;
+
+            Some(())
+        } else {
+            None
+        }
+    }
+
     fn finish(self) -> ArrayResult<StructArray> {
         let children = self
             .children_array

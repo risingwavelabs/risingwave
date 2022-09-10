@@ -270,6 +270,10 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         Ok(())
     }
 
+    fn pop(&mut self) -> Option<()> {
+        self.data.pop().map(|_| self.bitmap.pop().unwrap())
+    }
+
     fn finish(self) -> ArrayResult<PrimitiveArray<T>> {
         Ok(PrimitiveArray {
             bitmap: self.bitmap.finish(),

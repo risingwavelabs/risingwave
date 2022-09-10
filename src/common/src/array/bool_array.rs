@@ -159,6 +159,10 @@ impl ArrayBuilder for BoolArrayBuilder {
         Ok(())
     }
 
+    fn pop(&mut self) -> Option<()> {
+        self.data.pop().map(|_| self.bitmap.pop().unwrap())
+    }
+
     fn finish(self) -> ArrayResult<BoolArray> {
         Ok(BoolArray {
             bitmap: self.bitmap.finish(),

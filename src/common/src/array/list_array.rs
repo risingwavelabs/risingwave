@@ -112,6 +112,19 @@ impl ArrayBuilder for ListArrayBuilder {
         Ok(())
     }
 
+    fn pop(&mut self) -> Option<()> {
+        if self.bitmap.pop().is_some() {
+            let start = self.offsets.pop().unwrap();
+            let end = *self.offsets.last().unwrap();
+            for _ in end..start {
+                self.value.pop().unwrap()
+            }
+            Some(())
+        } else {
+            None
+        }
+    }
+
     fn finish(self) -> ArrayResult<ListArray> {
         Ok(ListArray {
             bitmap: self.bitmap.finish(),
