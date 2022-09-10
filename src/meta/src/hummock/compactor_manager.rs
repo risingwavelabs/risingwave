@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use fail::fail_point;
 use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -53,6 +54,10 @@ struct TaskHeartbeat {
 
 impl Compactor {
     pub async fn send_task(&self, task: Task) -> MetaResult<()> {
+        fail_point!("compaction_send_task_fail", |_| Err(anyhow::anyhow!(
+            "compaction_send_task_fail"
+        )
+        .into()));
         self.sender
             .send(Ok(SubscribeCompactTasksResponse { task: Some(task) }))
             .await
@@ -165,7 +170,7 @@ impl CompactorManager {
                     if hummock_manager
                         .get_assigned_tasks_number(compactor.context_id())
                         .await
-                        <= compactor.max_concurrent_task_number()
+                        < compactor.max_concurrent_task_number()
                     {
                         return Some(compactor);
                     }
@@ -321,6 +326,10 @@ impl CompactorManager {
                 }
             }
         }
+    }
+
+    pub fn compactor_num(&self) -> usize {
+        self.inner.read().compactors.len()
     }
 }
 

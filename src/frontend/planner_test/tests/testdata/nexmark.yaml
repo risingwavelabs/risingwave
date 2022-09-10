@@ -652,8 +652,8 @@
             LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   optimizer_error: |
     internal error: OverAgg can not be transformed. Plan:
-    LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
-      LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
+    LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
+      LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
         LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC NULLS FIRST) }
           LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
 - id: nexmark_q20

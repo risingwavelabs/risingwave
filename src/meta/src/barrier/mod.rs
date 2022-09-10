@@ -862,9 +862,7 @@ where
                         }
                     }
                 } else if prev_epoch != INVALID_EPOCH {
-                    self.hummock_manager
-                        .update_current_epoch(prev_epoch)
-                        .await?;
+                    self.hummock_manager.update_current_epoch(prev_epoch)?;
                 }
                 node.timer.take().unwrap().observe_duration();
                 node.wait_commit_timer.take().unwrap().observe_duration();
