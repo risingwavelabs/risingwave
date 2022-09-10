@@ -212,10 +212,10 @@
     select max(v2), v1 from t group by v1 order by v1 desc;
   batch_plan: |
     BatchExchange { order: [t.v1 DESC], dist: Single }
-      BatchSort { order: [t.v1 DESC] }
-        BatchProject { exprs: [max(t.v2), t.v1] }
-          BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
-            BatchExchange { order: [], dist: HashShard(t.v1) }
+      BatchProject { exprs: [max(t.v2), t.v1] }
+        BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+          BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
+            BatchSort { order: [t.v1 DESC] }
               BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
     create table t (v1 real);
