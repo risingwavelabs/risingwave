@@ -16,9 +16,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
-use risingwave_batch::executor::ExecutorBuilder;
+use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
@@ -34,6 +34,8 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
+use crate::handler::query::QueryResultSet;
+use crate::handler::util::to_pg_rows;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -66,7 +68,7 @@ impl LocalQueryExecution {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    pub async fn run(mut self) {
+    pub async fn run_inner(mut self) {
         debug!(
             "Starting to run query: {:?}, sql: '{}'",
             self.query.query_id, self.sql
@@ -99,6 +101,21 @@ impl LocalQueryExecution {
         for chunk in executor.execute() {
             yield chunk?;
         }
+    }
+
+    pub fn run(self) -> BoxedDataChunkStream {
+        Box::pin(self.run_inner())
+    }
+
+    pub async fn collect_rows(self, format: bool) -> SchedulerResult<QueryResultSet> {
+        let data_stream = self.run();
+        let mut rows = vec![];
+        #[for_await]
+        for chunk in data_stream {
+            rows.extend(to_pg_rows(chunk?, format));
+        }
+
+        Ok(rows)
     }
 
     /// Convert query to plan fragment.

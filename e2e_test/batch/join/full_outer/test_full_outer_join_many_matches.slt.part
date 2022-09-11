@@ -6,17 +6,23 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-# statement ok
-# CREATE TABLE integers AS SELECT a i, 1 j FROM generate_series(0, 1999, 1) t1(a);
+statement ok
+CREATE TABLE integers(i int, j int);
 
-# statement ok
-# CREATE TABLE integers2 AS SELECT a k, 2 l FROM generate_series(2000, 3999, 1) t1(a);
+statement ok
+INSERT INTO integers SELECT a i, 1 j FROM generate_series(0, 1999, 1) t1(a);
+
+statement ok
+CREATE TABLE integers2(k int, l int);
+
+statement ok
+INSERT INTO integers SELECT a k, 2 l FROM generate_series(2000, 3999, 1) t1(a);
 
 # equality join
-# query I
-# SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.i=integers2.k
-# ----
-# 4000
+query I
+SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.i=integers2.k
+----
+4000
 
 # query IIII
 # SELECT i, j, k, l FROM integers FULL OUTER JOIN integers2 ON integers.i=integers2.k ORDER BY 1, 2, 3, 4
@@ -24,10 +30,10 @@ SET RW_IMPLICIT_FLUSH TO true;
 # 16000 values hashing to 8b9eab043624ff470b00a981c1d588d9
 
 # range join
-# query I
-# SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j>integers2.l
-# ----
-# 4000
+query I
+SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j>integers2.l
+----
+4000
 
 # query IIII
 # SELECT i, j, k, l FROM integers FULL OUTER JOIN integers2 ON integers.j>integers2.l ORDER BY 1, 2, 3, 4
@@ -35,10 +41,10 @@ SET RW_IMPLICIT_FLUSH TO true;
 # 16000 values hashing to 8b9eab043624ff470b00a981c1d588d9
 
 # inequality join
-# query I
-# SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j+1<>integers2.l;
-# ----
-# 4000
+query I
+SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j+1<>integers2.l;
+----
+4000
 
 # query IIII
 # SELECT i, j, k, l FROM integers FULL OUTER JOIN integers2 ON integers.j+1<>integers2.l ORDER BY 1, 2, 3, 4
@@ -46,12 +52,18 @@ SET RW_IMPLICIT_FLUSH TO true;
 # 16000 values hashing to 8b9eab043624ff470b00a981c1d588d9
 
 # complex join condition
-# query I
-# SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j+integers2.l<>3;
-# ----
-# 4000
+query I
+SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j+integers2.l<>3;
+----
+4000
 
 # query IIII
 # SELECT i, j, k, l FROM integers FULL OUTER JOIN integers2 ON integers.j+integers2.l<>3 ORDER BY 1, 2, 3, 4
 # ----
 # 16000 values hashing to 8b9eab043624ff470b00a981c1d588d9
+
+statement ok
+DROP TABLE integers;
+
+statement ok
+DROP TABLE integers2;

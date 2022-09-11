@@ -18,7 +18,9 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use risingwave_common::config::StorageConfig;
+use risingwave_common_service::observer_manager::{ObserverManager, RpcNotificationClient};
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
@@ -30,6 +32,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use super::MetaServiceOpts;
+use crate::common::RiseCtlObserverNode;
 
 pub struct HummockServiceOpts {
     pub meta_opts: MetaServiceOpts,
@@ -136,6 +139,23 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
     ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>)> {
         let (meta_client, hummock_client, _) = self.create_hummock_store_with_metrics().await?;
         Ok((meta_client, hummock_client))
+    }
+
+    pub async fn create_observer_manager(
+        &self,
+        meta_client: MetaClient,
+        hummock: MonitoredStateStore<HummockStorage>,
+    ) -> Result<ObserverManager<RpcNotificationClient>> {
+        let ctl_observer = RiseCtlObserverNode::new(hummock.local_version_manager());
+        let host_addr = meta_client.host_addr();
+        let observer_manager = ObserverManager::new(
+            meta_client,
+            host_addr,
+            Box::new(ctl_observer),
+            WorkerType::RiseCtl,
+        )
+        .await;
+        Ok(observer_manager)
     }
 
     pub async fn shutdown(&mut self) {

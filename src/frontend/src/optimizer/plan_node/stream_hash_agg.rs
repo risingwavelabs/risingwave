@@ -106,7 +106,7 @@ impl StreamNode for StreamHashAgg {
                 .map(|table| {
                     table
                         .with_id(state.gen_table_id_wrapped())
-                        .to_state_table_prost()
+                        .to_internal_table_prost()
                 })
                 .collect(),
             column_mappings: column_mappings

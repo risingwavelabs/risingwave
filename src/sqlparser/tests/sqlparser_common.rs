@@ -1739,7 +1739,6 @@ fn parse_bad_constraint() {
 fn run_explain_analyze(query: &str, expected_analyze: bool, expected_options: ExplainOptions) {
     match one_statement_parses_to(query, "") {
         Statement::Explain {
-            describe_alias: _,
             analyze,
             statement,
             options,

@@ -65,7 +65,7 @@ impl StreamNode for StreamGroupTopN {
             limit: self.logical.limit() as u64,
             offset: self.logical.offset() as u64,
             group_key: group_key.iter().map(|idx| *idx as u32).collect(),
-            table: Some(table.to_state_table_prost()),
+            table: Some(table.to_internal_table_prost()),
         };
 
         ProstStreamNode::GroupTopN(group_topn_node)
