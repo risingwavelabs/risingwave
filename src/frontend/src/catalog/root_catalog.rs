@@ -324,8 +324,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         relation_name: &str,
-    ) -> Result<(DatabaseId, SchemaId)> {
-        let db = self.get_database_by_name(db_name)?;
+    ) -> Result<()> {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
         // Resolve source first.
@@ -343,7 +342,7 @@ impl Catalog {
         } else if let Some(_table) = schema.get_table_by_name(relation_name) {
             Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())
         } else {
-            Ok((db.id(), schema.id()))
+            Ok(())
         }
     }
 
