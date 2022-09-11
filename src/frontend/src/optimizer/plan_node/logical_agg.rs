@@ -37,8 +37,9 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, BatchSortAgg, LogicalProject};
+use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
-    Direction, Distribution, FunctionalDependencySet, Order, RequiredDist,
+    Direction, Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, Substitute};
 
@@ -602,18 +603,41 @@ impl LogicalAgg {
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 
-    // Check if the output of the aggregation needs to be sorted
+    // Check if the output of the aggregation needs to be sorted and return ordering for group keys
     // If so, push down the sort below the aggregation and use sort merge aggregation
-    // The output must require an order an all group_keys and the datatype of the
-    // columns need to be int32
-    fn output_requires_order_on_group_keys(&self, required_order: &Order) -> bool {
-        self.group_key().iter().all(|group_by_idx| {
-            required_order
-                .field_order
+    // The required order of the output must be satisfied by the order of the group key
+    // The data type of the columns need to be int32
+    fn output_requires_order_on_group_keys(&self, required_order: &Order) -> (bool, Order) {
+        let group_key_order = Order {
+            field_order: self
+                .group_key()
                 .iter()
-                .any(|field_order| field_order.index == *group_by_idx)
-                && self.schema().fields().get(*group_by_idx).unwrap().data_type == DataType::Int32
-        })
+                .map(|group_by_idx| {
+                    let direct = if required_order.field_order.contains(&FieldOrder {
+                        index: *group_by_idx,
+                        direct: Desc,
+                    }) {
+                        // If output requires descending order, use descending order
+                        Desc
+                    } else {
+                        // In all other cases use ascending order
+                        Asc
+                    };
+                    FieldOrder {
+                        index: *group_by_idx,
+                        direct,
+                    }
+                })
+                .collect(),
+        };
+        return (
+            !required_order.field_order.is_empty()
+                && group_key_order.satisfies(required_order)
+                && self.group_key().iter().all(|group_by_idx| {
+                    self.schema().fields().get(*group_by_idx).unwrap().data_type == DataType::Int32
+                }),
+            group_key_order,
+        );
     }
 
     // Check if the input is already sorted, and hence sort merge aggregation can be used
@@ -1277,12 +1301,13 @@ impl ToBatch for LogicalAgg {
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
         let mut input_order = Order::any();
-        let output_requires_order = self.output_requires_order_on_group_keys(required_order);
+        let (output_requires_order, group_key_order) =
+            self.output_requires_order_on_group_keys(required_order);
         if output_requires_order {
             // Push down sort before aggregation
             input_order = self
                 .o2i_col_mapping()
-                .rewrite_provided_order(required_order);
+                .rewrite_provided_order(&group_key_order);
         }
         let new_input = self.input().to_batch_with_order_required(&input_order)?;
         let new_logical = self.clone_with_input(new_input);

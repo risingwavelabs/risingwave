@@ -207,6 +207,17 @@
           BatchSort { order: [t.v1 DESC] }
             BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
+    /* Use BatchSortAgg, when required order satisfies input order */
+    create table t(k1 int, k2 int, v1 int);
+    SELECT max(v1), k1, k2 from t group by k1, k2 order by k1;
+  batch_plan: |
+    BatchExchange { order: [t.k1 ASC], dist: Single }
+      BatchProject { exprs: [max(t.v1), t.k1, t.k2] }
+        BatchSortAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
+          BatchExchange { order: [t.k1 ASC, t.k2 ASC], dist: HashShard(t.k1, t.k2) }
+            BatchSort { order: [t.k1 ASC, t.k2 ASC] }
+              BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
+- sql: |
     /* Use BatchSortAgg, when output requires order with swapped output*/
     create table t(v1 int, v2 int);
     select max(v2), v1 from t group by v1 order by v1 desc;
