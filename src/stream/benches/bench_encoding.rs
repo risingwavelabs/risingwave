@@ -58,11 +58,11 @@ fn value_serialization(datum: &Datum) -> Vec<u8> {
 
 fn key_deserialization(ty: &DataType, datum: &[u8]) {
     let mut deserializer = memcomparable::Deserializer::new(datum);
-    deserialize_datum_from(ty, &mut deserializer).unwrap();
+    let _ = deserialize_datum_from(ty, &mut deserializer);
 }
 
 fn value_deserialization(ty: &DataType, datum: &[u8]) {
-    deserialize_datum(datum, ty).unwrap();
+    let _ = deserialize_datum(datum, ty);
 }
 
 fn bench_encoding(c: &mut Criterion) {
