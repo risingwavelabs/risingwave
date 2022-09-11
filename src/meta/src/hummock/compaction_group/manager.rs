@@ -92,12 +92,20 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         table_fragments: &TableFragments,
         table_properties: &HashMap<String, String>,
     ) -> Result<Vec<StateTableId>> {
+        let is_independent_compaction_group = table_properties
+            .get("independent_compaction_group")
+            .map(|s| s == "1")
+            == Some(true);
         let table_option = TableOption::build_table_option(table_properties);
         let mut pairs = vec![];
         // materialized_view or materialized_source
         pairs.push((
             table_fragments.table_id().table_id,
-            CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
+            if is_independent_compaction_group {
+                CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
+            } else {
+                CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
+            },
             table_option,
         ));
         // internal states
@@ -105,14 +113,18 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             assert_ne!(table_id, table_fragments.table_id().table_id);
             pairs.push((
                 table_id,
-                CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
+                if is_independent_compaction_group {
+                    CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
+                } else {
+                    CompactionGroupId::from(StaticCompactionGroupId::StateDefault)
+                },
                 table_option,
             ));
         }
         self.inner
             .write()
             .await
-            .register(&pairs, self.env.meta_store())
+            .register(&mut pairs, self.env.meta_store())
             .await
     }
 
@@ -138,7 +150,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .write()
             .await
             .register(
-                &[(
+                &mut [(
                     source_id,
                     StaticCompactionGroupId::StateDefault.into(),
                     table_option,
@@ -203,7 +215,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
 
     pub async fn register_table_ids(
         &self,
-        pairs: &[(StateTableId, CompactionGroupId, TableOption)],
+        pairs: &mut [(StateTableId, CompactionGroupId, TableOption)],
     ) -> Result<Vec<StateTableId>> {
         self.inner
             .write()
@@ -282,14 +294,34 @@ impl CompactionGroupManagerInner {
 
     async fn register<S: MetaStore>(
         &mut self,
-        pairs: &[(StateTableId, CompactionGroupId, TableOption)],
+        pairs: &mut [(StateTableId, CompactionGroupId, TableOption)],
         meta_store: &S,
     ) -> Result<Vec<StateTableId>> {
+        let mut current_max_id = StaticCompactionGroupId::END as CompactionGroupId;
+        if let Some((&k, _)) = self.compaction_groups.last_key_value() {
+            if k > current_max_id {
+                current_max_id = k;
+            }
+        };
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
-        for (table_id, compaction_group_id, table_option) in pairs {
-            let mut compaction_group = compaction_groups
-                .get_mut(*compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(*compaction_group_id))?;
+        for (table_id, compaction_group_id, table_option) in pairs.iter_mut() {
+            let mut compaction_group =
+                if *compaction_group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
+                    current_max_id += 1;
+                    *compaction_group_id = current_max_id;
+                    compaction_groups.insert(
+                        *compaction_group_id,
+                        CompactionGroup::new(
+                            *compaction_group_id,
+                            CompactionConfigBuilder::new().build(),
+                        ),
+                    );
+                    compaction_groups.get_mut(*compaction_group_id).unwrap()
+                } else {
+                    compaction_groups
+                        .get_mut(*compaction_group_id)
+                        .ok_or(Error::InvalidCompactionGroup(*compaction_group_id))?
+                };
             compaction_group.member_table_ids.insert(*table_id);
             compaction_group
                 .table_id_to_options
@@ -301,7 +333,7 @@ impl CompactionGroupManagerInner {
         compaction_groups.commit();
 
         // Update in-memory index
-        for (table_id, compaction_group_id, _) in pairs {
+        for (table_id, compaction_group_id, _) in pairs.iter() {
             self.index.insert(*table_id, *compaction_group_id);
         }
         Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
@@ -419,7 +451,7 @@ mod tests {
             .write()
             .await
             .register(
-                &[(
+                &mut [(
                     1u32,
                     StaticCompactionGroupId::StateDefault.into(),
                     table_option,
@@ -432,7 +464,7 @@ mod tests {
             .write()
             .await
             .register(
-                &[(
+                &mut [(
                     2u32,
                     StaticCompactionGroupId::MaterializedView.into(),
                     table_option,

@@ -161,7 +161,7 @@ pub async fn register_table_ids_to_compaction_group<S>(
 {
     compaction_group_manager_ref
         .register_table_ids(
-            &table_ids
+            &mut table_ids
                 .iter()
                 .map(|table_id| (*table_id, compaction_group_id, TableOption::default()))
                 .collect_vec(),
