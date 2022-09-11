@@ -9,3 +9,8 @@ from	 (select c_id, count(o_id)
     	 group by c_id) as c_orders (c_id, c_count)
 group by c_count
 order by custdist desc, c_count desc;
+----
+0 2
+1 3
+2 4
+3 1

@@ -58,7 +58,7 @@ services:
       - POSTGRES_DB=ch_benchmark_db
       - PGPASSWORD=pw
     volumes:
-      - ./init:/docker-entrypoint-initdb.d
+      - ./ch-benchmark/init:/docker-entrypoint-initdb.d
 
   debezium:
     image: debezium/connect:1.4
@@ -71,7 +71,7 @@ services:
     ports:
       - 8083:8083
     volumes:
-      - ./connectors:/connectors
+      - ./ch-benchmark/connectors:/connectors
 
   rw-build-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220826
