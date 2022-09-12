@@ -222,10 +222,10 @@ impl<S: StateStore> SourceExecutor<S> {
         state: ConnectorState,
     ) -> StreamExecutorResult<Box<SourceStreamReaderImpl>> {
         let reader = match self.source_desc.source.as_ref() {
-            SourceImpl::TableV2(t) => t
+            SourceImpl::Table(t) => t
                 .stream_reader(self.column_ids.clone())
                 .await
-                .map(SourceStreamReaderImpl::TableV2),
+                .map(SourceStreamReaderImpl::Table),
             SourceImpl::Connector(c) => c
                 .stream_reader(
                     state,
@@ -380,7 +380,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     // Refill row id column for source.
                     chunk = match self.source_desc.source.as_ref() {
                         SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true).await,
-                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false).await,
+                        SourceImpl::Table(_) => self.refill_row_id_column(chunk, false).await,
                     };
 
                     self.metrics
@@ -539,7 +539,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table_v2().unwrap();
+            let table_source = source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
@@ -664,7 +664,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table_v2().unwrap();
+            let table_source = source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
