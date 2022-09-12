@@ -493,6 +493,11 @@ where
     async fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
         //  b'S' => Statement
         //  b'P' => Portal
+        tracing::trace!(
+            "(extended query)desribe name: {}",
+            cstr_to_str(&msg.name).unwrap()
+        );
+
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {
             let name = cstr_to_str(&msg.name).unwrap().to_string();
