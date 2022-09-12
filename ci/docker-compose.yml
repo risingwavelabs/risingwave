@@ -66,7 +66,7 @@ services:
   mysql:
     image: mysql/mysql-server:8.0
     ports:
-      - 0.0.0.0:23306:3306
+      - ${HOST_IP}:23306:3306
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_USER: mysql
@@ -76,6 +76,7 @@ services:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
       retries: 5
+    command: echo "HERE AM I" && ls
       
   benchmark-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729

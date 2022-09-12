@@ -3,10 +3,6 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-ufw status
-ufw disable
-ufw status
-
 source ci/scripts/common.env.sh
 
 while getopts 'p:' opt; do
