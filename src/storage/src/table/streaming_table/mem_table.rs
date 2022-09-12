@@ -89,27 +89,27 @@ impl MemTable {
         }
     }
 
-    pub fn delete(&mut self, pk: Vec<u8>, before_value: Vec<u8>) -> Result<()> {
+    pub fn delete(&mut self, pk: Vec<u8>, old_value: Vec<u8>) -> Result<()> {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(RowOp::Delete(before_value));
+                e.insert(RowOp::Delete(old_value));
                 Ok(())
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 RowOp::Insert(original_value) => {
-                    debug_assert_eq!(original_value, &before_value);
+                    debug_assert_eq!(original_value, &old_value);
                     e.remove();
                     Ok(())
                 }
                 RowOp::Delete(_) => Err(MemTableError::Conflict {
                     key: e.key().clone(),
                     prev: e.get().clone(),
-                    new: RowOp::Delete(before_value),
+                    new: RowOp::Delete(old_value),
                 }),
                 RowOp::Update(value) => {
                     let (original_old_value, original_new_value) = std::mem::take(value);
-                    debug_assert_eq!(original_new_value, before_value);
+                    debug_assert_eq!(original_new_value, old_value);
                     e.insert(RowOp::Delete(original_old_value));
                     Ok(())
                 }
