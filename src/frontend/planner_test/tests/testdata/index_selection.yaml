@@ -7,6 +7,14 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], distribution: UpstreamHashShard(idx1.a, idx1.b) }
 - sql: |
+    /* Use index if it provides required order */
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(a, b) include(c);
+    select * from t1 order by a, b
+  batch_plan: |
+    BatchExchange { order: [idx1.a ASC, idx1.b ASC], dist: Single }
+      BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], distribution: UpstreamHashShard(idx1.a, idx1.b) }
+- sql: |
     create table t1 (a int, b numeric, c bigint);
     create index idx1 on t1(a, b) include(c);
     select * from t1 where a = 1 or a = 2
