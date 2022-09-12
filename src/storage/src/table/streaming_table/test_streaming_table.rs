@@ -724,7 +724,7 @@ async fn test_mem_table_assertion() {
     let order_types = vec![OrderType::Ascending];
     let pk_index = vec![0_usize];
     let mut state_table = StateTable::new_without_distribution(
-        state_store.clone(),
+        state_store,
         TableId::from(0x42),
         column_descs,
         order_types,
