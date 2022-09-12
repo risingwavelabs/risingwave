@@ -19,6 +19,7 @@ pub mod property;
 
 mod delta_join_solver;
 mod heuristic;
+mod max_one_row_visitor;
 mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
@@ -36,8 +37,9 @@ use self::plan_visitor::has_logical_over_agg;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
+use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
-use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply};
+use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply, PlanVisitor};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
@@ -139,7 +141,6 @@ impl PlanRoot {
         apply_order: ApplyOrder,
     ) -> PlanRef {
         let mut output_plan = plan;
-
         loop {
             let mut heuristic_optimizer = HeuristicOptimizer::new(&apply_order, &rules);
             output_plan = heuristic_optimizer.optimize(output_plan);
@@ -171,13 +172,25 @@ impl PlanRoot {
         }
 
         // Simple Unnesting.
-        // Pull correlated predicates up the algebra tree to unnest simple subquery.
         plan = self.optimize_by_rules(
             plan,
             "Simple Unnesting".to_string(),
-            vec![PullUpCorrelatedPredicateRule::create()],
+            vec![
+                // Eliminate max one row
+                MaxOneRowEliminateRule::create(),
+                // Convert apply to join.
+                ApplyToJoinRule::create(),
+                // Pull correlated predicates up the algebra tree to unnest simple subquery.
+                PullUpCorrelatedPredicateRule::create(),
+            ],
             ApplyOrder::TopDown,
         );
+        if HasMaxOneRowApply().visit(plan.clone()) {
+            return Err(ErrorCode::InternalError(
+                "Scalar subquery might produce more than one row.".into(),
+            )
+            .into());
+        }
 
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
@@ -188,7 +201,6 @@ impl PlanRoot {
             vec![TranslateApplyRule::create()],
             ApplyOrder::BottomUp,
         );
-
         plan = self.optimize_by_rules_until_fix_point(
             plan,
             "General Unnesting(Push Down Apply)".to_string(),
@@ -201,14 +213,12 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
-
         if has_logical_apply(plan.clone()) {
             return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
         }
 
         // Predicate Push-down
         plan = plan.predicate_pushdown(Condition::true_cond());
-
         if explain_trace {
             ctx.trace("Predicate Push Down:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
@@ -235,7 +245,6 @@ impl PlanRoot {
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
         plan = plan.predicate_pushdown(Condition::true_cond());
-
         if explain_trace {
             ctx.trace("Predicate Push Down:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
@@ -257,9 +266,14 @@ impl PlanRoot {
         // `self.out_fields` as `required_cols` here.
         let required_cols = (0..self.plan.schema().len()).collect_vec();
         plan = plan.prune_col(&required_cols);
-
+        // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:".to_string());
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+        plan = plan.predicate_pushdown(Condition::true_cond());
+        if explain_trace {
+            ctx.trace("Predicate Push Down:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
         }
 

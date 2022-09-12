@@ -136,6 +136,11 @@ where
                 }
             }
 
+            WorkerType::RiseCtl => MetaSnapshot {
+                hummock_version: Some(hummock_manager_guard.current_version.clone()),
+                ..Default::default()
+            },
+
             _ => unreachable!(),
         };
 

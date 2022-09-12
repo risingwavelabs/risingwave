@@ -61,6 +61,7 @@ type SchemaId = u32;
 #[derive(Clone, Debug)]
 pub struct MetaClient {
     worker_id: Option<u32>,
+    host_addr: Option<HostAddr>,
     pub inner: GrpcMetaClient,
 }
 
@@ -70,6 +71,7 @@ impl MetaClient {
         Ok(Self {
             inner: GrpcMetaClient::new(meta_addr).await?,
             worker_id: None,
+            host_addr: None,
         })
     }
 
@@ -78,7 +80,14 @@ impl MetaClient {
     }
 
     pub fn worker_id(&self) -> u32 {
-        self.worker_id.expect("worker node id is not set.")
+        self.worker_id.expect("worker node id is set")
+    }
+
+    pub fn host_addr(&self) -> HostAddr {
+        self.host_addr
+            .as_ref()
+            .cloned()
+            .expect("host address is set")
     }
 
     /// Subscribe to notification from meta.
@@ -110,6 +119,7 @@ impl MetaClient {
         let resp = self.inner.add_worker_node(request).await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
         self.set_worker_id(worker_node.id);
+        self.host_addr = Some(addr.clone());
         // unpin snapshot before MAX will create a new snapshot with last committed epoch and then
         //  we do not create snapshot during every pin_snapshot.
         Ok(worker_node.id)
