@@ -1,5 +1,6 @@
 include ../tpch/create_tables.slt.part
 
+# First, insert the data into the tables
 include ../tpch/insert_customer.slt.part
 include ../tpch/insert_lineitem.slt.part
 include ../tpch/insert_nation.slt.part
@@ -9,8 +10,10 @@ include ../tpch/insert_partsupp.slt.part
 include ../tpch/insert_region.slt.part
 include ../tpch/insert_supplier.slt.part
 
+# Then, create materialized views based on the historical data (snapshot)
 include ./tpch/create_views.slt.part
 
+# Test each query
 include ./tpch/q1.slt.part
 include ./tpch/q2.slt.part
 include ./tpch/q3.slt.part
