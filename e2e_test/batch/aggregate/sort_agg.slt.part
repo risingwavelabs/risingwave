@@ -11,24 +11,25 @@ statement ok
 create materialized view mv as select * from t order by v1 desc
 
 query I rowsort
-select max(v2), v1 from mv group by v1
+select v1, max(v2) from mv group by v1
 ----
-10 100
-20 10
-3 9
-7 4
+-10 100
 1 1
-100 -10
+10 20
+100 10
+4 7
+9 3
+
 
 query II
-select max(v2), v1 from t group by v1 order by v1 desc
+select v1, max(v2) from t group by v1 order by v1 desc
 ----
-10 100
-20 10
-3 9
-7 4
+100 10
+10 20
+9 3
+4 7
 1 1
-100 -10
+-10 100
 
 statement ok
 drop materialized view mv

@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::RwLock;
-
 use anyhow::Context;
-use rand::prelude::SliceRandom;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use rand::seq::IteratorRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
@@ -61,9 +61,9 @@ impl TableSource {
     ///
     /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
     /// and the `usize` represents the cardinality of this chunk.
-    pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
-        let tx = {
-            let core = self.core.read().unwrap();
+    pub fn write_chunk(&self, mut chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+        loop {
+            let core = self.core.upgradable_read();
 
             // The `changes_txs` should not be empty normally, since we ensured that the channels
             // between the `TableSource` and the `SourceExecutor`s are ready before we making the
@@ -72,24 +72,37 @@ impl TableSource {
             // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
             // error instead of asserting here.
             // TODO: may reject DML when streaming executors are not recovered.
-            core.changes_txs
+            let (index, tx) = core
+                .changes_txs
+                .iter()
+                .enumerate()
                 .choose(&mut rand::thread_rng())
-                .context("no available table reader in streaming source executors")?
-                .clone()
-        };
+                .context("no available table reader in streaming source executors")?;
 
-        #[cfg(debug_assertions)]
-        risingwave_common::util::schema_check::schema_check(
-            self.column_descs.iter().map(|c| &c.data_type),
-            chunk.columns(),
-        )
-        .expect("table source write chunk schema check failed");
+            #[cfg(debug_assertions)]
+            risingwave_common::util::schema_check::schema_check(
+                self.column_descs.iter().map(|c| &c.data_type),
+                chunk.columns(),
+            )
+            .expect("table source write chunk schema check failed");
 
-        let (notifier_tx, notifier_rx) = oneshot::channel();
-        tx.send((chunk, notifier_tx))
-            .expect("table reader in streaming source executor closed");
+            let (notifier_tx, notifier_rx) = oneshot::channel();
 
-        Ok(notifier_rx)
+            match tx.send((chunk, notifier_tx)) {
+                Ok(_) => return Ok(notifier_rx),
+
+                // It's possible that the source executor is scaled in or migrated, so the channel
+                // is closed. In this case, we should remove the closed channel and retry.
+                Err(SendError((chunk_, _))) => {
+                    tracing::info!("find one closed table source channel, remove it and retry");
+
+                    chunk = chunk_;
+                    RwLockUpgradableReadGuard::upgrade(core)
+                        .changes_txs
+                        .swap_remove(index);
+                }
+            }
+        }
     }
 }
 
@@ -147,7 +160,7 @@ impl TableSource {
             })
             .collect();
 
-        let mut core = self.core.write().unwrap();
+        let mut core = self.core.write();
         let (tx, rx) = mpsc::unbounded_channel();
         core.changes_txs.push(tx);
 

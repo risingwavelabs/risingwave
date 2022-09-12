@@ -131,8 +131,8 @@
           LogicalScan { table: lineitem, output_columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus], required_columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate], predicate: (lineitem.l_shipdate <= ('1998-12-01':Varchar::Date - '71 days 00:00:00':Interval)) }
   batch_plan: |
     BatchExchange { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], dist: Single }
-      BatchSort { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC] }
-        BatchProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32), RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32), RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32), count] }
+      BatchProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32), RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32), RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32), count] }
+        BatchSort { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC] }
           BatchHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
             BatchExchange { order: [], dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
               BatchProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)), lineitem.l_discount] }
@@ -883,8 +883,8 @@
             LogicalScan { table: region, output_columns: [region.r_regionkey], required_columns: [r_regionkey, r_name], predicate: (region.r_name = 'ASIA':Varchar) }
   batch_plan: |
     BatchExchange { order: [Extract('YEAR':Varchar, orders.o_orderdate) ASC], dist: Single }
-      BatchSort { order: [Extract('YEAR':Varchar, orders.o_orderdate) ASC] }
-        BatchProject { exprs: [Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit((sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)) / sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), 6:Int32)] }
+      BatchProject { exprs: [Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit((sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)) / sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), 6:Int32)] }
+        BatchSort { order: [Extract('YEAR':Varchar, orders.o_orderdate) ASC] }
           BatchHashAgg { group_key: [Extract('YEAR':Varchar, orders.o_orderdate)], aggs: [sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
             BatchExchange { order: [], dist: HashShard(Extract('YEAR':Varchar, orders.o_orderdate)) }
               BatchProject { exprs: [Extract('YEAR':Varchar, orders.o_orderdate), Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
@@ -1034,8 +1034,8 @@
             LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name] }
   batch_plan: |
     BatchExchange { order: [nation.n_name ASC, Extract('YEAR':Varchar, orders.o_orderdate) DESC], dist: Single }
-      BatchSort { order: [nation.n_name ASC, Extract('YEAR':Varchar, orders.o_orderdate) DESC] }
-        BatchProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit(sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))), 2:Int32)] }
+      BatchProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit(sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))), 2:Int32)] }
+        BatchSort { order: [nation.n_name ASC, Extract('YEAR':Varchar, orders.o_orderdate) DESC] }
           BatchHashAgg { group_key: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate)], aggs: [sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))] }
             BatchExchange { order: [], dist: HashShard(nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate)) }
               BatchProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))] }
