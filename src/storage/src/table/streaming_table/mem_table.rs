@@ -15,7 +15,9 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 
-#[derive(Clone)]
+use thiserror::Error;
+
+#[derive(Clone, Debug)]
 pub enum RowOp {
     Insert(Vec<u8>),
     Delete(Vec<u8>),
@@ -29,6 +31,18 @@ pub struct MemTable {
 }
 
 pub type MemTableIter<'a> = impl Iterator<Item = (&'a Vec<u8>, &'a RowOp)>;
+
+#[derive(Error, Debug)]
+pub enum MemTableError {
+    #[error("conflicted row operations on same key")]
+    Conflict {
+        key: Vec<u8>,
+        prev: RowOp,
+        new: RowOp,
+    },
+}
+
+type Result<T> = std::result::Result<T, MemTableError>;
 
 impl Default for MemTable {
     fn default() -> Self {
@@ -53,78 +67,79 @@ impl MemTable {
     }
 
     /// write methods
-    pub fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) {
+    pub fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) -> Result<()> {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Insert(value));
+                Ok(())
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 RowOp::Delete(ref mut old_value) => {
                     let old_val = std::mem::take(old_value);
                     e.insert(RowOp::Update((old_val, value)));
+                    Ok(())
                 }
-
-                _ => {
-                    panic!(
-                        "invalid flush status: double insert {:?} -> {:?}",
-                        e.key(),
-                        value
-                    );
-                }
+                _ => Err(MemTableError::Conflict {
+                    key: e.key().clone(),
+                    prev: e.get().clone(),
+                    new: RowOp::Insert(value),
+                }),
             },
         }
     }
 
-    pub fn delete(&mut self, pk: Vec<u8>, old_value: Vec<u8>) {
+    pub fn delete(&mut self, pk: Vec<u8>, before_value: Vec<u8>) -> Result<()> {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(RowOp::Delete(old_value));
+                e.insert(RowOp::Delete(before_value));
+                Ok(())
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 RowOp::Insert(original_value) => {
-                    debug_assert_eq!(original_value, &old_value);
+                    debug_assert_eq!(original_value, &before_value);
                     e.remove();
+                    Ok(())
                 }
-                RowOp::Delete(_) => {
-                    panic!(
-                        "invalid flush status: double delete {:?} -> {:?}",
-                        e.key(),
-                        old_value
-                    );
-                }
+                RowOp::Delete(_) => Err(MemTableError::Conflict {
+                    key: e.key().clone(),
+                    prev: e.get().clone(),
+                    new: RowOp::Delete(before_value),
+                }),
                 RowOp::Update(value) => {
                     let (original_old_value, original_new_value) = std::mem::take(value);
-                    debug_assert_eq!(original_new_value, old_value);
+                    debug_assert_eq!(original_new_value, before_value);
                     e.insert(RowOp::Delete(original_old_value));
+                    Ok(())
                 }
             },
         }
     }
 
-    pub fn update(&mut self, pk: Vec<u8>, old_value: Vec<u8>, new_value: Vec<u8>) {
+    pub fn update(&mut self, pk: Vec<u8>, old_value: Vec<u8>, new_value: Vec<u8>) -> Result<()> {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Update((old_value, new_value)));
+                Ok(())
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 RowOp::Insert(original_value) => {
                     debug_assert_eq!(original_value, &old_value);
                     e.insert(RowOp::Insert(new_value));
+                    Ok(())
                 }
-                RowOp::Delete(_) => {
-                    panic!(
-                        "invalid flush status: double delete {:?} -> {:?}",
-                        e.key(),
-                        old_value
-                    );
-                }
+                RowOp::Delete(_) => Err(MemTableError::Conflict {
+                    key: e.key().clone(),
+                    prev: e.get().clone(),
+                    new: RowOp::Update((old_value, new_value)),
+                }),
                 RowOp::Update(value) => {
                     let (original_old_value, original_new_value) = std::mem::take(value);
                     debug_assert_eq!(original_new_value, old_value);
                     e.insert(RowOp::Update((original_old_value, new_value)));
+                    Ok(())
                 }
             },
         }
