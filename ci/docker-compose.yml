@@ -67,7 +67,7 @@ services:
     image: mysql/mysql-server:8.0
     container_name: mysql
     ports:
-      - '23306:3306'\
+      - '23306:3306'
     environment:
       - MYSQL_ALLOW_EMPTY_PASSWORD=true
       - MYSQL_ROOT_HOST=%
