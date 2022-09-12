@@ -218,9 +218,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let epoch = 1;
-        managed_state
-            .insert(ordered_rows[3].clone(), rows[3].clone())
-            .unwrap();
+        managed_state.insert(ordered_rows[3].clone(), rows[3].clone());
 
         // now ("ab", 4)
         let valid_rows = managed_state
@@ -231,9 +229,7 @@ mod tests {
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
 
-        managed_state
-            .insert(ordered_rows[2].clone(), rows[2].clone())
-            .unwrap();
+        managed_state.insert(ordered_rows[2].clone(), rows[2].clone());
         let valid_rows = managed_state
             .find_range(None, 1, Some(1), epoch)
             .await
@@ -241,9 +237,7 @@ mod tests {
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[2].clone());
 
-        managed_state
-            .insert(ordered_rows[1].clone(), rows[1].clone())
-            .unwrap();
+        managed_state.insert(ordered_rows[1].clone(), rows[1].clone());
 
         let valid_rows = managed_state
             .find_range(None, 1, Some(2), epoch)
@@ -260,14 +254,10 @@ mod tests {
         );
 
         // delete ("abc", 3)
-        managed_state
-            .delete(&ordered_rows[1].clone(), rows[1].clone())
-            .unwrap();
+        managed_state.delete(&ordered_rows[1].clone(), rows[1].clone());
 
         // insert ("abc", 2)
-        managed_state
-            .insert(ordered_rows[0].clone(), rows[0].clone())
-            .unwrap();
+        managed_state.insert(ordered_rows[0].clone(), rows[0].clone());
 
         let valid_rows = managed_state
             .find_range(None, 0, Some(3), epoch)
@@ -309,18 +299,10 @@ mod tests {
             .collect::<Vec<_>>();
 
         let epoch = 1;
-        managed_state
-            .insert(ordered_rows[3].clone(), rows[3].clone())
-            .unwrap();
-        managed_state
-            .insert(ordered_rows[1].clone(), rows[1].clone())
-            .unwrap();
-        managed_state
-            .insert(ordered_rows[2].clone(), rows[2].clone())
-            .unwrap();
-        managed_state
-            .insert(ordered_rows[4].clone(), rows[4].clone())
-            .unwrap();
+        managed_state.insert(ordered_rows[3].clone(), rows[3].clone());
+        managed_state.insert(ordered_rows[1].clone(), rows[1].clone());
+        managed_state.insert(ordered_rows[2].clone(), rows[2].clone());
+        managed_state.insert(ordered_rows[4].clone(), rows[4].clone());
 
         managed_state
             .fill_cache(None, &mut cache, &ordered_rows[3], 2, epoch)
