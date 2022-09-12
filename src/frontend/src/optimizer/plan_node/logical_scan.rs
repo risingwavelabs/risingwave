@@ -508,45 +508,39 @@ impl LogicalScan {
         &self,
         required_order: &Order,
     ) -> Option<Result<PlanRef>> {
-        let mut satisfying_indices: Vec<(Order, Rc<IndexCatalog>)> = self
-            .indexes()
-            .iter()
-            .map(|idx| {
-                (
-                    Order {
-                        field_order: idx
-                            .index_item
-                            .iter()
-                            .map(|idx_item| FieldOrder {
-                                index: idx_item.index,
-                                direct: Asc,
-                            })
-                            .collect(),
-                    },
-                    idx.clone(),
-                )
-            })
-            .filter(|(order, _)| {
-                !required_order.field_order.is_empty() && order.satisfies(required_order)
-            })
-            .collect();
-        if !satisfying_indices.is_empty() {
-            let (_, index) = satisfying_indices.pop().unwrap();
-            let p2s_mapping = index.primary_to_secondary_mapping();
-            if self
-                .required_col_idx()
-                .iter()
-                .all(|x| p2s_mapping.contains_key(x))
-            {
-                let index_scan = self.to_index_scan(
-                    &index.name,
-                    index.index_table.table_desc().into(),
-                    &index.primary_to_secondary_mapping,
-                );
-                return Some(index_scan.to_batch());
-            }
+        if required_order.field_order.is_empty() {
+            return None;
         }
-        None
+
+        let index = self.indexes().iter().find(|idx| {
+            Order {
+                field_order: idx
+                    .index_item
+                    .iter()
+                    .map(|idx_item| FieldOrder {
+                        index: idx_item.index,
+                        direct: Asc,
+                    })
+                    .collect(),
+            }
+            .satisfies(required_order)
+        })?;
+
+        let p2s_mapping = index.primary_to_secondary_mapping();
+        if self
+            .required_col_idx()
+            .iter()
+            .all(|x| p2s_mapping.contains_key(x))
+        {
+            let index_scan = self.to_index_scan(
+                &index.name,
+                index.index_table.table_desc().into(),
+                p2s_mapping,
+            );
+            Some(index_scan.to_batch())
+        } else {
+            None
+        }
     }
 }
 
