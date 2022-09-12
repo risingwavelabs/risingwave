@@ -3,8 +3,9 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-apt install dnsutils -y
-export HOST_IP=$(dig +short myip.opendns.com @resolver1.opendns.com)
+ufw status
+ufw disable
+ufw status
 
 source ci/scripts/common.env.sh
 
@@ -23,8 +24,6 @@ while getopts 'p:' opt; do
     esac
 done
 shift $((OPTIND -1))
-
-echo $HOST_IP
 
 echo "--- Download artifacts"
 mkdir -p target/debug
