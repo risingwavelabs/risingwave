@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{align_types, ExprImpl};
+use crate::expr::{align_types, CorrelatedId, Depth, ExprImpl};
 
 #[derive(Debug, Clone)]
 pub struct BoundValues {
@@ -32,6 +32,31 @@ impl BoundValues {
     /// The schema returned of this [`BoundValues`].
     pub fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    pub fn exprs(&self) -> impl Iterator<Item = &ExprImpl> {
+        self.rows.iter().flatten()
+    }
+
+    pub fn exprs_mut(&mut self) -> impl Iterator<Item = &mut ExprImpl> {
+        self.rows.iter_mut().flatten()
+    }
+
+    pub fn is_correlated(&self) -> bool {
+        self.exprs()
+            .any(|expr| expr.has_correlated_input_ref_by_depth())
+    }
+
+    pub fn collect_correlated_indices_by_depth_and_assign_id(
+        &mut self,
+        depth: Depth,
+        correlated_id: CorrelatedId,
+    ) -> Vec<usize> {
+        self.exprs_mut()
+            .flat_map(|expr| {
+                expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+            })
+            .collect()
     }
 }
 
@@ -63,6 +88,7 @@ impl Binder {
                 ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
             );
         }
+
         // Calculate column types.
         let types = match expected_types {
             Some(types) => {
@@ -86,10 +112,27 @@ impl Binder {
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(values_id, col_id)))
                 .collect(),
         );
-        Ok(BoundValues {
+
+        let bound_values = BoundValues {
             rows: bound,
             schema,
-        })
+        };
+        if bound_values
+            .rows
+            .iter()
+            .flatten()
+            .any(|expr| expr.has_subquery())
+        {
+            return Err(ErrorCode::NotImplemented("Subquery in VALUES".into(), None.into()).into());
+        }
+        if bound_values.is_correlated() {
+            return Err(ErrorCode::NotImplemented(
+                "CorrelatedInputRef in VALUES".into(),
+                None.into(),
+            )
+            .into());
+        }
+        Ok(bound_values)
     }
 }
 
@@ -108,8 +151,8 @@ mod tests {
         let mut binder = mock_binder();
 
         // Test i32 -> decimal.
-        let expr1 = Expr::Value(Value::Number("1".to_string(), false));
-        let expr2 = Expr::Value(Value::Number("1.1".to_string(), false));
+        let expr1 = Expr::Value(Value::Number("1".to_string()));
+        let expr2 = Expr::Value(Value::Number("1.1".to_string()));
         let values = Values(vec![vec![expr1], vec![expr2]]);
         let res = binder.bind_values(values, None).unwrap();
 

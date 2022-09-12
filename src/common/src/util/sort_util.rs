@@ -126,45 +126,6 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
-// TODO(yuchao): We may deprecate this struct to use `OrderedRow` instead.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DescOrderedRow {
-    pub row: Row,
-    pub encoded_row: Option<Vec<u8>>,
-    pub order_pairs: Arc<Vec<OrderPair>>,
-}
-
-impl DescOrderedRow {
-    pub fn new(row: Row, encoded_row: Option<Vec<u8>>, order_pairs: Arc<Vec<OrderPair>>) -> Self {
-        Self {
-            row,
-            encoded_row,
-            order_pairs,
-        }
-    }
-}
-
-impl Ord for DescOrderedRow {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let ord = if let (Some(encoded_lhs), Some(encoded_rhs)) =
-            (self.encoded_row.as_ref(), other.encoded_row.as_ref())
-        {
-            encoded_lhs.as_slice().cmp(encoded_rhs.as_slice())
-        } else {
-            compare_rows(&self.row, &other.row, &self.order_pairs).unwrap()
-        };
-        // We have to reverse the order because we need to use this in a max heap.
-        // Alternative option is to revert every order pair when constructing `OrderedRow`.
-        ord.reverse()
-    }
-}
-
-impl PartialOrd for DescOrderedRow {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 fn compare_values<'a, T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &'a OrderType) -> Ordering
 where
     T: Ord,
@@ -295,7 +256,6 @@ pub fn compare_rows_in_chunk(
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
-    use std::sync::Arc;
 
     use itertools::Itertools;
 
@@ -435,9 +395,7 @@ mod tests {
                 DataType::Date,
                 DataType::Timestamp,
                 DataType::Time,
-                DataType::Struct {
-                    fields: Arc::new([DataType::Int32, DataType::Float32]),
-                },
+                DataType::new_struct(vec![DataType::Int32, DataType::Float32], vec![]),
                 DataType::List {
                     datatype: Box::new(DataType::Int32),
                 },

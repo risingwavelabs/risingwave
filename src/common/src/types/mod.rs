@@ -37,6 +37,7 @@ pub use scalar_impl::*;
 pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
+pub mod struct_type;
 
 mod ordered_float;
 
@@ -51,9 +52,9 @@ pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 use postgres_types::{ToSql, Type};
-use prost::Message;
-use risingwave_pb::expr::{ListValue as ProstListValue, StructValue as ProstStructValue};
+use strum_macros::EnumDiscriminants;
 
+use self::struct_type::StructType;
 use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
@@ -73,7 +74,12 @@ pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
+/// but without data fields.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EnumDiscriminants)]
+#[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
+#[strum_discriminants(name(DataTypeName))]
+#[strum_discriminants(vis(pub))]
 pub enum DataType {
     Boolean,
     Int16,
@@ -88,8 +94,58 @@ pub enum DataType {
     Timestamp,
     Timestampz,
     Interval,
-    Struct { fields: Arc<[DataType]> },
+    Struct(Arc<StructType>),
     List { datatype: Box<DataType> },
+}
+
+impl DataTypeName {
+    pub fn is_scalar(&self) -> bool {
+        match self {
+            DataTypeName::Boolean
+            | DataTypeName::Int16
+            | DataTypeName::Int32
+            | DataTypeName::Int64
+            | DataTypeName::Decimal
+            | DataTypeName::Float32
+            | DataTypeName::Float64
+            | DataTypeName::Varchar
+            | DataTypeName::Date
+            | DataTypeName::Timestamp
+            | DataTypeName::Timestampz
+            | DataTypeName::Time
+            | DataTypeName::Interval => true,
+
+            DataTypeName::Struct | DataTypeName::List => false,
+        }
+    }
+
+    pub fn to_type(&self) -> Option<DataType> {
+        let t = match self {
+            DataTypeName::Boolean => DataType::Boolean,
+            DataTypeName::Int16 => DataType::Int16,
+            DataTypeName::Int32 => DataType::Int32,
+            DataTypeName::Int64 => DataType::Int64,
+            DataTypeName::Decimal => DataType::Decimal,
+            DataTypeName::Float32 => DataType::Float32,
+            DataTypeName::Float64 => DataType::Float64,
+            DataTypeName::Varchar => DataType::Varchar,
+            DataTypeName::Date => DataType::Date,
+            DataTypeName::Timestamp => DataType::Timestamp,
+            DataTypeName::Timestampz => DataType::Timestampz,
+            DataTypeName::Time => DataType::Time,
+            DataTypeName::Interval => DataType::Interval,
+            DataTypeName::Struct | DataTypeName::List => {
+                return None;
+            }
+        };
+        Some(t)
+    }
+}
+
+impl From<DataTypeName> for DataType {
+    fn from(type_name: DataTypeName) -> Self {
+        type_name.to_type().unwrap_or_else(|| panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`."))
+    }
 }
 
 pub fn unnested_list_type(datatype: DataType) -> DataType {
@@ -117,9 +173,8 @@ impl From<&ProstDataType> for DataType {
             TypeName::Interval => DataType::Interval,
             TypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
-                DataType::Struct {
-                    fields: fields.into(),
-                }
+                let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
+                DataType::new_struct(fields, field_names)
             }
             TypeName::List => DataType::List {
                 // The first (and only) item is the list element type.
@@ -141,12 +196,26 @@ impl Display for DataType {
             DataType::Float64 => f.write_str("double precision"),
             DataType::Decimal => f.write_str("numeric"),
             DataType::Date => f.write_str("date"),
-            DataType::Varchar => f.write_str("character varying"),
+            DataType::Varchar => f.write_str("varchar"),
             DataType::Time => f.write_str("time without time zone"),
             DataType::Timestamp => f.write_str("timestamp without time zone"),
             DataType::Timestampz => f.write_str("timestamp with time zone"),
             DataType::Interval => f.write_str("interval"),
-            DataType::Struct { .. } => f.write_str("record"),
+            DataType::Struct(t) => {
+                if t.field_names.is_empty() {
+                    write!(f, "record")
+                } else {
+                    write!(
+                        f,
+                        "struct<{}>",
+                        t.fields
+                            .iter()
+                            .zip_eq(t.field_names.iter())
+                            .map(|(d, s)| format!("{} {}", s, d))
+                            .join(",")
+                    )
+                }
+            }
             DataType::List { datatype } => write!(f, "{}[]", datatype),
         }
     }
@@ -169,13 +238,9 @@ impl DataType {
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
             DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
-            DataType::Struct { fields } => StructArrayBuilder::with_meta(
-                capacity,
-                ArrayMeta::Struct {
-                    children: fields.clone(),
-                },
-            )
-            .into(),
+            DataType::Struct(t) => {
+                StructArrayBuilder::with_meta(capacity, t.to_array_meta()).into()
+            }
             DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
@@ -207,17 +272,22 @@ impl DataType {
     }
 
     pub fn to_protobuf(&self) -> ProstDataType {
-        let field_type = match self {
-            DataType::Struct { fields } => fields.iter().map(|f| f.to_protobuf()).collect_vec(),
-            DataType::List { datatype } => vec![datatype.to_protobuf()],
-            _ => vec![],
-        };
-        ProstDataType {
+        let mut pb = ProstDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
-            field_type,
             ..Default::default()
+        };
+        match self {
+            DataType::Struct(t) => {
+                pb.field_type = t.fields.iter().map(|f| f.to_protobuf()).collect_vec();
+                pb.field_names = t.field_names.clone();
+            }
+            DataType::List { datatype } => {
+                pb.field_type = vec![datatype.to_protobuf()];
+            }
+            _ => {}
         }
+        pb
     }
 
     pub fn is_numeric(&self) -> bool {
@@ -239,9 +309,19 @@ impl DataType {
             Boolean | Int16 | Int32 | Int64 => true,
             Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestampz
             | Interval => false,
-            Struct { fields } => fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
+            Struct(t) => t.fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
             List { datatype } => datatype.mem_cmp_eq_value_enc(),
         }
+    }
+
+    pub fn new_struct(fields: Vec<DataType>, field_names: Vec<String>) -> Self {
+        Self::Struct(
+            StructType {
+                fields,
+                field_names,
+            }
+            .into(),
+        )
     }
 }
 
@@ -504,8 +584,8 @@ macro_rules! impl_convert {
                 impl ScalarImpl {
                     pub fn [<as_ $suffix_name>](&self) -> &$scalar {
                         match self {
-                        Self::$variant_name(ref scalar) => scalar,
-                        other_scalar => panic!("cannot convert ScalarImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
+                            Self::$variant_name(ref scalar) => scalar,
+                            other_scalar => panic!("cannot convert ScalarImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
                         }
                     }
 
@@ -645,7 +725,7 @@ impl Display for ScalarRefImpl<'_> {
     }
 }
 
-pub fn display_datum_ref(d: &DatumRef<'_>) -> String {
+pub fn display_datum_ref(d: DatumRef<'_>) -> String {
     match d {
         Some(s) => format!("{}", s),
         None => "NULL".to_string(),
@@ -792,7 +872,7 @@ impl ScalarImpl {
                 let days = de.deserialize_naivedate()?;
                 NaiveDateWrapper::with_days(days)?
             }),
-            Ty::Struct { fields } => StructValue::deserialize(&fields, de)?.to_scalar_value(),
+            Ty::Struct(t) => StructValue::deserialize(&t.fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::deserialize(&datatype, de)?.to_scalar_value(),
         })
     }
@@ -829,7 +909,8 @@ impl ScalarImpl {
                     // these two types is var-length and should only be determine at runtime.
                     // TODO: need some test for this case (e.g. e2e test)
                     DataType::List { .. } => deserializer.read_bytes_len()?,
-                    DataType::Struct { fields } => fields
+                    DataType::Struct(t) => t
+                        .fields
                         .iter()
                         .map(|field| Self::encoding_data_size(field, deserializer))
                         .try_fold(0, |a, b| b.map(|b| a + b))?,
@@ -868,7 +949,9 @@ impl ScalarImpl {
         body
     }
 
-    pub fn bytes_to_scalar(b: &Vec<u8>, data_type: &ProstDataType) -> ArrayResult<Self> {
+    /// This encoding should only be used in proto
+    /// TODO: replace with value encoding?
+    pub fn from_proto_bytes(b: &Vec<u8>, data_type: &ProstDataType) -> ArrayResult<Self> {
         let value = match data_type.get_type_name()? {
             TypeName::Boolean => ScalarImpl::Bool(
                 i8::from_be_bytes(
@@ -927,36 +1010,10 @@ impl ScalarImpl {
             TypeName::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_protobuf_bytes(b)?),
             TypeName::Date => ScalarImpl::NaiveDate(NaiveDateWrapper::from_protobuf_bytes(b)?),
             TypeName::Struct => {
-                let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
-                let fields: Vec<Datum> = struct_value
-                    .fields
-                    .iter()
-                    .zip_eq(data_type.field_type.iter())
-                    .map(|(b, d)| {
-                        if b.is_empty() {
-                            Ok(None)
-                        } else {
-                            Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
-                        }
-                    })
-                    .collect::<ArrayResult<Vec<Datum>>>()?;
-                ScalarImpl::Struct(StructValue::new(fields))
+                ScalarImpl::Struct(StructValue::from_protobuf_bytes(data_type.clone(), b)?)
             }
             TypeName::List => {
-                let list_value: ProstListValue = Message::decode(b.as_slice())?;
-                let d = &data_type.field_type[0];
-                let fields: Vec<Datum> = list_value
-                    .fields
-                    .iter()
-                    .map(|b| {
-                        if b.is_empty() {
-                            Ok(None)
-                        } else {
-                            Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
-                        }
-                    })
-                    .collect::<ArrayResult<Vec<Datum>>>()?;
-                ScalarImpl::List(ListValue::new(fields))
+                ScalarImpl::List(ListValue::from_protobuf_bytes(data_type.clone(), b)?)
             }
             _ => bail!("Unrecognized type name: {:?}", data_type.get_type_name()),
         };
@@ -1085,18 +1142,27 @@ mod tests {
     fn test_protobuf_conversion() {
         let v = ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::default());
         let actual =
-            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Timestamp.to_protobuf())
+            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Timestamp.to_protobuf())
                 .unwrap();
         assert_eq!(v, actual);
 
         let v = ScalarImpl::NaiveDate(NaiveDateWrapper::default());
         let actual =
-            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Date.to_protobuf()).unwrap();
+            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Date.to_protobuf()).unwrap();
         assert_eq!(v, actual);
 
         let v = ScalarImpl::NaiveTime(NaiveTimeWrapper::default());
         let actual =
-            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
+            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
         assert_eq!(v, actual);
+    }
+
+    #[test]
+    fn test_data_type_display() {
+        let d: DataType = DataType::new_struct(
+            vec![DataType::Int32, DataType::Varchar],
+            vec!["i".to_string(), "j".to_string()],
+        );
+        assert_eq!(format!("{}", d), "struct<i integer,j varchar>".to_string());
     }
 }

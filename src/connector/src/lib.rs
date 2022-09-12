@@ -34,8 +34,6 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 
-extern crate core;
-
 pub mod aws_utils;
 pub mod error;
 mod macros;

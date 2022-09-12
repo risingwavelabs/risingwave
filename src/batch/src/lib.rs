@@ -45,6 +45,6 @@ pub mod rpc;
 pub mod task;
 
 #[macro_use]
-extern crate log;
+extern crate tracing;
 #[macro_use]
 extern crate risingwave_common;

@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
+pub mod utils;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::hash_join::HashJoinExecutor;
 use risingwave_batch::executor::test_utils::{gen_projected_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType};
@@ -28,7 +29,7 @@ use risingwave_pb::expr::expr_node::Type::{
 };
 use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
-use tokio::runtime::Runtime;
+use utils::bench_join;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
@@ -165,65 +166,30 @@ fn create_hash_join_executor(
         right_child,
         vec![0],
         vec![0],
-        false,
+        vec![false],
         cond,
         "HashJoinExecutor".into(),
     ))
 }
 
-async fn execute_hash_join_executor(executor: BoxedExecutor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
-    }
-}
-
 fn bench_hash_join(c: &mut Criterion) {
-    const LEFT_SIZE: usize = 2 * 1024;
-    const RIGHT_SIZE: usize = 2 * 1024;
-    let rt = Runtime::new().unwrap();
-    for with_cond in [false, true] {
-        for join_type in &[
-            JoinType::Inner,
-            JoinType::LeftOuter,
-            JoinType::LeftSemi,
-            JoinType::LeftAnti,
-            JoinType::RightOuter,
-            JoinType::RightSemi,
-            JoinType::RightAnti,
-        ] {
-            for chunk_size in &[32, 128, 512, 1024] {
-                c.bench_with_input(
-                    BenchmarkId::new(
-                        "HashJoinExecutor",
-                        format!(
-                            "{}({:?})(non_equi_join: {})",
-                            chunk_size, join_type, with_cond
-                        ),
-                    ),
-                    chunk_size,
-                    |b, &chunk_size| {
-                        let left_chunk_num = LEFT_SIZE / chunk_size;
-                        let right_chunk_num = RIGHT_SIZE / chunk_size;
-                        b.to_async(&rt).iter_batched(
-                            || {
-                                create_hash_join_executor(
-                                    *join_type,
-                                    with_cond,
-                                    chunk_size,
-                                    left_chunk_num,
-                                    chunk_size,
-                                    right_chunk_num,
-                                )
-                            },
-                            |e| execute_hash_join_executor(e),
-                            BatchSize::SmallInput,
-                        );
-                    },
-                );
-            }
-        }
-    }
+    let with_conds = vec![false, true];
+    let join_types = vec![
+        JoinType::Inner,
+        JoinType::LeftOuter,
+        JoinType::LeftSemi,
+        JoinType::LeftAnti,
+        JoinType::RightOuter,
+        JoinType::RightSemi,
+        JoinType::RightAnti,
+    ];
+    bench_join(
+        c,
+        "HashJoinExecutor",
+        with_conds,
+        join_types,
+        create_hash_join_executor,
+    );
 }
 
 criterion_group!(benches, bench_hash_join);

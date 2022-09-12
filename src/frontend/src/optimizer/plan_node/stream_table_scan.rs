@@ -21,10 +21,11 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, StreamNode};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -131,8 +132,8 @@ impl fmt::Display for StreamTableScan {
     }
 }
 
-impl ToStreamProst for StreamTableScan {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamTableScan {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
@@ -152,7 +153,7 @@ impl StreamTableScan {
                 .collect(),
         };
 
-        let pk_indices = self.logical_pk().iter().map(|x| *x as u32).collect_vec();
+        let stream_key = self.logical_pk().iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),
@@ -166,7 +167,7 @@ impl StreamTableScan {
                     node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
-                    pk_indices: pk_indices.clone(),
+                    stream_key: stream_key.clone(),
                     input: vec![],
                     fields: vec![], // TODO: fill this later
                     append_only: true,
@@ -196,7 +197,7 @@ impl StreamTableScan {
                     .collect(),
                 is_singleton: *self.distribution() == Distribution::Single,
             })),
-            pk_indices,
+            stream_key,
             operator_id: self.base.id.0 as u64,
             identity: format!("{}", self),
             append_only: self.append_only(),

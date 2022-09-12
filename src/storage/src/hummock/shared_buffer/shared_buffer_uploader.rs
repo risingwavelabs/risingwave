@@ -19,7 +19,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 
-use crate::hummock::compactor::{compact, CompactionExecutor, CompactorContext};
+use crate::hummock::compactor::{compact, CompactionExecutor, Context};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::OrderSortedUncommittedData;
 use crate::hummock::{HummockResult, MemoryLimiter, SstableIdManagerRef, SstableStoreRef};
@@ -36,7 +36,7 @@ pub struct SharedBufferUploader {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     stats: Arc<StateStoreMetrics>,
     compaction_executor: Arc<CompactionExecutor>,
-    compactor_context: Arc<CompactorContext>,
+    compactor_context: Arc<Context>,
 }
 
 impl SharedBufferUploader {
@@ -57,8 +57,8 @@ impl SharedBufferUploader {
             )))
         };
         // not limit memory for uploader
-        let memory_limiter = Arc::new(MemoryLimiter::new(u64::MAX - 1));
-        let compactor_context = Arc::new(CompactorContext {
+        let memory_limiter = MemoryLimiter::unlimit();
+        let compactor_context = Arc::new(Context {
             options: options.clone(),
             hummock_meta_client: hummock_meta_client.clone(),
             sstable_store: sstable_store.clone(),
@@ -66,8 +66,9 @@ impl SharedBufferUploader {
             is_share_buffer_compact: true,
             compaction_executor: compaction_executor.clone(),
             filter_key_extractor_manager,
-            memory_limiter,
+            read_memory_limiter: memory_limiter,
             sstable_id_manager,
+            task_progress: Default::default(),
         });
         Self {
             options,
@@ -84,8 +85,9 @@ impl SharedBufferUploader {
 impl SharedBufferUploader {
     pub async fn flush(
         &self,
-        epoch: HummockEpoch,
         payload: UploadTaskPayload,
+        sst_watermark_epoch: HummockEpoch,
+        epoch: HummockEpoch,
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         if payload.is_empty() {
             return Ok(vec![]);
@@ -102,7 +104,7 @@ impl SharedBufferUploader {
             .add_watermark_sst_id(Some(epoch))
             .await?;
 
-        let tables = compact(mem_compactor_ctx, payload).await?;
+        let tables = compact(mem_compactor_ctx, payload, sst_watermark_epoch).await?;
 
         let uploaded_sst_info = tables.into_iter().collect();
 

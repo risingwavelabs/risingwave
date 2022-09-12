@@ -22,20 +22,24 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
-use risingwave_common::util::ordered::OrderedRow;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use value::*;
 
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::managed_state::aggregation::array_agg::ManagedArrayAggState;
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
 use crate::executor::PkIndices;
 
-mod extreme;
+/// Limit number of the cached entries in an extreme aggregation call
+// TODO: estimate a good cache size instead of hard-coding
+const EXTREME_CACHE_SIZE: usize = 1024;
 
+mod array_agg;
+mod extreme;
 mod string_agg;
 mod value;
 
@@ -55,78 +59,71 @@ pub fn verify_batch(
 }
 
 /// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
-pub struct Cache<T> {
-    /// The cache is not ready to be populated yet.
-    is_cold_start: bool,
-    /// The cache is synced with the state table.
-    synced: bool,
+pub struct Cache<K: Ord, V> {
     /// The capacity of the cache.
     capacity: usize,
     /// Ordered cache entries.
-    entries: BTreeMap<OrderedRow, T>,
+    entries: BTreeMap<K, V>,
 }
 
-impl<T> Cache<T> {
+impl<K: Ord, V> Cache<K, V> {
     /// Create a new cache with specified capacity and order requirements.
     /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
     pub fn new(capacity: usize) -> Self {
         Self {
-            is_cold_start: true,
-            synced: false,
             capacity,
             entries: Default::default(),
         }
     }
 
-    /// Begin to populate the cache.
-    pub fn begin_sync(&mut self) {
-        self.entries.clear(); // clear the cache if anything exists
-        self.is_cold_start = false;
+    /// Get the capacity of the cache.
+    pub fn capacity(&self) -> usize {
+        self.capacity
     }
 
-    /// Check if cache is synced/populated.
-    pub fn is_synced(&self) -> bool {
-        self.synced
+    /// Get the number of entries in the cache.
+    pub fn len(&self) -> usize {
+        self.entries.len()
     }
 
-    /// Mark the cache as synced/populated.
-    /// Must be called after `begin_sync()`.
-    pub fn set_synced(&mut self) {
-        assert!(!self.is_cold_start);
-        self.synced = true;
+    /// Check if the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Clear the cache.
+    pub fn clear(&mut self) {
+        self.entries.clear();
     }
 
     /// Insert an entry into the cache.
     /// Key: `OrderedRow` composed of order by fields.
     /// Value: The value fields that are to be aggregated.
-    pub fn insert(&mut self, key: OrderedRow, value: T) {
-        if !self.is_cold_start {
-            self.entries.insert(key, value);
-            // evict if capacity is reached
-            while self.entries.len() > self.capacity {
-                self.entries.pop_last();
-            }
+    pub fn insert(&mut self, key: K, value: V) {
+        self.entries.insert(key, value);
+        // evict if capacity is reached
+        while self.entries.len() > self.capacity {
+            self.entries.pop_last();
         }
     }
 
     /// Remove an entry from the cache.
-    pub fn remove(&mut self, key: OrderedRow) {
-        if !self.is_cold_start {
-            self.entries.remove(&key);
-        }
+    pub fn remove(&mut self, key: K) {
+        self.entries.remove(&key);
+    }
+
+    /// Get the last (largest) key in the cache
+    pub fn last_key(&self) -> Option<&K> {
+        self.entries.last_key_value().map(|(k, _)| k)
     }
 
     /// Get the first (smallest) value in the cache.
-    pub fn first_value(&self) -> Option<&T> {
-        if self.synced {
-            self.entries.first_key_value().map(|(_, v)| v)
-        } else {
-            None
-        }
+    pub fn first_value(&self) -> Option<&V> {
+        self.entries.first_key_value().map(|(_, v)| v)
     }
 
     /// Iterate over the values in the cache.
-    pub fn iter_values(&self) -> impl Iterator<Item = &T> {
+    pub fn iter_values(&self) -> impl Iterator<Item = &V> {
         self.entries.values()
     }
 }
@@ -143,19 +140,19 @@ pub enum ManagedStateImpl<S: StateStore> {
 }
 
 impl<S: StateStore> ManagedStateImpl<S> {
-    pub async fn apply_batch(
+    pub async fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
+        columns: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut RowBasedStateTable<S>,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.apply_batch(ops, visibility, data),
+            Self::Value(state) => state.apply_chunk(ops, visibility, columns),
             Self::Table(state) => {
                 state
-                    .apply_batch(ops, visibility, data, epoch, state_table)
+                    .apply_chunk(ops, visibility, columns, epoch, state_table)
                     .await
             }
         }
@@ -165,7 +162,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output(),
@@ -182,7 +179,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
+    pub fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.flush(state_table),
             Self::Table(state) => state.flush(state_table),
@@ -195,53 +192,48 @@ impl<S: StateStore> ManagedStateImpl<S> {
         row_count: Option<usize>,
         pk_indices: PkIndices,
         is_row_count: bool,
-        pk: Option<&Row>,
-        state_table: &RowBasedStateTable<S>,
+        group_key: Option<&Row>,
+        state_table: &StateTable<S>,
         state_table_col_mapping: Arc<StateTableColumnMapping>,
     ) -> StreamExecutorResult<Self> {
+        assert!(
+            is_row_count || row_count.is_some(),
+            "should set row_count for value states other than row count agg call"
+        );
         match agg_call.kind {
-            AggKind::Max | AggKind::Min => {
-                assert!(
-                    row_count.is_some(),
-                    "should set row_count for value states other than AggKind::RowCount"
-                );
-
-                if agg_call.append_only {
-                    // optimization: use single-value state for append-only min/max
-                    Ok(Self::Value(
-                        ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
-                    ))
-                } else {
-                    Ok(Self::Table(Box::new(GenericExtremeState::new(
-                        agg_call,
-                        pk,
-                        pk_indices,
-                        state_table_col_mapping,
-                        row_count.unwrap(),
-                        1024, // TODO: estimate a good cache size instead of hard-coding
-                    ))))
-                }
-            }
-            AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
+            AggKind::Avg
+            | AggKind::Count
+            | AggKind::Sum
+            | AggKind::ApproxCountDistinct
+            | AggKind::SingleValue => Ok(Self::Value(
+                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
+            )),
+            // optimization: use single-value state for append-only min/max
+            AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
+                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
+            )),
+            AggKind::Max | AggKind::Min => Ok(Self::Table(Box::new(GenericExtremeState::new(
                 agg_call,
-                pk,
+                group_key,
                 pk_indices,
                 state_table_col_mapping,
+                row_count.unwrap(),
+                EXTREME_CACHE_SIZE,
             )))),
-            // TODO: for append-only lists, we can create `ManagedValueState` instead of
-            // `ManagedExtremeState`.
-            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
-                assert!(
-                    is_row_count || row_count.is_some(),
-                    "should set row_count for value states other than AggKind::RowCount"
-                );
-                Ok(Self::Value(
-                    ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
-                ))
-            }
-            AggKind::SingleValue => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
-            )),
+            AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
+                agg_call,
+                group_key,
+                pk_indices,
+                state_table_col_mapping,
+                row_count.unwrap(),
+            )))),
+            AggKind::ArrayAgg => Ok(Self::Table(Box::new(ManagedArrayAggState::new(
+                agg_call,
+                group_key,
+                pk_indices,
+                state_table_col_mapping,
+                row_count.unwrap(),
+            )))),
         }
     }
 }

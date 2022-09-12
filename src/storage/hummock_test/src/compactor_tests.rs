@@ -38,11 +38,16 @@ mod tests {
         unregister_table_ids_from_compaction_group,
     };
     use risingwave_meta::hummock::MockHummockMetaClient;
+    use risingwave_pb::hummock::pin_version_response::Payload;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
-    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
+    use risingwave_storage::hummock::compactor::{
+        CompactionExecutor, Compactor, CompactorContext, Context,
+    };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-    use risingwave_storage::hummock::{HummockStorage, MemoryLimiter, SstableIdManager};
+    use risingwave_storage::hummock::{
+        CompactorSstableStore, HummockStorage, MemoryLimiter, SstableIdManager,
+    };
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
     use risingwave_storage::store::{ReadOptions, WriteOptions};
@@ -56,19 +61,18 @@ mod tests {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir.clone(),
+            data_directory: remote_dir,
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();
 
         HummockStorage::for_test(
-            options.clone(),
+            options,
             sstable_store,
             hummock_meta_client.clone(),
             Arc::new(FilterKeyExtractorManager::default()),
         )
-        .await
         .unwrap()
     }
 
@@ -81,19 +85,18 @@ mod tests {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir.clone(),
+            data_directory: remote_dir,
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();
 
         HummockStorage::for_test(
-            options.clone(),
+            options,
             sstable_store,
-            hummock_meta_client.clone(),
-            filter_key_extractor_manager.clone(),
+            hummock_meta_client,
+            filter_key_extractor_manager,
         )
-        .await
         .unwrap()
     }
 
@@ -122,14 +125,8 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            storage.sync(Some(epoch)).await.unwrap();
-            hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(epoch),
-                )
-                .await
-                .unwrap();
+            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
     }
 
@@ -149,19 +146,27 @@ mod tests {
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
-        CompactorContext {
+        let context = Arc::new(Context {
             options: storage.options().clone(),
             sstable_store: storage.sstable_store(),
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
+            read_memory_limiter: MemoryLimiter::unlimit(),
             filter_key_extractor_manager,
-            memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
             sstable_id_manager: Arc::new(SstableIdManager::new(
                 hummock_meta_client.clone(),
                 storage.options().sstable_id_remote_fetch_number,
             )),
+            task_progress: Default::default(),
+        });
+        CompactorContext {
+            sstable_store: Arc::new(CompactorSstableStore::new(
+                context.sstable_store.clone(),
+                context.read_memory_limiter.clone(),
+            )),
+            context,
         }
     }
 
@@ -219,11 +224,12 @@ mod tests {
         assert_eq!(compact_task.input_ssts.len(), 128);
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
-        let output_table_id = version
+        let output_table = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .l0
             .as_ref()
@@ -234,13 +240,13 @@ mod tests {
             .table_infos
             .first()
             .unwrap()
-            .id;
+            .clone();
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
         let table = storage
             .sstable_store()
-            .sstable(output_table_id, &mut StoreLocalStatistic::default())
+            .sstable(&output_table, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
 
@@ -328,22 +334,22 @@ mod tests {
         compact_task.target_level = 6;
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
-        let output_table_id = version
+        let output_table = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .levels
             .last()
             .unwrap()
             .table_infos
             .first()
-            .unwrap()
-            .id;
+            .unwrap();
         let table = storage
             .sstable_store()
-            .sstable(output_table_id, &mut StoreLocalStatistic::default())
+            .sstable(output_table, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
         let target_table_size = storage.options().sstable_size_mb * (1 << 20);
@@ -358,7 +364,7 @@ mod tests {
         // 5. storage get back the correct kv after compaction
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
         let get_val = storage
             .get(
                 &key,
@@ -420,7 +426,7 @@ mod tests {
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         // Only registered table_ids are accepted in commit_epoch
         register_table_ids_to_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager_ref.compaction_group_manager(),
             &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -430,24 +436,22 @@ mod tests {
         let mut epoch: u64 = 1;
         for _ in 0..kv_count {
             epoch += 1;
-            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local = keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: existing_table_id.into(),
             });
-            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest().await.unwrap();
+            local.ingest().await.unwrap();
 
-            storage.sync(Some(epoch)).await.unwrap();
-            let ssts = storage.local_version_manager().get_uncommitted_ssts(epoch);
+            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         // Mimic dropping table
         unregister_table_ids_from_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager_ref.compaction_group_manager(),
             &[existing_table_id],
         )
         .await;
@@ -480,7 +484,8 @@ mod tests {
         );
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
@@ -551,35 +556,28 @@ mod tests {
             };
             let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
             register_table_ids_to_compaction_group(
-                hummock_manager_ref.compaction_group_manager_ref_for_test(),
+                hummock_manager_ref.compaction_group_manager(),
                 &[table_id],
                 StaticCompactionGroupId::StateDefault.into(),
             )
             .await;
             epoch += 1;
-            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local = keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: TableId::from(table_id),
             });
-            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest().await.unwrap();
+            local.ingest().await.unwrap();
 
-            storage.sync(Some(epoch)).await.unwrap();
-            hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(epoch),
-                )
-                .await
-                .unwrap();
+            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         // Mimic dropping table
         unregister_table_ids_from_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager_ref.compaction_group_manager(),
             &[drop_table_id],
         )
         .await;
@@ -619,21 +617,22 @@ mod tests {
         );
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
-        let mut table_ids_from_version = vec![];
+        let mut tables_from_version = vec![];
         version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
-            table_ids_from_version.extend(level.table_infos.iter().map(|table| table.id));
+            tables_from_version.extend(level.table_infos.iter().cloned());
             true
         });
 
         let mut key_count = 0;
-        for table_id in table_ids_from_version {
+        for table in tables_from_version {
             key_count += storage
                 .sstable_store()
-                .sstable(table_id, &mut StoreLocalStatistic::default())
+                .sstable(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
                 .value()
@@ -653,7 +652,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -716,7 +715,7 @@ mod tests {
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager_ref.compaction_group_manager(),
             &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -725,26 +724,16 @@ mod tests {
         for _ in 0..kv_count {
             epoch += millisec_interval_epoch;
             epoch_set.insert(epoch);
-            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local = keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: TableId::from(existing_table_id),
             });
-            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest().await.unwrap();
-        }
-
-        storage.sync(None).await.unwrap();
-        for epoch in &epoch_set {
-            hummock_meta_client
-                .commit_epoch(
-                    *epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(*epoch),
-                )
-                .await
-                .unwrap();
+            local.ingest().await.unwrap();
+            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         let manual_compcation_option = ManualCompactionOption {
@@ -789,21 +778,22 @@ mod tests {
         );
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
-        let mut table_ids_from_version = vec![];
+        let mut tables_from_version = vec![];
         version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
-            table_ids_from_version.extend(level.table_infos.iter().map(|table| table.id));
+            tables_from_version.extend(level.table_infos.iter().cloned());
             true
         });
 
         let mut key_count = 0;
-        for table_id in table_ids_from_version {
+        for table in tables_from_version {
             key_count += storage
                 .sstable_store()
-                .sstable(table_id, &mut StoreLocalStatistic::default())
+                .sstable(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
                 .value()
@@ -824,7 +814,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -890,7 +880,7 @@ mod tests {
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager_ref.compaction_group_manager(),
             &[keyspace.table_id().table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -899,26 +889,16 @@ mod tests {
         for _ in 0..kv_count {
             epoch += millisec_interval_epoch;
             epoch_set.insert(epoch);
-            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local = keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: keyspace.table_id(),
             });
-            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = [key_prefix, &rand::thread_rng().gen::<[u8; 32]>()].concat();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest().await.unwrap();
-        }
-
-        storage.sync(None).await.unwrap();
-        for epoch in &epoch_set {
-            hummock_meta_client
-                .commit_epoch(
-                    *epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(*epoch),
-                )
-                .await
-                .unwrap();
+            local.ingest().await.unwrap();
+            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         let manual_compcation_option = ManualCompactionOption {
@@ -957,23 +937,23 @@ mod tests {
             .unwrap();
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
-        let table_ids_from_version: Vec<_> = version
+        let tables_from_version: Vec<_> = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .levels
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .map(|table_info| table_info.id)
             .collect::<Vec<_>>();
 
         let mut key_count = 0;
-        for table_id in table_ids_from_version {
+        for table in tables_from_version {
             key_count += storage
                 .sstable_store()
-                .sstable(table_id, &mut StoreLocalStatistic::default())
+                .sstable(table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
                 .value()
@@ -994,7 +974,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);

@@ -19,6 +19,7 @@ use risingwave_pb::ProstFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
 use crate::hummock::error::Error as HummockError;
+use crate::manager::WorkerId;
 use crate::model::MetadataModelError;
 use crate::storage::MetaStoreError;
 
@@ -40,6 +41,9 @@ enum MetaErrorInner {
 
     #[error("PermissionDenied: {0}")]
     PermissionDenied(String),
+
+    #[error("Invalid worker: {0}")]
+    InvalidWorker(WorkerId),
 
     #[error(transparent)]
     Internal(anyhow::Error),
@@ -81,6 +85,15 @@ impl MetaError {
     pub fn permission_denied(s: String) -> Self {
         MetaErrorInner::PermissionDenied(s).into()
     }
+
+    pub fn invalid_worker(worker_id: WorkerId) -> Self {
+        MetaErrorInner::InvalidWorker(worker_id).into()
+    }
+
+    pub fn is_invalid_worker(&self) -> bool {
+        use std::borrow::Borrow;
+        std::matches!(self.inner.borrow(), &MetaErrorInner::InvalidWorker(_))
+    }
 }
 
 impl From<MetadataModelError> for MetaError {
@@ -116,11 +129,6 @@ impl From<MetaError> for tonic::Status {
             _ => tonic::Status::internal(err.to_string()),
         }
     }
-}
-
-/// Convert `MetaError` into `tonic::Status`. Generally used in `map_err`.
-pub fn meta_error_to_tonic(err: impl Into<MetaError>) -> tonic::Status {
-    err.into().into()
 }
 
 impl From<ProstFieldNotFound> for MetaError {

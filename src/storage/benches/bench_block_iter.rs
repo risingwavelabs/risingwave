@@ -55,7 +55,9 @@ fn bench_block_iter(c: &mut Criterion) {
         &data,
         |b, data| {
             b.iter(|| {
-                let block = BlockHolder::from_owned_block(Box::new(Block::decode(data).unwrap()));
+                let block = BlockHolder::from_owned_block(Box::new(
+                    Block::decode(data.clone(), data.len()).unwrap(),
+                ));
                 block_iter_next(block)
             });
         },
@@ -72,13 +74,16 @@ fn bench_block_iter(c: &mut Criterion) {
         &data,
         |b, data| {
             b.iter(|| {
-                let block = BlockHolder::from_owned_block(Box::new(Block::decode(data).unwrap()));
+                let block = BlockHolder::from_owned_block(Box::new(
+                    Block::decode(data.clone(), data.len()).unwrap(),
+                ));
                 block_iter_prev(block)
             });
         },
     );
 
-    let block = BlockHolder::from_owned_block(Box::new(Block::decode(&data).unwrap()));
+    let l = data.len();
+    let block = BlockHolder::from_owned_block(Box::new(Block::decode(data, l).unwrap()));
     let mut iter = BlockIterator::new(block);
     iter.seek_to_first();
     for t in 1..=TABLES_PER_SSTABLE {

@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -132,7 +131,7 @@ impl FixedLengthFilterKeyExtractor {
 /// prefix_bloom_filter
 pub struct SchemaFilterKeyExtractor {
     /// Each stateful operator has its own read pattern, partly using prefix scan.
-    /// Perfix key length can be decoded through its `DataType` and `OrderType` which obtained from
+    /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
     read_pattern_prefix_column: usize,
@@ -150,7 +149,7 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
         let (_vnode_prefix, pk) = key.split_at(VIRTUAL_NODE_SIZE);
 
-        // if the key with table_id deserializer fail from schema, that shoud panic here for early
+        // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection
         let pk_prefix_len = self
             .deserializer
@@ -239,11 +238,7 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
 struct FilterKeyExtractorManagerInner {
     table_id_to_filter_key_extractor: RwLock<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
     notify: Notify,
-    total_file_size_kb: AtomicUsize,
-    total_bloom_filter: AtomicUsize,
 }
-
-const MAX_REFRESH_DATA_SIZE: usize = 64 * 1024 * 1024; // 64GB
 
 impl FilterKeyExtractorManagerInner {
     fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
@@ -310,31 +305,6 @@ impl FilterKeyExtractorManagerInner {
 
         FilterKeyExtractorImpl::Multi(multi_filter_key_extractor)
     }
-
-    fn update_bloom_filter_avg_size(&self, sst_size: usize, bloom_filter_size: usize) {
-        // store KB to avoid small result of div
-        let old_size = self
-            .total_file_size_kb
-            .fetch_add(sst_size / 1024, Ordering::SeqCst);
-        self.total_bloom_filter
-            .fetch_add(bloom_filter_size, Ordering::SeqCst);
-        if old_size > MAX_REFRESH_DATA_SIZE {
-            self.total_file_size_kb
-                .store(sst_size / 1024, Ordering::SeqCst);
-            self.total_bloom_filter
-                .store(bloom_filter_size, Ordering::SeqCst);
-        }
-    }
-
-    pub fn estimate_bloom_filter_size(&self, sst_size: usize) -> usize {
-        let sst_size_mb = sst_size >> 20;
-        let total_bloom_filter = self.total_bloom_filter.load(Ordering::Acquire);
-        let total_file_size_mb = self.total_file_size_kb.load(Ordering::Acquire) / 1024;
-        if total_file_size_mb == 0 {
-            return 0;
-        }
-        total_bloom_filter / total_file_size_mb * sst_size_mb
-    }
 }
 
 /// FilterKeyExtractorManager is a wrapper for inner, and provide a protected read and write
@@ -366,15 +336,6 @@ impl FilterKeyExtractorManager {
     pub async fn acquire(&self, table_id_set: HashSet<u32>) -> FilterKeyExtractorImpl {
         self.inner.acquire(table_id_set).await
     }
-
-    pub fn update_bloom_filter_avg_size(&self, sst_size: usize, bloom_filter_size: usize) {
-        self.inner
-            .update_bloom_filter_avg_size(sst_size, bloom_filter_size);
-    }
-
-    pub fn estimate_bloom_filter_size(&self, sst_size: usize) -> usize {
-        self.inner.estimate_bloom_filter_size(sst_size)
-    }
 }
 
 pub type FilterKeyExtractorManagerRef = Arc<FilterKeyExtractorManager>;
@@ -390,7 +351,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::types::{DataType, VIRTUAL_NODE_SIZE};
     use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
@@ -492,16 +453,18 @@ mod tests {
                     index: 3,
                 },
             ],
-            pk: vec![0],
+            stream_key: vec![0],
             dependent_relations: vec![],
             distribution_key: (0..column_count as i32).collect_vec(),
             optional_associated_source_id: None,
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
-                String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                String::from(PROPERTIES_RETENTION_SECOND_KEY),
                 String::from("300"),
             )]),
+            fragment_id: 0,
+            vnode_col_idx: None,
         }
     }
 

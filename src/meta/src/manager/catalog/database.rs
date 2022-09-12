@@ -15,10 +15,11 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
 use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table};
 
 use super::{DatabaseId, RelationId, SchemaId, SinkId, SourceId};
-use crate::manager::MetaSrvEnv;
+use crate::manager::{MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 use crate::MetaResult;
@@ -57,10 +58,13 @@ pub struct DatabaseManager<S: MetaStore> {
     /// Cached index key information.
     indexes: HashSet<IndexKey>,
     /// Relation refer count mapping.
+    // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
     relation_ref_count: HashMap<RelationId, usize>,
 
     // In-progress creation tracker
     in_progress_creation_tracker: HashSet<RelationKey>,
+    // In-progress creating tables, including internal tables.
+    in_progress_creating_tables: HashMap<TableId, Table>,
 }
 
 impl<S> DatabaseManager<S>
@@ -100,7 +104,10 @@ where
         );
         let tables = HashSet::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
-                relation_ref_count.entry(*depend_relation_id).or_insert(0);
+                relation_ref_count
+                    .entry(*depend_relation_id)
+                    .and_modify(|e| *e += 1)
+                    .or_insert(1);
             }
             (table.database_id, table.schema_id, table.name)
         }));
@@ -117,6 +124,7 @@ where
             indexes,
             relation_ref_count,
             in_progress_creation_tracker,
+            in_progress_creating_tables: HashMap::default(),
         })
     }
 
@@ -129,6 +137,13 @@ where
             Sink::list(self.env.meta_store()).await?,
             Index::list(self.env.meta_store()).await?,
         ))
+    }
+
+    pub fn list_creating_tables(&self) -> Vec<Table> {
+        self.in_progress_creating_tables
+            .values()
+            .cloned()
+            .collect_vec()
     }
 
     pub async fn list_sources(&self) -> MetaResult<Vec<Source>> {
@@ -276,5 +291,16 @@ where
 
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
         self.in_progress_creation_tracker.remove(&relation.clone());
+    }
+
+    pub fn mark_creating_tables(&mut self, tables: &[Table]) {
+        self.in_progress_creating_tables
+            .extend(tables.iter().map(|t| (t.id, t.clone())));
+    }
+
+    pub fn unmark_creating_tables(&mut self, table_ids: &[TableId]) {
+        for id in table_ids {
+            self.in_progress_creating_tables.remove(id);
+        }
     }
 }

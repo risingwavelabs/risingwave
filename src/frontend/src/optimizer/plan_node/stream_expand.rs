@@ -14,13 +14,13 @@
 
 use std::fmt;
 
-use itertools::Itertools;
 use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ExpandNode;
 
-use super::{LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone)]
 pub struct StreamExpand {
@@ -30,12 +30,20 @@ pub struct StreamExpand {
 
 impl StreamExpand {
     pub fn new(logical: LogicalExpand) -> Self {
+        let dist = match logical.input().distribution() {
+            Distribution::Single => Distribution::Single,
+            Distribution::SomeShard
+            | Distribution::HashShard(_)
+            | Distribution::UpstreamHashShard(_) => Distribution::SomeShard,
+            Distribution::Broadcast => unreachable!(),
+        };
+
         let base = PlanBase::new_stream(
             logical.base.ctx.clone(),
             logical.schema().clone(),
             logical.base.logical_pk.to_vec(),
             logical.functional_dependency().clone(),
-            Distribution::SomeShard,
+            dist,
             logical.input().append_only(),
         );
         StreamExpand { base, logical }
@@ -64,19 +72,19 @@ impl PlanTreeNodeUnary for StreamExpand {
 
 impl_plan_tree_node_for_unary! { StreamExpand }
 
-impl ToStreamProst for StreamExpand {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamExpand {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Expand(ExpandNode {
             column_subsets: self
                 .column_subsets()
                 .iter()
                 .map(|subset| subset_to_protobuf(subset))
-                .collect_vec(),
+                .collect(),
         })
     }
 }
 
 fn subset_to_protobuf(subset: &[usize]) -> Subset {
-    let column_indices = subset.iter().map(|key| *key as u32).collect_vec();
+    let column_indices = subset.iter().map(|key| *key as u32).collect();
     Subset { column_indices }
 }

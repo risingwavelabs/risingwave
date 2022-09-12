@@ -30,9 +30,17 @@ pub const INVALID_EXPIRE_AT: u64 = 0;
 #[derive(Clone, Debug)]
 pub struct Worker {
     pub worker_node: WorkerNode,
+
+    // Volatile values updated by meta node as follows.
+    //
+    // Unix timestamp that the worker will expire at.
     expire_at: u64,
 
-    // Info updated by worker as follows
+    // Volatile values updated by worker as follows:
+    //
+    // Monotonic increasing id since meta node bootstrap.
+    info_version_id: u64,
+    // GC watermark.
     hummock_gc_watermark: Option<HummockSstableId>,
 }
 
@@ -52,6 +60,7 @@ impl MetadataModel for Worker {
         Self {
             worker_node: prost,
             expire_at: INVALID_EXPIRE_AT,
+            info_version_id: 0,
             hummock_gc_watermark: Default::default(),
         }
     }
@@ -87,6 +96,7 @@ impl Worker {
     }
 
     pub fn update_info(&mut self, info: Vec<Info>) {
+        self.info_version_id += 1;
         for i in info {
             match i {
                 Info::HummockGcWatermark(info) => {
@@ -98,5 +108,9 @@ impl Worker {
 
     pub fn hummock_gc_watermark(&self) -> Option<HummockSstableId> {
         self.hummock_gc_watermark
+    }
+
+    pub fn info_version_id(&self) -> u64 {
+        self.info_version_id
     }
 }

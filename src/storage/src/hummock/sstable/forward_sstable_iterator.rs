@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::VersionedComparator;
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::{BlockHolder, BlockIterator, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
@@ -79,18 +79,15 @@ impl SstableIterator {
         if idx >= self.sst.value().block_count() {
             self.block_iter = None;
         } else {
-            let block = if idx < self.sst.value().blocks.len() {
-                BlockHolder::from_ref_block(self.sst.value().blocks[idx].clone())
-            } else {
-                self.sstable_store
-                    .get(
-                        self.sst.value(),
-                        idx as u64,
-                        crate::hummock::CachePolicy::Fill,
-                        &mut self.stats,
-                    )
-                    .await?
-            };
+            let block = self
+                .sstable_store
+                .get(
+                    self.sst.value(),
+                    idx as u64,
+                    crate::hummock::CachePolicy::Fill,
+                    &mut self.stats,
+                )
+                .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
                 block_iter.seek(key);
@@ -104,30 +101,6 @@ impl SstableIterator {
 
         Ok(())
     }
-
-    // Only for compaction because it would not load block from sstablestore.
-    pub fn next_for_compact(&mut self) -> HummockResult<()> {
-        self.stats.scan_key_count += 1;
-        let block_iter = self.block_iter.as_mut().expect("no block iter");
-        block_iter.next();
-        if block_iter.is_valid() {
-            Ok(())
-        } else {
-            // seek to next block
-            if self.cur_idx + 1 >= self.sst.value().block_count() {
-                self.block_iter = None;
-            } else {
-                debug_assert!(!self.sst.value().blocks.is_empty());
-                let block =
-                    BlockHolder::from_ref_block(self.sst.value().blocks[self.cur_idx + 1].clone());
-                let mut block_iter = BlockIterator::new(block);
-                block_iter.seek_to_first();
-                self.block_iter = Some(block_iter);
-                self.cur_idx += 1;
-            }
-            Ok(())
-        }
-    }
 }
 
 impl HummockIterator for SstableIterator {
@@ -139,7 +112,7 @@ impl HummockIterator for SstableIterator {
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            self.stats.scan_key_count += 1;
+            self.stats.skip_key_count += 1;
             let block_iter = self.block_iter.as_mut().expect("no block iter");
             block_iter.next();
 
@@ -223,9 +196,8 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
-        gen_test_sstable_data, test_key_of, test_value_of, TEST_KEYS_COUNT,
+        gen_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
-    use crate::hummock::{CachePolicy, Sstable};
 
     async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
@@ -264,13 +236,6 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(sstable));
         inner_test_forward_iterator(sstable_store.clone(), handle).await;
-
-        let kv_iter =
-            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-        let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-        let sstable = Sstable::new_with_data(0, meta, data).unwrap();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
-        inner_test_forward_iterator(sstable_store, handle).await;
     }
 
     #[tokio::test]
@@ -352,15 +317,20 @@ mod tests {
         // when upload data is successful, but upload meta is fail and delete is fail
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-        let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-        sstable_store
-            .put_sst(0, meta, data, CachePolicy::NotFill)
-            .await
-            .unwrap();
+        let table = gen_test_sstable(
+            default_builder_opt_for_test(),
+            0,
+            kv_iter,
+            sstable_store.clone(),
+        )
+        .await;
 
         let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
-            sstable_store.sstable(0, &mut stats).await.unwrap(),
+            sstable_store
+                .sstable(&table.get_sstable_info(), &mut stats)
+                .await
+                .unwrap(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions { prefetch: true }),
         );

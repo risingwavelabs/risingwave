@@ -1,0 +1,138 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table st (v1 int, v2 struct<v1 int, v2 struct<v1 int, v2 int>>);
+
+statement ok
+insert into st values(1,(1,(1,2)));
+
+statement ok
+insert into st values(1,(1,(1,3)));
+
+query II rowsort
+select (v2).v2.* from st;
+----
+1 2
+1 3
+
+query II rowsort
+select (v2).* from st;
+----
+1 (1,2)
+1 (1,3)
+
+query II rowsort
+select * from st;
+----
+1 (1,(1,2))
+1 (1,(1,3))
+
+query I
+select (v2).v2.v1 from st;
+----
+1
+1
+
+query I rowsort
+select (v2).v2 from st;
+----
+(1,2)
+(1,3)
+
+query II
+select * from st where v2 = (1,(1,3));
+----
+1 (1,(1,3))
+
+query II
+select * from st where v2 != (1,(1,3));
+----
+1 (1,(1,2))
+
+query II
+select * from st where (v2).v2 < (1,3);
+----
+1 (1,(1,2))
+
+query II
+select * from st where (v2).v2 > (1,2);
+----
+1 (1,(1,3))
+
+query I
+select max((v2).v2) from st;
+----
+(1,3)
+
+query I
+select min((v2).v2) from st;
+----
+(1,2)
+
+statement ok
+drop table st;
+
+statement ok
+create table st (v1 int, v2 struct<v1 int, v2 struct<v1 int, v2 int>>);
+
+statement ok
+insert into st values(1,(1,(1,null)));
+
+query II
+select * from st;
+----
+1 (1,(1,NULL))
+
+statement ok
+drop table st;
+
+query T
+select Row('foo', 'bar', null);
+----
+(foo,bar,NULL)
+
+query T
+select Row();
+----
+()
+
+query T
+select Row(null);
+----
+(NULL)
+
+statement ok
+create table t (v1 int);
+
+statement ok
+insert into t values (1), (2), (3);
+
+query T rowsort
+select Row(1, v1*2) from t;
+----
+(1,2)
+(1,4)
+(1,6)
+
+query I rowsort
+select * from t where Row(1,v1*2) < Row(1,6);
+----
+1
+2
+
+query I rowsort
+select * from t where Row(1,v1*2) <= Row(1,6);
+----
+1
+2
+3
+
+query I rowsort
+select * from t where Row(1,v1*2) > Row(1,2);
+----
+2
+3
+
+statement ok
+drop table t;

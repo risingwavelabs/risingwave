@@ -16,11 +16,11 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 
-use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
+use crate::Result;
 
 const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
 const NUM_OF_REGISTERS: usize = 1 << INDEX_BITS; // number of indices available
@@ -33,20 +33,19 @@ const BIAS_CORRECTION: f64 = 0.72125;
 /// `ApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`. The
 /// estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^14 registers this
 /// is ~1/128.
+#[derive(Clone)]
 pub struct ApproxCountDistinct {
     return_type: DataType,
     input_col_idx: usize,
     registers: [u8; NUM_OF_REGISTERS],
-    filter: ExpressionRef,
 }
 
 impl ApproxCountDistinct {
-    pub fn new(return_type: DataType, input_col_idx: usize, filter: ExpressionRef) -> Self {
+    pub fn new(return_type: DataType, input_col_idx: usize) -> Self {
         Self {
             return_type,
             input_col_idx,
             registers: [0; NUM_OF_REGISTERS],
-            filter,
         }
     }
 
@@ -117,20 +116,6 @@ impl ApproxCountDistinct {
 
         answer as i64
     }
-
-    /// `apply_filter_on_row` apply a filter on the given row, and return if the row satisfies the
-    /// filter or not # SAFETY
-    /// the given row must be visible
-    fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
-        let (row, visible) = input.row_at(row_id)?;
-        assert!(visible);
-        let filter_res = if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
-            v
-        } else {
-            false
-        };
-        Ok(filter_res)
-    }
 }
 
 impl Aggregator for ApproxCountDistinct {
@@ -139,12 +124,8 @@ impl Aggregator for ApproxCountDistinct {
     }
 
     fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let filter_res = self.apply_filter_on_row(input, row_id)?;
-        if filter_res {
-            let array = input.column_at(self.input_col_idx).array_ref();
-            let datum_ref = array.value_at(row_id);
-            self.add_datum(datum_ref);
-        }
+        let array = input.column_at(self.input_col_idx).array_ref();
+        self.add_datum(array.value_at(row_id));
         Ok(())
     }
 
@@ -156,27 +137,18 @@ impl Aggregator for ApproxCountDistinct {
     ) -> Result<()> {
         let array = input.column_at(self.input_col_idx).array_ref();
         for row_id in start_row_id..end_row_id {
-            let filter_res = self.apply_filter_on_row(input, row_id)?;
-            if filter_res {
-                let datum_ref = array.value_at(row_id);
-                self.add_datum(datum_ref);
-            }
+            self.add_datum(array.value_at(row_id));
         }
         Ok(())
     }
 
-    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         let result = self.calculate_result();
+        self.registers = [0; NUM_OF_REGISTERS];
         match builder {
             ArrayBuilderImpl::Int64(b) => b.append(Some(result)).map_err(Into::into),
-            _ => Err(ErrorCode::InternalError("Unexpected builder for count(*).".into()).into()),
+            _ => bail!("Unexpected builder for count(*)."),
         }
-    }
-
-    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        let res = self.output(builder);
-        self.registers = [0; NUM_OF_REGISTERS];
-        res
     }
 }
 
@@ -188,9 +160,8 @@ mod tests {
     use risingwave_common::array::{
         ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, I64ArrayBuilder,
     };
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::DataType;
 
-    use crate::expr::{Expression, LiteralExpression};
     use crate::vector_op::agg::aggregator::Aggregator;
     use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 
@@ -214,13 +185,7 @@ mod tests {
         let inputs_size: [usize; 3] = [20000, 10000, 5000];
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
-        let mut agg = ApproxCountDistinct::new(
-            DataType::Int64,
-            0,
-            Arc::from(
-                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-            ),
-        );
+        let mut agg = ApproxCountDistinct::new(DataType::Int64, 0);
         let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {
@@ -228,7 +193,7 @@ mod tests {
             for row_id in 0..data_chunk.cardinality() {
                 agg.update_single(&data_chunk, row_id).unwrap();
             }
-            agg.output_and_reset(&mut builder).unwrap();
+            agg.output(&mut builder).unwrap();
         }
 
         let array = builder.finish().unwrap();
@@ -240,20 +205,14 @@ mod tests {
         let inputs_size: [usize; 3] = [20000, 10000, 5000];
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
-        let mut agg = ApproxCountDistinct::new(
-            DataType::Int64,
-            0,
-            Arc::from(
-                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-            ),
-        );
+        let mut agg = ApproxCountDistinct::new(DataType::Int64, 0);
         let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {
             let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
             agg.update_multi(&data_chunk, 0, data_chunk.cardinality())
                 .unwrap();
-            agg.output_and_reset(&mut builder).unwrap();
+            agg.output(&mut builder).unwrap();
         }
 
         let array = builder.finish().unwrap();

@@ -29,5 +29,7 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
-tracing = { version = "0.1" }
+tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }

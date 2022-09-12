@@ -74,9 +74,9 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
         let children = func_call_node.children.to_vec();
         // Field `func_call_node` have 2 child nodes, the first is Field `FuncCall` or
         // `InputRef`, the second is i32 `Literal`.
-        ensure!(children.len() == 2);
-        let input = expr_build_from_prost(&children[0])?;
-        let RexNode::Constant(value) = children[1].get_rex_node().unwrap() else {
+        let [first, second]: [_; 2] = children.try_into().unwrap();
+        let input = expr_build_from_prost(&first)?;
+        let RexNode::Constant(value) = second.get_rex_node().unwrap() else {
             bail!("Expected Constant as 1st argument");
         };
         let index = i32::from_be_bytes(

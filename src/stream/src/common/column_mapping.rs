@@ -41,7 +41,6 @@ impl StateTableColumnMapping {
     }
 
     /// Return the number of columns in the mapping.
-    #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.upstream_columns.len()
     }

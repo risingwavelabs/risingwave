@@ -20,6 +20,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
@@ -47,6 +48,10 @@ pub trait TopNExecutorBase: Send + 'static {
 
     /// See [`Executor::identity`].
     fn identity(&self) -> &str;
+
+    /// Update the vnode bitmap for the state tables, only used by Group Top-N since it's
+    /// distributed.
+    fn update_state_table_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {}
 
     async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()>;
 }

@@ -40,7 +40,12 @@ pub struct DeleteExecutor {
 }
 
 impl DeleteExecutor {
-    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
+    pub fn new(
+        table_id: TableId,
+        source_manager: SourceManagerRef,
+        child: BoxedExecutor,
+        identity: String,
+    ) -> Self {
         Self {
             table_id,
             source_manager,
@@ -49,7 +54,7 @@ impl DeleteExecutor {
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
-            identity: "DeleteExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -72,7 +77,7 @@ impl DeleteExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table_v2().expect("not table source");
+        let source = source_desc.source.as_table().expect("not table source");
 
         let mut notifiers = Vec::new();
 
@@ -112,9 +117,9 @@ impl DeleteExecutor {
 impl BoxedExecutorBuilder for DeleteExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "Delete executor should have 1 child!");
+        let [child]: [_; 1] = inputs.try_into().unwrap();
         let delete_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Delete
@@ -128,7 +133,8 @@ impl BoxedExecutorBuilder for DeleteExecutor {
                 .context()
                 .source_manager_ref()
                 .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
-            inputs.remove(0),
+            child,
+            source.plan_node().get_identity().clone(),
         )))
     }
 }
@@ -179,14 +185,21 @@ mod tests {
              7  8
              9 10",
         ));
+        let row_id_index = None;
+        let pk_column_ids = vec![1];
 
         // Create the table.
         let table_id = TableId::new(0);
-        source_manager.create_table_source(&table_id, table_columns.to_vec())?;
+        source_manager.create_table_source(
+            &table_id,
+            table_columns.to_vec(),
+            row_id_index,
+            pk_column_ids,
+        )?;
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
-        let source = source_desc.source.as_table_v2().unwrap();
+        let source = source_desc.source.as_table().unwrap();
         let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
 
         // Delete
@@ -194,6 +207,7 @@ mod tests {
             table_id,
             source_manager.clone(),
             Box::new(mock_executor),
+            "DeleteExecutor".to_string(),
         ));
 
         let handle = tokio::spawn(async move {

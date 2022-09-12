@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::ops::{Bound, RangeBounds};
-use std::sync::Arc;
 
 use futures::future::try_join_all;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use prometheus::{exponential_buckets, Histogram, HistogramOpts};
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
@@ -25,15 +25,16 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::deserialize_datum;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
-use risingwave_storage::row_serde::RowBasedSerde;
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTableIter};
+use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
-use crate::executor::monitor::BatchMetrics;
+use super::BatchTaskMetrics;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -44,12 +45,16 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     chunk_size: usize,
     schema: Schema,
     identity: String,
-    stats: Arc<BatchMetrics>,
+
+    /// Batch metrics.
+    /// None: Local mode don't record mertics.
+    metrics: Option<BatchTaskMetrics>,
+
     scan_types: Vec<ScanType<S>>,
 }
 
 pub enum ScanType<S: StateStore> {
-    BatchScan(StorageTableIter<S, RowBasedSerde>),
+    BatchScan(StorageTableIter<S>),
     PointGet(Option<Row>),
 }
 
@@ -59,13 +64,13 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         scan_types: Vec<ScanType<S>>,
         chunk_size: usize,
         identity: String,
-        stats: Arc<BatchMetrics>,
+        metrics: Option<BatchTaskMetrics>,
     ) -> Self {
         Self {
             chunk_size,
             schema,
             identity,
-            stats,
+            metrics,
             scan_types,
         }
     }
@@ -92,8 +97,7 @@ fn get_scan_bound(
         .iter()
         .map(|v| {
             let ty = pk_types.next().unwrap();
-            let scalar = ScalarImpl::bytes_to_scalar(v, &ty.to_protobuf()).unwrap();
-            Some(scalar)
+            deserialize_datum(v.as_slice(), &ty).expect("fail to deserialize datum")
         })
         .collect_vec());
     if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
@@ -102,7 +106,7 @@ fn get_scan_bound(
 
     let bound_ty = pk_types.next().unwrap();
     let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
-        let scalar = ScalarImpl::bytes_to_scalar(&bound.value, &bound_ty.to_protobuf()).unwrap();
+        let scalar = ScalarImpl::from_proto_bytes(&bound.value, &bound_ty.to_protobuf()).unwrap();
 
         let datum = Some(scalar);
         if bound.inclusive {
@@ -180,13 +184,12 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-
         let distribution = match &seq_scan_node.vnode_bitmap {
             Some(vnodes) => Distribution {
                 vnodes: Bitmap::from(vnodes).into(),
                 dist_key_indices,
             },
-            // This is possbile for dml. vnode_bitmap is not filled by scheduler.
+            // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
             None => Distribution::all_vnodes(dist_key_indices),
         };
@@ -200,8 +203,8 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         };
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
-            let batch_stats = source.context().stats();
-            let table = RowBasedStorageTable::new_partial(
+            let metrics = source.context().get_task_metrics();
+            let table = StorageTable::new_partial(
                 state_store.clone(),
                 table_id,
                 column_descs,
@@ -214,13 +217,15 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 
             if seq_scan_node.scan_ranges.is_empty() {
-                let iter = table.batch_iter(source.epoch).await?;
+                let iter = table
+                    .batch_iter(HummockReadEpoch::Committed(source.epoch))
+                    .await?;
                 return Ok(Box::new(RowSeqScanExecutor::new(
                     table.schema().clone(),
                     vec![ScanType::BatchScan(iter)],
                     RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
                     source.plan_node().get_identity().clone(),
-                    batch_stats,
+                    metrics,
                 )));
             }
 
@@ -228,7 +233,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             for scan_range in &seq_scan_node.scan_ranges {
                 let scan_type = async {
                     let pk_types = pk_types.clone();
-                    let table = table.clone();
+                    let mut table = table.clone();
                     let keyspace = keyspace.clone();
 
                     let (pk_prefix_value, next_col_bounds) =
@@ -239,7 +244,10 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             unreachable!()
                         } else if pk_prefix_value.size() == pk_len {
                             let row = {
-                                keyspace.state_store().wait_epoch(source.epoch).await?;
+                                keyspace
+                                    .state_store()
+                                    .try_wait_epoch(HummockReadEpoch::Committed(source.epoch))
+                                    .await?;
                                 table.get_row(&pk_prefix_value, source.epoch).await?
                             };
                             ScanType::PointGet(row)
@@ -247,7 +255,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             assert!(pk_prefix_value.size() < pk_len);
                             let iter = table
                                 .batch_iter_with_pk_bounds(
-                                    source.epoch,
+                                    HummockReadEpoch::Committed(source.epoch),
                                     &pk_prefix_value,
                                     next_col_bounds,
                                 )
@@ -267,7 +275,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 scan_types?,
                 RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
                 source.plan_node().get_identity().clone(),
-                batch_stats,
+                metrics,
             )))
         })
     }
@@ -286,37 +294,72 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
         let Self {
             chunk_size,
             schema,
-            identity: _,
-            stats,
+            identity,
+            metrics,
             scan_types,
         } = *self;
+
+        // create collector
+        let histogram = if let Some(ref metrics) = metrics {
+            let mut labels = metrics.task_labels();
+            labels.insert("executor_id".to_string(), identity);
+            let opts = HistogramOpts::new(
+                "batch_row_seq_scan_next_duration",
+                "Time spent deserializing into a row in cell based table.",
+            )
+            .buckets(exponential_buckets(0.0001, 2.0, 20).unwrap())
+            .const_labels(labels.clone());
+            let histogram = Histogram::with_opts(opts).unwrap();
+            // change to error if failed to register.
+            match metrics.register(Box::new(histogram.clone())) {
+                Ok(_) => Some(histogram),
+                Err(err) => return Self::return_err(err.into()).boxed(),
+            }
+        } else {
+            None
+        };
+
         let streams = scan_types
             .into_iter()
-            .map(|scan_type| Self::do_execute(scan_type, stats.clone(), schema.clone(), chunk_size))
+            .map(|scan_type| {
+                Self::do_execute(scan_type, schema.clone(), chunk_size, histogram.clone())
+            })
             .collect();
+        if let (Some(histogram), Some(metrics)) = (histogram, metrics) {
+            metrics.unregister(Box::new(histogram));
+        }
         select_all(streams).boxed()
     }
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn return_err(err: RwError) {
+        return Err(err);
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(
         scan_type: ScanType<S>,
-        stats: Arc<BatchMetrics>,
         schema: Schema,
         chunk_size: usize,
+        histogram: Option<Histogram>,
     ) {
         match scan_type {
             ScanType::BatchScan(iter) => {
                 pin_mut!(iter);
                 loop {
-                    let timer = stats.row_seq_scan_next_duration.start_timer();
+                    // let timer = stats.row_seq_scan_next_duration.start_timer();
+                    let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
                     let chunk = iter
                         .collect_data_chunk(&schema, Some(chunk_size))
                         .await
                         .map_err(RwError::from)?;
-                    timer.observe_duration();
+
+                    if let Some(timer) = timer {
+                        timer.observe_duration()
+                    }
 
                     if let Some(chunk) = chunk {
                         yield chunk

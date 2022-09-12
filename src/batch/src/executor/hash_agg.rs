@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::vec;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -47,15 +46,22 @@ impl HashKeyDispatcher for HashAggExecutorBuilderDispatcher {
     type Output = BoxedExecutor;
 
     fn dispatch<K: HashKey>(input: HashAggExecutorBuilder) -> Self::Output {
-        Box::new(HashAggExecutor::<K>::new(input))
+        Box::new(HashAggExecutor::<K>::new(
+            input.agg_factories,
+            input.group_key_columns,
+            input.group_key_types,
+            input.schema,
+            input.child,
+            input.identity,
+        ))
     }
 }
 
 pub struct HashAggExecutorBuilder {
     agg_factories: Vec<AggStateFactory>,
     group_key_columns: Vec<usize>,
-    child: BoxedExecutor,
     group_key_types: Vec<DataType>,
+    child: BoxedExecutor,
     schema: Schema,
     task_id: TaskId,
     identity: String,
@@ -68,17 +74,17 @@ impl HashAggExecutorBuilder {
         task_id: TaskId,
         identity: String,
     ) -> Result<BoxedExecutor> {
+        let agg_factories: Vec<_> = hash_agg_node
+            .get_agg_calls()
+            .iter()
+            .map(AggStateFactory::new)
+            .try_collect()?;
+
         let group_key_columns = hash_agg_node
             .get_group_key()
             .iter()
             .map(|x| *x as usize)
             .collect_vec();
-
-        let agg_factories = hash_agg_node
-            .get_agg_calls()
-            .iter()
-            .map(AggStateFactory::new)
-            .collect::<Result<Vec<AggStateFactory>>>()?;
 
         let child_schema = child.schema();
 
@@ -99,8 +105,8 @@ impl HashAggExecutorBuilder {
         let builder = HashAggExecutorBuilder {
             agg_factories,
             group_key_columns,
-            child,
             group_key_types,
+            child,
             schema: Schema { fields },
             task_id,
             identity,
@@ -117,9 +123,9 @@ impl HashAggExecutorBuilder {
 impl BoxedExecutorBuilder for HashAggExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "HashAggExecutor should have 1 child!");
+        let [child]: [_; 1] = inputs.try_into().unwrap();
 
         let hash_agg_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -127,39 +133,41 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
         )?;
 
         let identity = source.plan_node().get_identity().clone();
-        Self::deserialize(
-            hash_agg_node,
-            inputs.remove(0),
-            source.task_id.clone(),
-            identity,
-        )
+        Self::deserialize(hash_agg_node, child, source.task_id.clone(), identity)
     }
 }
 
 /// `HashAggExecutor` implements the hash aggregate algorithm.
-pub(crate) struct HashAggExecutor<K> {
-    /// factories to construct aggregator for each groups
+pub struct HashAggExecutor<K> {
+    /// Factories to construct aggregator for each groups
     agg_factories: Vec<AggStateFactory>,
     /// Column indexes that specify a group
     group_key_columns: Vec<usize>,
-    /// child executor
-    child: BoxedExecutor,
-    /// the data types of key columns
+    /// Data types of group key columns
     group_key_types: Vec<DataType>,
+    /// Output schema
     schema: Schema,
+    child: BoxedExecutor,
     identity: String,
     _phantom: PhantomData<K>,
 }
 
 impl<K> HashAggExecutor<K> {
-    fn new(builder: HashAggExecutorBuilder) -> Self {
+    pub fn new(
+        agg_factories: Vec<AggStateFactory>,
+        group_key_columns: Vec<usize>,
+        group_key_types: Vec<DataType>,
+        schema: Schema,
+        child: BoxedExecutor,
+        identity: String,
+    ) -> Self {
         HashAggExecutor {
-            agg_factories: builder.agg_factories,
-            group_key_columns: builder.group_key_columns,
-            child: builder.child,
-            group_key_types: builder.group_key_types,
-            schema: builder.schema,
-            identity: builder.identity,
+            agg_factories,
+            group_key_columns,
+            group_key_types,
+            schema,
+            child,
+            identity,
             _phantom: PhantomData,
         }
     }
@@ -191,23 +199,17 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let chunk = chunk?.compact()?;
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
-                let mut err_flag = Ok(());
                 let states: &mut Vec<BoxedAggState> = groups.entry(key).or_insert_with(|| {
                     self.agg_factories
                         .iter()
                         .map(AggStateFactory::create_agg_state)
-                        .collect::<Result<Vec<_>>>()
-                        .unwrap_or_else(|x| {
-                            err_flag = Err(x);
-                            vec![]
-                        })
+                        .collect()
                 });
-                err_flag?;
 
                 // TODO: currently not a vectorized implementation
-                states
-                    .iter_mut()
-                    .for_each(|state| state.update_single(&chunk, row_id).unwrap());
+                for state in states {
+                    state.update_single(&chunk, row_id)?
+                }
             }
         }
 
@@ -240,7 +242,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 states
                     .into_iter()
                     .zip_eq(&mut agg_builders)
-                    .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
+                    .try_for_each(|(mut aggregator, builder)| aggregator.output(builder))?;
             }
             if !has_next {
                 break; // exit loop

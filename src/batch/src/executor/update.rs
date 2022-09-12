@@ -50,6 +50,7 @@ impl UpdateExecutor {
         source_manager: SourceManagerRef,
         child: BoxedExecutor,
         exprs: Vec<BoxedExpression>,
+        identity: String,
     ) -> Self {
         assert_eq!(
             child.schema().data_types(),
@@ -66,7 +67,7 @@ impl UpdateExecutor {
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
-            identity: "UpdateExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -89,7 +90,7 @@ impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table_v2().expect("not table source");
+        let source = source_desc.source.as_table().expect("not table source");
 
         let schema = self.child.schema().clone();
         let mut notifiers = Vec::new();
@@ -165,9 +166,10 @@ impl UpdateExecutor {
 impl BoxedExecutorBuilder for UpdateExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "Update executor should have 1 child!");
+        let [child]: [_; 1] = inputs.try_into().unwrap();
+
         let update_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Update
@@ -184,8 +186,9 @@ impl BoxedExecutorBuilder for UpdateExecutor {
         Ok(Box::new(Self::new(
             table_id,
             source.context().try_get_source_manager_ref()?,
-            inputs.remove(0),
+            child,
             exprs,
+            source.plan_node().get_identity().clone(),
         )))
     }
 }
@@ -246,11 +249,18 @@ mod tests {
 
         // Create the table.
         let table_id = TableId::new(0);
-        source_manager.create_table_source(&table_id, table_columns.to_vec())?;
+        let row_id_index = None;
+        let pk_column_ids = vec![1];
+        source_manager.create_table_source(
+            &table_id,
+            table_columns.to_vec(),
+            row_id_index,
+            pk_column_ids,
+        )?;
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
-        let source = source_desc.source.as_table_v2().unwrap();
+        let source = source_desc.source.as_table().unwrap();
         let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
 
         // Update
@@ -259,6 +269,7 @@ mod tests {
             source_manager.clone(),
             Box::new(mock_executor),
             exprs,
+            "UpdateExecutor".to_string(),
         ));
 
         let handle = tokio::spawn(async move {

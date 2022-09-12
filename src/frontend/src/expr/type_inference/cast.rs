@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use itertools::Itertools as _;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DataTypeName};
 
-use super::DataTypeName;
 use crate::expr::{Expr as _, ExprImpl};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -75,7 +74,7 @@ pub enum CastContext {
     Explicit,
 }
 
-pub type CastMap = HashMap<(DataTypeName, DataTypeName), CastContext>;
+pub type CastMap = BTreeMap<(DataTypeName, DataTypeName), CastContext>;
 
 impl From<&CastContext> for String {
     fn from(c: &CastContext) -> Self {
@@ -89,11 +88,37 @@ impl From<&CastContext> for String {
 
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
 pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> bool {
-    cast_ok_base(source.into(), target.into(), allows)
+    cast_ok_array(source, target, allows) || cast_ok_base(source.into(), target.into(), allows)
 }
 
 pub fn cast_ok_base(source: DataTypeName, target: DataTypeName, allows: CastContext) -> bool {
     matches!(CAST_MAP.get(&(source, target)), Some(context) if *context <= allows)
+}
+
+fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> bool {
+    match (source, target) {
+        (
+            DataType::List {
+                datatype: source_elem,
+            },
+            DataType::List {
+                datatype: target_elem,
+            },
+        ) => cast_ok(source_elem, target_elem, allows),
+        (
+            DataType::Varchar,
+            DataType::List {
+                datatype: target_elem,
+            },
+        ) if target_elem == &Box::new(DataType::Varchar) => true,
+        (
+            DataType::Varchar,
+            DataType::List {
+                datatype: target_elem,
+            },
+        ) => cast_ok(&DataType::Varchar, target_elem, allows),
+        _ => false,
+    }
 }
 
 fn build_cast_map() -> CastMap {
@@ -102,7 +127,7 @@ fn build_cast_map() -> CastMap {
     // Implicit cast operations in PG are organized in 3 sequences, with the reverse direction being
     // assign cast operations.
     // https://github.com/postgres/postgres/blob/e0064f0ff6dfada2695330c6bc1945fa7ae813be/src/include/catalog/pg_cast.dat#L18-L20
-    let mut m = HashMap::new();
+    let mut m = BTreeMap::new();
     insert_cast_seq(
         &mut m,
         &[
@@ -145,7 +170,7 @@ fn build_cast_map() -> CastMap {
 }
 
 fn insert_cast_seq(
-    m: &mut HashMap<(DataTypeName, DataTypeName), CastContext>,
+    m: &mut BTreeMap<(DataTypeName, DataTypeName), CastContext>,
     types: &[DataTypeName],
 ) {
     for (source_index, source_type) in types.iter().enumerate() {

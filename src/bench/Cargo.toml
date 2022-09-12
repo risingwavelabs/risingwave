@@ -5,19 +5,16 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
-
-aws-config = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.45"
+aws-config = { version = "0.46", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.16", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.46"
 bytes = "1"
 bytesize = { version = "1", features = ["serde"] }
 clap = { version = "3", features = ["derive"] }
-env_logger = "0.9"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hdrhistogram = "7"
 itertools = "0.10"
 libc = "0.2"
-log = "0.4"
 moka = { version = "0.9", features = ["future"] }
 nix = { version = "0.24.1", features = ["fs", "mman"] }
 parking_lot = "0.12"
@@ -41,6 +38,10 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-stream = "0.1"
 toml = "0.5"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [[bin]]

@@ -189,7 +189,7 @@ impl BlockIterator {
                     Ordering::Greater => false,
                 }
             })
-            .saturating_sub(1) // Prevent from underflowing when given is smaller than ther first.
+            .saturating_sub(1) // Prevent from underflowing when given is smaller than the first.
     }
 
     /// Seeks to the restart point that the given `key` belongs to.
@@ -224,9 +224,10 @@ mod tests {
         builder.add(&full_key(b"k02", 2), b"v02");
         builder.add(&full_key(b"k04", 4), b"v04");
         builder.add(&full_key(b"k05", 5), b"v05");
+        let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         BlockIterator::new(BlockHolder::from_owned_block(Box::new(
-            Block::decode(&buf).unwrap(),
+            Block::decode(buf.into(), capacity).unwrap(),
         )))
     }
 

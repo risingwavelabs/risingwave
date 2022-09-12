@@ -1,3 +1,5 @@
+# This test is intended to be run in the database created by prepare.slt
+
 query T rowsort
 show schemas;
 ----

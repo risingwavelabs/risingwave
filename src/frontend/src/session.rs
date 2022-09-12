@@ -16,33 +16,37 @@ use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
-use std::path::PathBuf;
+use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+// use tokio::sync::Mutex;
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
+use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use rand::RngCore;
 #[cfg(test)]
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::FrontendConfig;
+use risingwave_common::config::load_config;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_rpc_client::{ComputeClientPool, MetaClient};
+use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
+use tracing::info;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
@@ -54,17 +58,22 @@ use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::FrontendObserverNode;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
+use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
+use crate::scheduler::{
+    HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager, QueryMessage,
+};
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::FrontendOpts;
+use crate::utils::WithOptions;
+use crate::{FrontendConfig, FrontendOpts};
+// use crate::scheduler::QueryMessage;
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
-    // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
+    // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
     /// For debugging purposes, store the SQL string in Context
     pub sql: Arc<str>,
@@ -78,8 +87,8 @@ pub struct OptimizerContext {
     pub optimizer_trace: Arc<Mutex<Vec<String>>>,
     /// Store correlated id
     pub next_correlated_id: AtomicU32,
-    /// Store handle_with_properties for internal table
-    pub with_properties: HashMap<String, String>,
+    /// Store options or properties from the `with` clause
+    pub with_options: WithOptions,
 }
 
 #[derive(Clone, Debug)]
@@ -136,7 +145,7 @@ impl OptimizerContextRef {
 }
 
 impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>, with_options: WithOptions) -> Self {
         Self {
             session_ctx,
             next_id: AtomicI32::new(0),
@@ -145,7 +154,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
-            with_properties: HashMap::new(),
+            with_options,
         }
     }
 
@@ -161,7 +170,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
-            with_properties: HashMap::new(),
+            with_options: Default::default(),
         }
         .into()
     }
@@ -175,15 +184,6 @@ impl std::fmt::Debug for OptimizerContext {
             self.next_id.load(Ordering::Relaxed)
         )
     }
-}
-
-fn load_config(opts: &FrontendOpts) -> FrontendConfig {
-    if opts.config_path.is_empty() {
-        return FrontendConfig::default();
-    }
-
-    let config_path = PathBuf::from(opts.config_path.to_owned());
-    FrontendConfig::init(config_path).unwrap()
 }
 
 /// The global environment for the frontend server.
@@ -200,7 +200,16 @@ pub struct FrontendEnv {
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     server_addr: HostAddr,
+    client_pool: ComputeClientPoolRef,
+
+    /// Each session is identified by (process_id,
+    /// secret_key). When Cancel Request received, find corresponding session and cancel all
+    /// running queries.
+    sessions_map: SessionMapRef,
 }
+
+/// TODO: Find a way to delete session from map when session is closed.
+type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
     pub async fn init(
@@ -227,8 +236,10 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
             compute_client_pool,
+            catalog_reader.clone(),
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
+        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
         Self {
             meta_client,
             catalog_writer,
@@ -239,6 +250,8 @@ impl FrontendEnv {
             query_manager,
             hummock_snapshot_manager,
             server_addr,
+            client_pool,
+            sessions_map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -246,15 +259,20 @@ impl FrontendEnv {
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(opts);
+        let config: FrontendConfig = load_config(&opts.config_path).unwrap();
         tracing::info!("Starting frontend node with config {:?}", config);
 
         let frontend_address: HostAddr = opts
             .client_address
             .as_ref()
-            .unwrap_or(&opts.host)
+            .unwrap_or_else(|| {
+                tracing::warn!("Client address is not specified, defaulting to host address");
+                &opts.host
+            })
             .parse()
             .unwrap();
+        tracing::info!("Client address is {}", frontend_address);
+
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client
             .register(WorkerType::Frontend, &frontend_address, 0)
@@ -284,6 +302,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
             compute_client_pool,
+            catalog_reader.clone(),
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
@@ -313,6 +332,8 @@ impl FrontendEnv {
 
         meta_client.activate(&frontend_address).await?;
 
+        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+
         Ok((
             Self {
                 catalog_reader,
@@ -324,6 +345,8 @@ impl FrontendEnv {
                 query_manager,
                 hummock_snapshot_manager,
                 server_addr: frontend_address,
+                client_pool,
+                sessions_map: Arc::new(Mutex::new(HashMap::new())),
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -382,6 +405,10 @@ impl FrontendEnv {
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
     }
+
+    pub fn client_pool(&self) -> ComputeClientPoolRef {
+        self.client_pool.clone()
+    }
 }
 
 pub struct AuthContext {
@@ -407,6 +434,14 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: RwLock<ConfigMap>,
+
+    /// Shutdown channels map
+    /// FIXME: Use weak key hash map to remove query id if query ends.
+    shutdown_receivers_map:
+        Arc<tokio::sync::Mutex<HashMap<QueryId, Option<mpsc::Sender<QueryMessage>>>>>,
+
+    /// Identified by process_id, secret_key. Corresponds to SessionManager.
+    id: (i32, i32),
 }
 
 impl SessionImpl {
@@ -414,12 +449,15 @@ impl SessionImpl {
         env: FrontendEnv,
         auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
+        id: (i32, i32),
     ) -> Self {
         Self {
             env,
             auth_context,
             user_authenticator,
             config_map: RwLock::new(Default::default()),
+            shutdown_receivers_map: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            id,
         }
     }
 
@@ -434,6 +472,9 @@ impl SessionImpl {
             )),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
+            shutdown_receivers_map: Default::default(),
+            // Mock session use non-sense id.
+            id: (0, 0),
         }
     }
 
@@ -464,6 +505,31 @@ impl SessionImpl {
     pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
         self.config_map.write().set(key, value)
     }
+
+    pub async fn insert_query_shutdown_sender(
+        &self,
+        query_id: QueryId,
+        shutdown_tx: mpsc::Sender<QueryMessage>,
+    ) {
+        let mut write_guard = self.shutdown_receivers_map.lock().await;
+        write_guard.insert(query_id, Some(shutdown_tx));
+    }
+
+    // // TODO: Support cancel query's in current session. This needs to store query ID in session.
+    // pub fn cancel_running_queries(&self) {
+    //     let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
+    //     for (query_id, sender) in &mut *write_guard {
+    //         if let Some(sender_swap) = mem::take(sender) {
+    //             sender_swap.send(QueryMessage::CancelQuery).await.unwrap();
+    //             info!("Cancel query_id {:?} in query manager", query_id);
+    //         }
+    //     }
+    //     write_guard.clear();
+    // }
+
+    pub fn session_id(&self) -> SessionId {
+        self.id
+    }
 }
 
 pub struct SessionManagerImpl {
@@ -471,6 +537,7 @@ pub struct SessionManagerImpl {
     _observer_join_handle: JoinHandle<()>,
     _heartbeat_join_handle: JoinHandle<()>,
     _heartbeat_shutdown_sender: Sender<()>,
+    number: AtomicI32,
 }
 
 impl SessionManager for SessionManagerImpl {
@@ -483,12 +550,15 @@ impl SessionManager for SessionManagerImpl {
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        if reader.get_database_by_name(database).is_err() {
-            return Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Not found database name: {}", database),
-            )));
-        }
+        let database_id = reader
+            .get_database_by_name(database)
+            .map_err(|_| {
+                Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Not found database name: {}", database),
+                ))
+            })?
+            .id();
         let user_reader = self.env.user_info_reader();
         let reader = user_reader.read_guard();
         if let Some(user) = reader.get_user_by_name(user_name) {
@@ -496,6 +566,19 @@ impl SessionManager for SessionManagerImpl {
                 return Err(Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("User {} is not allowed to login", user_name),
+                )));
+            }
+            let has_privilege = user.grant_privileges.iter().any(|privilege| {
+                privilege.object == Some(Object::DatabaseId(database_id))
+                    && privilege
+                        .action_with_opts
+                        .iter()
+                        .any(|ao| ao.action == Action::Connect as i32)
+            });
+            if !user.is_super && !has_privilege {
+                return Err(Box::new(Error::new(
+                    ErrorKind::PermissionDenied,
+                    "User does not have CONNECT privilege.",
                 )));
             }
             let user_authenticator = match &user.auth_info {
@@ -523,7 +606,11 @@ impl SessionManager for SessionManagerImpl {
                 }
             };
 
-            Ok(SessionImpl::new(
+            // Assign a session id and insert into sessions map (for cancel request).
+            let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
+            // Use a trivial strategy: process_id and secret_key are equal.
+            let id = (secret_key, secret_key);
+            let session_impl: Arc<SessionImpl> = SessionImpl::new(
                 self.env.clone(),
                 Arc::new(AuthContext::new(
                     database.to_string(),
@@ -531,14 +618,31 @@ impl SessionManager for SessionManagerImpl {
                     user.id,
                 )),
                 user_authenticator,
+                id,
             )
-            .into())
+            .into();
+            self.insert_session(session_impl.clone());
+
+            Ok(session_impl)
         } else {
             Err(Box::new(Error::new(
                 ErrorKind::InvalidInput,
                 format!("Role {} does not exist", user_name),
             )))
         }
+    }
+
+    /// Used when cancel request happened, returned corresponding session ref.
+    fn connect_for_cancel(
+        &self,
+        process_id: i32,
+        secret_key: i32,
+    ) -> PsqlResult<Arc<Self::Session>> {
+        let write_guard = self.env.sessions_map.lock().unwrap();
+        write_guard
+            .get(&(process_id, secret_key))
+            .cloned()
+            .ok_or(PsqlError::CancelNotFound)
     }
 }
 
@@ -551,7 +655,13 @@ impl SessionManagerImpl {
             _observer_join_handle: join_handle,
             _heartbeat_join_handle: heartbeat_join_handle,
             _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
+            number: AtomicI32::new(0),
         })
+    }
+
+    fn insert_session(&self, session: Arc<SessionImpl>) {
+        let mut write_guard = self.env.sessions_map.lock().unwrap();
+        write_guard.insert(session.id(), session);
     }
 }
 
@@ -561,7 +671,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         sql: &str,
 
-        // format: indicate the query PgReponse format (Only meaningful for SELECT queries).
+        // format: indicate the query PgResponse format (Only meaningful for SELECT queries).
         // false: TEXT
         // true: BINARY
         format: bool,
@@ -658,11 +768,26 @@ impl Session for SessionImpl {
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
     }
+
+    async fn cancel_running_queries(&self) {
+        let mut write_guard = self.shutdown_receivers_map.lock().await;
+        for (query_id, sender) in &mut *write_guard {
+            if let Some(sender_swap) = mem::take(sender) {
+                sender_swap.send(QueryMessage::CancelQuery).await.unwrap();
+                info!("Cancel query_id {:?} in query manager", query_id);
+            }
+        }
+        write_guard.clear();
+    }
+
+    fn id(&self) -> SessionId {
+        self.id
+    }
 }
 
 /// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session, Arc::from(sql));
+    let context = OptimizerContext::new(session, Arc::from(sql), WithOptions::try_from(&stmt)?);
     let session = context.session_ctx.clone();
 
     let bound = {

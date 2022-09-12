@@ -62,7 +62,7 @@ pub struct AggCall {
     /// The return type of aggregation function.
     pub return_type: DataType,
 
-    /// Order requirements specfied in order by clause of agg call
+    /// Order requirements specified in order by clause of agg call
     pub order_pairs: Vec<OrderPair>,
 
     /// Whether the stream is append-only.

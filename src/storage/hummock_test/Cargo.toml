@@ -5,13 +5,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait = "0.1"
 bytes = { version = "1" }
 fail = "0.5"
-futures = { version = "0.3" }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 parking_lot = "0.12"
 rand = "0.8"
 risingwave_common = { path = "../../common" }
+risingwave_common_service = { path = "../../common/common_service" }
+risingwave_compute = { path = "../../compute" }
 risingwave_hummock_sdk = { path = "../hummock_sdk" }
 risingwave_meta = { path = "../../meta", features = ["test"] }
 risingwave_object_store = { path = "../../object_store" }
@@ -19,7 +22,12 @@ risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_storage = { path = "..", features = ["test"] }
 tokio = { version = "0.2", package = "madsim-tokio" }
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+
+[dev-dependencies]
+futures = { version = "0.3", default-features = false, features = ["alloc", "executor"] }
 
 [features]
 failpoints = ["risingwave_storage/failpoints"]

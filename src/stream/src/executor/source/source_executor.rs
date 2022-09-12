@@ -41,7 +41,8 @@ use crate::executor::*;
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
 pub struct SourceExecutor<S: StateStore> {
-    actor_id: ActorId,
+    ctx: ActorContextRef,
+
     source_id: TableId,
     source_desc: SourceDesc,
 
@@ -78,7 +79,7 @@ pub struct SourceExecutor<S: StateStore> {
 impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        actor_id: ActorId,
+        ctx: ActorContextRef,
         source_id: TableId,
         source_desc: SourceDesc,
         vnodes: Bitmap,
@@ -96,7 +97,7 @@ impl<S: StateStore> SourceExecutor<S> {
         // Using vnode range start for row id generator.
         let vnode_id = vnodes.next_set_bit(0).unwrap_or(0);
         Ok(Self {
-            actor_id,
+            ctx,
             source_id,
             source_desc,
             row_id_generator: RowIdGenerator::with_epoch(
@@ -154,27 +155,30 @@ impl<S: StateStore> SourceExecutor<S> {
 
     async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
         let row_id_index = self.source_desc.row_id_index;
-        let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
 
-        if let Some(idx) = self
-            .column_ids
-            .iter()
-            .position(|column_id| *column_id == row_id_column_id)
-        {
-            let (ops, mut columns, bitmap) = chunk.into_inner();
-            if append_only {
-                columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
-            } else {
-                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
+        // if row_id_index is None, pk is not row_id, so no need to gen row_id and refill chunk
+        if let Some(row_id_index) = row_id_index {
+            let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
+            if let Some(idx) = self
+                .column_ids
+                .iter()
+                .position(|column_id| *column_id == row_id_column_id)
+            {
+                let (ops, mut columns, bitmap) = chunk.into_inner();
+                if append_only {
+                    columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
+                } else {
+                    columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
+                }
+                return StreamChunk::new(ops, columns, bitmap);
             }
-            return StreamChunk::new(ops, columns, bitmap);
         }
         chunk
     }
 }
 
 impl<S: StateStore> SourceExecutor<S> {
-    fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
+    fn get_diff(&mut self, rhs: ConnectorState) -> ConnectorState {
         // rhs can not be None because we do not support split number reduction
 
         let split_change = rhs.unwrap();
@@ -187,6 +191,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 Some(s) => target_state.push(s.clone()),
                 None => {
                     no_change_flag = false;
+                    // write new assigned split to state cache. snapshot is base on cache.
+                    self.state_cache
+                        .entry(sc.id())
+                        .or_insert_with(|| sc.clone());
                     target_state.push(sc.clone())
                 }
             }
@@ -214,16 +222,16 @@ impl<S: StateStore> SourceExecutor<S> {
         state: ConnectorState,
     ) -> StreamExecutorResult<Box<SourceStreamReaderImpl>> {
         let reader = match self.source_desc.source.as_ref() {
-            SourceImpl::TableV2(t) => t
+            SourceImpl::Table(t) => t
                 .stream_reader(self.column_ids.clone())
                 .await
-                .map(SourceStreamReaderImpl::TableV2),
+                .map(SourceStreamReaderImpl::Table),
             SourceImpl::Connector(c) => c
                 .stream_reader(
                     state,
                     self.column_ids.clone(),
                     self.source_desc.metrics.clone(),
-                    SourceContext::new(self.actor_id as u32, self.source_id),
+                    SourceContext::new(self.ctx.id as u32, self.source_id),
                 )
                 .await
                 .map(SourceStreamReaderImpl::Connector),
@@ -242,9 +250,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .await
             .unwrap();
 
+        // If the first barrier is configuration change, then the source executor must be newly
+        // created, and we should start with the paused state.
+        let start_with_paused = barrier.is_update();
+
         if let Some(mutation) = barrier.mutation.as_ref() {
             if let Mutation::Add { splits, .. } = mutation.as_ref() {
-                if let Some(splits) = splits.get(&self.actor_id) {
+                if let Some(splits) = splits.get(&self.ctx.id) {
                     self.stream_source_splits = splits.clone();
                 }
             }
@@ -264,6 +276,12 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
+        tracing::debug!(
+            "source {:?} actor {:?} starts with state {:?}",
+            self.source_id,
+            self.ctx.id,
+            recover_state
+        );
 
         // todo: use epoch from msg to restore state from state store
         let source_chunk_reader = self
@@ -273,6 +291,9 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
+        if start_with_paused {
+            stream.pause_source();
+        }
 
         yield Message::Barrier(barrier);
 
@@ -282,16 +303,15 @@ impl<S: StateStore> SourceExecutor<S> {
                 Either::Left(barrier) => {
                     let barrier = barrier?;
                     let epoch = barrier.epoch.prev;
-                    self.take_snapshot(epoch).await?;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::SourceChangeSplit(mapping) => {
-                                if let Some(target_splits) = mapping.get(&self.actor_id).cloned() {
+                                if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
                                     if let Some(target_state) = self.get_diff(target_splits) {
-                                        log::info!(
+                                        tracing::info!(
                                             "actor {:?} apply source split change to {:?}",
-                                            self.actor_id,
+                                            self.ctx.id,
                                             target_state
                                         );
 
@@ -308,9 +328,25 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                             Mutation::Pause => stream.pause_source(),
                             Mutation::Resume => stream.resume_source(),
+                            Mutation::Update { vnode_bitmaps, .. } => {
+                                // Update row id generator if vnode mapping is changed.
+                                // Note that: since update barrier will only occurs between pause
+                                // and resume barrier, duplicated row id won't be generated.
+                                if let Some(vnode_bitmaps) = vnode_bitmaps.get(&self.ctx.id) {
+                                    let vnode_id =
+                                        vnode_bitmaps.next_set_bit(0).unwrap_or(0) as u32;
+                                    if self.row_id_generator.vnode_id != vnode_id {
+                                        self.row_id_generator = RowIdGenerator::with_epoch(
+                                            vnode_id,
+                                            *UNIX_SINGULARITY_DATE_EPOCH,
+                                        );
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     }
+                    self.take_snapshot(epoch).await?;
                     self.state_cache.clear();
                     yield Message::Barrier(barrier);
                 }
@@ -351,7 +387,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     // Refill row id column for source.
                     chunk = match self.source_desc.source.as_ref() {
                         SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true).await,
-                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false).await,
+                        SourceImpl::Table(_) => self.refill_row_id_column(chunk, false).await,
                     };
 
                     self.metrics
@@ -406,7 +442,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
-    use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, StreamSourceInfo};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::plan_common::{
@@ -450,8 +486,15 @@ mod tests {
                 type_name: "".to_string(),
             },
         ];
+        let row_id_index = Some(0);
+        let pk_column_ids = vec![0];
         let source_manager = MemSourceManager::default();
-        source_manager.create_table_source(&table_id, table_columns)?;
+        source_manager.create_table_source(
+            &table_id,
+            table_columns,
+            row_id_index,
+            pk_column_ids,
+        )?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -484,7 +527,7 @@ mod tests {
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let executor = SourceExecutor::new(
-            0x3f3f3f,
+            ActorContext::create(0x3f3f3f),
             table_id,
             source_desc,
             vnodes,
@@ -503,7 +546,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table_v2().unwrap();
+            let table_source = source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
@@ -574,8 +617,15 @@ mod tests {
                 type_name: "".to_string(),
             },
         ];
+        let row_id_index = Some(0);
+        let pk_column_ids = vec![0];
         let source_manager = MemSourceManager::default();
-        source_manager.create_table_source(&table_id, table_columns)?;
+        source_manager.create_table_source(
+            &table_id,
+            table_columns,
+            row_id_index,
+            pk_column_ids,
+        )?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -602,7 +652,7 @@ mod tests {
         let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
         let executor = SourceExecutor::new(
-            0x3f3f3f,
+            ActorContext::create(0x3f3f3f),
             table_id,
             source_desc,
             vnodes,
@@ -621,7 +671,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table_v2().unwrap();
+            let table_source = source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
@@ -675,7 +725,7 @@ mod tests {
             properties,
             row_format: ProstRowFormatType::Json as i32,
             row_schema_location: "".to_string(),
-            row_id_index: 0,
+            row_id_index: Some(ProstColumnIndex { index: 0 }),
             columns,
             pk_column_ids: vec![0],
         }
@@ -715,7 +765,6 @@ mod tests {
             Schema::new(fields)
         };
 
-        let actor_id = ActorId::default();
         let source_desc = source_manager.get_source(&source_table_id)?;
         let mem_state_store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(mem_state_store.clone(), &TableId::from(0x2333));
@@ -724,9 +773,10 @@ mod tests {
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+        let source_state_handler = SourceStateHandler::new(keyspace.clone());
 
         let source_exec = SourceExecutor::new(
-            actor_id,
+            ActorContext::create(0),
             source_table_id,
             source_desc,
             vnodes,
@@ -809,6 +859,12 @@ mod tests {
         barrier_tx.send(change_split_mutation).unwrap();
 
         let _ = materialize.next().await.unwrap(); // barrier
+
+        // there must exist state for new add partition
+        source_state_handler
+            .restore_states("3-1".to_string().into(), curr_epoch + 1)
+            .await?
+            .unwrap();
 
         let chunk_2 = (materialize.next().await.unwrap().unwrap())
             .into_chunk()

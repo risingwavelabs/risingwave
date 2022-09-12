@@ -27,7 +27,6 @@ use super::*;
 use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::dispatch::*;
-use crate::executor::exchange::input::LocalInput;
 use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
@@ -41,25 +40,18 @@ use crate::task::SharedContext;
 /// and do this again and again.
 #[tokio::test]
 async fn test_merger_sum_aggr() {
+    let actor_ctx = ActorContext::create(0);
+
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
-        let schema = Schema {
+        let _schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let metrics = Arc::new(StreamingMetrics::unused());
-        let input = ReceiverExecutor::new(
-            schema,
-            vec![],
-            LocalInput::for_test(input_rx),
-            ActorContext::create(),
-            0,
-            0,
-            0,
-            metrics,
-        );
+        let input = ReceiverExecutor::for_test(input_rx);
         let append_only = false;
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
+            actor_ctx.clone(),
             input.boxed(),
             vec![
                 AggCall {
@@ -94,7 +86,7 @@ async fn test_merger_sum_aggr() {
             0,
             context,
             StreamingMetrics::unused().into(),
-            ActorContext::create(),
+            actor_ctx.clone(),
         );
         (actor, rx)
     };
@@ -120,19 +112,10 @@ async fn test_merger_sum_aggr() {
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (input, rx) = channel(16);
-    let schema = Schema {
+    let _schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
-    let receiver_op = Box::new(ReceiverExecutor::new(
-        schema.clone(),
-        vec![],
-        LocalInput::for_test(rx),
-        ActorContext::create(),
-        0,
-        0,
-        0,
-        Arc::new(StreamingMetrics::unused()),
-    ));
+    let receiver_op = Box::new(ReceiverExecutor::for_test(rx));
     let dispatcher = DispatchExecutor::new(
         receiver_op,
         vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
@@ -148,7 +131,7 @@ async fn test_merger_sum_aggr() {
         0,
         context,
         StreamingMetrics::unused().into(),
-        ActorContext::create(),
+        actor_ctx.clone(),
     );
     handles.push(tokio::spawn(actor.run()));
 
@@ -158,6 +141,7 @@ async fn test_merger_sum_aggr() {
     // for global aggregator, we need to sum data and sum row count
     let append_only = false;
     let aggregator = new_boxed_simple_agg_executor(
+        actor_ctx.clone(),
         create_in_memory_keyspace_agg(2),
         merger.boxed(),
         vec![
@@ -184,6 +168,7 @@ async fn test_merger_sum_aggr() {
     );
 
     let projection = ProjectExecutor::new(
+        actor_ctx.clone(),
         aggregator,
         vec![],
         vec![
@@ -204,7 +189,7 @@ async fn test_merger_sum_aggr() {
         0,
         context,
         StreamingMetrics::unused().into(),
-        ActorContext::create(),
+        actor_ctx.clone(),
     );
     handles.push(tokio::spawn(actor.run()));
 

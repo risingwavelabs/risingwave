@@ -16,8 +16,9 @@ use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, FieldOrder};
+use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
@@ -28,6 +29,7 @@ pub struct StreamTopN {
 
 impl StreamTopN {
     pub fn new(logical: LogicalTopN) -> Self {
+        assert!(logical.group_key().is_empty());
         let ctx = logical.base.ctx.clone();
         let dist = match logical.input().distribution() {
             Distribution::Single => Distribution::Single,
@@ -68,25 +70,19 @@ impl PlanTreeNodeUnary for StreamTopN {
 
 impl_plan_tree_node_for_unary! { StreamTopN }
 
-impl ToStreamProst for StreamTopN {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamTopN {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let column_orders = self
-            .logical
-            .topn_order()
-            .field_order
-            .iter()
-            .map(FieldOrder::to_protobuf)
-            .collect();
-
         let topn_node = TopNNode {
-            column_orders,
             limit: self.logical.limit() as u64,
             offset: self.logical.offset() as u64,
-            distribution_key: vec![], // TODO: seems unnecessary
-            ..Default::default()
+            table: Some(
+                self.logical
+                    .infer_internal_table_catalog(None)
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ),
         };
-
         if self.input().append_only() {
             ProstStreamNode::AppendOnlyTopN(topn_node)
         } else {

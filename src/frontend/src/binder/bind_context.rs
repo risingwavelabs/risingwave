@@ -44,6 +44,9 @@ impl ColumnBinding {
 pub enum Clause {
     Where,
     Values,
+    GroupBy,
+    Having,
+    Filter,
 }
 
 impl Display for Clause {
@@ -51,6 +54,9 @@ impl Display for Clause {
         match self {
             Clause::Where => write!(f, "WHERE"),
             Clause::Values => write!(f, "VALUES"),
+            Clause::GroupBy => write!(f, "GROUP BY"),
+            Clause::Having => write!(f, "HAVING"),
+            Clause::Filter => write!(f, "FILTER"),
         }
     }
 }
@@ -66,8 +72,8 @@ pub struct LateralBindContext {
 pub struct BindContext {
     // Columns of all tables.
     pub columns: Vec<ColumnBinding>,
-    // Mapping column name to indexs in `columns`.
-    pub indexs_of: HashMap<String, Vec<usize>>,
+    // Mapping column name to indices in `columns`.
+    pub indices_of: HashMap<String, Vec<usize>>,
     // Mapping table name to [begin, end) of its columns.
     pub range_of: HashMap<String, (usize, usize)>,
     // `clause` identifies in what clause we are binding.
@@ -158,7 +164,7 @@ impl BindContext {
 
     pub fn get_unqualified_indices(&self, column_name: &String) -> Result<Vec<usize>> {
         let columns = self
-            .indexs_of
+            .indices_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {column_name}")))?;
         if columns.len() > 1 {
@@ -220,7 +226,7 @@ impl BindContext {
                 if group.non_nullable_column.is_none() {
                     group.non_nullable_column = non_nullable_column;
                 }
-                self.column_group_context.mapping.insert(right, group_id);
+                self.column_group_context.mapping.insert(left, group_id);
             }
             (Some(l_group_id), Some(r_group_id)) => {
                 if r_group_id == l_group_id {
@@ -259,7 +265,7 @@ impl BindContext {
         table_name: &String,
     ) -> Result<usize> {
         let column_indexes = self
-            .indexs_of
+            .indices_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
         match column_indexes
@@ -283,8 +289,8 @@ impl BindContext {
             c.index += begin;
             c
         }));
-        for (k, v) in other.indexs_of {
-            let entry = self.indexs_of.entry(k).or_insert_with(Vec::new);
+        for (k, v) in other.indices_of {
+            let entry = self.indices_of.entry(k).or_insert_with(Vec::new);
             entry.extend(v.into_iter().map(|x| x + begin));
         }
         for (k, (x, y)) in other.range_of {

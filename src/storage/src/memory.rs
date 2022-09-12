@@ -22,8 +22,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -37,18 +39,12 @@ type KeyWithEpoch = (Bytes, Reverse<u64>);
 /// so the memory usage will be high. At the same time, every time we create a new iterator on
 /// `BTreeMap`, it will fully clone the map, so as to act as a snapshot. Therefore, in-memory state
 /// store should never be used in production.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MemoryStateStore {
     /// Stores (key, epoch) -> user value. We currently don't consider value meta here.
     inner: Arc<RwLock<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
     /// current largest committed epoch,
     epoch: Option<u64>,
-}
-
-impl Default for MemoryStateStore {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 fn to_bytes_range<R, B>(range: R) -> (Bound<KeyWithEpoch>, Bound<KeyWithEpoch>)
@@ -71,10 +67,7 @@ where
 
 impl MemoryStateStore {
     pub fn new() -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(BTreeMap::new())),
-            epoch: None,
-        }
+        Self::default()
     }
 
     pub fn shared() -> Self {
@@ -196,14 +189,6 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn replicate_batch(
-        &self,
-        _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_> {
-        async move { unimplemented!() }
-    }
-
     fn iter<R, B>(
         &self,
         _prefix_hint: Option<Vec<u8>>,
@@ -236,19 +221,24 @@ impl StateStore for MemoryStateStore {
         async move { unimplemented!() }
     }
 
-    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             // memory backend doesn't support wait for epoch, so this is a no-op.
             Ok(())
         }
     }
 
-    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             // memory backend doesn't support push to S3, so this is a no-op
-            Ok(0)
+            Ok(SyncResult {
+                sync_succeed: true,
+                ..Default::default()
+            })
         }
     }
+
+    fn seal_epoch(&self, _epoch: u64) {}
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move { Ok(()) }

@@ -28,7 +28,7 @@ use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
 use crate::monitor::SourceMetrics;
-use crate::table_v2::TableSourceV2;
+use crate::table::TableSource;
 use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
@@ -37,7 +37,13 @@ pub type SourceRef = Arc<SourceImpl>;
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
     async fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
-    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
+    fn create_table_source(
+        &self,
+        table_id: &TableId,
+        columns: Vec<ColumnDesc>,
+        row_id_index: Option<usize>,
+        pk_column_ids: Vec<i32>,
+    ) -> Result<()>;
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
@@ -90,9 +96,9 @@ pub struct SourceDesc {
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
 
-    // The column index of row ID. By default it's 0, which means the first column is row ID.
-    // TODO: change to Option<usize> when pk supported in the future.
-    pub row_id_index: usize,
+    // The column index of row ID. If the primary key is specified by users, this will be `None`.
+    pub row_id_index: Option<usize>,
+    pub pk_column_ids: Vec<i32>,
 }
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
@@ -129,25 +135,20 @@ impl SourceManager for MemSourceManager {
             return Err(source_parser_rs.err().unwrap());
         };
 
-        let columns = info
+        let mut columns: Vec<_> = info
             .columns
-            .iter()
-            .enumerate()
-            .map(|(idx, c)| {
-                let mut col = SourceColumnDesc::from(&ColumnDesc::from(
-                    c.column_desc.as_ref().unwrap().clone(),
-                ));
-                col.skip_parse = idx as i32 == info.row_id_index;
-                col
-            })
-            .collect::<Vec<SourceColumnDesc>>();
-
+            .into_iter()
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.unwrap())))
+            .collect();
+        let row_id_index = info.row_id_index.map(|row_id_index| {
+            columns[row_id_index.index as usize].skip_parse = true;
+            row_id_index.index as usize
+        });
+        let pk_column_ids = info.pk_column_ids;
         assert!(
-            info.row_id_index >= 0,
-            "expected row_id_index >= 0, got {}",
-            info.row_id_index
+            !pk_column_ids.is_empty(),
+            "source should have at least one pk column"
         );
-        let row_id_index = info.row_id_index as usize;
 
         let config = ConnectorProperties::extract(info.properties)
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
@@ -163,6 +164,7 @@ impl SourceManager for MemSourceManager {
             format,
             columns,
             row_id_index,
+            pk_column_ids,
             metrics: self.metrics.clone(),
         };
 
@@ -177,7 +179,13 @@ impl SourceManager for MemSourceManager {
         Ok(())
     }
 
-    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
+    fn create_table_source(
+        &self,
+        table_id: &TableId,
+        columns: Vec<ColumnDesc>,
+        row_id_index: Option<usize>,
+        pk_column_ids: Vec<i32>,
+    ) -> Result<()> {
         let mut sources = self.get_sources()?;
 
         ensure!(
@@ -186,15 +194,21 @@ impl SourceManager for MemSourceManager {
             table_id
         );
 
+        assert!(
+            !pk_column_ids.is_empty(),
+            "source should have at least one pk column"
+        );
+
         let source_columns = columns.iter().map(SourceColumnDesc::from).collect();
-        let source = SourceImpl::TableV2(TableSourceV2::new(columns));
+        let source = SourceImpl::Table(TableSource::new(columns));
 
         // Table sources do not need columns and format
         let desc = SourceDesc {
             source: Arc::new(source),
             columns: source_columns,
             format: SourceFormat::Invalid,
-            row_id_index: 0, // always use the first column as row_id
+            row_id_index,
+            pk_column_ids,
             metrics: self.metrics.clone(),
         };
 
@@ -246,7 +260,7 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_connector::source::kinesis::config::kinesis_demo_properties;
-    use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::catalog::{ColumnIndex, StreamSourceInfo};
     use risingwave_pb::plan_common::ColumnCatalog;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::Keyspace;
@@ -271,7 +285,7 @@ mod tests {
             properties,
             row_format: 0,
             row_schema_location: "".to_string(),
-            row_id_index: 0,
+            row_id_index: Some(ColumnIndex { index: 0 }),
             pk_column_ids: vec![0],
             columns,
         };
@@ -286,7 +300,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_table_source_v2() -> Result<()> {
+    async fn test_table_source() -> Result<()> {
         let table_id = TableId::default();
 
         let schema = Schema {
@@ -308,11 +322,18 @@ mod tests {
                 type_name: "".to_string(),
             })
             .collect();
+        let row_id_index = None;
+        let pk_column_ids = vec![1];
 
         let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
         let mem_source_manager = MemSourceManager::default();
-        let res = mem_source_manager.create_table_source(&table_id, table_columns);
+        let res = mem_source_manager.create_table_source(
+            &table_id,
+            table_columns,
+            row_id_index,
+            pk_column_ids,
+        );
         assert!(res.is_ok());
 
         // get source

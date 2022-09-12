@@ -43,14 +43,26 @@ pub struct LogicalProjectBuilder {
 impl LogicalProjectBuilder {
     /// add an expression to the `LogicalProject` and return the column index of the project's
     /// output
-    pub fn add_expr(&mut self, expr: &ExprImpl) -> usize {
+    pub fn add_expr(&mut self, expr: &ExprImpl) -> std::result::Result<usize, &'static str> {
+        if expr.has_subquery() {
+            return Err("subquery");
+        }
+        if expr.has_agg_call() {
+            return Err("aggregate function");
+        }
+        if expr.has_table_function() {
+            return Err("table function");
+        }
+        if expr.has_window_function() {
+            return Err("window function");
+        }
         if let Some(idx) = self.exprs_index.get(expr) {
-            *idx
+            Ok(*idx)
         } else {
             let index = self.exprs.len();
             self.exprs.push(expr.clone());
             self.exprs_index.insert(expr.clone(), index);
-            index
+            Ok(index)
         }
     }
 
@@ -75,11 +87,6 @@ pub struct LogicalProject {
 }
 impl LogicalProject {
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
-        assert!(
-            exprs.iter().all(|e| !e.has_table_function()),
-            "Project should not have table function."
-        );
-
         let ctx = input.ctx();
         let schema = Self::derive_schema(&exprs, input.schema());
         let pk_indices = Self::derive_pk(input.schema(), input.logical_pk(), &exprs);
@@ -87,6 +94,14 @@ impl LogicalProject {
             assert_input_ref!(expr, input.schema().fields().len());
             assert!(!expr.has_subquery());
             assert!(!expr.has_agg_call());
+            assert!(
+                !expr.has_table_function(),
+                "Project should not have table function."
+            );
+            assert!(
+                !expr.has_window_function(),
+                "Project should not have window function."
+            );
         }
         let functional_dependency =
             Self::derive_fd(input.schema().len(), input.functional_dependency(), &exprs);
@@ -122,6 +137,12 @@ impl LogicalProject {
 
     pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
         Self::new(input, exprs).into()
+    }
+
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
@@ -348,9 +369,16 @@ impl PredicatePushdown for LogicalProject {
 
 impl ToBatch for LogicalProject {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
+        self.to_batch_with_order_required(&Order::any())
+    }
+
+    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+        let input_order = self
+            .o2i_col_mapping()
+            .rewrite_provided_order(required_order);
+        let new_input = self.input().to_batch_with_order_required(&input_order)?;
         let new_logical = self.clone_with_input(new_input.clone());
-        if let Some(input_proj) = new_input.as_batch_project() {
+        let batch_project = if let Some(input_proj) = new_input.as_batch_project() {
             let outer_project = new_logical;
             let inner_project = input_proj.as_logical();
             let mut subst = Substitute {
@@ -362,10 +390,11 @@ impl ToBatch for LogicalProject {
                 .cloned()
                 .map(|expr| subst.rewrite_expr(expr))
                 .collect();
-            Ok(BatchProject::new(LogicalProject::new(inner_project.input(), exprs)).into())
+            BatchProject::new(LogicalProject::new(inner_project.input(), exprs))
         } else {
-            Ok(BatchProject::new(new_logical).into())
-        }
+            BatchProject::new(new_logical)
+        };
+        required_order.enforce_if_not_satisfies(batch_project.into())
     }
 }
 

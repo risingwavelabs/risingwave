@@ -320,7 +320,7 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
     }
 }
 
-type RequestQueue<K, T> = Vec<Sender<CachableEntry<K, T>>>;
+type RequestQueue<K, T> = Vec<Sender<CacheableEntry<K, T>>>;
 pub struct LruCacheShard<K: LruKey, T: LruValue> {
     /// The dummy header node of a ring linked list. The linked list is a LRU list, holding the
     /// cache handles that are not used externally.
@@ -536,7 +536,7 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     unsafe fn clear(&mut self) {
         while !std::ptr::eq(self.lru.next, self.lru.as_mut()) {
             let handle = self.lru.next;
-            // `listener` should not be trigged here, for it doesn't listen to `clear`.
+            // `listener` should not be triggered here, for it doesn't listen to `clear`.
             self.erase((*handle).hash, (*handle).get_key());
         }
     }
@@ -620,14 +620,14 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         }
     }
 
-    pub fn lookup(self: &Arc<Self>, hash: u64, key: &K) -> Option<CachableEntry<K, T>> {
+    pub fn lookup(self: &Arc<Self>, hash: u64, key: &K) -> Option<CacheableEntry<K, T>> {
         let mut shard = self.shards[self.shard(hash)].lock();
         unsafe {
             let ptr = shard.lookup(hash, key);
             if ptr.is_null() {
                 return None;
             }
-            let entry = CachableEntry {
+            let entry = CacheableEntry {
                 cache: self.clone(),
                 handle: ptr,
             };
@@ -640,7 +640,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         unsafe {
             let ptr = shard.lookup(hash, &key);
             if !ptr.is_null() {
-                return LookupResult::Cached(CachableEntry {
+                return LookupResult::Cached(CacheableEntry {
                     cache: self.clone(),
                     handle: ptr,
                 });
@@ -673,7 +673,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         hash: u64,
         charge: usize,
         value: T,
-    ) -> CachableEntry<K, T> {
+    ) -> CacheableEntry<K, T> {
         let mut to_delete = vec![];
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
@@ -683,13 +683,13 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             if let Some(que) = pending_request {
                 for sender in que {
                     (*ptr).add_ref();
-                    let _ = sender.send(CachableEntry {
+                    let _ = sender.send(CacheableEntry {
                         cache: self.clone(),
                         handle: ptr,
                     });
                 }
             }
-            CachableEntry {
+            CacheableEntry {
                 cache: self.clone(),
                 handle: ptr,
             }
@@ -790,7 +790,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         hash: u64,
         key: K,
         fetch_value: F,
-    ) -> Result<Result<CachableEntry<K, T>, E>, RecvError>
+    ) -> Result<Result<CacheableEntry<K, T>, E>, RecvError>
     where
         F: FnOnce() -> VC,
         E: Error + Send + 'static,
@@ -832,27 +832,27 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
     }
 }
 
-pub struct CachableEntry<K: LruKey, T: LruValue> {
+pub struct CacheableEntry<K: LruKey, T: LruValue> {
     cache: Arc<LruCache<K, T>>,
     handle: *mut LruHandle<K, T>,
 }
 
 pub enum LookupResult<K: LruKey, T: LruValue> {
-    Cached(CachableEntry<K, T>),
+    Cached(CacheableEntry<K, T>),
     Miss,
-    WaitPendingRequest(Receiver<CachableEntry<K, T>>),
+    WaitPendingRequest(Receiver<CacheableEntry<K, T>>),
 }
 
-unsafe impl<K: LruKey, T: LruValue> Send for CachableEntry<K, T> {}
-unsafe impl<K: LruKey, T: LruValue> Sync for CachableEntry<K, T> {}
+unsafe impl<K: LruKey, T: LruValue> Send for CacheableEntry<K, T> {}
+unsafe impl<K: LruKey, T: LruValue> Sync for CacheableEntry<K, T> {}
 
-impl<K: LruKey, T: LruValue> CachableEntry<K, T> {
+impl<K: LruKey, T: LruValue> CacheableEntry<K, T> {
     pub fn value(&self) -> &T {
         unsafe { (*self.handle).get_value() }
     }
 }
 
-impl<K: LruKey, T: LruValue> Drop for CachableEntry<K, T> {
+impl<K: LruKey, T: LruValue> Drop for CacheableEntry<K, T> {
     fn drop(&mut self) {
         unsafe {
             self.cache.release(self.handle);

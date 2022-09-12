@@ -24,8 +24,11 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as FieldProst;
+use serde::ser::SerializeStruct;
+use serde::Serialize;
 use uuid::Uuid;
 
+use crate::catalog::catalog_service::CatalogReader;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
@@ -68,6 +71,21 @@ pub struct ExecutionPlanNode {
     pub source_stage_id: Option<StageId>,
 }
 
+impl Serialize for ExecutionPlanNode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("QueryStage", 5)?;
+        state.serialize_field("plan_node_id", &self.plan_node_id)?;
+        state.serialize_field("plan_node_type", &self.plan_node_type)?;
+        state.serialize_field("schema", &self.schema)?;
+        state.serialize_field("children", &self.children)?;
+        state.serialize_field("source_stage_id", &self.source_stage_id)?;
+        state.end()
+    }
+}
+
 impl From<PlanRef> for ExecutionPlanNode {
     fn from(plan_node: PlanRef) -> Self {
         Self {
@@ -93,6 +111,7 @@ pub struct BatchPlanFragmenter {
     stage_graph_builder: StageGraphBuilder,
     next_stage_id: u32,
     worker_node_manager: WorkerNodeManagerRef,
+    catalog_reader: CatalogReader,
 }
 
 impl Default for QueryId {
@@ -104,12 +123,13 @@ impl Default for QueryId {
 }
 
 impl BatchPlanFragmenter {
-    pub fn new(worker_node_manager: WorkerNodeManagerRef) -> Self {
+    pub fn new(worker_node_manager: WorkerNodeManagerRef, catalog_reader: CatalogReader) -> Self {
         Self {
             query_id: Default::default(),
             stage_graph_builder: StageGraphBuilder::new(),
             next_stage_id: 0,
             worker_node_manager,
+            catalog_reader,
         }
     }
 }
@@ -210,6 +230,19 @@ impl Debug for QueryStage {
     }
 }
 
+impl Serialize for QueryStage {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("QueryStage", 3)?;
+        state.serialize_field("root", &self.root)?;
+        state.serialize_field("parallelism", &self.parallelism)?;
+        state.serialize_field("exchange_info", &self.exchange_info)?;
+        state.end()
+    }
+}
+
 pub type QueryStageRef = Arc<QueryStage>;
 
 struct QueryStageBuilder {
@@ -262,7 +295,7 @@ impl QueryStageBuilder {
 }
 
 /// Maintains how each stage are connected.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct StageGraph {
     pub root_stage_id: StageId,
     pub stages: HashMap<StageId, QueryStageRef>,
@@ -452,11 +485,22 @@ impl BatchPlanFragmenter {
             Some({
                 let table_desc = scan_node.logical().table_desc();
                 let partitions = self
-                    .worker_node_manager
-                    .get_table_mapping(&table_desc.table_id)
-                    .map(|vnode_mapping| {
-                        derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping)
-                    });
+                    .catalog_reader
+                    .read_guard()
+                    .get_table_by_id(&table_desc.table_id)
+                    .map(|table| {
+                        self.worker_node_manager
+                            .get_fragment_mapping(&table.fragment_id)
+                            .map(|vnode_mapping| {
+                                derive_partitions(
+                                    scan_node.scan_ranges(),
+                                    table_desc,
+                                    &vnode_mapping,
+                                )
+                            })
+                    })
+                    .ok()
+                    .flatten();
                 TableScanInfo { partitions }
             })
         } else {
@@ -469,7 +513,7 @@ impl BatchPlanFragmenter {
 }
 
 // TODO: let frontend store owner_mapping directly?
-fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<ParallelUnitId, Buffer> {
+fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<ParallelUnitId, Bitmap> {
     let mut m: HashMap<ParallelUnitId, BitmapBuilder> = HashMap::new();
     let num_vnodes = vnode_mapping.len();
     for (i, parallel_unit_id) in vnode_mapping.into_iter().enumerate() {
@@ -478,9 +522,7 @@ fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<Parall
             .or_insert_with(|| BitmapBuilder::zeroed(num_vnodes));
         bitmap.set(i, true);
     }
-    m.into_iter()
-        .map(|(k, v)| (k, v.finish().to_protobuf()))
-        .collect()
+    m.into_iter().map(|(k, v)| (k, v.finish())).collect()
 }
 
 fn bitmap_with_single_vnode(vnode: usize, num_vnodes: usize) -> Bitmap {
@@ -504,7 +546,7 @@ fn derive_partitions(
                 (
                     k,
                     PartitionInfo {
-                        vnode_bitmap,
+                        vnode_bitmap: vnode_bitmap.to_protobuf(),
                         scan_ranges: scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
                     },
                 )
@@ -525,9 +567,20 @@ fn derive_partitions(
             &table_desc.order_column_indices(),
         );
         match vnode {
-            // scan all partitions, all partitions scan all ranges
             None => {
-                return all_partitions();
+                // put this scan_range to all partitions
+                vnode_mapping_to_owner_mapping(vnode_mapping.clone())
+                    .into_iter()
+                    .for_each(|(parallel_unit_id, vnode_bitmap)| {
+                        let (bitmap, scan_ranges) = partitions
+                            .entry(parallel_unit_id)
+                            .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
+                        vnode_bitmap
+                            .iter()
+                            .enumerate()
+                            .for_each(|(vnode, b)| bitmap.set(vnode, b));
+                        scan_ranges.push(scan_range.to_protobuf());
+                    });
             }
             // scan a single partition
             Some(vnode) => {
@@ -561,13 +614,16 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
+    use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
+    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
 
+    use crate::catalog::catalog_service::CatalogReader;
+    use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
@@ -597,7 +653,7 @@ mod tests {
             false,
             Rc::new(TableDesc {
                 table_id: 0.into(),
-                pk: vec![],
+                stream_key: vec![],
                 order_key: vec![],
                 columns: vec![
                     ColumnDesc {
@@ -617,7 +673,7 @@ mod tests {
                 ],
                 distribution_key: vec![],
                 appendonly: false,
-                retention_seconds: TABLE_OPTION_DUMMY_RETAINTION_SECOND,
+                retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
             }),
             vec![],
             ctx,
@@ -664,6 +720,7 @@ mod tests {
                             index: 2,
                             data_type: DataType::Int32,
                         },
+                        false,
                     ),
                     (
                         InputRef {
@@ -674,6 +731,7 @@ mod tests {
                             index: 3,
                             data_type: DataType::Float64,
                         },
+                        false,
                     ),
                 ],
                 2,
@@ -719,8 +777,9 @@ mod tests {
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
+        let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
         // Break the plan node into fragments.
-        let fragmenter = BatchPlanFragmenter::new(worker_node_manager);
+        let fragmenter = BatchPlanFragmenter::new(worker_node_manager, catalog_reader);
         let query = fragmenter.split(batch_exchange_node3.clone()).unwrap();
 
         assert_eq!(query.stage_graph.root_stage_id, 0);

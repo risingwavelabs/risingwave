@@ -47,10 +47,10 @@ impl SplitReader for DatagenSplitReader {
         Self: Sized,
     {
         let mut assigned_split = DatagenSplit::default();
-        let mut split_id = SplitId::default();
+        let mut split_id: SplitId = "".into();
         let mut events_so_far = u64::default();
         if let Some(splits) = state {
-            log::debug!("Splits for datagen found! {:?}", splits);
+            tracing::debug!("Splits for datagen found! {:?}", splits);
             for split in splits {
                 // TODO: currently, assume there's only on split in one reader
                 split_id = split.id();
@@ -76,8 +76,6 @@ impl SplitReader for DatagenSplitReader {
         // check columns
         assert!(columns.as_ref().is_some());
         let columns = columns.unwrap();
-        assert!(columns.len() > 1);
-        let columns = &columns[1..];
 
         // parse field connector option to build FieldGeneratorImpl
         // for example:
@@ -112,7 +110,7 @@ impl SplitReader for DatagenSplitReader {
                         // seed
                         Ok(seed) => seed ^ split_index,
                         Err(e) => {
-                            log::warn!("cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed", seed, e, split_index);
+                            tracing::warn!("cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed", seed, e, split_index);
                             split_index
                         }
                     }
@@ -220,10 +218,6 @@ mod tests {
     #[tokio::test]
     async fn test_generator() -> Result<()> {
         let mock_datum = vec![
-            Column {
-                name: "_".to_string(),
-                data_type: DataType::Int64,
-            },
             Column {
                 name: "random_int".to_string(),
                 data_type: DataType::Int32,

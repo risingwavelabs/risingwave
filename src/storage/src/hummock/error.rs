@@ -54,6 +54,8 @@ enum HummockErrorInner {
     SstIdTrackerError(String),
     #[error("CompactionGroup error {0}.")]
     CompactionGroupError(String),
+    #[error("SstableUpload error {0}.")]
+    SstableUploadError(String),
     #[error("Other error {0}.")]
     Other(String),
 }
@@ -131,6 +133,10 @@ impl HummockError {
         HummockErrorInner::TieredCache(error.to_string()).into()
     }
 
+    pub fn sstable_upload_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::SstableUploadError(error.to_string()).into()
+    }
+
     pub fn other(error: impl ToString) -> HummockError {
         HummockErrorInner::Other(error.to_string()).into()
     }
@@ -139,6 +145,12 @@ impl HummockError {
 impl From<prost::DecodeError> for HummockError {
     fn from(error: prost::DecodeError) -> Self {
         HummockErrorInner::DecodeError(error.to_string()).into()
+    }
+}
+
+impl From<ObjectError> for HummockError {
+    fn from(error: ObjectError) -> Self {
+        HummockErrorInner::ObjectIoError(error).into()
     }
 }
 

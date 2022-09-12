@@ -27,6 +27,7 @@ pub struct ComputeNodeConfig {
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
+    pub enable_async_stack_trace: bool,
     pub enable_tiered_cache: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -60,6 +61,10 @@ pub struct MetaNodeConfig {
     pub enable_dashboard_v2: bool,
     pub unsafe_disable_recovery: bool,
     pub max_idle_secs_to_exit: Option<u64>,
+    pub vacuum_interval_sec: u64,
+    pub collect_gc_watermark_spin_interval_sec: u64,
+    pub min_sst_retention_time_sec: u64,
+    pub enable_committed_sst_sanity_check: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -97,6 +102,8 @@ pub struct CompactorConfig {
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
+    pub max_concurrent_task_number: u64,
+    pub compaction_worker_threads_number: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

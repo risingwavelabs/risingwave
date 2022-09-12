@@ -22,10 +22,6 @@ use prometheus::{
     IntGauge, Opts, Registry,
 };
 use risingwave_common::monitor::Print;
-use risingwave_hummock_sdk::HummockSstableId;
-
-use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{BlockCache, LruCache, MemoryLimiter, Sstable};
 
 /// Define all metrics.
 #[macro_export]
@@ -38,7 +34,7 @@ macro_rules! for_all_metrics {
             get_shared_buffer_hit_counts: GenericCounter<AtomicU64>,
 
             bloom_filter_true_negative_counts: GenericCounter<AtomicU64>,
-            bloom_filter_might_positive_counts: GenericCounter<AtomicU64>,
+            bloom_filter_check_counts: GenericCounter<AtomicU64>,
 
             range_scan_size: Histogram,
             range_scan_duration: Histogram,
@@ -50,6 +46,7 @@ macro_rules! for_all_metrics {
             iter_duration: Histogram,
             iter_scan_duration: Histogram,
             iter_in_process_counts: GenericCounter<AtomicU64>,
+            iter_scan_key_counts: GenericCounterVec<AtomicU64>,
 
             write_batch_tuple_counts: GenericCounter<AtomicU64>,
             write_batch_duration: Histogram,
@@ -66,7 +63,6 @@ macro_rules! for_all_metrics {
             shared_buffer_to_sstable_size: Histogram,
 
             compaction_upload_sst_counts: GenericCounter<AtomicU64>,
-            compact_frequency: GenericCounterVec<AtomicU64>,
             compact_write_bytes: GenericCounterVec<AtomicU64>,
             compact_read_current_level: GenericCounterVec<AtomicU64>,
             compact_read_next_level: GenericCounterVec<AtomicU64>,
@@ -78,6 +74,9 @@ macro_rules! for_all_metrics {
             compact_task_pending_num: IntGauge,
             get_table_id_total_time_duration: Histogram,
             remote_read_time: Histogram,
+
+            sstable_bloom_filter_size: Histogram,
+            sstable_meta_size: Histogram,
         }
     };
 }
@@ -143,9 +142,9 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let bloom_filter_might_positive_counts = register_int_counter_with_registry!(
-            "state_store_bloom_filter_might_positive_counts",
-            "Total number of sst tables that have been considered possibly positive by bloom filters",
+        let bloom_filter_check_counts = register_int_counter_with_registry!(
+            "state_bloom_filter_check_counts",
+            "Total number of read request to check bloom filters",
             registry
         )
         .unwrap();
@@ -211,6 +210,14 @@ impl StateStoreMetrics {
         let iter_in_process_counts = register_int_counter_with_registry!(
             "state_store_iter_in_process_counts",
             "Total number of iter_in_process that have been issued to state store",
+            registry
+        )
+        .unwrap();
+
+        let iter_scan_key_counts = register_int_counter_vec_with_registry!(
+            "state_store_iter_scan_key_counts",
+            "Total number of keys read by iterator",
+            &["type"],
             registry
         )
         .unwrap();
@@ -374,14 +381,6 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let compact_frequency = register_int_counter_vec_with_registry!(
-            "storage_level_compact_frequency",
-            "num of compactions from each level to next level",
-            &["group", "level_index"],
-            registry
-        )
-        .unwrap();
-
         let compact_task_pending_num = register_int_gauge_with_registry!(
             "storage_compact_task_pending_num",
             "the num of storage compact parallelism",
@@ -389,13 +388,31 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "state_store_sstable_bloom_filter_size",
+            "Total bytes gotten from sstable_bloom_filter, for observing bloom_filter size",
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+        );
+
+        let sstable_bloom_filter_size = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_sstable_meta_size",
+            "Total bytes gotten from sstable_meta_size, for observing sstable_meta_size",
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+        );
+
+        let sstable_meta_size = register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             get_duration,
             get_key_size,
             get_value_size,
             get_shared_buffer_hit_counts,
+
             bloom_filter_true_negative_counts,
-            bloom_filter_might_positive_counts,
+            bloom_filter_check_counts,
+
             range_scan_size,
             range_scan_duration,
             range_backward_scan_size,
@@ -405,6 +422,7 @@ impl StateStoreMetrics {
             iter_duration,
             iter_scan_duration,
             iter_in_process_counts,
+            iter_scan_key_counts,
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
@@ -417,7 +435,6 @@ impl StateStoreMetrics {
             shared_buffer_to_sstable_size,
 
             compaction_upload_sst_counts,
-            compact_frequency,
             compact_write_bytes,
             compact_read_current_level,
             compact_read_next_level,
@@ -430,6 +447,9 @@ impl StateStoreMetrics {
 
             get_table_id_total_time_duration,
             remote_read_time,
+
+            sstable_bloom_filter_size,
+            sstable_meta_size,
         }
     }
 
@@ -439,18 +459,22 @@ impl StateStoreMetrics {
     }
 }
 
+pub trait MemoryCollector: Sync + Send {
+    fn get_meta_memory_usage(&self) -> u64;
+    fn get_data_memory_usage(&self) -> u64;
+    fn get_total_memory_usage(&self) -> u64;
+}
+
 struct StateStoreCollector {
-    block_cache: BlockCache,
-    meta_cache: Arc<LruCache<HummockSstableId, Box<Sstable>>>,
+    memory_collector: Arc<dyn MemoryCollector>,
     descs: Vec<Desc>,
     block_cache_size: IntGauge,
     meta_cache_size: IntGauge,
     limit_memory_size: IntGauge,
-    memory_limiter: Arc<MemoryLimiter>,
 }
 
 impl StateStoreCollector {
-    pub fn new(sstable_store: SstableStoreRef, memory_limiter: Arc<MemoryLimiter>) -> Self {
+    pub fn new(memory_collector: Arc<dyn MemoryCollector>) -> Self {
         let mut descs = Vec::new();
 
         let block_cache_size = IntGauge::with_opts(Opts::new(
@@ -474,12 +498,10 @@ impl StateStoreCollector {
         descs.extend(limit_memory_size.desc().into_iter().cloned());
 
         Self {
-            block_cache: sstable_store.get_block_cache(),
-            meta_cache: sstable_store.get_meta_cache(),
+            memory_collector,
             descs,
             block_cache_size,
             meta_cache_size,
-            memory_limiter,
             limit_memory_size,
         }
     }
@@ -491,14 +513,15 @@ impl Collector for StateStoreCollector {
     }
 
     fn collect(&self) -> Vec<proto::MetricFamily> {
-        self.block_cache_size.set(self.block_cache.size() as i64);
+        self.block_cache_size
+            .set(self.memory_collector.get_data_memory_usage() as i64);
         self.meta_cache_size
-            .set(self.meta_cache.get_memory_usage() as i64);
+            .set(self.memory_collector.get_meta_memory_usage() as i64);
         self.limit_memory_size
-            .set(self.memory_limiter.get_memory_usage() as i64);
+            .set(self.memory_collector.get_total_memory_usage() as i64);
 
         // collect MetricFamilies.
-        let mut mfs = Vec::with_capacity(2);
+        let mut mfs = Vec::with_capacity(3);
         mfs.extend(self.block_cache_size.collect());
         mfs.extend(self.meta_cache_size.collect());
         mfs.extend(self.limit_memory_size.collect());
@@ -509,11 +532,10 @@ impl Collector for StateStoreCollector {
 use std::io::{Error, ErrorKind, Result};
 
 pub fn monitor_cache(
-    sstable_store: SstableStoreRef,
-    memory_limiter: Arc<MemoryLimiter>,
+    memory_collector: Arc<dyn MemoryCollector>,
     registry: &Registry,
 ) -> Result<()> {
-    let collector = StateStoreCollector::new(sstable_store, memory_limiter);
+    let collector = StateStoreCollector::new(memory_collector);
     registry
         .register(Box::new(collector))
         .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))

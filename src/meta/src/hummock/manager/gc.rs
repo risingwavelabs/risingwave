@@ -110,7 +110,6 @@ where
             .iter()
             .filter(|sst_id| !tracked_sst_ids.contains(sst_id))
             .collect_vec();
-        tracing::info!("SST full scan results: {:#?}", sst_ids);
         tracing::info!("SST to delete in full GC: {:#?}", to_delete);
         write_lock!(self, versioning).await.ssts_to_delete.extend(
             to_delete

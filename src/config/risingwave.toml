@@ -16,7 +16,7 @@ bloom_false_positive = 0.01
 data_directory = "hummock_001"
 block_cache_capacity_mb = 4096
 meta_cache_capacity_mb = 1024
-compactor_memory_limit_mb = 8096
+compactor_memory_limit_mb = 5120
 
 [storage.file_cache]
 capacity = 1073741824                 # 1 GiB

@@ -22,7 +22,7 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::{Barrier, Epoch};
+use risingwave_stream::executor::{Barrier, Epoch, Mutation};
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
@@ -82,9 +82,9 @@ impl StreamService for StreamServiceImpl {
         &self,
         request: Request<BroadcastActorInfoTableRequest>,
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
-        let table = request.into_inner();
+        let req = request.into_inner();
 
-        let res = self.mgr.update_actor_info(table);
+        let res = self.mgr.update_actor_info(&req.info);
         match res {
             Err(e) => {
                 error!("failed to update actor info table actor {}", e);
@@ -117,12 +117,20 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
         let epoch = req.epoch.unwrap();
-        self.mgr
-            .stop_all_actors(Epoch {
+
+        let barrier = &Barrier {
+            epoch: Epoch {
                 curr: epoch.curr,
                 prev: epoch.prev,
-            })
-            .await?;
+            },
+            mutation: Some(Arc::new(Mutation::Stop(
+                req.actor_ids.into_iter().collect(),
+            ))),
+            checkpoint: true,
+            passed_actors: vec![],
+        };
+
+        self.mgr.stop_all_actors(barrier).await?;
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -160,11 +168,11 @@ impl StreamService for StreamServiceImpl {
             .await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
-        let synced_sstables = self
+        let (synced_sstables, sync_succeed) = self
             .mgr
             .sync_epoch(req.prev_epoch)
             .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
-            .await;
+            .await?;
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
@@ -177,6 +185,7 @@ impl StreamService for StreamServiceImpl {
                     sst: Some(sst),
                 })
                 .collect_vec(),
+            checkpoint: sync_succeed,
             worker_id: self.env.worker_id(),
         }))
     }
@@ -235,7 +244,7 @@ impl StreamServiceImpl {
 
         let id = TableId::new(source.id); // TODO: use SourceId instead
 
-        match &source.get_info()? {
+        match source.get_info()? {
             Info::StreamSource(info) => {
                 self.env
                     .source_manager()
@@ -250,9 +259,12 @@ impl StreamServiceImpl {
                     .map(|c| c.column_desc.unwrap().into())
                     .collect_vec();
 
-                self.env
-                    .source_manager()
-                    .create_table_source(&id, columns)?;
+                self.env.source_manager().create_table_source(
+                    &id,
+                    columns,
+                    info.row_id_index.as_ref().map(|index| index.index as _),
+                    info.pk_column_ids.clone(),
+                )?;
             }
         };
 

@@ -18,7 +18,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::session_config::QueryMode;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
@@ -550,7 +549,7 @@ impl LogicalJoin {
         mut predicate: EqJoinPredicate,
     ) -> Option<PlanRef> {
         if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
-            log::warn!(
+            tracing::warn!(
                 "Lookup Join only supports basic tables on the join's right side. A \
             different join will be used instead."
             );
@@ -568,7 +567,7 @@ impl LogicalJoin {
 
         let order_col_ids = table_desc.order_column_ids();
         if order_col_ids.len() != predicate.right_eq_indexes().len() {
-            log::warn!("{}", eq_col_warn_message);
+            tracing::warn!("{}", eq_col_warn_message);
             return None;
         }
 
@@ -577,7 +576,7 @@ impl LogicalJoin {
             .zip_eq(predicate.right_eq_indexes())
         {
             if order_col_id != output_column_ids[eq_idx] {
-                log::warn!("{}", eq_col_warn_message);
+                tracing::warn!("{}", eq_col_warn_message);
                 return None;
             }
         }
@@ -821,8 +820,32 @@ impl PredicatePushdown for LogicalJoin {
 
         let new_left = self.left.predicate_pushdown(left_predicate);
         let new_right = self.right.predicate_pushdown(right_predicate);
-        let new_join = LogicalJoin::new(new_left, new_right, join_type, new_on);
+        let new_join = LogicalJoin::new_with_output_indices(
+            new_left,
+            new_right,
+            join_type,
+            new_on,
+            self.output_indices.clone(),
+        );
         LogicalFilter::create(new_join.into(), predicate)
+    }
+}
+
+impl LogicalJoin {
+    pub fn to_batch_lookup_join(&self) -> Result<PlanRef> {
+        let predicate = EqJoinPredicate::create(
+            self.left.schema().len(),
+            self.right.schema().len(),
+            self.on.clone(),
+        );
+
+        let left = self.left().to_batch()?;
+        let right = self.right().to_batch()?;
+        let logical_join = self.clone_with_left_right(left, right);
+
+        Ok(self
+            .convert_to_lookup_join(logical_join, predicate)
+            .expect("Fail to convert to lookup join"))
     }
 }
 
@@ -842,17 +865,10 @@ impl ToBatch for LogicalJoin {
 
         if predicate.has_eq() {
             if config.get_batch_enable_lookup_join() {
-                if config.get_query_mode() == QueryMode::Local {
-                    if let Some(lookup_join) =
-                        self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
-                    {
-                        return Ok(lookup_join);
-                    }
-                } else {
-                    log::warn!(
-                        "Lookup Join can only be done in local mode. A different join will \
-                    be used instead."
-                    );
+                if let Some(lookup_join) =
+                    self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
+                {
+                    return Ok(lookup_join);
                 }
             }
 

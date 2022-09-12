@@ -18,7 +18,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
@@ -30,14 +29,15 @@ use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 pub type WorkerId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
 pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct WorkerKey(pub HostAddress);
 
 impl PartialEq<Self> for WorkerKey {
@@ -64,13 +64,26 @@ pub struct ClusterManager<S: MetaStore> {
     max_heartbeat_interval: Duration,
 
     core: RwLock<ClusterManagerCore>,
+
+    metrics: Arc<MetaMetrics>,
 }
 
 impl<S> ClusterManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
+    pub async fn new_for_test(
+        env: MetaSrvEnv<S>,
+        max_heartbeat_interval: Duration,
+    ) -> MetaResult<Self> {
+        Self::new(env, max_heartbeat_interval, Arc::new(MetaMetrics::new())).await
+    }
+
+    pub async fn new(
+        env: MetaSrvEnv<S>,
+        max_heartbeat_interval: Duration,
+        metrics: Arc<MetaMetrics>,
+    ) -> MetaResult<Self> {
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
 
@@ -78,6 +91,7 @@ where
             env,
             max_heartbeat_interval,
             core: RwLock::new(core),
+            metrics,
         })
     }
 
@@ -147,8 +161,14 @@ where
 
         core.update_worker_node(worker.clone());
 
+        // Update node metrics.
+        let worker_type = worker.worker_type();
+        if let Some(node_label) = Self::map_to_node_label(worker_type) {
+            self.metrics.node_num.with_label_values(&[node_label]).inc();
+        }
+
         // Notify frontends of new compute node.
-        if worker.worker_node.r#type == WorkerType::ComputeNode as i32 {
+        if worker_type == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Node(worker.worker_node))
@@ -158,7 +178,7 @@ where
         Ok(())
     }
 
-    pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
+    pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let worker = core.get_worker_by_host_checked(host_address.clone())?;
         let worker_type = worker.worker_type();
@@ -169,6 +189,11 @@ where
 
         // Update core.
         core.delete_worker_node(worker);
+
+        // Update node metrics.
+        if let Some(node_label) = Self::map_to_node_label(worker_type) {
+            self.metrics.node_num.with_label_values(&[node_label]).dec();
+        }
 
         // Notify frontends to delete compute node.
         if worker_type == WorkerType::ComputeNode {
@@ -181,10 +206,10 @@ where
         // Notify local subscribers.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerDeletion(worker_node))
+            .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
             .await;
 
-        Ok(())
+        Ok(worker_type)
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
@@ -202,7 +227,7 @@ where
                 return Ok(());
             }
         }
-        bail!("unknown worker id: {}", worker_id);
+        Err(MetaError::invalid_worker(worker_id))
     }
 
     pub async fn start_heartbeat_checker(
@@ -242,31 +267,40 @@ where
                         workers
                             .values()
                             .filter(|worker| worker.expire_at() < now)
-                            .cloned()
+                            .map(|worker| (worker.worker_id(), worker.key().unwrap()))
                             .collect_vec(),
                         now,
                     )
                 };
                 // 3. Delete expired workers.
-                for worker in workers_to_delete {
-                    let key = worker.key().expect("illegal key");
+                for (worker_id, key) in workers_to_delete {
                     match cluster_manager.delete_worker_node(key.clone()).await {
-                        Ok(_) => {
-                            cluster_manager
-                                .env
-                                .notification_manager()
-                                .delete_sender(WorkerKey(key.clone()))
-                                .await;
+                        Ok(worker_type) => {
+                            match worker_type {
+                                WorkerType::Frontend
+                                | WorkerType::ComputeNode
+                                | WorkerType::Compactor
+                                | WorkerType::RiseCtl => {
+                                    cluster_manager
+                                        .env
+                                        .notification_manager()
+                                        .delete_sender(worker_type, WorkerKey(key.clone()))
+                                        .await
+                                }
+                                _ => {}
+                            };
                             tracing::warn!(
-                                "Deleted expired worker {:#?}, current timestamp {}",
-                                worker,
+                                "Deleted expired worker {} {:#?}, current timestamp {}",
+                                worker_id,
+                                key,
                                 now,
                             );
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {:#?}, current timestamp {}. {:?}",
-                                worker,
+                                "Failed to delete expired worker {} {:#?}, current timestamp {}. {:?}",
+                                worker_id,
+                                key,
                                 now,
                                 err,
                             );
@@ -324,6 +358,15 @@ where
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
     }
+
+    fn map_to_node_label(worker_type: WorkerType) -> Option<&'static str> {
+        match worker_type {
+            WorkerType::Frontend => Some("frontend"),
+            WorkerType::ComputeNode => Some("compute"),
+            WorkerType::Compactor => Some("compactor"),
+            _ => None,
+        }
+    }
 }
 
 pub struct ClusterManagerCore {
@@ -360,7 +403,7 @@ impl ClusterManagerCore {
             .ok_or_else(|| anyhow::anyhow!("Worker node does not exist!").into())
     }
 
-    fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
+    pub fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
         self.workers.get(&WorkerKey(host_address)).cloned()
     }
 
@@ -422,7 +465,6 @@ impl ClusterManagerCore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hummock::test_utils::setup_compute_env;
     use crate::storage::MemStore;
 
     #[tokio::test]
@@ -430,7 +472,7 @@ mod tests {
         let env = MetaSrvEnv::for_test().await;
 
         let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), Duration::new(0, 0))
+            ClusterManager::new_for_test(env.clone(), Duration::new(0, 0))
                 .await
                 .unwrap(),
         );
@@ -478,9 +520,10 @@ mod tests {
     }
 
     // This test takes seconds because the TTL is measured in seconds.
+    #[cfg(madsim)]
     #[tokio::test]
-    #[ignore]
     async fn test_heartbeat() {
+        use crate::hummock::test_utils::setup_compute_env;
         let (_env, _hummock_manager, cluster_manager, worker_node) = setup_compute_env(1).await;
         let context_id_1 = worker_node.id;
         let fake_host_address_2 = HostAddress {

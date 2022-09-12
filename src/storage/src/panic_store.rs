@@ -16,6 +16,7 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -83,16 +84,6 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn replicate_batch(
-        &self,
-        _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_> {
-        async move {
-            panic!("should not replicate batch from the state store!");
-        }
-    }
-
     fn iter<R, B>(
         &self,
         _prefix_hint: Option<Vec<u8>>,
@@ -122,16 +113,20 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             panic!("should not wait epoch from the panic state store!");
         }
     }
 
-    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             panic!("should not sync from the panic state store!");
         }
+    }
+
+    fn seal_epoch(&self, _epoch: u64) {
+        panic!("should not update current epoch from the panic state store!");
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {

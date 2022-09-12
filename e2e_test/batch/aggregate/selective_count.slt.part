@@ -23,6 +23,10 @@ select v2, count(*) filter (where v1 > 1) as cnt from t group by v2 order by v2
 3 2
 4 1
 
+query I
+select count(*) filter (where v1 = null) from t
+----
+0
 
 statement ok
 drop table t

@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
+
+use crate::Result;
 
 /// `EqGroups` encodes the grouping information in the sort aggregate algorithm.
 ///
@@ -89,7 +91,8 @@ pub trait SortedGrouper: Send + 'static {
 
     /// `output` the state to the `builder`. Expected to be called at the end of
     /// each group.
-    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+    /// After `output` the internal state is reset.
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
 }
 pub type BoxedSortedGrouper = Box<dyn SortedGrouper>;
 
@@ -154,7 +157,7 @@ where
         Ok(())
     }
 
-    pub fn output_and_reset_concrete(&mut self, builder: &mut T::Builder) -> Result<()> {
+    pub fn output_concrete(&mut self, builder: &mut T::Builder) -> Result<()> {
         builder.append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))?;
         self.ongoing = false;
         self.group_value = None;
@@ -169,11 +172,7 @@ macro_rules! impl_sorted_grouper {
                 if let ArrayImpl::$input_variant(i) = input {
                     self.detect_groups_concrete(i)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
@@ -186,23 +185,15 @@ macro_rules! impl_sorted_grouper {
                 if let ArrayImpl::$input_variant(i) = input {
                     self.update_concrete(i, start_idx, end_idx)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
-            fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+            fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
                 if let ArrayBuilderImpl::$input_variant(b) = builder {
-                    self.output_and_reset_concrete(b)
+                    self.output_concrete(b)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Builder fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Builder fail to match {}.", stringify!($input_variant))
                 }
             }
         }
@@ -228,16 +219,16 @@ mod tests {
         let eq = g.detect_groups_concrete(&input)?;
         assert_eq!(eq.indices, vec![2]);
         g.update_concrete(&input, 0, *eq.indices.first().unwrap())?;
-        g.output_and_reset_concrete(&mut builder)?;
+        g.output_concrete(&mut builder)?;
         g.update_concrete(&input, *eq.indices.first().unwrap(), input.len())?;
 
         let input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]).unwrap();
         let eq = g.detect_groups_concrete(&input)?;
         assert_eq!(eq.indices, vec![1]);
         g.update_concrete(&input, 0, *eq.indices.first().unwrap())?;
-        g.output_and_reset_concrete(&mut builder)?;
+        g.output_concrete(&mut builder)?;
         g.update_concrete(&input, *eq.indices.first().unwrap(), input.len())?;
-        g.output_and_reset_concrete(&mut builder)?;
+        g.output_concrete(&mut builder)?;
 
         assert_eq!(
             builder.finish().unwrap().iter().collect::<Vec<_>>(),

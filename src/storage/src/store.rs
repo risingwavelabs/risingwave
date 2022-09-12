@@ -18,9 +18,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
+use crate::hummock::local_version_manager::SyncResult;
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
@@ -30,7 +31,7 @@ pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, 
 pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B> =
     Future<Output = StorageResult<I>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
-pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
+pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<SyncResult>> + Send;
 pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
 
 #[macro_export]
@@ -38,7 +39,6 @@ macro_rules! define_state_store_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
-        type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl SyncFutureTrait<'a>;
 
@@ -82,8 +82,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         B: 'static + Send + AsRef<[u8]>;
 
     type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
-
-    type ReplicateBatchFuture<'a>: EmptyFutureTrait<'a>;
 
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
 
@@ -153,13 +151,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_>;
 
-    /// Functions the same as `ingest_batch`, except that data won't be persisted.
-    fn replicate_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_>;
-
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
@@ -188,26 +179,25 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         B: AsRef<[u8]> + Send;
 
     /// Creates a `WriteBatch` associated with this state store.
-    fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<Self> {
-        WriteBatch::new(self.clone(), write_options)
+    fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<'_, Self> {
+        WriteBatch::new(self, write_options)
     }
 
-    /// Waits until the epoch is committed and its data is ready to read.
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_>;
+    /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
+    /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
 
     /// Syncs buffered data to S3.
     /// If the epoch is None, all buffered data will be synced.
     /// Otherwise, only data of the provided epoch will be synced.
-    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_>;
+    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_>;
+
+    /// update max current epoch in storage.
+    fn seal_epoch(&self, epoch: u64);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         MonitoredStateStore::new(self, stats)
-    }
-
-    /// Gets `epoch`'s uncommitted `Sstables`.
-    fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<LocalSstableInfo> {
-        todo!()
     }
 
     /// Clears contents in shared buffer.

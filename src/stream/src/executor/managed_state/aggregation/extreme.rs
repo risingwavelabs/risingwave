@@ -22,10 +22,10 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::*;
-use risingwave_common::util::ordered::OrderedRow;
+use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::Cache;
@@ -35,9 +35,8 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
-// TODO(yuchao): We can convert GenericExtremeState to GenericTableState later,
-// to implement min/max and string_agg uniformly. We can reuse code even further
-// by merging ManagedTableState with ManagedValueState.
+// Memcomparable row.
+type CacheKey = Vec<u8>;
 
 /// Generic managed agg state for min/max.
 /// It maintains a top N cache internally, using `HashSet`, and the sort key
@@ -52,22 +51,30 @@ pub struct GenericExtremeState<S: StateStore> {
     /// Contains the column mapping between upstream schema and state table.
     state_table_col_mapping: Arc<StateTableColumnMapping>,
 
+    // The column to aggregate in input chunk.
+    upstream_agg_col_idx: usize,
+
     /// The column to aggregate in state table.
     state_table_agg_col_idx: usize,
 
     /// The columns to order by in state table.
     state_table_order_col_indices: Vec<usize>,
 
-    /// The order types of `state_table_order_col_indices`.
-    state_table_order_types: Vec<OrderType>,
-
-    /// Number of items in the state including those not in top n cache but in state store.
-    total_count: usize, // TODO(yuchao): is this really needed?
+    /// Number of all items in the state store.
+    total_count: usize,
 
     /// Cache for the top N elements in the state. Note that the cache
-    /// won't store group_key so the column indices should be offseted
+    /// won't store group_key so the column indices should be offsetted
     /// by group_key.len(), which is handled by `state_row_to_cache_row`.
-    cache: Cache<Datum>,
+    cache: Cache<CacheKey, Datum>,
+
+    /// Whether the cache is synced to state table. The cache is synced iff:
+    /// - the cache is empty and `total_count` is 0, or
+    /// - the cache is not empty and elements in it are the top ones in the state table.
+    cache_synced: bool,
+
+    /// Serializer for cache key.
+    cache_key_serializer: OrderedRowSerializer,
 }
 
 /// A trait over all table-structured states.
@@ -78,27 +85,27 @@ pub struct GenericExtremeState<S: StateStore> {
 /// of adding a layer of indirection caused by async traits.
 #[async_trait]
 pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
-    async fn apply_batch(
+    async fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
+        columns: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut RowBasedStateTable<S>,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()>;
 
     /// Get the output of the state. Must flush before getting output.
     async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum>;
 
     /// Check if this state needs a flush.
     fn is_dirty(&self) -> bool;
 
     /// Flush the internal state to a write batch.
-    fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()>;
+    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()>;
 }
 
 impl<S: StateStore> GenericExtremeState<S> {
@@ -112,6 +119,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         row_count: usize,
         cache_capacity: usize,
     ) -> Self {
+        let upstream_agg_col_idx = agg_call.args.val_indices()[0];
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
             .upstream_to_state_table(agg_call.args.val_indices()[0])
@@ -134,61 +142,82 @@ impl<S: StateStore> GenericExtremeState<S> {
             )
         }))
         .unzip();
+        let cache_key_serializer = OrderedRowSerializer::new(state_table_order_types);
 
         Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
             state_table_col_mapping: col_mapping,
+            upstream_agg_col_idx,
             state_table_agg_col_idx,
             state_table_order_col_indices,
-            state_table_order_types,
             total_count: row_count,
             cache: Cache::new(cache_capacity),
+            cache_synced: row_count == 0, // if there is no row, the cache is synced initially
+            cache_key_serializer,
         }
     }
 
-    fn state_row_to_cache_entry(&self, state_row: &Row) -> (OrderedRow, Datum) {
-        let cache_key = OrderedRow::new(
-            state_row.by_indices(&self.state_table_order_col_indices),
-            &self.state_table_order_types,
+    fn state_row_to_cache_entry(&self, state_row: &Row) -> StreamExecutorResult<(Vec<u8>, Datum)> {
+        let mut cache_key = Vec::new();
+        self.cache_key_serializer.serialize_datums(
+            self.state_table_order_col_indices
+                .iter()
+                .map(|col_idx| &(state_row.0)[*col_idx]),
+            &mut cache_key,
         );
         let cache_data = state_row[self.state_table_agg_col_idx].clone();
-        (cache_key, cache_data)
+        Ok((cache_key, cache_data))
     }
 
-    /// Apply a batch of data to the state.
-    fn apply_batch_inner(
+    /// Apply a chunk of data to the state.
+    fn apply_chunk_inner(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        chunk_cols: &[&ArrayImpl], // contains all upstream columns
-        state_table: &mut RowBasedStateTable<S>,
+        columns: &[&ArrayImpl],
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, chunk_cols));
+        debug_assert!(super::verify_batch(ops, visibility, columns));
 
-        for (i, op) in ops.iter().enumerate() {
-            let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
-            if !visible {
-                continue;
-            }
-
+        for (i, op) in ops
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
+            .filter(|(i, _)| {
+                columns[self.upstream_agg_col_idx]
+                    .null_bitmap()
+                    .is_set(*i)
+                    .unwrap()
+            })
+        {
             let state_row = Row::new(
                 self.state_table_col_mapping
                     .upstream_columns()
                     .iter()
-                    .map(|col_idx| chunk_cols[*col_idx].datum_at(i))
+                    .map(|col_idx| columns[*col_idx].datum_at(i))
                     .collect(),
             );
-            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
-
+            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row)?;
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.cache.insert(cache_key, cache_data);
+                    if self.cache_synced
+                        && (self.cache.len() == self.total_count
+                            || &cache_key < self.cache.last_key().unwrap())
+                    {
+                        self.cache.insert(cache_key, cache_data);
+                    }
                     state_table.insert(state_row)?;
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    self.cache.remove(cache_key);
+                    if self.cache_synced {
+                        self.cache.remove(cache_key);
+                        if self.total_count > 1 /* still has rows after deletion */ && self.cache.is_empty()
+                        {
+                            self.cache_synced = false;
+                        }
+                    }
                     state_table.delete(state_row)?;
                     self.total_count -= 1;
                 }
@@ -199,13 +228,17 @@ impl<S: StateStore> GenericExtremeState<S> {
     }
 
     fn get_output_from_cache(&self) -> Option<Datum> {
-        self.cache.first_value().cloned()
+        if self.cache_synced {
+            self.cache.first_value().cloned()
+        } else {
+            None
+        }
     }
 
     async fn get_output_inner(
         &mut self,
         epoch: u64,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         // try to get the result from cache
         if let Some(datum) = self.get_output_from_cache() {
@@ -216,42 +249,38 @@ impl<S: StateStore> GenericExtremeState<S> {
                 iter_state_table(state_table, epoch, self.group_key.as_ref()).await?;
             pin_mut!(all_data_iter);
 
-            self.cache.begin_sync();
+            self.cache.clear();
             #[for_await]
-            for state_row in all_data_iter.take(self.cache.capacity) {
+            for state_row in all_data_iter.take(self.cache.capacity()) {
                 let state_row = state_row?;
-                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref());
+                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref())?;
                 self.cache.insert(cache_key, cache_data);
             }
-            self.cache.set_synced();
+            self.cache_synced = true;
 
             // try to get the result from cache again
-            if let Some(datum) = self.get_output_from_cache() {
-                Ok(datum)
-            } else {
-                Ok(None)
-            }
+            Ok(self.get_output_from_cache().unwrap_or(None))
         }
     }
 }
 
 #[async_trait]
 impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
-    async fn apply_batch(
+    async fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        chunk_cols: &[&ArrayImpl],
+        columns: &[&ArrayImpl],
         _epoch: u64,
-        state_table: &mut RowBasedStateTable<S>,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        self.apply_batch_inner(ops, visibility, chunk_cols, state_table)
+        self.apply_chunk_inner(ops, visibility, columns, state_table)
     }
 
     async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         self.get_output_inner(epoch, state_table).await
     }
@@ -263,7 +292,7 @@ impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
     }
 
     /// TODO: Remove this. #4035
-    fn flush(&mut self, _state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
+    fn flush(&mut self, _state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         Ok(())
     }
 }
@@ -310,7 +339,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 3]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -341,12 +370,12 @@ mod tests {
                 + c 1 3 130",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -372,12 +401,12 @@ mod tests {
                 + e 2 2 137",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -434,7 +463,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 3]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -465,12 +494,12 @@ mod tests {
                 + c 1 3 130",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -496,12 +525,12 @@ mod tests {
                 + e 2 2 137",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -559,7 +588,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),   // _row_id
         ];
         let state_table_col_mapping_1 = Arc::new(StateTableColumnMapping::new(vec![0, 3]));
-        let mut state_table_1 = RowBasedStateTable::new_without_distribution(
+        let mut state_table_1 = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -575,7 +604,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping_2 = Arc::new(StateTableColumnMapping::new(vec![1, 3]));
-        let mut state_table_2 = RowBasedStateTable::new_without_distribution(
+        let mut state_table_2 = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -617,21 +646,21 @@ mod tests {
                 + c . 3 133",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state_1
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table_1,
                 )
                 .await?;
             managed_state_2
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table_2,
                 )
@@ -644,7 +673,9 @@ mod tests {
             epoch += 1;
 
             match managed_state_1.get_output(epoch, &state_table_1).await? {
-                None => {} // pass
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(&s, "a");
+                }
                 _ => panic!("unexpected output"),
             }
             match managed_state_2.get_output(epoch, &state_table_2).await? {
@@ -673,7 +704,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 1, 3]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -706,12 +737,12 @@ mod tests {
                 + c 7 3 130 D // hide this row",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -737,12 +768,12 @@ mod tests {
                 + e 8 8 137",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -799,7 +830,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![0, 1]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -849,12 +880,12 @@ mod tests {
 
             let chunk = StreamChunk::from_pretty(&pretty_lines.join("\n"));
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -892,12 +923,12 @@ mod tests {
 
             let chunk = StreamChunk::from_pretty(&pretty_lines.join("\n"));
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -911,6 +942,148 @@ mod tests {
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, min_value);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_extreme_state_cache_maintenance() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: int32, _row_id: int64)
+
+        let input_pk_indices = vec![1]; // _row_id
+        let agg_call = create_agg_call(AggKind::Min, DataType::Int32, 0); // min(a)
+
+        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        let table_id = TableId::new(0x2333);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // a
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
+        ];
+        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![0, 1]));
+        let mut state_table = StateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![
+                OrderType::Ascending, // for AggKind::Min
+                OrderType::Ascending,
+            ],
+            vec![0, 1], // [a, _row_id]
+        );
+
+        let mut managed_state = GenericExtremeState::new(
+            agg_call.clone(),
+            None,
+            input_pk_indices.clone(),
+            state_table_col_mapping.clone(),
+            0,
+            3, // cache capacity = 3 for easy testing
+        );
+
+        let mut epoch = 0;
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " i  I
+                + 4  123
+                + 8  128
+                + 12 129",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            managed_state
+                .apply_chunk(
+                    &ops,
+                    visibility.as_ref(),
+                    &column_refs,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 4);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " i I
+                + 9  130 // this will evict 12
+                - 9  130
+                + 13 128
+                - 4  123
+                - 8  128",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            managed_state
+                .apply_chunk(
+                    &ops,
+                    visibility.as_ref(),
+                    &column_refs,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 12);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " i  I
+                + 1  131
+                + 2  132
+                + 3  133 // evict all from cache
+                - 1  131
+                - 2  132
+                - 3  133
+                + 14 134",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            managed_state
+                .apply_chunk(
+                    &ops,
+                    visibility.as_ref(),
+                    &column_refs,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 12);
                 }
                 _ => panic!("unexpected output"),
             }

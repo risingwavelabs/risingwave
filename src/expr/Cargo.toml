@@ -13,10 +13,10 @@ byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 crc32fast = "1"
+dyn-clone = "1"
 either = "1"
 itertools = "0.10"
 lazy_static = "1"
-log = "0.4"
 lru = "0.7"
 md5 = "0.7.0"
 memcomparable = { path = "../utils/memcomparable" }
@@ -34,5 +34,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi
 tokio-stream = "0.1"
 toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
-value-encoding = { path = "../utils/value-encoding" }
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

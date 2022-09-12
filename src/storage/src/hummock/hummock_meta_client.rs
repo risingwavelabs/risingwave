@@ -17,7 +17,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta,
+    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
@@ -41,25 +41,6 @@ impl MonitoredHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MonitoredHummockMetaClient {
-    async fn pin_version(
-        &self,
-        last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
-        self.stats.pin_version_counts.inc();
-        let timer = self.stats.pin_version_latency.start_timer();
-        let res = self.meta_client.pin_version(last_pinned).await;
-        timer.observe_duration();
-        res
-    }
-
-    async fn unpin_version(&self) -> Result<()> {
-        self.stats.unpin_version_counts.inc();
-        let timer = self.stats.unpin_version_latency.start_timer();
-        let res = self.meta_client.unpin_version().await;
-        timer.observe_duration();
-        res
-    }
-
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
         self.stats.unpin_version_before_counts.inc();
         let timer = self.stats.unpin_version_before_latency.start_timer();
@@ -71,7 +52,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
+    async fn get_current_version(&self) -> Result<HummockVersion> {
+        self.meta_client.get_current_version().await
+    }
+
+    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
         let res = self.meta_client.pin_snapshot().await;
@@ -79,7 +64,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn get_epoch(&self) -> Result<HummockEpoch> {
+    async fn get_epoch(&self) -> Result<HummockSnapshot> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
         let res = self.meta_client.get_epoch().await;
@@ -123,8 +108,22 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
-    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
-        self.meta_client.subscribe_compact_tasks().await
+    async fn subscribe_compact_tasks(
+        &self,
+        max_concurrent_task_number: u64,
+    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+        self.meta_client
+            .subscribe_compact_tasks(max_concurrent_task_number)
+            .await
+    }
+
+    async fn report_compaction_task_progress(
+        &self,
+        progress: Vec<CompactTaskProgress>,
+    ) -> Result<()> {
+        self.meta_client
+            .report_compaction_task_progress(progress)
+            .await
     }
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
@@ -148,5 +147,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
         self.meta_client.report_full_scan_task(sst_ids).await
+    }
+
+    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+        self.meta_client
+            .trigger_full_gc(sst_retention_time_sec)
+            .await
     }
 }

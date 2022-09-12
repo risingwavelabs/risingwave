@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -25,6 +26,8 @@ use risingwave_storage::hummock::*;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreIter, WriteOptions};
 use risingwave_storage::StateStore;
+
+use super::test_utils::get_observer_manager;
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
@@ -78,8 +81,9 @@ macro_rules! assert_count_backward_range_scan {
 async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -89,11 +93,19 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         hummock_options,
         sstable_store,
         mock_hummock_meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
     let vm = hummock_storage.local_version_manager().clone();
+    let observer_manager = get_observer_manager(
+        env,
+        hummock_manager_ref,
+        filter_key_extractor_manager,
+        hummock_storage.local_version_manager().clone(),
+        worker_node,
+    )
+    .await;
+    observer_manager.start().await.unwrap();
 
     let epoch1: u64 = 1;
     hummock_storage
@@ -110,18 +122,15 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         .await
         .unwrap();
     if enable_sync {
-        hummock_storage.sync(Some(epoch1)).await.unwrap();
+        let ssts = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(
-                    epoch1,
-                    hummock_storage
-                        .local_version_manager()
-                        .get_uncommitted_ssts(epoch1),
-                )
+                .commit_epoch(epoch1, ssts)
                 .await
                 .unwrap();
-            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch1))
+                .await
+                .unwrap();
         }
     }
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
@@ -142,18 +151,15 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         .await
         .unwrap();
     if enable_sync {
-        hummock_storage.sync(Some(epoch2)).await.unwrap();
+        let ssts = hummock_storage.sync(epoch2).await.unwrap().uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(
-                    epoch2,
-                    hummock_storage
-                        .local_version_manager()
-                        .get_uncommitted_ssts(epoch2),
-                )
+                .commit_epoch(epoch2, ssts)
                 .await
                 .unwrap();
-            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+                .await
+                .unwrap();
         }
     }
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
@@ -175,18 +181,15 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         .await
         .unwrap();
     if enable_sync {
-        hummock_storage.sync(Some(epoch3)).await.unwrap();
+        let ssts = hummock_storage.sync(epoch3).await.unwrap().uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(
-                    epoch3,
-                    hummock_storage
-                        .local_version_manager()
-                        .get_uncommitted_ssts(epoch3),
-                )
+                .commit_epoch(epoch3, ssts)
                 .await
                 .unwrap();
-            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch3))
+                .await
+                .unwrap();
         }
     }
     assert_count_range_scan!(hummock_storage, .., 0, epoch3);
@@ -197,8 +200,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
 async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -207,11 +211,19 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         hummock_options,
         sstable_store,
         mock_hummock_meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
-    let vm = hummock_storage.local_version_manager();
+    let vm = hummock_storage.local_version_manager().clone();
+    let observer_manager = get_observer_manager(
+        env,
+        hummock_manager_ref,
+        filter_key_extractor_manager,
+        hummock_storage.local_version_manager().clone(),
+        worker_node,
+    )
+    .await;
+    observer_manager.start().await.unwrap();
 
     let epoch: u64 = 1;
 
@@ -231,18 +243,15 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         .await
         .unwrap();
     if enable_sync {
-        hummock_storage.sync(Some(epoch)).await.unwrap();
+        let ssts = hummock_storage.sync(epoch).await.unwrap().uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    hummock_storage
-                        .local_version_manager()
-                        .get_uncommitted_ssts(epoch),
-                )
+                .commit_epoch(epoch, ssts)
                 .await
                 .unwrap();
-            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .await
+                .unwrap();
         }
     }
     macro_rules! key {
@@ -262,8 +271,9 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
 async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commit: bool) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -273,11 +283,19 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         hummock_options,
         sstable_store,
         mock_hummock_meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
-    let vm = hummock_storage.local_version_manager();
+    let vm = hummock_storage.local_version_manager().clone();
+    let observer_manager = get_observer_manager(
+        env,
+        hummock_manager_ref,
+        filter_key_extractor_manager,
+        hummock_storage.local_version_manager().clone(),
+        worker_node,
+    )
+    .await;
+    observer_manager.start().await.unwrap();
 
     let epoch = 1;
     hummock_storage
@@ -298,18 +316,15 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         .await
         .unwrap();
     if enable_sync {
-        hummock_storage.sync(Some(epoch)).await.unwrap();
+        let ssts = hummock_storage.sync(epoch).await.unwrap().uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    hummock_storage
-                        .local_version_manager()
-                        .get_uncommitted_ssts(epoch),
-                )
+                .commit_epoch(epoch, ssts)
                 .await
                 .unwrap();
-            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .await
+                .unwrap();
         }
     }
     hummock_storage
@@ -328,18 +343,19 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         .await
         .unwrap();
     if enable_sync {
-        hummock_storage.sync(Some(epoch + 1)).await.unwrap();
+        let ssts = hummock_storage
+            .sync(epoch + 1)
+            .await
+            .unwrap()
+            .uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(
-                    epoch + 1,
-                    hummock_storage
-                        .local_version_manager()
-                        .get_uncommitted_ssts(epoch + 1),
-                )
+                .commit_epoch(epoch + 1, ssts)
                 .await
                 .unwrap();
-            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch + 1))
+                .await
+                .unwrap();
         }
     }
     macro_rules! key {

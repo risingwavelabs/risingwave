@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use anyhow::{bail, Context};
-use log::{debug, info};
 use tokio::process::Command;
+use tracing::{debug, info};
 
 use crate::Opts;
 

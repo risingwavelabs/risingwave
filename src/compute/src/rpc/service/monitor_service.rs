@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
-use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
+use risingwave_pb::monitor_service::{
+    ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
+};
 use risingwave_stream::task::LocalStreamManager;
 use tonic::{Request, Response, Status};
 
@@ -66,6 +69,37 @@ impl MonitorService for MonitorServiceImpl {
             rpc_traces,
         }))
     }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn profiling(
+        &self,
+        request: Request<ProfilingRequest>,
+    ) -> Result<Response<ProfilingResponse>, Status> {
+        if std::env::var("RW_PROFILE_PATH").is_ok() {
+            return Err(Status::internal(
+                "Profiling is already running by setting RW_PROFILE_PATH",
+            ));
+        }
+        let time = request.into_inner().get_sleep_s();
+        let guard = pprof::ProfilerGuardBuilder::default()
+            .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+            .build()
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(time)).await;
+        // let buf = SharedWriter::new(vec![]);
+        let mut buf = vec![];
+        match guard.report().build() {
+            Ok(report) => {
+                report.flamegraph(&mut buf).unwrap();
+                tracing::info!("succeed to generate flamegraph");
+                Ok(Response::new(ProfilingResponse { result: buf }))
+            }
+            Err(err) => {
+                tracing::warn!("failed to generate flamegraph: {}", err);
+                Err(Status::internal(err.to_string()))
+            }
+        }
+    }
 }
 
 pub use grpc_middleware::*;
@@ -79,8 +113,9 @@ pub mod grpc_middleware {
     use async_stack_trace::{SpanValue, StackTraceManager};
     use futures::Future;
     use hyper::Body;
-    use risingwave_common::util::env_var::ENABLE_ASYNC_STACK_TRACE;
     use tokio::sync::Mutex;
+    use tower::layer::util::Identity;
+    use tower::util::Either;
     use tower::{Layer, Service};
 
     /// Manages the stack trace of `gRPC` requests that are currently served by the compute node.
@@ -90,10 +125,21 @@ pub mod grpc_middleware {
     pub struct StackTraceMiddlewareLayer {
         manager: GrpcStackTraceManagerRef,
     }
+    pub type OptionalStackTraceMiddlewareLayer = Either<StackTraceMiddlewareLayer, Identity>;
 
     impl StackTraceMiddlewareLayer {
         pub fn new(manager: GrpcStackTraceManagerRef) -> Self {
             Self { manager }
+        }
+
+        pub fn new_optional(
+            manager: Option<GrpcStackTraceManagerRef>,
+        ) -> OptionalStackTraceMiddlewareLayer {
+            if let Some(manager) = manager {
+                Either::A(Self::new(manager))
+            } else {
+                Either::B(Identity::new())
+            }
         }
     }
 
@@ -145,12 +191,11 @@ pub mod grpc_middleware {
                 let root_span: SpanValue = format!("{}:{}", req.uri().path(), id).into();
 
                 sender
-                    .optional_trace(
+                    .trace(
                         inner.call(req),
                         root_span,
                         false,
                         Duration::from_millis(100),
-                        *ENABLE_ASYNC_STACK_TRACE,
                     )
                     .await
             }

@@ -13,27 +13,29 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
-use log::debug;
-use rand::seq::SliceRandom;
+use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
-use risingwave_common::types::VnodeMapping;
-use risingwave_pb::batch_plan::exchange_info::DistributionMode;
-use risingwave_pb::batch_plan::{
-    ExchangeInfo, PlanFragment, PlanNode as BatchPlanProst, TaskId, TaskOutputId,
-};
+use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use uuid::Uuid;
+// use futures_async_stream::try_stream;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::Receiver;
+use tracing::debug;
 
 use super::QueryExecution;
-use crate::scheduler::plan_fragmenter::{Query, QueryId};
+use crate::catalog::catalog_service::CatalogReader;
+use crate::handler::query::QueryResultSet;
+use crate::handler::util::to_pg_rows;
+use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult,
+    ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError, SchedulerResult,
 };
 
 pub struct QueryResultFetcher {
@@ -52,133 +54,63 @@ pub struct QueryManager {
     worker_node_manager: WorkerNodeManagerRef,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
+    catalog_reader: CatalogReader,
 }
+
+type QueryManagerRef = Arc<QueryManager>;
 
 impl QueryManager {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
+        catalog_reader: CatalogReader,
     ) -> Self {
         Self {
             worker_node_manager,
             hummock_snapshot_manager,
             compute_client_pool,
+            catalog_reader,
         }
-    }
-
-    /// Schedule query to single node.
-    ///
-    /// This is kept for dml only.
-    pub async fn schedule_single(
-        &self,
-        _context: ExecutionContextRef,
-        plan: BatchPlanProst,
-        vnode_mapping: Option<VnodeMapping>,
-    ) -> SchedulerResult<impl DataChunkStream> {
-        let worker_node_addr = match vnode_mapping {
-            Some(mut parallel_unit_ids) => {
-                parallel_unit_ids.dedup();
-                let candidates = self
-                    .worker_node_manager
-                    .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-                candidates
-                    .choose(&mut rand::thread_rng())
-                    .unwrap()
-                    .clone()
-                    .host
-                    .unwrap()
-            }
-            None => self.worker_node_manager.next_random()?.host.unwrap(),
-        };
-
-        let compute_client = self
-            .compute_client_pool
-            .get_by_addr((&worker_node_addr).into())
-            .await?;
-
-        let query_id = QueryId {
-            id: Uuid::new_v4().to_string(),
-        };
-
-        // Build task id and task sink id
-        let task_id = TaskId {
-            query_id: query_id.id.clone(),
-            stage_id: 0,
-            task_id: 0,
-        };
-        let task_output_id = TaskOutputId {
-            task_id: Some(task_id.clone()),
-            output_id: 0,
-        };
-
-        let epoch = self
-            .hummock_snapshot_manager
-            .get_epoch(query_id.clone())
-            .await?;
-
-        // The exchange of DML is Single.
-        let plan = PlanFragment {
-            root: Some(plan),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                ..Default::default()
-            }),
-        };
-        let creat_task_resp = compute_client
-            .create_task(task_id.clone(), plan, epoch)
-            .await;
-        self.hummock_snapshot_manager
-            .unpin_snapshot(epoch, &query_id)
-            .await?;
-        let dml_stream = creat_task_resp?;
-        #[for_await]
-        for _status in dml_stream {
-            // TODO: Handle task status of dml.
-            // Now simply consume it.
-        }
-
-        let query_result_fetcher = QueryResultFetcher::new(
-            epoch,
-            self.hummock_snapshot_manager.clone(),
-            task_output_id,
-            worker_node_addr,
-            self.compute_client_pool.clone(),
-        );
-
-        Ok(query_result_fetcher.run())
     }
 
     pub async fn schedule(
         &self,
-        _context: ExecutionContextRef,
+        context: ExecutionContextRef,
         query: Query,
-    ) -> SchedulerResult<impl DataChunkStream> {
+        format: bool,
+    ) -> SchedulerResult<QueryResultSet> {
         let query_id = query.query_id().clone();
         let epoch = self
             .hummock_snapshot_manager
             .get_epoch(query_id.clone())
-            .await?;
+            .await?
+            .committed_epoch;
 
         let query_execution = QueryExecution::new(
+            context,
             query,
             epoch,
             self.worker_node_manager.clone(),
             self.hummock_snapshot_manager.clone(),
             self.compute_client_pool.clone(),
-        );
+            self.catalog_reader.clone(),
+        )
+        .await;
 
-        let query_result_fetcher = match query_execution.start().await {
+        // Create a oneshot channel for QueryResultFetcher to get failed event.
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let query_result_fetcher = match query_execution.start(shutdown_tx).await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager
                     .unpin_snapshot(epoch, &query_id)
-                    .await?;
+                    .await;
                 return Err(e);
             }
         };
 
-        Ok(query_result_fetcher.run())
+        query_result_fetcher.collect_rows(format, shutdown_rx).await
     }
 }
 
@@ -200,7 +132,7 @@ impl QueryResultFetcher {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn run(self) {
+    async fn run_inner(self) {
         debug!(
             "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
             self.task_output_id, self.task_host
@@ -213,6 +145,32 @@ impl QueryResultFetcher {
         while let Some(response) = stream.next().await {
             yield DataChunk::from_protobuf(response?.get_record_batch()?)?;
         }
+    }
+
+    fn run(self) -> BoxedDataChunkStream {
+        Box::pin(self.run_inner())
+    }
+
+    pub async fn collect_rows(
+        self,
+        format: bool,
+        shutdown_rx: Receiver<SchedulerError>,
+    ) -> SchedulerResult<QueryResultSet> {
+        let data_stream = self.run();
+        let mut data_stream = data_stream.take_until(shutdown_rx);
+        let mut rows = vec![];
+        #[for_await]
+        for chunk in &mut data_stream {
+            rows.extend(to_pg_rows(chunk?, format));
+        }
+
+        // Check whether error happen, if yes, returned.
+        let execution_ret = data_stream.take_result();
+        if let Some(ret) = execution_ret {
+            return Err(ret.expect("The shutdown message receiver should not fail"));
+        }
+
+        Ok(rows)
     }
 }
 

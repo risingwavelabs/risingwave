@@ -12,20 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
-use itertools::Itertools;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::column_catalog::ColumnCatalog;
-use super::{ColumnId, SourceId, TABLE_SOURCE_PK_COLID};
-
-pub mod with_options {
-    pub const APPEND_ONLY: &str = "appendonly";
-    pub const CONNECTOR: &str = "connector";
-}
+use super::{ColumnId, SourceId};
+use crate::WithOptions;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
 
@@ -42,29 +35,6 @@ pub struct SourceCatalog {
     pub owner: u32,
 }
 
-impl SourceCatalog {
-    /// Extract `field_descs` from `column_desc` and add in source catalog.
-    pub fn flatten(mut self) -> Self {
-        let mut catalogs = vec![];
-        for col in &self.columns {
-            // Extract `field_descs` and return `column_catalogs`.
-            catalogs.append(
-                &mut col
-                    .column_desc
-                    .flatten()
-                    .into_iter()
-                    .map(|c| ColumnCatalog {
-                        column_desc: c,
-                        is_hidden: col.is_hidden,
-                    })
-                    .collect_vec(),
-            )
-        }
-        self.columns = catalogs.clone();
-        self
-    }
-}
-
 impl From<&ProstSource> for SourceCatalog {
     fn from(prost: &ProstSource) -> Self {
         let id = prost.id;
@@ -75,22 +45,28 @@ impl From<&ProstSource> for SourceCatalog {
                 source.columns.clone(),
                 source
                     .pk_column_ids
-                    .iter()
-                    .map(|id| ColumnId::new(*id))
+                    .clone()
+                    .into_iter()
+                    .map(Into::into)
                     .collect(),
-                source.properties.clone(),
+                WithOptions::new(source.properties.clone()),
             ),
             Some(Info::TableSource(source)) => (
                 SourceType::Table,
                 source.columns.clone(),
-                vec![TABLE_SOURCE_PK_COLID],
-                source.properties.clone(),
+                source
+                    .pk_column_ids
+                    .clone()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                WithOptions::new(source.properties.clone()),
             ),
             None => unreachable!(),
         };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
 
-        let append_only = check_append_only(&with_options);
+        let append_only = with_options.append_only();
         let owner = prost.owner;
 
         Self {
@@ -103,19 +79,4 @@ impl From<&ProstSource> for SourceCatalog {
             owner,
         }
     }
-}
-
-fn check_append_only(with_options: &HashMap<String, String>) -> bool {
-    if let Some(val) = with_options.get(with_options::APPEND_ONLY) {
-        if val.to_lowercase() == "true" {
-            return true;
-        }
-    }
-    if let Some(val) = with_options.get(with_options::CONNECTOR) {
-        // Kafka source is append-only
-        if val.to_lowercase() == KAFKA_CONNECTOR {
-            return true;
-        }
-    }
-    false
 }

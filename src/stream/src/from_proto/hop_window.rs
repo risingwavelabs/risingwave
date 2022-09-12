@@ -29,6 +29,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let ExecutorParams {
+            actor_context,
             input,
             pk_indices,
             executor_id,
@@ -69,6 +70,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         let window_size = node.get_window_size()?.into();
 
         Ok(HopWindowExecutor::new(
+            actor_context,
             input,
             info,
             time_col,

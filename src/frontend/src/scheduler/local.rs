@@ -16,9 +16,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
-use risingwave_batch::executor::ExecutorBuilder;
+use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
@@ -34,6 +34,8 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
+use crate::handler::query::QueryResultSet;
+use crate::handler::util::to_pg_rows;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -66,7 +68,7 @@ impl LocalQueryExecution {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    pub async fn run(mut self) {
+    pub async fn run_inner(mut self) {
         debug!(
             "Starting to run query: {:?}, sql: '{}'",
             self.query.query_id, self.sql
@@ -87,7 +89,8 @@ impl LocalQueryExecution {
             .front_env
             .hummock_snapshot_manager()
             .get_epoch(query_id)
-            .await?;
+            .await?
+            .committed_epoch;
         self.epoch = Some(epoch);
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
@@ -98,6 +101,21 @@ impl LocalQueryExecution {
         for chunk in executor.execute() {
             yield chunk?;
         }
+    }
+
+    pub fn run(self) -> BoxedDataChunkStream {
+        Box::pin(self.run_inner())
+    }
+
+    pub async fn collect_rows(self, format: bool) -> SchedulerResult<QueryResultSet> {
+        let data_stream = self.run();
+        let mut rows = vec![];
+        #[for_await]
+        for chunk in data_stream {
+            rows.extend(to_pg_rows(chunk?, format));
+        }
+
+        Ok(rows)
     }
 
     /// Convert query to plan fragment.
@@ -310,8 +328,16 @@ impl LocalQueryExecution {
                             .expect("no side table desc");
                         node.probe_side_vnode_mapping = self
                             .front_env
-                            .worker_node_manager()
-                            .get_table_mapping(&side_table_desc.table_id.into())
+                            .catalog_reader()
+                            .read_guard()
+                            .get_table_by_id(&side_table_desc.table_id.into())
+                            .map(|table| {
+                                self.front_env
+                                    .worker_node_manager()
+                                    .get_fragment_mapping(&table.fragment_id)
+                            })
+                            .ok()
+                            .flatten()
                             .unwrap_or_default();
                         node.worker_nodes =
                             self.front_env.worker_node_manager().list_worker_nodes();

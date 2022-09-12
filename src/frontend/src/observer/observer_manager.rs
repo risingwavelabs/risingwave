@@ -25,7 +25,6 @@ use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::TableId;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
@@ -37,6 +36,7 @@ pub(crate) struct FrontendObserverNode {
     catalog_updated_tx: Sender<CatalogVersion>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     user_info_updated_tx: Sender<UserInfoVersion>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 impl ObserverNodeImpl for FrontendObserverNode {
@@ -60,7 +60,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
             Info::User(_) => {
                 self.handle_user_notification(resp);
             }
-            Info::ParallelUnitMapping(_) => self.handle_table_mapping_notification(resp),
+            Info::ParallelUnitMapping(_) => self.handle_fragment_mapping_notification(resp),
             Info::Snapshot(_) => {
                 panic!(
                     "receiving a snapshot in the middle is unsupported now {:?}",
@@ -68,7 +68,10 @@ impl ObserverNodeImpl for FrontendObserverNode {
                 )
             }
             Info::HummockSnapshot(_) => {
-                // TODO: remove snapshot notify
+                self.handle_hummock_snapshot_notification(resp);
+            }
+            Info::HummockVersionDeltas(_) => {
+                panic!("frontend node should not receive HummockVersionDeltas");
             }
         }
     }
@@ -105,12 +108,14 @@ impl ObserverNodeImpl for FrontendObserverNode {
                         .iter()
                         .map(|mapping| {
                             (
-                                TableId::new(mapping.table_id),
+                                mapping.fragment_id,
                                 decompress_data(&mapping.original_indices, &mapping.data),
                             )
                         })
                         .collect(),
                 );
+                self.hummock_snapshot_manager
+                    .update_epoch(snapshot.hummock_snapshot.unwrap());
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
@@ -122,9 +127,12 @@ impl ObserverNodeImpl for FrontendObserverNode {
         }
         catalog_guard.set_version(resp.version);
         self.catalog_updated_tx.send(resp.version).unwrap();
+        user_guard.set_version(resp.version);
+        self.user_info_updated_tx.send(resp.version).unwrap();
         Ok(())
     }
 }
+
 impl FrontendObserverNode {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
@@ -132,7 +140,7 @@ impl FrontendObserverNode {
         catalog_updated_tx: Sender<CatalogVersion>,
         user_info_manager: Arc<RwLock<UserInfoManager>>,
         user_info_updated_tx: Sender<UserInfoVersion>,
-        _hummock_snapshot_manager: HummockSnapshotManagerRef,
+        hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -140,6 +148,7 @@ impl FrontendObserverNode {
             catalog_updated_tx,
             user_info_manager,
             user_info_updated_tx,
+            hummock_snapshot_manager,
         }
     }
 
@@ -226,33 +235,51 @@ impl FrontendObserverNode {
         self.user_info_updated_tx.send(resp.version).unwrap();
     }
 
-    fn handle_table_mapping_notification(&mut self, resp: SubscribeResponse) {
+    fn handle_fragment_mapping_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
         match info {
             Info::ParallelUnitMapping(parallel_unit_mapping) => match resp.operation() {
                 Operation::Add => {
-                    let table_id = TableId::new(parallel_unit_mapping.table_id);
+                    let fragment_id = parallel_unit_mapping.fragment_id;
                     let mapping = decompress_data(
                         &parallel_unit_mapping.original_indices,
                         &parallel_unit_mapping.data,
                     );
                     self.worker_node_manager
-                        .insert_table_mapping(table_id, mapping);
+                        .insert_fragment_mapping(fragment_id, mapping);
                 }
                 Operation::Delete => {
-                    let table_id = TableId::new(parallel_unit_mapping.table_id);
-                    self.worker_node_manager.remove_table_mapping(&table_id);
+                    let fragment_id = parallel_unit_mapping.fragment_id;
+                    self.worker_node_manager
+                        .remove_fragment_mapping(&fragment_id);
                 }
                 Operation::Update => {
-                    let table_id = TableId::new(parallel_unit_mapping.table_id);
+                    let fragment_id = parallel_unit_mapping.fragment_id;
                     let mapping = decompress_data(
                         &parallel_unit_mapping.original_indices,
                         &parallel_unit_mapping.data,
                     );
                     self.worker_node_manager
-                        .update_table_mapping(table_id, mapping);
+                        .update_fragment_mapping(fragment_id, mapping);
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    /// Update max committed epoch in `HummockSnapshotManager`.
+    fn handle_hummock_snapshot_notification(&self, resp: SubscribeResponse) {
+        let Some(info) = resp.info.as_ref() else {
+            return;
+        };
+        match info {
+            Info::HummockSnapshot(hummock_snapshot) => match resp.operation() {
+                Operation::Update => {
+                    self.hummock_snapshot_manager
+                        .update_epoch(hummock_snapshot.clone());
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },

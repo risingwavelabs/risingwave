@@ -20,7 +20,7 @@ use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult, NULL_VAL
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoolArray {
     bitmap: Bitmap,
     data: Bitmap,

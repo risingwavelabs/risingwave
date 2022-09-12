@@ -22,13 +22,15 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, ParallelUnitId, ScalarImpl, ToOwnedDatum, VirtualNode, VnodeMapping,
+    DataType, Datum, ParallelUnitId, ToOwnedDatum, VirtualNode, VnodeMapping,
 };
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::expr_binary_nullable::new_nullable_binary_expr;
+use risingwave_expr::expr::expr_binary_nullable::{
+    new_not_distinct_from_expr, new_nullable_binary_expr,
+};
 use risingwave_expr::expr::expr_unary::new_unary_expr;
 use risingwave_expr::expr::{
     build_from_prost, BoxedExpression, InputRefExpression, LiteralExpression,
@@ -149,7 +151,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// Creates the `ProstExchangeSource` using the given `id`.
     fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<ProstExchangeSource> {
         let worker = self.pu_to_worker_mapping.get(id).ok_or_else(|| {
-            internal_error("No worker node found for hte given parallel unit id.")
+            internal_error("No worker node found for the given parallel unit id.")
         })?;
 
         let local_execute_plan = LocalExecutePlan {
@@ -169,7 +171,14 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 
         let prost_exchange_source = ProstExchangeSource {
             task_output_id: Some(TaskOutputId {
-                task_id: Some(ProstTaskId::default()),
+                task_id: Some(ProstTaskId {
+                    // FIXME: We should replace this random generated uuid to current query_id for
+                    // better dashboard. However, due to the lack of info of
+                    // stage_id and task_id, we can not do it now. Now just make sure it will not
+                    // conflict.
+                    query_id: Uuid::new_v4().to_string(),
+                    ..Default::default()
+                }),
                 output_id: 0,
             }),
             host: Some(worker.host.as_ref().unwrap().clone()),
@@ -196,8 +205,8 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
             .zip_eq(self.build_side_key_types.iter())
             .zip_eq(self.probe_side_key_types.iter())
         {
-            let scalar_impl = if probe_type == build_type {
-                datum.as_ref().unwrap().clone()
+            let datum = if probe_type == build_type {
+                datum.clone()
             } else {
                 let cast_expr = new_unary_expr(
                     Type::Cast,
@@ -205,11 +214,10 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
                     Box::new(LiteralExpression::new(build_type.clone(), datum.clone())),
                 )?;
 
-                let datum = cast_expr.eval_row(&Row(vec![]))?;
-                datum.unwrap()
+                cast_expr.eval_row(Row::empty())?
             };
 
-            scan_range.eq_conds.push(scalar_impl);
+            scan_range.eq_conds.push(datum);
         }
 
         let vnode = self.get_virtual_node(&scan_range)?;
@@ -284,6 +292,7 @@ pub struct LookupJoinExecutor<P> {
     probe_side_source: P,
     probe_side_key_types: Vec<DataType>, // Data types only of key columns of probe side table
     probe_side_key_idxs: Vec<usize>,
+    null_safe: Vec<bool>,
     chunk_builder: DataChunkBuilder,
     schema: Schema,
     output_indices: Vec<usize>,
@@ -341,9 +350,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
 
             self.probe_side_source.reset();
             for row_key in &row_keys {
-                if row_key.iter().all(|datum| datum.is_some()) {
-                    self.probe_side_source.add_scan_range(row_key)?;
-                }
+                self.probe_side_source.add_scan_range(row_key)?;
             }
 
             let probe_child = self.probe_side_source.build_source().await?;
@@ -472,17 +479,9 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     }
 
     /// Creates an expression that returns true if the value of the datums in all the probe side
-    /// key columns match the given `key_datums`. If any of the `key_datums` are none, then
-    /// return an expression that always evaluates to false.
+    /// key columns match the given `key_datums`.
     fn create_expression(&self, key_datums: &[Datum]) -> BoxedExpression {
-        if key_datums.iter().all(|datum| datum.is_some()) {
-            self.create_expression_helper(key_datums, 0)
-        } else {
-            Box::new(LiteralExpression::new(
-                DataType::Boolean,
-                Some(ScalarImpl::Bool(false)),
-            ))
-        }
+        self.create_expression_helper(key_datums, 0)
     }
 
     /// Recursively builds the expression
@@ -499,7 +498,12 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
             self.probe_side_key_idxs[i],
         ));
 
-        let equal = new_binary_expr(Type::Equal, DataType::Boolean, literal, input_ref);
+        // For null safe equal pair, use `IS NOT DISTINCT FROM`.
+        let equal = if self.null_safe[i] {
+            new_not_distinct_from_expr(literal, input_ref, DataType::Boolean)
+        } else {
+            new_binary_expr(Type::Equal, DataType::Boolean, literal, input_ref)
+        };
 
         if i + 1 == key_datums.len() {
             equal
@@ -578,9 +582,9 @@ pub struct LookupJoinExecutorBuilder {}
 impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "LookupJoinExecutor should have 1 child!");
+        let [build_child]: [_; 1] = inputs.try_into().unwrap();
 
         let lookup_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -599,7 +603,6 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .map(|&x| x as usize)
             .collect();
 
-        let build_child = inputs.remove(0);
         let build_side_data_types = build_child.schema().data_types();
 
         let table_desc = lookup_join_node.get_probe_side_table_desc()?;
@@ -661,6 +664,8 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .map(|&i| probe_side_schema.fields[i as usize].data_type.clone())
             .collect_vec();
 
+        let null_safe = lookup_join_node.get_null_safe().to_vec();
+
         let vnode_mapping = lookup_join_node.get_probe_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
@@ -687,11 +692,12 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             probe_side_source,
             probe_side_key_types,
             probe_side_key_idxs,
+            null_safe,
             chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
             schema: actual_schema,
             output_indices,
             last_chunk: None,
-            identity: "LookupJoinExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }
@@ -747,6 +753,7 @@ mod tests {
     fn create_lookup_join_executor(
         join_type: JoinType,
         condition: Option<BoxedExpression>,
+        null_safe: bool,
     ) -> BoxedExecutor {
         let build_child = create_build_child();
 
@@ -774,6 +781,7 @@ mod tests {
             probe_side_key_types: vec![probe_side_schema.data_types()[0].clone()],
             probe_side_source: FakeProbeSideSourceBuilder::new(probe_side_schema),
             probe_side_key_idxs: vec![0],
+            null_safe: vec![null_safe],
             chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
             schema: original_schema.clone(),
             output_indices: (0..original_schema.len()).into_iter().collect(),
@@ -801,8 +809,13 @@ mod tests {
         ))
     }
 
-    async fn do_test(join_type: JoinType, condition: Option<BoxedExpression>, expected: DataChunk) {
-        let lookup_join_executor = create_lookup_join_executor(join_type, condition);
+    async fn do_test(
+        join_type: JoinType,
+        condition: Option<BoxedExpression>,
+        null_safe: bool,
+        expected: DataChunk,
+    ) {
+        let lookup_join_executor = create_lookup_join_executor(join_type, condition, null_safe);
         let order_by_executor = create_order_by_executor(lookup_join_executor);
         let mut expected_mock_exec = MockExecutor::new(order_by_executor.schema().clone());
         expected_mock_exec.add(expected);
@@ -824,7 +837,26 @@ mod tests {
              5 9.1 5 2.3",
         );
 
-        do_test(JoinType::Inner, None, expected).await;
+        do_test(JoinType::Inner, None, false, expected).await;
+    }
+
+    #[tokio::test]
+    async fn test_null_safe_inner_join() {
+        let expected = DataChunk::from_pretty(
+            "i f   i f
+             1 6.1 1 9.2
+             2 5.5 2 4.4
+             2 5.5 2 5.5
+             2 8.4 2 4.4
+             2 8.4 2 5.5
+             5 4.1 5 3.7
+             5 4.1 5 2.3
+             5 9.1 5 3.7
+             5 9.1 5 2.3
+             .  .  .  .",
+        );
+
+        do_test(JoinType::Inner, None, true, expected).await;
     }
 
     #[tokio::test]
@@ -844,7 +876,7 @@ mod tests {
              . .   . .",
         );
 
-        do_test(JoinType::LeftOuter, None, expected).await;
+        do_test(JoinType::LeftOuter, None, false, expected).await;
     }
 
     #[tokio::test]
@@ -858,7 +890,7 @@ mod tests {
              5 9.1",
         );
 
-        do_test(JoinType::LeftSemi, None, expected).await;
+        do_test(JoinType::LeftSemi, None, false, expected).await;
     }
 
     #[tokio::test]
@@ -869,7 +901,7 @@ mod tests {
              . .",
         );
 
-        do_test(JoinType::LeftAnti, None, expected).await;
+        do_test(JoinType::LeftAnti, None, false, expected).await;
     }
 
     #[tokio::test]
@@ -891,7 +923,7 @@ mod tests {
             Box::new(InputRefExpression::new(DataType::Float32, 3)),
         ));
 
-        do_test(JoinType::Inner, condition, expected).await;
+        do_test(JoinType::Inner, condition, false, expected).await;
     }
 
     #[tokio::test]
@@ -917,7 +949,7 @@ mod tests {
             Box::new(InputRefExpression::new(DataType::Float32, 3)),
         ));
 
-        do_test(JoinType::LeftOuter, condition, expected).await;
+        do_test(JoinType::LeftOuter, condition, false, expected).await;
     }
 
     #[tokio::test]
@@ -939,7 +971,7 @@ mod tests {
             Box::new(InputRefExpression::new(DataType::Float32, 3)),
         ));
 
-        do_test(JoinType::LeftSemi, condition, expected).await;
+        do_test(JoinType::LeftSemi, condition, false, expected).await;
     }
 
     #[tokio::test]
@@ -962,6 +994,6 @@ mod tests {
             Box::new(InputRefExpression::new(DataType::Float32, 3)),
         ));
 
-        do_test(JoinType::LeftAnti, condition, expected).await;
+        do_test(JoinType::LeftAnti, condition, false, expected).await;
     }
 }

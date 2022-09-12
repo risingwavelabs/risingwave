@@ -17,7 +17,7 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta,
+    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use tonic::Streaming;
@@ -26,25 +26,28 @@ use crate::error::Result;
 
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
-    async fn pin_version(
-        &self,
-        last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)>;
-    async fn unpin_version(&self) -> Result<()>;
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
-    async fn pin_snapshot(&self) -> Result<HummockEpoch>;
+    async fn get_current_version(&self) -> Result<HummockVersion>;
+    async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
     async fn unpin_snapshot(&self) -> Result<()>;
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
-    async fn get_epoch(&self) -> Result<HummockEpoch>;
+    async fn get_epoch(&self) -> Result<HummockSnapshot>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange>;
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()>;
+    async fn report_compaction_task_progress(
+        &self,
+        progress: Vec<CompactTaskProgress>,
+    ) -> Result<()>;
     // We keep `commit_epoch` only for test/benchmark like ssbench.
     async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()>;
-    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>>;
+    async fn subscribe_compact_tasks(
+        &self,
+        max_concurrent_task_number: u64,
+    ) -> Result<Streaming<SubscribeCompactTasksResponse>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>>;
     async fn trigger_manual_compaction(
@@ -54,4 +57,5 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         level: u32,
     ) -> Result<()>;
     async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()>;
+    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()>;
 }

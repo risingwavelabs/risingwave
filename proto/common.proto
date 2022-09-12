@@ -8,6 +8,7 @@ message Status {
   enum Code {
     UNSPECIFIED = 0;
     OK = 1;
+    UNKNOWN_WORKER = 2;
   }
   Code code = 1;
   string message = 2;
@@ -61,9 +62,9 @@ message Buffer {
   bytes body = 2;
 }
 
-// Vnode mapping for stream fragments / relational state tables. Stores mapping from virtual node to parallel unit id.
+// Vnode mapping for stream fragments. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
-  uint32 table_id = 1;
+  uint32 fragment_id = 1;
   repeated uint64 original_indices = 2;
   repeated uint32 data = 3;
 }

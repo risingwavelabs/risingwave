@@ -11,6 +11,7 @@ message SstableInfo {
   KeyRange key_range = 2;
   uint64 file_size = 3;
   repeated uint32 table_ids = 4;
+  uint64 meta_offset = 5;
 }
 
 enum LevelType {
@@ -79,8 +80,16 @@ message HummockVersionDelta {
   bool trivial_move = 6;
 }
 
+message HummockVersionDeltas {
+  repeated HummockVersionDelta version_deltas = 1;
+}
+
+// We will have two epoch after decouple
 message HummockSnapshot {
-  uint64 epoch = 1;
+  // Epoch with checkpoint, we will read durable data with it.
+  uint64 committed_epoch = 1;
+  // Epoch without checkpoint, we will read real-time data with it. But it may be rolled back.
+  uint64 current_epoch = 2;
 }
 
 message PinVersionRequest {
@@ -90,9 +99,13 @@ message PinVersionRequest {
 
 message PinVersionResponse {
   common.Status status = 1;
-  bool is_delta_response = 2;
-  repeated HummockVersionDelta version_deltas = 3;
-  HummockVersion pinned_version = 4;
+  message HummockVersionDeltas {
+    repeated HummockVersionDelta delta = 1;
+  }
+  oneof payload {
+    HummockVersionDeltas version_deltas = 2;
+    HummockVersion pinned_version = 3;
+  }
 }
 
 message UnpinVersionBeforeRequest {
@@ -102,6 +115,13 @@ message UnpinVersionBeforeRequest {
 
 message UnpinVersionBeforeResponse {
   common.Status status = 1;
+}
+
+message GetCurrentVersionRequest {}
+
+message GetCurrentVersionResponse {
+  common.Status status = 1;
+  HummockVersion current_version = 2;
 }
 
 message UnpinVersionRequest {
@@ -156,6 +176,12 @@ message TableOption {
 }
 
 message CompactTask {
+  enum TaskStatus {
+    PENDING = 0;
+    SUCCESS = 1;
+    FAILED = 2;
+    CANCELED = 3;
+  }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
   // In ideal case, the compaction will generate `splits.len()` tables which have key range
@@ -170,7 +196,7 @@ message CompactTask {
   // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
   bool gc_delete_keys = 7;
-  bool task_status = 9;
+  TaskStatus task_status = 9;
   // compaction group the task belongs to
   uint64 compaction_group_id = 12;
   // existing_table_ids for compaction drop key
@@ -197,7 +223,6 @@ message LevelHandler {
 message CompactStatus {
   uint64 compaction_group_id = 1;
   repeated LevelHandler level_handlers = 2;
-  CompactionConfig compaction_config = 3;
 }
 
 message CompactionGroup {
@@ -250,8 +275,33 @@ message GetNewSstIdsResponse {
   uint64 end_id = 3;
 }
 
+// This is a heartbeat message. Task will be considered dead if
+// `CompactTaskProgress` is not received for a timeout
+// or `num_ssts_sealed`/`num_ssts_uploaded` do not increase for a timeout.
+message CompactTaskProgress {
+  uint64 task_id = 1;
+  uint32 num_ssts_sealed = 2;
+  uint32 num_ssts_uploaded = 3;
+}
+
+message ReportCompactionTaskProgressRequest {
+  uint32 context_id = 1;
+  repeated CompactTaskProgress progress = 2;
+}
+
+message ReportCompactionTaskProgressResponse {
+  common.Status status = 1;
+}
+
 message SubscribeCompactTasksRequest {
   uint32 context_id = 1;
+  uint64 max_concurrent_task_number = 2;
+}
+
+message ValidationTask {
+  repeated SstableInfo sst_infos = 1;
+  map<uint64, uint32> sst_id_to_worker_id = 2;
+  uint64 epoch = 3;
 }
 
 message SubscribeCompactTasksResponse {
@@ -259,6 +309,8 @@ message SubscribeCompactTasksResponse {
     CompactTask compact_task = 1;
     VacuumTask vacuum_task = 2;
     FullScanTask full_scan_task = 3;
+    ValidationTask validation_task = 4;
+    CancelCompactTask cancel_compact_task = 5;
   }
 }
 
@@ -270,6 +322,12 @@ message VacuumTask {
 // Scan object store to get candidate orphan SSTs.
 message FullScanTask {
   uint64 sst_retention_time_sec = 1;
+}
+
+// Cancel compact task
+message CancelCompactTask {
+  uint32 context_id = 1;
+  uint64 task_id = 2;
 }
 
 message ReportVacuumTaskRequest {
@@ -307,11 +365,19 @@ message ReportFullScanTaskResponse {
   common.Status status = 1;
 }
 
+message TriggerFullGCRequest {
+  uint64 sst_retention_time_sec = 1;
+}
+
+message TriggerFullGCResponse {
+  common.Status status = 1;
+}
+
 service HummockManagerService {
-  rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
-  rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
+  rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
+  rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
@@ -322,6 +388,7 @@ service HummockManagerService {
   rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
+  rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
 }
 
 service CompactorService {}
@@ -330,14 +397,13 @@ message CompactionConfig {
   enum CompactionMode {
     UNSPECIFIED = 0;
     RANGE = 1;
-    CONSISTENT_HASH = 2;
   }
   uint64 max_bytes_for_level_base = 1;
   uint64 max_level = 2;
   uint64 max_bytes_for_level_multiplier = 3;
   uint64 max_compaction_bytes = 4;
   uint64 sub_level_max_compaction_bytes = 5;
-  uint64 level0_tigger_file_numer = 6;
+  uint64 level0_trigger_file_number = 6;
   uint64 level0_tier_compact_file_number = 7;
   CompactionMode compaction_mode = 8;
   repeated string compression_algorithm = 9;

@@ -15,13 +15,40 @@ services:
       timeout: 5s
       retries: 5
 
+  zookeeper:
+    image: confluentinc/cp-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+
+  kafka:
+    image: confluentinc/cp-kafka
+    ports:
+      - 29092:29092
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,OUTSIDE://${HOST_IP}:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+    healthcheck:
+      test: nc -z ${HOST_IP} 29092 || exit -1
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220826
     volumes:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220826
     depends_on:
       db:
         condition: service_healthy
@@ -35,17 +62,12 @@ services:
         condition: service_healthy
     volumes:
       - ..:/risingwave
-    # networks:
-    #   nw:
-    #     ipv4_address: 172.24.2.1
 
   mysql:
     image: mysql/mysql-server:8.0
     container_name: mysql
     ports:
-      - '23306:3306'
-    # volumes:
-    #   - ./init:/docker-entrypoint-initdb.d
+      - '23306:3306'\
     environment:
       - MYSQL_ALLOW_EMPTY_PASSWORD=true
       - MYSQL_ROOT_HOST=%
@@ -54,15 +76,10 @@ services:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
       retries: 5
-    # network_mode: host
-    # networks:
-    #   nw:
-    #     ipv4_address: 172.24.2.2
-
-# networks:
-#   nw:
-#     driver: bridge
-#     ipam:
-#         driver: default
-#         config:
-#             - subnet: "172.24.2.0/16"
+      
+  benchmark-env:
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
+    depends_on:
+      - kafka
+    volumes:
+      - ..:/risingwave

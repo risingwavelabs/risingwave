@@ -1,0 +1,12 @@
+# The third parameter of split_index function in Flink SQL is a cardinal number, starting from 0
+# The third parameter of split_part function in PostgreSQL is an ordinal number, starting from 1
+
+statement ok
+CREATE MATERIALIZED VIEW nexmark_q22 AS
+SELECT
+    auction, bidder, price, channel,
+    split_part(url, '/', 4) as dir1,
+    split_part(url, '/', 5) as dir2,
+    split_part(url, '/', 6) as dir3 
+FROM 
+    bid;

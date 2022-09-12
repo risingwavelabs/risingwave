@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::TableId;
+use std::sync::Arc;
+
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::executor::TopNExecutor;
@@ -22,40 +24,35 @@ pub struct TopNExecutorNewBuilder;
 
 impl ExecutorBuilder for TopNExecutorNewBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::TopN)?;
-        let order_pairs: Vec<_> = node
-            .get_column_orders()
+        let [input]: [_; 1] = params.input.try_into().unwrap();
+
+        let table = node.get_table()?;
+        let vnodes = params.vnode_bitmap.map(Arc::new);
+        let state_table = StateTable::from_table_catalog(table, store, vnodes);
+        let order_pairs = table
+            .get_order_key()
             .iter()
             .map(OrderPair::from_prost)
             .collect();
-        let limit = if node.limit == 0 {
-            None
-        } else {
-            Some(node.limit as usize)
-        };
-        let total_count = 0;
-        let table_id_l = TableId::new(node.get_table_id_l());
-        let key_indices = node
+        let key_indices = table
             .get_distribution_key()
             .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
-
+            .map(|idx| *idx as usize)
+            .collect();
         Ok(TopNExecutor::new(
-            params.input.remove(0),
+            input,
             order_pairs,
-            (node.offset as usize, limit),
+            (node.offset as usize, node.limit as usize),
             params.pk_indices,
-            store,
-            table_id_l,
-            total_count,
             params.executor_id,
             key_indices,
+            state_table,
         )?
         .boxed())
     }

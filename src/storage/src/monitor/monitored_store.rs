@@ -18,7 +18,7 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -232,53 +232,41 @@ where
         }
     }
 
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             self.inner
-                .wait_epoch(epoch)
+                .try_wait_epoch(epoch)
                 .stack_trace("store_wait_epoch")
                 .await
                 .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
         }
     }
 
-    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
-            let size = self
+            let sync_result = self
                 .inner
                 .sync(epoch)
                 .stack_trace("store_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
-            if size != 0 {
-                self.stats.write_l0_size_per_epoch.observe(size as _);
+            if sync_result.sync_size != 0 {
+                self.stats
+                    .write_l0_size_per_epoch
+                    .observe(sync_result.sync_size as _);
             }
-            Ok(size)
+            Ok(sync_result)
         }
+    }
+
+    fn seal_epoch(&self, epoch: u64) {
+        self.inner.seal_epoch(epoch);
     }
 
     fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         panic!("the state store is already monitored")
-    }
-
-    fn replicate_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_> {
-        async move {
-            self.inner
-                .replicate_batch(kv_pairs, write_options)
-                .stack_trace("store_replicate_batch")
-                .await
-                .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
-        }
-    }
-
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
-        self.inner.get_uncommitted_ssts(epoch)
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {

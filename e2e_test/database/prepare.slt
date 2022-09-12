@@ -1,3 +1,7 @@
+# Create a database for test.slt to use. 
+# A new connection will be created when we switch to a different database, 
+# so this cannot be tested in a single .slt file.
+
 # Create a test database.
 statement ok
 create database test;

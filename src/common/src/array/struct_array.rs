@@ -21,7 +21,9 @@ use std::sync::Arc;
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use prost::Message;
-use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
+use risingwave_pb::data::{
+    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, StructArrayData,
+};
 use risingwave_pb::expr::StructValue as ProstStructValue;
 
 use super::{
@@ -31,8 +33,8 @@ use super::{
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::{
-    deserialize_datum_from, display_datum_ref, serialize_datum_into, serialize_datum_ref_into,
-    to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
+    Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
 };
 
 #[derive(Debug)]
@@ -124,7 +126,7 @@ impl ArrayBuilder for StructArrayBuilder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructArray {
     bitmap: Bitmap,
     children: Vec<ArrayRef>,
@@ -290,7 +292,7 @@ impl StructArray {
     }
 }
 
-#[derive(Clone, Debug, Eq, Default, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, Default)]
 pub struct StructValue {
     fields: Box<[Datum]>,
 }
@@ -313,6 +315,12 @@ impl fmt::Display for StructValue {
     }
 }
 
+impl PartialEq for StructValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.fields == other.fields
+    }
+}
+
 impl PartialOrd for StructValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
@@ -322,6 +330,12 @@ impl PartialOrd for StructValue {
 impl Ord for StructValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
+    }
+}
+
+impl Hash for StructValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.fields.hash(state);
     }
 }
 
@@ -337,19 +351,24 @@ impl StructValue {
     }
 
     pub fn to_protobuf_owned(&self) -> Vec<u8> {
-        let value = ProstStructValue {
-            fields: self
-                .fields
-                .iter()
-                .map(|f| match f {
-                    None => {
-                        vec![]
-                    }
-                    Some(s) => s.to_protobuf(),
-                })
-                .collect_vec(),
-        };
-        value.encode_to_vec()
+        self.as_scalar_ref().to_protobuf_owned()
+    }
+
+    pub fn from_protobuf_bytes(data_type: ProstDataType, b: &Vec<u8>) -> ArrayResult<Self> {
+        let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
+        let fields: Vec<Datum> = struct_value
+            .fields
+            .iter()
+            .zip_eq(data_type.field_type.iter())
+            .map(|(b, d)| {
+                if b.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(ScalarImpl::from_proto_bytes(b, d)?))
+                }
+            })
+            .collect::<ArrayResult<Vec<Datum>>>()?;
+        Ok(StructValue::new(fields))
     }
 
     pub fn deserialize(
@@ -370,54 +389,67 @@ pub enum StructRef<'a> {
     ValueRef { val: &'a StructValue },
 }
 
+macro_rules! iter_fields_ref {
+    ($self:ident, $it:ident, { $($body:tt)* }) => {
+        match $self {
+            StructRef::Indexed { arr, idx } => {
+                let $it = arr.children.iter().map(|a| a.value_at(*idx));
+                $($body)*
+            }
+            StructRef::ValueRef { val } => {
+                let $it = val.fields.iter().map(to_datum_ref);
+                $($body)*
+            }
+        }
+    };
+}
+
+macro_rules! iter_fields {
+    ($self:ident, $it:ident, { $($body:tt)* }) => {
+        match &$self {
+            StructRef::Indexed { arr, idx } => {
+                let $it = arr
+                    .children
+                    .iter()
+                    .map(|a| a.value_at(*idx).to_owned_datum());
+                $($body)*
+            }
+            StructRef::ValueRef { val } => {
+                let $it = val.fields.iter();
+                $($body)*
+            }
+        }
+    };
+}
+
 impl<'a> StructRef<'a> {
     pub fn fields_ref(&self) -> Vec<DatumRef<'a>> {
-        match self {
-            StructRef::Indexed { arr, idx } => {
-                arr.children.iter().map(|a| a.value_at(*idx)).collect()
-            }
-            StructRef::ValueRef { val } => val.fields.iter().map(to_datum_ref).collect(),
-        }
+        iter_fields_ref!(self, it, { it.collect() })
     }
 
     pub fn to_protobuf_owned(&self) -> Vec<u8> {
-        match self {
-            StructRef::ValueRef { val } => val.to_protobuf_owned(),
-            StructRef::Indexed { arr, idx } => {
-                let value = ProstStructValue {
-                    fields: arr
-                        .children
-                        .iter()
-                        .map(|a| {
-                            let datum_ref = a.value_at(*idx);
-                            match datum_ref {
-                                None => vec![],
-                                Some(s) => s.into_scalar_impl().to_protobuf(),
-                            }
-                        })
-                        .collect_vec(),
-                };
-                value.encode_to_vec()
-            }
-        }
+        let fields = iter_fields!(self, it, {
+            it.map(|f| match f {
+                None => {
+                    vec![]
+                }
+                Some(s) => s.to_protobuf(),
+            })
+            .collect_vec()
+        });
+        ProstStructValue { fields }.encode_to_vec()
     }
 
     pub fn serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
-        match self {
-            StructRef::Indexed { arr, idx } => arr
-                .children
-                .iter()
-                .map(|a| a.value_at(*idx))
-                .try_for_each(|datum_ref| serialize_datum_ref_into(&datum_ref, serializer))?,
-            StructRef::ValueRef { val } => val
-                .fields
-                .iter()
-                .try_for_each(|datum| serialize_datum_into(datum, serializer))?,
-        }
-        Ok(())
+        iter_fields_ref!(self, it, {
+            for datum_ref in it {
+                serialize_datum_ref_into(&datum_ref, serializer)?
+            }
+            Ok(())
+        })
     }
 }
 
@@ -470,20 +502,20 @@ fn cmp_struct_field(l: &Option<ScalarRefImpl>, r: &Option<ScalarRefImpl>) -> Ord
 
 impl Debug for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StructRef::Indexed { arr, idx } => arr
-                .children
-                .iter()
-                .try_for_each(|a| a.value_at(*idx).fmt(f)),
-            StructRef::ValueRef { val } => write!(f, "{:?}", val),
-        }
+        iter_fields_ref!(self, it, {
+            for v in it {
+                v.fmt(f)?;
+            }
+            Ok(())
+        })
     }
 }
 
 impl Display for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let values = self.fields_ref().iter().map(display_datum_ref).join(",");
-        write!(f, "({})", values)
+        iter_fields_ref!(self, it, {
+            write!(f, "({})", it.map(display_datum_ref).join(","))
+        })
     }
 }
 
@@ -648,22 +680,19 @@ mod tests {
         let fields = [
             DataType::Float32,
             DataType::Varchar,
-            DataType::Struct {
-                fields: Arc::new([
+            DataType::new_struct(
+                vec![
                     DataType::Float64,
                     DataType::Varchar,
                     DataType::Varchar,
-                    DataType::Struct {
-                        fields: Arc::new([]),
-                    },
-                ]),
-            },
+                    DataType::new_struct(vec![], vec![]),
+                ],
+                vec![],
+            ),
             DataType::Int64,
             DataType::Varchar,
             DataType::Int16,
-            DataType::Struct {
-                fields: Arc::new([]),
-            },
+            DataType::new_struct(vec![], vec![]),
             DataType::Int32,
         ];
         let struct_ref = StructRef::ValueRef { val: &value };
@@ -739,9 +768,7 @@ mod tests {
                 ]),
                 vec![
                     DataType::Varchar,
-                    DataType::Struct {
-                        fields: Arc::new([DataType::Varchar]),
-                    },
+                    DataType::new_struct(vec![DataType::Varchar], vec![]),
                 ],
                 Ordering::Greater,
             ),
@@ -762,9 +789,7 @@ mod tests {
                 ]),
                 vec![
                     DataType::Varchar,
-                    DataType::Struct {
-                        fields: Arc::new([DataType::Varchar]),
-                    },
+                    DataType::new_struct(vec![DataType::Varchar], vec![]),
                 ],
                 Ordering::Equal,
             ),

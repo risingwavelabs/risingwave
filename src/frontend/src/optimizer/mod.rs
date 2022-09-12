@@ -19,6 +19,7 @@ pub mod property;
 
 mod delta_join_solver;
 mod heuristic;
+mod max_one_row_visitor;
 mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
@@ -28,14 +29,17 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 use property::Order;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
+use self::plan_visitor::has_logical_over_agg;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::BatchExchange;
+use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
+use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
+use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply, PlanVisitor};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
@@ -137,7 +141,6 @@ impl PlanRoot {
         apply_order: ApplyOrder,
     ) -> PlanRef {
         let mut output_plan = plan;
-
         loop {
             let mut heuristic_optimizer = HeuristicOptimizer::new(&apply_order, &rules);
             output_plan = heuristic_optimizer.optimize(output_plan);
@@ -158,7 +161,7 @@ impl PlanRoot {
     }
 
     /// Apply logical optimization to the plan.
-    pub fn gen_optimized_logical_plan(&self) -> PlanRef {
+    pub fn gen_optimized_logical_plan(&self) -> Result<PlanRef> {
         let mut plan = self.plan.clone();
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -169,13 +172,25 @@ impl PlanRoot {
         }
 
         // Simple Unnesting.
-        // Pull correlated predicates up the algebra tree to unnest simple subquery.
         plan = self.optimize_by_rules(
             plan,
             "Simple Unnesting".to_string(),
-            vec![PullUpCorrelatedPredicateRule::create()],
+            vec![
+                // Eliminate max one row
+                MaxOneRowEliminateRule::create(),
+                // Convert apply to join.
+                ApplyToJoinRule::create(),
+                // Pull correlated predicates up the algebra tree to unnest simple subquery.
+                PullUpCorrelatedPredicateRule::create(),
+            ],
             ApplyOrder::TopDown,
         );
+        if HasMaxOneRowApply().visit(plan.clone()) {
+            return Err(ErrorCode::InternalError(
+                "Scalar subquery might produce more than one row.".into(),
+            )
+            .into());
+        }
 
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
@@ -186,7 +201,6 @@ impl PlanRoot {
             vec![TranslateApplyRule::create()],
             ApplyOrder::BottomUp,
         );
-
         plan = self.optimize_by_rules_until_fix_point(
             plan,
             "General Unnesting(Push Down Apply)".to_string(),
@@ -199,10 +213,12 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
+        if has_logical_apply(plan.clone()) {
+            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
+        }
 
         // Predicate Push-down
         plan = plan.predicate_pushdown(Condition::true_cond());
-
         if explain_trace {
             ctx.trace("Predicate Push Down:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
@@ -229,7 +245,6 @@ impl PlanRoot {
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
         plan = plan.predicate_pushdown(Condition::true_cond());
-
         if explain_trace {
             ctx.trace("Predicate Push Down:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
@@ -243,14 +258,6 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
-        // Convert distinct aggregates.
-        plan = self.optimize_by_rules(
-            plan,
-            "Convert Distinct Aggregation".to_string(),
-            vec![DistinctAggRule::create()],
-            ApplyOrder::TopDown,
-        );
-
         // Prune Columns
         //
         // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT and
@@ -259,11 +266,24 @@ impl PlanRoot {
         // `self.out_fields` as `required_cols` here.
         let required_cols = (0..self.plan.schema().len()).collect_vec();
         plan = plan.prune_col(&required_cols);
-
+        // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
         }
+        plan = plan.predicate_pushdown(Condition::true_cond());
+        if explain_trace {
+            ctx.trace("Predicate Push Down:".to_string());
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        // Convert distinct aggregates.
+        plan = self.optimize_by_rules(
+            plan,
+            "Convert Distinct Aggregation".to_string(),
+            vec![DistinctAggRule::create()],
+            ApplyOrder::TopDown,
+        );
 
         plan = self.optimize_by_rules(
             plan,
@@ -279,36 +299,50 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         );
 
-        plan
-    }
-
-    /// Batch specific logical optimization
-    fn batch_logical_optimize(&self, plan: PlanRef) -> PlanRef {
-        self.optimize_by_rules(
+        plan = self.optimize_by_rules(
             plan,
-            "Index Selection".to_string(),
-            vec![IndexSelectionRule::create()],
-            ApplyOrder::BottomUp,
-        )
+            "Convert Window Aggregation".to_string(),
+            vec![
+                OverAggToTopNRule::create(),
+                ProjectMergeRule::create(),
+                ProjectEliminateRule::create(),
+            ],
+            ApplyOrder::TopDown,
+        );
+        if has_logical_over_agg(plan.clone()) {
+            return Err(ErrorCode::InternalError(format!(
+                "OverAgg can not be transformed. Plan:\n{}",
+                plan.explain_to_string().unwrap()
+            ))
+            .into());
+        }
+
+        Ok(plan)
     }
 
-    /// Optimize and generate a batch query plan for distributed execution.
-    pub fn gen_batch_query_plan(&self) -> Result<PlanRef> {
+    /// Optimize and generate a singleton batch physical plan without exchange nodes.
+    fn gen_batch_plan(&self) -> Result<PlanRef> {
         // Logical optimization
-        let mut plan = self.gen_optimized_logical_plan();
-
-        // Batch specific logical optimization
-        plan = self.batch_logical_optimize(plan);
+        let mut plan = self.gen_optimized_logical_plan()?;
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
+        assert!(*plan.distribution() == Distribution::Single, "{}", plan);
+        assert!(!has_batch_exchange(plan.clone()), "{}", plan);
+
         let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
-        if explain_trace {
+        if ctx.is_explain_trace() {
             ctx.trace("To Batch Physical Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        Ok(plan)
+    }
+
+    /// Optimize and generate a batch query plan for distributed execution.
+    pub fn gen_batch_distributed_plan(&self) -> Result<PlanRef> {
+        let mut plan = self.gen_batch_plan()?;
 
         // Convert to distributed plan
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
@@ -319,9 +353,18 @@ impl PlanRoot {
                 BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
         }
 
-        if explain_trace {
+        let ctx = plan.ctx();
+        if ctx.is_explain_trace() {
             ctx.trace("To Batch Distributed Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
+        }
+        // Always insert a exchange singleton for batch dml.
+        // TODO: Support local dml and
+        if plan.node_type() == PlanNodeType::BatchUpdate
+            || plan.node_type() == PlanNodeType::BatchInsert
+            || plan.node_type() == PlanNodeType::BatchDelete
+        {
+            plan = BatchExchange::new(plan, Order::any(), Distribution::Single).into();
         }
 
         Ok(plan)
@@ -329,23 +372,9 @@ impl PlanRoot {
 
     /// Optimize and generate a batch query plan for local execution.
     pub fn gen_batch_local_plan(&self) -> Result<PlanRef> {
-        // Logical optimization
-        let mut plan = self.gen_optimized_logical_plan();
+        let mut plan = self.gen_batch_plan()?;
 
-        // Batch specific logical optimization
-        plan = self.batch_logical_optimize(plan);
-
-        // Convert to physical plan node
-        plan = plan.to_batch_with_order_required(&self.required_order)?;
-
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
-        if explain_trace {
-            ctx.trace("To Batch Physical Plan:".to_string());
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // Convert to physical plan node
+        // Convert to local plan node
         plan = plan.to_local_with_order_required(&self.required_order)?;
 
         // We remark that since the `to_local_with_order_required` does not enforce single
@@ -361,7 +390,8 @@ impl PlanRoot {
                 BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
         }
 
-        if explain_trace {
+        let ctx = plan.ctx();
+        if ctx.is_explain_trace() {
             ctx.trace("To Batch Local Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
         }
@@ -373,7 +403,7 @@ impl PlanRoot {
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let mut plan = match self.plan.convention() {
             Convention::Logical => {
-                let plan = self.gen_optimized_logical_plan();
+                let plan = self.gen_optimized_logical_plan()?;
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
                 self.required_dist =
                     out_col_change.rewrite_required_distribution(&self.required_dist);

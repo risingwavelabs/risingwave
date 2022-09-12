@@ -14,12 +14,12 @@
 
 use std::path::Path;
 
+use itertools::Itertools;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
-use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_common::types::{DataType, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 use risingwave_pb::plan_common::ColumnDesc;
 use serde::de::Deserialize;
@@ -28,7 +28,7 @@ use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
-use crate::{Event, SourceColumnDesc, SourceParser};
+use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for Protobuf-encoded bytes.
 #[derive(Debug)]
@@ -198,12 +198,17 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
         FieldType::Bool => DataType::Boolean,
         FieldType::String => DataType::Varchar,
         FieldType::Message(m) => {
-            let vec = m
+            let fields = m
                 .fields()
                 .iter()
                 .map(|f| protobuf_type_mapping(f, descriptors))
                 .collect::<Result<Vec<_>>>()?;
-            DataType::Struct { fields: vec.into() }
+            let field_names = m
+                .fields()
+                .iter()
+                .map(|f| f.name().to_string())
+                .collect_vec();
+            DataType::new_struct(fields, field_names)
         }
         actual_type => {
             return Err(ErrorCode::NotImplemented(
@@ -217,22 +222,18 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
 }
 
 impl SourceParser for ProtobufParser {
-    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         let mut map = match self.decode(payload)? {
             Value::Map(m) => m,
             _ => return Err(RwError::from(ProtocolError("".to_string()))),
         };
 
-        let row = columns.iter().map(|column| {
-            if column.skip_parse {
-                return None;
-            }
-
+        writer.insert(|column| {
             let key = Value::String(column.name.clone());
 
             // Use `remove` instead of `get` to take the ownership of the value
             let value = map.remove(&key);
-            match column.data_type {
+            Ok(match column.data_type {
                 DataType::Boolean => {
                     protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
                 }
@@ -278,12 +279,7 @@ impl SourceParser for ProtobufParser {
                     }).map(ScalarImpl::NaiveDateTime)
                 }
                 _ => unimplemented!(),
-            }
-        }).collect::<Vec<Datum>>();
-
-        Ok(Event {
-            ops: vec![Op::Insert],
-            rows: vec![row],
+            })
         })
     }
 }
@@ -292,7 +288,9 @@ impl SourceParser for ProtobufParser {
 mod tests {
     use std::io::Write;
 
+    use itertools::Itertools;
     use maplit::hashmap;
+    use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error::Result;
     use risingwave_common::test_prelude::*;
@@ -302,7 +300,7 @@ mod tests {
     use serde_value::Value;
     use tempfile::Builder;
 
-    use crate::{ProtobufParser, SourceColumnDesc, SourceParser};
+    use crate::{ProtobufParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
     static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";
@@ -316,12 +314,12 @@ mod tests {
       string date = 6;
     }"#;
 
-    //        Id:      123,
-    // 		Address: "test address",
-    // 		City:    "test city",
-    // 		Zipcode: 456,
-    // 		Rate:    1.2345,
-    //    Date:    "2021-01-01"
+    // Id:      123,
+    // Address: "test address",
+    // City:    "test city",
+    // Zipcode: 456,
+    // Rate:    1.2345,
+    // Date:    "2021-01-01"
     static PRE_GEN_PROTO_DATA: &[u8] = b"\x08\x7b\x12\x0c\x74\x65\x73\x74\x20\x61\x64\x64\x72\x65\x73\x73\x1a\x09\x74\x65\x73\x74\x20\x63\x69\x74\x79\x20\xc8\x03\x2d\x19\x04\x9e\x3f\x32\x0a\x32\x30\x32\x31\x2d\x30\x31\x2d\x30\x31";
 
     fn create_parser(proto_data: &str) -> Result<ProtobufParser> {
@@ -339,25 +337,6 @@ mod tests {
 
         ProtobufParser::new(format!("file://{}", path).as_str(), ".test.TestRecord")
     }
-
-    static PROTO_NESTED_FILE_DATA: &str = r#"
-    syntax = "proto3";
-    package test;
-    message TestRecord {
-      int32 id = 1;
-      Country country = 3;
-      int64 zipcode = 4;
-      float rate = 5;
-    }
-    message Country {
-      string address = 1;
-      City city = 2;
-      string zipcode = 3;
-    }
-    message City {
-      string address = 1;
-      string zipcode = 2;
-    }"#;
 
     #[test]
     fn test_proto_message_name() {
@@ -470,20 +449,43 @@ mod tests {
             },
         ];
 
-        let result = parser.parse(PRE_GEN_PROTO_DATA, &descs);
-        assert!(result.is_ok());
-        let event = result.unwrap();
-        let data = event.rows.first().unwrap();
-        assert_eq!(data.len(), descs.len());
-        assert!(data[0].eq(&Some(ScalarImpl::Int32(123))));
-        assert!(data[1].eq(&Some(ScalarImpl::Utf8("test address".to_string()))));
-        assert!(data[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
-        assert!(data[3].eq(&Some(ScalarImpl::Int64(456))));
-        assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
-        assert!(data[5].eq(&Some(ScalarImpl::NaiveDate(
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+        {
+            let writer = builder.row_writer();
+            parser.parse(PRE_GEN_PROTO_DATA, writer).unwrap();
+        }
+        let chunk = builder.finish().unwrap();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.to_owned_row();
+        assert!(row[0].eq(&Some(ScalarImpl::Int32(123))));
+        assert!(row[1].eq(&Some(ScalarImpl::Utf8("test address".to_string()))));
+        assert!(row[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
+        assert!(row[3].eq(&Some(ScalarImpl::Int64(456))));
+        assert!(row[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
+        assert!(row[5].eq(&Some(ScalarImpl::NaiveDate(
             str_to_date("2021-01-01").unwrap()
         ))))
     }
+
+    static PROTO_NESTED_FILE_DATA: &str = r#"
+    syntax = "proto3";
+    package test;
+    message TestRecord {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+    }
+    message Country {
+      string address = 1;
+      City city = 2;
+      string zipcode = 3;
+    }
+    message City {
+      string address = 1;
+      string zipcode = 2;
+    }"#;
 
     #[test]
     fn test_map_to_columns() {
@@ -509,5 +511,37 @@ mod tests {
                 ColumnDesc::new_atomic(DataType::Float32.to_protobuf(), "rate", 9),
             ]
         );
+    }
+
+    #[test]
+    fn test_struct_field_names() {
+        use risingwave_common::catalog::ColumnDesc as RwColumnDesc;
+        use risingwave_common::types::*;
+
+        let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
+        let columns = parser.map_to_columns().unwrap();
+        let columns = columns.iter().map(RwColumnDesc::from).collect_vec();
+        if let DataType::Struct(t) = columns[1].data_type.clone() {
+            // country
+            if let DataType::Struct(tf1) = t.fields[1].clone() {
+                // city
+                assert_eq!(
+                    tf1.field_names.to_vec(),
+                    vec!["address".to_string(), "zipcode".to_string()]
+                );
+            } else {
+                unreachable!()
+            }
+            assert_eq!(
+                t.field_names.to_vec(),
+                vec![
+                    "address".to_string(),
+                    "city".to_string(),
+                    "zipcode".to_string()
+                ]
+            );
+        } else {
+            unreachable!()
+        }
     }
 }

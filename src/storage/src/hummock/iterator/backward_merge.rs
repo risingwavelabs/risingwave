@@ -14,7 +14,6 @@
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
 
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
@@ -23,7 +22,6 @@ mod test {
     use crate::hummock::iterator::{HummockIterator, UnorderedMergeIteratorInner};
     use crate::hummock::test_utils::create_small_table_cache;
     use crate::hummock::BackwardSstableIterator;
-    use crate::monitor::StateStoreMetrics;
 
     #[tokio::test]
     async fn test_backward_merge_basic() {
@@ -68,7 +66,7 @@ mod test {
             ),
         ];
 
-        let mut mi = UnorderedMergeIteratorInner::new(iters, Arc::new(StateStoreMetrics::unused()));
+        let mut mi = UnorderedMergeIteratorInner::new(iters);
         let mut i = 3 * TEST_KEYS_COUNT;
         mi.rewind().await.unwrap();
         while mi.is_valid() {
@@ -131,7 +129,7 @@ mod test {
             ),
         ];
 
-        let mut mi = UnorderedMergeIteratorInner::new(iters, Arc::new(StateStoreMetrics::unused()));
+        let mut mi = UnorderedMergeIteratorInner::new(iters);
 
         // right edge case
         mi.seek(iterator_test_key_of(0).as_slice()).await.unwrap();
@@ -204,7 +202,7 @@ mod test {
             ),
         ];
 
-        let mut mi = UnorderedMergeIteratorInner::new(iters, Arc::new(StateStoreMetrics::unused()));
+        let mut mi = UnorderedMergeIteratorInner::new(iters);
 
         mi.rewind().await.unwrap();
         let mut count = 0;

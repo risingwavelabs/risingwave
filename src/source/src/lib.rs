@@ -40,7 +40,7 @@ pub use parser::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
 use risingwave_connector::source::SplitId;
-pub use table_v2::*;
+pub use table::*;
 
 use crate::connector_source::{ConnectorSource, ConnectorSourceReader};
 
@@ -52,10 +52,7 @@ mod common;
 pub mod connector_source;
 pub mod monitor;
 pub mod row_id;
-mod table_v2;
-
-extern crate core;
-extern crate maplit;
+mod table;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
@@ -68,20 +65,20 @@ pub enum SourceFormat {
 
 #[derive(Debug, EnumAsInner)]
 pub enum SourceImpl {
-    TableV2(TableSourceV2),
+    Table(TableSource),
     Connector(ConnectorSource),
 }
 
 #[expect(clippy::large_enum_variant)]
 pub enum SourceStreamReaderImpl {
-    TableV2(TableV2StreamReader),
+    Table(TableStreamReader),
     Connector(ConnectorSourceReader),
 }
 
 impl SourceStreamReaderImpl {
     pub async fn next(&mut self) -> Result<StreamChunkWithState> {
         match self {
-            SourceStreamReaderImpl::TableV2(t) => t.next().await.map(Into::into),
+            SourceStreamReaderImpl::Table(t) => t.next().await.map(Into::into),
             SourceStreamReaderImpl::Connector(c) => c.next().await,
         }
     }

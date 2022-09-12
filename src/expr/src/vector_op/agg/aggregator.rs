@@ -14,26 +14,27 @@
 
 use std::sync::Arc;
 
+use dyn_clone::DynClone;
 use risingwave_common::array::*;
-use risingwave_common::ensure;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::expr::AggCall;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
-use super::string_agg::StringAgg;
-use crate::expr::{
-    build_from_prost, AggKind, Expression, ExpressionRef, InputRefExpression, LiteralExpression,
-};
+use crate::expr::{build_from_prost, AggKind};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
+use crate::vector_op::agg::array_agg::create_array_agg_state;
 use crate::vector_op::agg::count_star::CountStar;
+use crate::vector_op::agg::filter::*;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
+use crate::vector_op::agg::string_agg::create_string_agg_state;
+use crate::Result;
 
 /// An `Aggregator` supports `update` data and `output` result.
-pub trait Aggregator: Send + 'static {
+pub trait Aggregator: Send + DynClone + 'static {
     fn return_type(&self) -> DataType;
 
     /// `update_single` update the aggregator with a single row with type checked at runtime.
@@ -48,29 +49,25 @@ pub trait Aggregator: Send + 'static {
     ) -> Result<()>;
 
     /// `output` the aggregator to `ArrayBuilder` with input with type checked at runtime.
-    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;
-
-    /// `output_and_reset` output the aggregator to `ArrayBuilder` and reset the internal state.
-    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+    /// After `output` the aggregator is reset to initial state.
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
 }
+
+dyn_clone::clone_trait_object!(Aggregator);
 
 pub type BoxedAggState = Box<dyn Aggregator>;
 
 pub struct AggStateFactory {
-    agg_kind: AggKind,
+    /// Return type of the agg call.
     return_type: DataType,
-    // When agg func is count(*), the args is empty and input type is None.
-    input_type: Option<DataType>,
-    input_col_idx: usize,
-    extra_arg: Option<ExpressionRef>,
-    distinct: bool,
-    order_pairs: Vec<OrderPair>,
-    order_col_types: Vec<DataType>,
-    filter: ExpressionRef,
+    /// The _prototype_ of agg state. It is cloned when need to create a new agg state.
+    initial_agg_state: BoxedAggState,
 }
 
 impl AggStateFactory {
     pub fn new(prost: &AggCall) -> Result<Self> {
+        // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
+
         let return_type = DataType::from(prost.get_return_type()?);
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
         let distinct = prost.distinct;
@@ -86,110 +83,62 @@ impl AggStateFactory {
             order_pairs.push(OrderPair::new(col_idx, order_type));
             order_col_types.push(col_type);
         });
-        let filter: ExpressionRef = match prost.filter {
-            Some(ref expr) => Arc::from(build_from_prost(expr)?),
-            None => Arc::from(
-                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-            ),
-        };
-        match &prost.get_args()[..] {
-            [] => match (&agg_kind, return_type.clone()) {
-                (AggKind::Count, DataType::Int64) => Ok(Self {
-                    agg_kind,
-                    return_type,
-                    input_type: None,
-                    input_col_idx: 0,
-                    extra_arg: None,
-                    distinct,
-                    order_pairs,
-                    order_col_types,
-                    filter,
-                }),
-                _ => Err(ErrorCode::InternalError(format!(
-                    "Agg {:?} without args not supported",
-                    agg_kind
-                ))
-                .into()),
-            },
-            [ref arg] if agg_kind != AggKind::StringAgg => {
+
+        let initial_agg_state: BoxedAggState = match (agg_kind, &prost.get_args()[..]) {
+            (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone())),
+            (AggKind::ApproxCountDistinct, [arg]) => {
+                let input_col_idx = arg.get_input()?.get_column_idx() as usize;
+                Box::new(ApproxCountDistinct::new(return_type.clone(), input_col_idx))
+            }
+            (AggKind::StringAgg, [agg_arg, delim_arg]) => {
+                assert_eq!(
+                    DataType::from(agg_arg.get_type().unwrap()),
+                    DataType::Varchar
+                );
+                assert_eq!(
+                    DataType::from(delim_arg.get_type().unwrap()),
+                    DataType::Varchar
+                );
+                let agg_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
+                let delim_col_idx = delim_arg.get_input()?.get_column_idx() as usize;
+                create_string_agg_state(agg_col_idx, delim_col_idx, order_pairs)?
+            }
+            (AggKind::ArrayAgg, [arg]) => {
+                let agg_col_idx = arg.get_input()?.get_column_idx() as usize;
+                create_array_agg_state(return_type.clone(), agg_col_idx, order_pairs)?
+            }
+            (agg_kind, [arg]) => {
+                // other unary agg call
                 let input_type = DataType::from(arg.get_type()?);
                 let input_col_idx = arg.get_input()?.get_column_idx() as usize;
-                Ok(Self {
-                    agg_kind,
-                    return_type,
-                    input_type: Some(input_type),
+                create_agg_state_unary(
+                    input_type,
                     input_col_idx,
-                    extra_arg: None,
-                    distinct,
-                    order_pairs,
-                    order_col_types,
-                    filter,
-                })
-            }
-            [ref agg_arg, ref extra_arg] if agg_kind == AggKind::StringAgg => {
-                let input_type = DataType::from(agg_arg.get_type()?);
-                let input_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
-                let extra_arg_type = DataType::from(extra_arg.get_type()?);
-                ensure!(
-                    extra_arg_type == DataType::Varchar,
-                    ErrorCode::ExprError("Delimiter must be Varchar".into())
-                );
-                let extra_arg = Arc::from(
-                    InputRefExpression::new(
-                        extra_arg_type,
-                        extra_arg.get_input()?.get_column_idx() as usize,
-                    )
-                    .boxed(),
-                );
-                Ok(Self {
                     agg_kind,
-                    return_type,
-                    input_type: Some(input_type),
-                    input_col_idx,
-                    extra_arg: Some(extra_arg),
+                    return_type.clone(),
                     distinct,
-                    order_pairs,
-                    order_col_types,
-                    filter,
-                })
+                )?
             }
-            _ => Err(ErrorCode::ExprError(
-                format!("Too many/few arguments for {:?}", agg_kind).into(),
-            )
-            .into()),
-        }
+            _ => bail!("Invalid agg call: {:?}", agg_kind),
+        };
+
+        // wrap the agg state in a `Filter` if needed
+        let initial_agg_state = match prost.filter {
+            Some(ref expr) => Box::new(Filter::new(
+                Arc::from(build_from_prost(expr)?),
+                initial_agg_state,
+            )),
+            None => initial_agg_state,
+        };
+
+        Ok(Self {
+            return_type,
+            initial_agg_state,
+        })
     }
 
-    pub fn create_agg_state(&self) -> Result<Box<dyn Aggregator>> {
-        if let AggKind::ApproxCountDistinct = self.agg_kind {
-            Ok(Box::new(ApproxCountDistinct::new(
-                self.return_type.clone(),
-                self.input_col_idx,
-                self.filter.clone(),
-            )))
-        } else if let AggKind::StringAgg = self.agg_kind {
-            Ok(Box::new(StringAgg::new(
-                self.input_col_idx,
-                self.extra_arg.clone().unwrap(),
-                self.order_pairs.clone(),
-                self.order_col_types.clone(),
-            )))
-        } else if let Some(input_type) = self.input_type.clone() {
-            create_agg_state_unary(
-                input_type,
-                self.input_col_idx,
-                &self.agg_kind,
-                self.return_type.clone(),
-                self.distinct,
-                self.filter.clone(),
-            )
-        } else {
-            Ok(Box::new(CountStar::new(
-                self.return_type.clone(),
-                0,
-                self.filter.clone(),
-            )))
-        }
+    pub fn create_agg_state(&self) -> BoxedAggState {
+        self.initial_agg_state.clone()
     }
 
     pub fn get_return_type(&self) -> DataType {
@@ -200,18 +149,17 @@ impl AggStateFactory {
 pub fn create_agg_state_unary(
     input_type: DataType,
     input_col_idx: usize,
-    agg_type: &AggKind,
+    agg_kind: AggKind,
     return_type: DataType,
     distinct: bool,
-    filter: ExpressionRef,
-) -> Result<Box<dyn Aggregator>> {
+) -> Result<BoxedAggState> {
     use crate::expr::data_types::*;
 
     macro_rules! gen_arms {
         [$(($agg:ident, $fn:expr, $in:tt, $ret:tt, $init_result:expr)),* $(,)?] => {
             match (
                 input_type,
-                agg_type,
+                agg_kind,
                 return_type.clone(),
                 distinct,
             ) {
@@ -222,7 +170,6 @@ pub fn create_agg_state_unary(
                             input_col_idx,
                             $fn,
                             $init_result,
-                            filter
                         ))
                     },
                     ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
@@ -230,24 +177,20 @@ pub fn create_agg_state_unary(
                             return_type,
                             input_col_idx,
                             $fn,
-                            filter,
                         ))
                     },
                 )*
                 (unimpl_input, unimpl_agg, unimpl_ret, distinct) => {
-                    return Err(
-                        ErrorCode::InternalError(format!(
+                    bail!(
                         "unsupported aggregator: type={:?} input={:?} output={:?} distinct={}",
                         unimpl_agg, unimpl_input, unimpl_ret, distinct
-                        ))
-                        .into(),
                     )
                 }
             }
         };
     }
 
-    let state: Box<dyn Aggregator> = gen_arms![
+    let state: BoxedAggState = gen_arms![
         (Count, count, int16, int64, Some(0)),
         (Count, count, int32, int64, Some(0)),
         (Count, count, int64, int64, Some(0)),
@@ -324,27 +267,22 @@ mod tests {
         let decimal_type = DataType::Decimal;
         let bool_type = DataType::Boolean;
         let char_type = DataType::Varchar;
-        let filter: ExpressionRef = Arc::from(
-            LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-        );
         macro_rules! test_create {
             ($input_type:expr, $agg:ident, $return_type:expr, $expected:ident) => {
                 assert!(create_agg_state_unary(
                     $input_type.clone(),
                     0,
-                    &AggKind::$agg,
+                    AggKind::$agg,
                     $return_type.clone(),
                     false,
-                    filter.clone(),
                 )
                 .$expected());
                 assert!(create_agg_state_unary(
                     $input_type.clone(),
                     0,
-                    &AggKind::$agg,
+                    AggKind::$agg,
                     $return_type.clone(),
                     true,
-                    filter.clone(),
                 )
                 .$expected());
             };

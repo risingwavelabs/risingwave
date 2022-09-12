@@ -100,19 +100,6 @@ where
         .collect()
 }
 
-pub fn can_concat(ssts: &[&SstableInfo]) -> bool {
-    let len = ssts.len();
-    for i in 0..len - 1 {
-        if user_key(&ssts[i].get_key_range().as_ref().unwrap().right).cmp(user_key(
-            &ssts[i + 1].get_key_range().as_ref().unwrap().left,
-        )) != Ordering::Less
-        {
-            return false;
-        }
-    }
-    true
-}
-
 /// Search the SST containing the specified key within a level, using binary search.
 pub(crate) fn search_sst_idx<B>(ssts: &[&SstableInfo], key: &B) -> usize
 where
@@ -136,6 +123,66 @@ impl MemoryLimiterInner {
         self.total_size.fetch_sub(quota, AtomicOrdering::Release);
         self.notify.notify_waiters();
     }
+
+    pub fn try_require_memory(&self, quota: u64) -> bool {
+        let mut current_quota = self.total_size.load(AtomicOrdering::Acquire);
+        while current_quota + quota <= self.quota {
+            match self.total_size.compare_exchange(
+                current_quota,
+                current_quota + quota,
+                AtomicOrdering::SeqCst,
+                AtomicOrdering::SeqCst,
+            ) {
+                Ok(_) => {
+                    return true;
+                }
+                Err(old_quota) => {
+                    current_quota = old_quota;
+                }
+            }
+        }
+        false
+    }
+
+    pub async fn require_memory(&self, quota: u64) {
+        let current_quota = self.total_size.load(AtomicOrdering::Acquire);
+        if current_quota + quota <= self.quota
+            && self
+                .total_size
+                .compare_exchange(
+                    current_quota,
+                    current_quota + quota,
+                    AtomicOrdering::SeqCst,
+                    AtomicOrdering::SeqCst,
+                )
+                .is_ok()
+        {
+            // fast path.
+            return;
+        }
+        loop {
+            let notified = self.notify.notified();
+            let current_quota = self.total_size.load(AtomicOrdering::Acquire);
+            if current_quota + quota <= self.quota {
+                match self.total_size.compare_exchange(
+                    current_quota,
+                    current_quota + quota,
+                    AtomicOrdering::SeqCst,
+                    AtomicOrdering::SeqCst,
+                ) {
+                    Ok(_) => break,
+                    Err(old_quota) => {
+                        // The quota is enough but just changed by other threads. So just try to
+                        // update again without waiting notify.
+                        if old_quota + quota <= self.quota {
+                            continue;
+                        }
+                    }
+                }
+            }
+            notified.await;
+        }
+    }
 }
 
 pub struct MemoryLimiter {
@@ -150,6 +197,16 @@ pub struct MemoryTracker {
 use std::sync::atomic::Ordering as AtomicOrdering;
 
 impl MemoryLimiter {
+    pub fn unlimit() -> Arc<Self> {
+        Arc::new(Self {
+            inner: Arc::new(MemoryLimiterInner {
+                total_size: AtomicU64::new(0),
+                notify: Notify::new(),
+                quota: u64::MAX - 1,
+            }),
+        })
+    }
+
     pub fn new(quota: u64) -> Self {
         Self {
             inner: Arc::new(MemoryLimiterInner {
@@ -171,47 +228,7 @@ impl MemoryLimiter {
         if quota > self.inner.quota {
             return None;
         }
-        let current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
-        if current_quota + quota <= self.inner.quota
-            && self
-                .inner
-                .total_size
-                .compare_exchange(
-                    current_quota,
-                    current_quota + quota,
-                    AtomicOrdering::SeqCst,
-                    AtomicOrdering::SeqCst,
-                )
-                .is_ok()
-        {
-            // fast path.
-            return Some(MemoryTracker {
-                limiter: self.inner.clone(),
-                quota,
-            });
-        }
-        loop {
-            let notified = self.inner.notify.notified();
-            let current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
-            if current_quota + quota <= self.inner.quota {
-                match self.inner.total_size.compare_exchange(
-                    current_quota,
-                    current_quota + quota,
-                    AtomicOrdering::SeqCst,
-                    AtomicOrdering::SeqCst,
-                ) {
-                    Ok(_) => break,
-                    Err(old_quota) => {
-                        // The quota is enough but just changed by other threads. So just try to
-                        // update again without waiting notify.
-                        if old_quota + quota <= self.inner.quota {
-                            continue;
-                        }
-                    }
-                }
-            }
-            notified.await;
-        }
+        self.inner.require_memory(quota).await;
         Some(MemoryTracker {
             limiter: self.inner.clone(),
             quota,
@@ -223,8 +240,43 @@ impl MemoryLimiter {
     }
 }
 
+impl MemoryTracker {
+    pub fn try_increase_memory(&mut self, target: u64) -> bool {
+        if self.quota >= target {
+            return true;
+        }
+        if self.limiter.try_require_memory(target - self.quota) {
+            self.quota = target;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 impl Drop for MemoryTracker {
     fn drop(&mut self) {
         self.limiter.release_quota(self.quota);
     }
+}
+
+/// Check whether the items in `sub_iter` is a subset of the items in `full_iter`, and meanwhile
+/// preserve the order.
+pub fn check_subset_preserve_order<T: Eq>(
+    sub_iter: impl Iterator<Item = T>,
+    mut full_iter: impl Iterator<Item = T>,
+) -> bool {
+    for sub_iter_item in sub_iter {
+        let mut found = false;
+        for full_iter_item in full_iter.by_ref() {
+            if sub_iter_item == full_iter_item {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return false;
+        }
+    }
+    true
 }

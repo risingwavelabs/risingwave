@@ -6,9 +6,9 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 assert_matches = "1"
+async-recursion = "1.0.0"
 async-stream = "0.3"
 async-trait = "0.1"
-axum = "0.5"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -16,7 +16,7 @@ clap = { version = "3", features = ["derive", "env"] }
 crc32fast = "1"
 derivative = "2"
 either = "1"
-etcd-client = "0.9"
+etcd-client = { version = "0.2", package = "madsim-etcd-client" }
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -24,7 +24,6 @@ hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
-log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -39,11 +38,11 @@ risingwave_connector = { path = "../connector" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
-scopeguard = "1"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
 smallvec = "1"
+sync-point = { path = "../utils/sync-point" }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -57,9 +56,12 @@ tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
-tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
-tracing = { version = "0.1" }
+tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(not(madsim))'.dependencies]
+axum = "0.5"
+tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

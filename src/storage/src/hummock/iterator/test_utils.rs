@@ -15,8 +15,8 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
 };
@@ -73,7 +73,7 @@ pub fn iterator_test_key_of(idx: usize) -> Vec<u8> {
 }
 
 /// Generates keys like `key_test_00002` with epoch `epoch` .
-pub fn iterator_test_key_of_epoch(idx: usize, epoch: Epoch) -> Vec<u8> {
+pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> Vec<u8> {
     key_with_epoch(format!("key_test_{:05}", idx).as_bytes().to_vec(), epoch)
 }
 

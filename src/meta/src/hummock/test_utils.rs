@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -53,7 +54,7 @@ where
     let table_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_tables(epoch, table_ids);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -79,13 +80,13 @@ where
         .unwrap();
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables_2,
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
     compact_task.sorted_output_ssts = test_tables_2.clone();
-    compact_task.task_status = true;
+    compact_task.set_task_status(TaskStatus::Success);
     hummock_manager
         .report_compact_task(context_id, &compact_task)
         .await
@@ -96,7 +97,7 @@ where
     epoch += 1;
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
+        hummock_manager.compaction_group_manager(),
         &test_tables_3,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -124,6 +125,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
             }),
             file_size: 2,
             table_ids: vec![(i + 1) as u32, (i + 2) as u32],
+            meta_offset: 0,
         });
     }
     sst_info
@@ -221,7 +223,7 @@ pub async fn setup_compute_env_with_config(
 ) {
     let env = MetaSrvEnv::for_test().await;
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), Duration::from_secs(1))
+        ClusterManager::new_for_test(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );
@@ -232,7 +234,11 @@ pub async fn setup_compute_env_with_config(
             .unwrap(),
     );
 
-    let compactor_manager = Arc::new(CompactorManager::new());
+    let compactor_manager = Arc::new(
+        CompactorManager::new_with_meta(env.clone(), 1)
+            .await
+            .unwrap(),
+    );
 
     let hummock_manager = Arc::new(
         HummockManager::new(

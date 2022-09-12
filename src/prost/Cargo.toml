@@ -5,14 +5,16 @@ version = "0.1.11"
 
 [dependencies]
 bytes = "1"
-pbjson = "0.3"
+pbjson = "0.4"
 prost = "0.11"
 prost-helpers = { path = "helpers" }
 prost-types = "0.11"
 serde = { version = "1", features = ["derive"] }
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { version = "0.2.4", package = "madsim-tonic" }
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [build-dependencies]
-pbjson-build = "0.3"
+pbjson-build = "0.4"
 tonic-build = { version = "0.2", package = "madsim-tonic-build" }

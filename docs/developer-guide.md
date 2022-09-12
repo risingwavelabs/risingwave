@@ -2,9 +2,9 @@
 
 This guide is intended to be used by contributors to learn about how to develop RisingWave. The instructions about how to submit code changes are included in [contributing guidelines](../CONTRIBUTING.md).
 
-If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/singularity-data/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
+If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/risingwavelabs/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
 
-To report bugs, create a [GitHub issue](https://github.com/singularity-data/risingwave/issues/new/choose).
+To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/risingwave/issues/new/choose).
 
 
 ## Table of contents
@@ -128,7 +128,9 @@ To manually add those components into the cluster, you will need to configure Ri
 ./risedev configure enable prometheus-and-grafana # enable Prometheus and Grafana
 ./risedev configure enable minio                  # enable MinIO
 ```
-**Note**: Enabling a component with the `./risedev configure enable` command will only download the component to your environment. To allow it to function, you must revise the corresponding configuration setting in `risedev.yml` and restart the dev cluster.
+> **Note**
+>
+> Enabling a component with the `./risedev configure enable` command will only download the component to your environment. To allow it to function, you must revise the corresponding configuration setting in `risedev.yml` and restart the dev cluster.
 
 For example, you can modify the default section to:
 
@@ -147,11 +149,20 @@ For example, you can modify the default section to:
       persist-data: true
 ```
 
-**Note**: The Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
+> **Note**
+>
+> The Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
 
 Now you can run `./risedev d` to start a new dev cluster. The new dev cluster will contain components as configured in the yaml file. RiseDev will automatically configure the components to use the available storage service and to monitor the target.
 
 You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config is an example.
+
+### Configure system variables
+
+You can check `src/common/src/config.rs` to see all the configurable variables. 
+If additional variables are needed, 
+include them in the correct sections (such as `[server]` or `[storage]`) in `src/config/risingwave.toml`.
+
 
 ### Start the playground with RiseDev
 
@@ -273,7 +284,7 @@ If you want to see the coverage report, run this command:
 
 ### Planner tests
 
-RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/test_runner/README.md).
+RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/plan_test/README.md).
 
 ### End-to-end tests
 
@@ -291,10 +302,28 @@ Before running end-to-end tests, you will need to start a full cluster first:
 ./risedev d
 ```
 
-Then run the end-to-end tests (replace `**/*.slt` with the test case directories and files available):
+Then to run the end-to-end tests, you can use one of the following commands according to which component you are developing:
 
 ```shell
-./risedev slt -p 4566 -d dev  './e2e_test/streaming/**/*.slt'
+# run all streaming tests
+./risedev slt-streaming -p 4566 -d dev -j 1
+# run all batch tests
+./risedev slt-batch -p 4566 -d dev -j 1
+# run both
+./risedev slt-all -p 4566 -d dev -j 1
+```
+
+> **Note**
+>
+> Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won’t affect other tests due to table cleanups.
+
+Alternatively, you can also run some specific tests:
+
+```shell
+# run a single test
+./risedev slt -p 4566 -d dev './e2e_test/path/to/file.slt'
+# run all tests under a directory (including subdirectories)
+./risedev slt -p 4566 -d dev './e2e_test/path/to/directory/**/*.slt'
 ```
 
 After running e2e tests, you may kill the cluster and clean data.

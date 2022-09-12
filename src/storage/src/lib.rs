@@ -47,6 +47,10 @@
 #![feature(type_alias_impl_trait)]
 #![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+#![feature(assert_matches)]
+#![feature(is_sorted)]
+#![feature(btree_drain_filter)]
+
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
@@ -66,7 +70,6 @@ pub mod write_batch;
 mod storage_failpoints;
 
 pub use keyspace::Keyspace;
-extern crate test;
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 

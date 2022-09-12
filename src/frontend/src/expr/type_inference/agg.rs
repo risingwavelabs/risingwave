@@ -14,12 +14,11 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_expr::expr::AggKind;
 
 // Use AggCall to infer return type
 use super::super::AggCall;
-use super::DataTypeName;
 
 // Same as FuncSign in type_inference/func.rs except this is for aggregate function
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
@@ -37,7 +36,7 @@ impl AggFuncSigMap {
         let arity = param_types.len();
         let inputs_type = param_types.into_iter().map(Into::into).collect();
         let sig = AggFuncSig {
-            func: func.clone(),
+            func,
             inputs_type,
             ret_type,
         };
@@ -75,17 +74,22 @@ fn build_type_derive_map() -> AggFuncSigMap {
         A::Max,
         A::Count,
         A::Avg,
-        A::StringAgg,
         A::SingleValue,
         A::ApproxCountDistinct,
     ] {
         for input in all_types {
             match AggCall::infer_return_type(&agg, &[DataType::from(input)]) {
-                Ok(v) => map.insert(agg.clone(), vec![input], DataTypeName::from(v)),
+                Ok(v) => map.insert(agg, vec![input], DataTypeName::from(v)),
                 Err(_e) => continue,
             }
         }
     }
+    // Handle special case for `string_agg`, for it accepts two input arguments.
+    map.insert(
+        AggKind::StringAgg,
+        vec![DataTypeName::Varchar, DataTypeName::Varchar],
+        DataTypeName::Varchar,
+    );
     map
 }
 

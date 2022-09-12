@@ -35,9 +35,6 @@ mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
 
-mod compact_concat_iterator;
-pub use compact_concat_iterator::ConcatSstableIterator;
-
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 use crate::hummock::SstableIterator;
 
@@ -124,7 +121,7 @@ pub trait HummockIterator: Send + Sync + 'static {
     fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a>;
 
     /// take local statistic info from iterator to report metrics.
-    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
 }
 
 /// This is a placeholder trait used in `HummockIteratorUnion`
@@ -162,6 +159,8 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
     fn seek<'a>(&'a mut self, _key: &'a [u8]) -> Self::SeekFuture<'a> {
         async { unreachable!() }
     }
+
+    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
 }
 
 /// The `HummockIteratorUnion` acts like a wrapper over multiple types of `HummockIterator`, so that
@@ -262,6 +261,15 @@ impl<
             }
         }
     }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        match self {
+            First(iter) => iter.collect_local_statistic(stats),
+            Second(iter) => iter.collect_local_statistic(stats),
+            Third(iter) => iter.collect_local_statistic(stats),
+            Fourth(iter) => iter.collect_local_statistic(stats),
+        }
+    }
 }
 
 impl<I: HummockIterator> HummockIterator for Box<I> {
@@ -293,6 +301,10 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
 
     fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
         (*self).deref_mut().seek(key)
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        (*self).deref().collect_local_statistic(stats);
     }
 }
 

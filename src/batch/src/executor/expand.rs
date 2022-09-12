@@ -78,15 +78,29 @@ impl ExpandExecutor {
             yield chunk;
         }
     }
+
+    pub fn new(input: BoxedExecutor, column_subsets: Vec<Vec<usize>>) -> Self {
+        let schema = {
+            let mut fields = input.schema().clone().into_fields();
+            fields.extend(fields.clone());
+            fields.push(Field::with_name(DataType::Int64, "flag"));
+            Schema::new(fields)
+        };
+        Self {
+            column_subsets,
+            child: input,
+            schema,
+            identity: "ExpandExecutor".into(),
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for ExpandExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1);
         let expand_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Expand
@@ -104,19 +118,8 @@ impl BoxedExecutorBuilder for ExpandExecutor {
             })
             .collect_vec();
 
-        let child = inputs.remove(0);
-
-        let mut schema = child.schema().clone();
-        schema
-            .fields
-            .push(Field::with_name(DataType::Int64, "flag"));
-
-        Ok(Box::new(Self {
-            column_subsets,
-            child,
-            schema,
-            identity: "ExpandExecutor".to_string(),
-        }))
+        let [input]: [_; 1] = inputs.try_into().unwrap();
+        Ok(Box::new(Self::new(input, column_subsets)))
     }
 }
 
@@ -145,6 +148,9 @@ mod tests {
                 Field::unnamed(DataType::Int32),
                 Field::unnamed(DataType::Int32),
                 Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
                 Field::unnamed(DataType::Int64),
             ],
         };
@@ -164,11 +170,11 @@ mod tests {
         let mut stream = expand_executor.execute();
         let res = stream.next().await.unwrap().unwrap();
         let expected_chunk = DataChunk::from_pretty(
-            "i i i I
-             1 2 . 0
-             2 3 . 0
-             . 2 3 1
-             . 3 4 1",
+            "i i i i i i I
+             1 2 . 1 2 3 0
+             2 3 . 2 3 4 0
+             . 2 3 1 2 3 1
+             . 3 4 2 3 4 1",
         );
         assert_eq!(res, expected_chunk);
     }

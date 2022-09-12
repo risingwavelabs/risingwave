@@ -23,9 +23,9 @@ use crate::error::RwError;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum QueryMode {
+    #[default]
     Local,
 
-    #[default]
     Distributed,
 }
 

@@ -39,3 +39,9 @@ impl From<ProstFieldNotFound> for MetadataModelError {
         ))
     }
 }
+
+impl From<MetadataModelError> for tonic::Status {
+    fn from(e: MetadataModelError) -> Self {
+        tonic::Status::new(tonic::Code::Internal, format!("{}", e))
+    }
+}

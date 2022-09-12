@@ -15,12 +15,12 @@
 use std::fmt::Debug;
 
 use bytes::Bytes;
-use log::error;
 use risingwave_common::bail;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::{Keyspace, StateStore};
+use tracing::error;
 
 use crate::executor::StreamExecutorResult;
 
@@ -63,17 +63,16 @@ impl<S: StateStore> SourceStateHandler<S> {
             // TODO should be a clear Error Code
             bail!("states require not null");
         } else {
-            let mut write_batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local_batch = self.keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: self.keyspace.table_id(),
             });
-            let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
                 let value = state.encode_to_bytes();
-                local_batch.put(state.id().as_str(), StorageValue::new_default_put(value));
+                local_batch.put(&*state.id(), StorageValue::new_default_put(value));
             });
             // If an error is returned, the underlying state should be rollback
-            write_batch.ingest().await.inspect_err(|e| {
+            local_batch.ingest().await.inspect_err(|e| {
                 error!(
                     "SourceStateHandler take_snapshot() batch.ingest Error,cause by {:?}",
                     e
@@ -95,7 +94,7 @@ impl<S: StateStore> SourceStateHandler<S> {
     ) -> StreamExecutorResult<Option<Bytes>> {
         self.keyspace
             .get(
-                state_identifier.as_str(),
+                &*state_identifier,
                 true,
                 ReadOptions {
                     epoch,
@@ -226,7 +225,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_state_restore() {
-        let partition = SplitId::new("p01".into());
+        let partition = "p01".into();
         let state_store_handler = SourceStateHandler::new(new_test_keyspace());
         let list_states = state_store_handler
             .restore_states(partition, u64::MAX)

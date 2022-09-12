@@ -70,8 +70,8 @@ impl RandValue for IntervalUnit {
 
 impl RandValue for NaiveDateWrapper {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        let max_day = chrono::MAX_DATE.num_days_from_ce();
-        let min_day = chrono::MIN_DATE.num_days_from_ce();
+        let max_day = chrono::Date::<chrono::Utc>::MAX_UTC.num_days_from_ce();
+        let min_day = chrono::Date::<chrono::Utc>::MIN_UTC.num_days_from_ce();
         let days = rand.gen_range(min_day..=max_day);
         NaiveDateWrapper::with_days(days).unwrap()
     }

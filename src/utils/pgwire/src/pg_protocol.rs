@@ -21,14 +21,15 @@ use std::{str, vec};
 
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tracing::log::trace;
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
-    BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCloseMessage,
-    FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage, FePasswordMessage,
-    FeStartupMessage,
+    BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
+    FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
+    FePasswordMessage, FeStartupMessage,
 };
 use crate::pg_response::PgResponse;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
@@ -49,8 +50,8 @@ where
     session_mgr: Arc<SM>,
     session: Option<Arc<SM::Session>>,
 
-    unnamed_statement: PgStatement,
-    unnamed_portal: PgPortal,
+    unnamed_statement: Option<PgStatement>,
+    unnamed_portal: Option<PgPortal>,
     named_statements: HashMap<String, PgStatement>,
     named_portals: HashMap<String, PgPortal>,
 }
@@ -88,8 +89,8 @@ where
             state: PgProtocolState::Startup,
             session_mgr,
             session: None,
-            unnamed_statement: Default::default(),
-            unnamed_portal: Default::default(),
+            unnamed_statement: None,
+            unnamed_portal: None,
             named_statements: Default::default(),
             named_portals: Default::default(),
         }
@@ -111,6 +112,7 @@ where
                 match e {
                     PsqlError::SslError(io_err) | PsqlError::IoError(io_err) => {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
+                            tracing::error!("{}", error_msg);
                             return true;
                         }
                     }
@@ -124,6 +126,7 @@ where
 
                     PsqlError::ReadMsgError(io_err) => {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
+                            tracing::error!("{}", error_msg);
                             return true;
                         }
                         self.stream
@@ -141,13 +144,16 @@ where
                     | PsqlError::DescribeError(_)
                     | PsqlError::ParseError(_)
                     | PsqlError::BindError(_)
-                    | PsqlError::ExecuteError(_) => {
+                    | PsqlError::ExecuteError(_)
+                    | PsqlError::CancelNotFound => {
                         self.stream
                             .write_for_error(&BeMessage::ErrorResponse(Box::new(e)));
                     }
 
                     // Never reach this.
-                    PsqlError::CancelMsg(_) => todo!(),
+                    PsqlError::CancelMsg(_) => {
+                        todo!("Support processing cancel query")
+                    }
                 }
                 self.stream.flush_for_error().await;
                 tracing::error!("{}", error_msg);
@@ -163,7 +169,7 @@ where
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg)?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
-            FeMessage::CancelQuery => self.process_cancel_msg()?,
+            FeMessage::CancelQuery(m) => self.process_cancel_msg(m).await?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => self.process_parse_msg(m).await?,
             FeMessage::Bind(m) => self.process_bind_msg(m).await?,
@@ -212,6 +218,13 @@ where
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationOk)
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
+
+                // Cancel request need this for identify and verification. According to postgres
+                // doc, it should be written to buffer after receive AuthenticationOk.
+                // let id = self.session_mgr.insert_session(session.clone());
+                self.stream
+                    .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
+
                 self.stream
                     .write_parameter_status_msg_no_flush()
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
@@ -256,9 +269,16 @@ where
         Ok(())
     }
 
-    fn process_cancel_msg(&mut self) -> PsqlResult<()> {
-        self.stream
-            .write_no_flush(&BeMessage::ErrorResponse(Box::new(PsqlError::cancel())))?;
+    async fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
+        let session = self
+            .session_mgr
+            .connect_for_cancel(m.target_process_id, m.target_secret_key)?;
+        self.session = Some(session);
+        // TODO: Abort running query in `QueryManager`.
+        let session = self.session.clone().unwrap();
+        session.cancel_running_queries().await;
+        self.session = None;
+        self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         Ok(())
     }
 
@@ -299,10 +319,10 @@ where
         tracing::trace!("(extended query)parse query: {}", sql);
         // 1. Create the types description.
         let type_ids = msg.type_ids;
-        let types: Vec<TypeOid> = type_ids
-            .into_iter()
-            .map(|x| TypeOid::as_type(x).unwrap())
-            .collect();
+        let mut types: Vec<TypeOid> = Vec::with_capacity(type_ids.len());
+        for x in type_ids {
+            types.push(TypeOid::as_type(x).map_err(|e| PsqlError::ParseError(Box::new(e)))?);
+        }
 
         // Flag indicate whether statement is a query statement.
         let is_query_sql = {
@@ -323,25 +343,48 @@ where
                     .await
                     .map_err(PsqlError::ParseError)?
             } else {
-                sql.split(&[' ', ',', ';'])
+                // Process the statement with params.
+                // For now, we can only process the statement type like this e.g. 'select
+                // $1,$2,$3...'. The following process only consider statement as
+                // 'select $1,$2,$3...'.
+
+                // Get the generic params e.g. [$1,$2,$3]
+                let generic_params: Vec<&str> = sql
+                    .split(&[' ', ',', ';'])
                     .skip(1)
                     .into_iter()
                     .take_while(|x| !x.is_empty())
-                    .map(|x| {
-                        // NOTE: Assume all output are generic params.
-                        let str = x.strip_prefix('$').unwrap();
-                        // NOTE: Assume all generic are valid.
-                        let v: i32 = str.parse().unwrap();
-                        assert!(v.is_positive());
-                        v
-                    })
-                    .map(|x| {
-                        // NOTE Make sure the type_description include all generic parameter
-                        // description we needed.
-                        assert!(((x - 1) as usize) < types.len());
-                        PgFieldDescriptor::new(String::new(), types[(x - 1) as usize].to_owned())
-                    })
-                    .collect()
+                    .collect();
+
+                // Strip the '$' from the generic params e.g. [1,2,3]
+                let mut idx = Vec::with_capacity(generic_params.len());
+                for x in generic_params.iter() {
+                    // NOTE: Assume all output are generic params.
+                    let str = x
+                        .strip_prefix('$')
+                        .ok_or_else(|| PsqlError::ParseError("Invalid generic param".into()))?;
+                    // NOTE: Assume all generic are valid.
+                    let v: i32 = str
+                        .parse()
+                        .map_err(|e| PsqlError::ParseError(Box::new(e)))?;
+                    if !v.is_positive() {
+                        return Err(PsqlError::ParseError("Invalid generic param".into()));
+                    }
+                    idx.push(v);
+                }
+
+                // Create the PgFieldDescriptor according the type of generic params.
+                let mut res = Vec::with_capacity(idx.len());
+                for x in idx.iter() {
+                    if ((x - 1) as usize) >= types.len() {
+                        return Err(PsqlError::ParseError("Invalid generic param".into()));
+                    }
+                    res.push(PgFieldDescriptor::new(
+                        String::new(),
+                        types[(x - 1) as usize].to_owned(),
+                    ));
+                }
+                res
             }
         } else {
             vec![]
@@ -358,7 +401,7 @@ where
         // 4. Insert the statement.
         let name = statement.name();
         if name.is_empty() {
-            self.unnamed_statement = statement;
+            self.unnamed_statement.replace(statement);
         } else {
             self.named_statements.insert(name, statement);
         }
@@ -369,13 +412,18 @@ where
     async fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         // 1. Get statement.
+        trace!(
+            "(extended query)bind: get statement name: {}",
+            &statement_name
+        );
         let statement = if statement_name.is_empty() {
-            &self.unnamed_statement
+            self.unnamed_statement
+                .as_ref()
+                .ok_or_else(PsqlError::no_statement_in_bind)?
         } else {
-            // NOTE Error handle method may need to modified.
-            // Postgresql doc needs write ErrorResponse if name not found. We may revisit
-            // this part if needed.
-            self.named_statements.get(&statement_name).expect("statement_name managed by client_driver, hence assume statement name always valid.")
+            self.named_statements
+                .get(&statement_name)
+                .ok_or_else(PsqlError::no_statement_in_bind)?
         };
 
         // 2. Instance the statement to get the portal.
@@ -388,11 +436,11 @@ where
                 msg.result_format_code,
             )
             .await
-            .unwrap();
+            .map_err(|_| PsqlError::BindError("Failed to instance statement".into()))?;
 
         // 3. Insert the Portal.
         if portal_name.is_empty() {
-            self.unnamed_portal = portal;
+            self.unnamed_portal.replace(portal);
         } else {
             self.named_portals.insert(portal_name, portal);
         }
@@ -404,12 +452,14 @@ where
         // 1. Get portal.
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         let portal = if msg.portal_name.is_empty() {
-            &mut self.unnamed_portal
+            self.unnamed_portal
+                .as_mut()
+                .ok_or_else(PsqlError::no_portal_in_execute)?
         } else {
             // NOTE Error handle need modify later.
-            self.named_portals.get_mut(&portal_name).expect(
-                "portal_name managed by client_driver, hence assume portal name always valid",
-            )
+            self.named_portals
+                .get_mut(&portal_name)
+                .ok_or_else(PsqlError::no_portal_in_execute)?
         };
 
         tracing::trace!(
@@ -449,12 +499,14 @@ where
         if msg.kind == b'S' {
             let name = cstr_to_str(&msg.name).unwrap().to_string();
             let statement = if name.is_empty() {
-                &self.unnamed_statement
+                self.unnamed_statement
+                    .as_ref()
+                    .ok_or_else(PsqlError::no_statement_in_describe)?
             } else {
                 // NOTE Error handle need modify later.
                 self.named_statements
                     .get(&name)
-                    .ok_or_else(|| PsqlError::DescribeError("statement isn't exist".to_string()))?
+                    .ok_or_else(PsqlError::no_statement_in_describe)?
             };
 
             // 1. Send parameter description.
@@ -469,12 +521,14 @@ where
         } else if msg.kind == b'P' {
             let name = cstr_to_str(&msg.name).unwrap().to_string();
             let portal = if name.is_empty() {
-                &self.unnamed_portal
+                self.unnamed_portal
+                    .as_ref()
+                    .ok_or_else(PsqlError::no_portal_in_describe)?
             } else {
                 // NOTE Error handle need modify later.
                 self.named_portals
                     .get(&name)
-                    .ok_or_else(|| PsqlError::DescribeError("portal isn't exist".to_string()))?
+                    .ok_or_else(PsqlError::no_portal_in_describe)?
             };
 
             // 3. Send row description.
@@ -575,7 +629,7 @@ where
     }
 
     // The following functions are used to response something error to client.
-    // The write() interface of this kind of message must be send sucesssfully or "unwrap" when it
+    // The write() interface of this kind of message must be send successfully or "unwrap" when it
     // failed. Hence we can dirtyly unwrap write_message_no_flush, it must return Ok(),
     // otherwise system will panic and it never return.
     fn write_for_error(&mut self, message: &BeMessage<'_>) {

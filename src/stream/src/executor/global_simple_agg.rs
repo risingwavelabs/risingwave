@@ -19,15 +19,14 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
 use super::*;
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
-    agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
+    generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
@@ -48,6 +47,7 @@ use crate::executor::{BoxedMessageStream, Message, PkIndices};
 pub struct GlobalSimpleAggExecutor<S: StateStore> {
     input: Box<dyn Executor>,
     info: ExecutorInfo,
+    ctx: ActorContextRef,
 
     /// Pk indices from input
     input_pk_indices: Vec<usize>,
@@ -64,7 +64,7 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     agg_calls: Vec<AggCall>,
 
     /// Relational state tables for each aggregation calls.
-    state_tables: Vec<RowBasedStateTable<S>>,
+    state_tables: Vec<StateTable<S>>,
 
     /// State table column mappings for each aggregation calls,
     state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
@@ -90,22 +90,24 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
 
 impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     pub fn new(
+        ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-        mut state_tables: Vec<RowBasedStateTable<S>>,
+        mut state_tables: Vec<StateTable<S>>,
         state_table_col_mappings: Vec<Vec<usize>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
 
-        // TODO: enable sanity check for globle simple agg executor <https://github.com/singularity-data/risingwave/issues/3885>
+        // // TODO: enable sanity check for globle simple agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
         for state_table in &mut state_tables {
             state_table.disable_sanity_check();
         }
 
         Ok(Self {
+            ctx,
             input,
             info: ExecutorInfo {
                 schema,
@@ -127,30 +129,20 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
     #[allow(clippy::too_many_arguments)]
     async fn apply_chunk(
+        ctx: &ActorContextRef,
+        identity: &str,
         agg_calls: &[AggCall],
         input_pk_indices: &[usize],
         _input_schema: &Schema,
         states: &mut Option<AggState<S>>,
         chunk: StreamChunk,
         epoch: u64,
-        state_tables: &mut [RowBasedStateTable<S>],
+        state_tables: &mut [StateTable<S>],
         state_table_col_mappings: &[Arc<StateTableColumnMapping>],
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
-
-        // --- Retrieve all aggregation inputs in advance ---
-        let all_agg_input_arrays = agg_input_array_refs(agg_calls, &columns);
-        let pk_input_arrays = pk_input_array_refs(input_pk_indices, &columns);
-
-        // When applying batch, we will send columns of primary keys to the last N columns.
-        let all_agg_data = all_agg_input_arrays
-            .into_iter()
-            .map(|mut input_arrays| {
-                input_arrays.extend(pk_input_arrays.iter());
-                input_arrays
-            })
-            .collect_vec();
+        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
 
         // 1. Retrieve previous state from the KeyedState. If they didn't exist, the ManagedState
         // will automatically create new ones for them.
@@ -172,28 +164,23 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         states.may_mark_as_dirty(epoch, state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for (((agg_state, agg_call), data), state_table) in states
+        for ((agg_state, agg_call), state_table) in states
             .managed_states
             .iter_mut()
             .zip_eq(agg_calls.iter())
-            .zip_eq(all_agg_data.iter())
             .zip_eq(state_tables.iter_mut())
         {
-            let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
-            // TODO(yuchao): make this work for all agg kinds in later PR
-            if matches!(agg_call.kind, AggKind::StringAgg)
-                || (matches!(agg_call.kind, AggKind::Min | AggKind::Max) && !agg_call.append_only)
-            {
-                let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
-                agg_state
-                    .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
-                    .await?;
-            } else {
-                // TODO(yuchao): Pass all the columns to apply_batch for other agg calls, #4185
-                agg_state
-                    .apply_batch(&ops, vis_map.as_ref(), data, epoch, state_table)
-                    .await?;
-            }
+            let vis_map = agg_call_filter_res(
+                ctx,
+                identity,
+                agg_call,
+                &columns,
+                visibility.as_ref(),
+                capacity,
+            )?;
+            agg_state
+                .apply_chunk(&ops, vis_map.as_ref(), &column_refs, epoch, state_table)
+                .await?;
         }
 
         Ok(())
@@ -203,7 +190,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         schema: &Schema,
         states: &mut Option<AggState<S>>,
         epoch: u64,
-        state_tables: &mut [RowBasedStateTable<S>],
+        state_tables: &mut [StateTable<S>],
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
@@ -251,6 +238,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let GlobalSimpleAggExecutor {
+            ctx,
             input,
             info,
             input_pk_indices,
@@ -272,6 +260,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             match msg {
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(
+                        &ctx,
+                        &info.identity,
                         &agg_calls,
                         &input_pk_indices,
                         &input_schema,
@@ -384,6 +374,7 @@ mod tests {
         ];
 
         let simple_agg = new_boxed_simple_agg_executor(
+            ActorContext::create(123),
             keyspace.clone(),
             Box::new(source),
             agg_calls,
