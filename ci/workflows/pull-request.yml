@@ -98,6 +98,7 @@ steps:
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
     depends_on: "build"
     plugins:
+      - ./ci/plugins/benchmark
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: sink-build-env

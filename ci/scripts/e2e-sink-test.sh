@@ -3,6 +3,8 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+export HOST_IP=$(dig +short myip.opendns.com @resolver1.opendns.com)
+
 source ci/scripts/common.env.sh
 
 while getopts 'p:' opt; do
@@ -21,6 +23,8 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+echo $HOST_IP
+
 echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-"$profile" target/debug/
@@ -38,15 +42,6 @@ cp ci/risedev-components.ci.env risedev-components.user.env
 echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
 cargo make link-all-in-one-binaries
-
-echo "debug"
-cat /etc/hosts
-whoami
-apt install sudo -y
-usermod -aG sudo root
-apt install ufw -y
-sudo -i ufw status verbose
-
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
 cargo make clean-data
