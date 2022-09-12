@@ -65,13 +65,13 @@ services:
 
   mysql:
     image: mysql/mysql-server:8.0
-    container_name: mysql
     ports:
       - '23306:3306'
     environment:
-      - MYSQL_ALLOW_EMPTY_PASSWORD=true
-      - MYSQL_ROOT_HOST=%
-      - MYSQL_DATABASE=test
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: mysql
+      MYSQL_PASSWORD: mysql
+      MYSQL_DATABASE: test
     healthcheck:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
