@@ -711,3 +711,38 @@ async fn test_state_table_iter_with_prefix() {
     let res = iter.next().await;
     assert!(res.is_none());
 }
+
+#[tokio::test]
+#[should_panic]
+async fn test_mem_table_assertion() {
+    let state_store = MemoryStateStore::new();
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
+    ];
+    let order_types = vec![OrderType::Ascending];
+    let pk_index = vec![0_usize];
+    let mut state_table = StateTable::new_without_distribution(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs,
+        order_types,
+        pk_index,
+    );
+    state_table
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
+        .unwrap();
+    // duplicate key: 1
+    state_table
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
+        .unwrap();
+}
