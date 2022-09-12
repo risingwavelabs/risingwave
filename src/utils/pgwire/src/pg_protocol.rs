@@ -435,8 +435,7 @@ where
                 &msg.params,
                 msg.result_format_code,
             )
-            .await
-            .map_err(|_| PsqlError::BindError("Failed to instance statement".into()))?;
+            .await?;
 
         // 3. Insert the Portal.
         if portal_name.is_empty() {
@@ -492,7 +491,6 @@ where
     }
 
     async fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
-        // m.kind indicates the Describe type:
         //  b'S' => Statement
         //  b'P' => Portal
         assert!(msg.kind == b'S' || msg.kind == b'P');

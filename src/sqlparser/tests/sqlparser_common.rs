@@ -3359,9 +3359,6 @@ fn parse_start_transaction() {
     }
 
     verified_stmt("START TRANSACTION");
-    one_statement_parses_to("BEGIN", "START TRANSACTION");
-    one_statement_parses_to("BEGIN WORK", "START TRANSACTION");
-    one_statement_parses_to("BEGIN TRANSACTION", "START TRANSACTION");
 
     verified_stmt("START TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
     verified_stmt("START TRANSACTION ISOLATION LEVEL READ COMMITTED");
@@ -3396,6 +3393,13 @@ fn parse_start_transaction() {
         ParserError::ParserError("Expected transaction mode, found: EOF".to_string()),
         res.unwrap_err()
     );
+}
+
+#[test]
+fn parse_begin() {
+    one_statement_parses_to("BEGIN", "BEGIN");
+    one_statement_parses_to("BEGIN WORK", "BEGIN");
+    one_statement_parses_to("BEGIN TRANSACTION", "BEGIN");
 }
 
 #[test]
