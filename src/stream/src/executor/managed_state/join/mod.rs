@@ -465,8 +465,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
         // If no cache maintained, only update the flush buffer.
         let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
-        self.state.table.insert(row)?;
-        self.degree_state.table.insert(degree)?;
+        self.state.table.insert(row);
+        self.degree_state.table.insert(degree);
         Ok(())
     }
 
@@ -481,7 +481,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             entry.insert(pk, join_row.encode());
         }
         // If no cache maintained, only update the state table.
-        self.state.table.insert(value)?;
+        self.state.table.insert(value);
         Ok(())
     }
 
@@ -496,8 +496,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         // If no cache maintained, only update the state table.
         let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
-        self.state.table.delete(row)?;
-        self.degree_state.table.delete(degree)?;
+        self.state.table.delete(row);
+        self.degree_state.table.delete(degree);
         Ok(())
     }
 
@@ -511,7 +511,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
 
         // If no cache maintained, only update the state table.
-        self.state.table.delete(value)?;
+        self.state.table.delete(value);
         Ok(())
     }
 
@@ -527,7 +527,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let new_degree = join_row
             .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
 
-        self.degree_state.table.update(old_degree, new_degree)?;
+        self.degree_state.table.update(old_degree, new_degree);
         Ok(())
     }
 
@@ -538,7 +538,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let new_degree = join_row
             .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
 
-        self.degree_state.table.update(old_degree, new_degree)?;
+        self.degree_state.table.update(old_degree, new_degree);
         Ok(())
     }
 

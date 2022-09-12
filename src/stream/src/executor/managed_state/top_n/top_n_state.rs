@@ -55,12 +55,12 @@ impl<S: StateStore> ManagedTopNState<S> {
     }
 
     pub fn insert(&mut self, _key: OrderedRow, value: Row) -> StreamExecutorResult<()> {
-        self.state_table.insert(value)?;
+        self.state_table.insert(value);
         Ok(())
     }
 
     pub fn delete(&mut self, _key: &OrderedRow, value: Row) -> StreamExecutorResult<()> {
-        self.state_table.delete(value)?;
+        self.state_table.delete(value);
         Ok(())
     }
 

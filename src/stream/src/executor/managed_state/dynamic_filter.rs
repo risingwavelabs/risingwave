@@ -72,7 +72,7 @@ impl<S: StateStore> RangeCache<S> {
             let entry = self.cache.entry(k).or_insert_with(HashSet::new);
             entry.insert(v.clone());
         }
-        self.state_table.insert(v)?;
+        self.state_table.insert(v);
         Ok(())
     }
 
@@ -92,7 +92,7 @@ impl<S: StateStore> RangeCache<S> {
                 )));
             };
         }
-        self.state_table.delete(v)?;
+        self.state_table.delete(v);
         Ok(())
     }
 
