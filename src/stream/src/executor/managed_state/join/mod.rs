@@ -104,7 +104,7 @@ impl JoinRow {
 
     pub fn encode(&self) -> StreamExecutorResult<EncodedJoinRow> {
         Ok(EncodedJoinRow {
-            row: self.row.serialize()?,
+            row: self.row.serialize(),
             degree: self.degree,
         })
     }
