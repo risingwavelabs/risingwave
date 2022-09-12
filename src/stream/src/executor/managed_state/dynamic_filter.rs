@@ -78,6 +78,7 @@ impl<S: StateStore> RangeCache<S> {
 
     /// Delete a row and corresponding scalar value key from cache (if within range) and
     /// `StateTable`.
+    // FIXME: panic instead of returning Err
     pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if self.range.contains(k) {
             let contains_element = self

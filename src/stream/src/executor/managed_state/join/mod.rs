@@ -456,7 +456,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a join row
-    pub fn insert(&mut self, key: &K, value: JoinRow) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, key: &K, value: JoinRow) {
         if let Some(entry) = self.inner.get_mut(key) {
             let pk = value
                 .row
@@ -467,12 +467,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
         self.state.table.insert(row);
         self.degree_state.table.insert(degree);
-        Ok(())
     }
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
-    pub fn insert_row(&mut self, key: &K, value: Row) -> StreamExecutorResult<()> {
+    pub fn insert_row(&mut self, key: &K, value: Row) {
         let join_row = JoinRow::new(value.clone(), 0);
 
         if let Some(entry) = self.inner.get_mut(key) {
@@ -482,11 +481,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
         // If no cache maintained, only update the state table.
         self.state.table.insert(value);
-        Ok(())
     }
 
     /// Delete a join row
-    pub fn delete(&mut self, key: &K, value: JoinRow) -> StreamExecutorResult<()> {
+    pub fn delete(&mut self, key: &K, value: JoinRow) {
         if let Some(entry) = self.inner.get_mut(key) {
             let pk = value
                 .row
@@ -498,12 +496,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
         self.state.table.delete(row);
         self.degree_state.table.delete(degree);
-        Ok(())
     }
 
     /// Delete a row
     /// Used when the side does not need to update degree.
-    pub fn delete_row(&mut self, key: &K, value: Row) -> StreamExecutorResult<()> {
+    pub fn delete_row(&mut self, key: &K, value: Row) {
         if let Some(entry) = self.inner.get_mut(key) {
             let pk =
                 value.extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
@@ -512,7 +509,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         // If no cache maintained, only update the state table.
         self.state.table.delete(value);
-        Ok(())
     }
 
     /// Insert a [`JoinEntryState`]
