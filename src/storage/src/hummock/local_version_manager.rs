@@ -35,7 +35,7 @@ use risingwave_pb::hummock::{pin_version_response, HummockVersion};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::jitter;
 use tracing::{error, info};
@@ -155,8 +155,6 @@ pub struct LocalVersionManager {
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
-    // notify when ever the shared buffer of some epochs moved to `sync_uncommitted_data`
-    shared_buffer_sync_notify: Notify,
 }
 
 impl LocalVersionManager {
@@ -207,7 +205,6 @@ impl LocalVersionManager {
                 filter_key_extractor_manager,
             )),
             sstable_id_manager,
-            shared_buffer_sync_notify: Notify::new(),
         });
 
         // Unpin unused version.
@@ -513,43 +510,27 @@ impl LocalVersionManager {
     }
 
     /// Sync all shared buffer that less than or equal to the `epoch`.
-    async fn sync_shared_buffer_epochs(
+    async fn sync_shared_buffer_le_epoch(
         &self,
-        epoch: HummockEpoch,
+        new_sync_epoch: HummockEpoch,
         prev_max_sync_epoch: HummockEpoch,
     ) -> HummockResult<SyncResult> {
-        loop {
-            let notify = self.shared_buffer_sync_notify.notified();
-            if let Some(min_epoch) = {
-                let min_epoch = self.local_version.read().get_min_shared_buffer_epoch();
-                min_epoch
-            } {
-                // We wait for some concurrent `sync` calls for older epochs to move their shared
-                // buffer first.
-                if min_epoch <= prev_max_sync_epoch {
-                    notify.await;
-                    continue;
-                }
-            }
-            break;
-        }
         // Get epochs that less than epoch and add to sync_uncommitted_data, we must keep the write
         // lock.
         let (task_payload, sync_size) =
-            { self.local_version.write().start_syncing(epochs.clone()) };
+            { self.local_version.write().start_syncing(new_sync_epoch) };
         let uncommitted_ssts = self
-            .run_sync_upload_task(task_payload, epochs.clone(), new_sync_epoch)
+            .run_sync_upload_task(task_payload, new_sync_epoch, prev_max_sync_epoch)
             .await?;
         tracing::info!(
             "sync epoch {} finished. Task size {}",
             new_sync_epoch,
             sync_size
         );
-        if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector.archive_epoch(epochs.clone());
-        }
-        self.buffer_tracker
-            .send_event(SharedBufferEvent::EpochSynced(epochs));
+        // TODO: re-enable it when conflict detector has enough information to do conflict detection
+        // if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
+        //     conflict_detector.archive_epoch(epochs.clone());
+        // }
         Ok(SyncResult {
             sync_size,
             uncommitted_ssts,
@@ -560,16 +541,14 @@ impl LocalVersionManager {
     pub async fn run_sync_upload_task(
         &self,
         task_payload: UploadTaskPayload,
-        epochs: Vec<HummockEpoch>,
         epoch: HummockEpoch,
+        prev_max_sync_epoch: HummockEpoch,
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         let ssts = self
             .shared_buffer_uploader
-            .flush(task_payload, *epochs.last().unwrap(), epoch)
+            .flush(task_payload, prev_max_sync_epoch, epoch) // set watermark to be MIN so that all epoch will be written
             .await?;
-        self.local_version
-            .write()
-            .data_synced(epochs.clone(), ssts.clone());
+        self.local_version.write().data_synced(epoch, ssts.clone());
         Ok(ssts)
     }
 
