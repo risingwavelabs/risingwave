@@ -1,11 +1,14 @@
 include ../nexmark/create_tables.slt.part
 
+# First, insert the data into the tables
 include ../nexmark/insert_person.slt.part
 include ../nexmark/insert_auction.slt.part
 include ../nexmark/insert_bid.slt.part
 
+# Then, create materialized views based on the historical data (snapshot)
 include ./nexmark/create_views.slt.part
 
+# Test each query
 include ./nexmark/q0.slt.part
 include ./nexmark/q1.slt.part
 include ./nexmark/q2.slt.part
