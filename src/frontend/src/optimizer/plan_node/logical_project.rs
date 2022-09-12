@@ -369,9 +369,16 @@ impl PredicatePushdown for LogicalProject {
 
 impl ToBatch for LogicalProject {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
+        self.to_batch_with_order_required(&Order::any())
+    }
+
+    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+        let input_order = self
+            .o2i_col_mapping()
+            .rewrite_provided_order(required_order);
+        let new_input = self.input().to_batch_with_order_required(&input_order)?;
         let new_logical = self.clone_with_input(new_input.clone());
-        if let Some(input_proj) = new_input.as_batch_project() {
+        let batch_project = if let Some(input_proj) = new_input.as_batch_project() {
             let outer_project = new_logical;
             let inner_project = input_proj.as_logical();
             let mut subst = Substitute {
@@ -383,10 +390,11 @@ impl ToBatch for LogicalProject {
                 .cloned()
                 .map(|expr| subst.rewrite_expr(expr))
                 .collect();
-            Ok(BatchProject::new(LogicalProject::new(inner_project.input(), exprs)).into())
+            BatchProject::new(LogicalProject::new(inner_project.input(), exprs))
         } else {
-            Ok(BatchProject::new(new_logical).into())
-        }
+            BatchProject::new(new_logical)
+        };
+        required_order.enforce_if_not_satisfies(batch_project.into())
     }
 }
 

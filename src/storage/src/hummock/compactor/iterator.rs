@@ -212,7 +212,7 @@ impl ConcatSstableIterator {
         if idx < self.tables.len() {
             let table = self
                 .sstable_store
-                .sstable(self.tables[idx].id, &mut self.stats)
+                .sstable(&self.tables[idx], &mut self.stats)
                 .await?;
             let block_metas = &table.value().meta.block_metas;
 

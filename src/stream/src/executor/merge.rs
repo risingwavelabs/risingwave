@@ -15,7 +15,7 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::Context as _;
+use anyhow::anyhow;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
@@ -147,7 +147,7 @@ impl MergeExecutor {
                                 )
                             })
                             .try_collect()
-                            .context("failed to create upstream receivers")?;
+                            .map_err(|e| anyhow!("failed to create upstream receivers: {e}"))?;
 
                         // Poll the first barrier from the new upstreams. It must be the same as the
                         // one we polled from original upstreams.
