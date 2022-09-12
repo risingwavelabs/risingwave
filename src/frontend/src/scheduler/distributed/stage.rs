@@ -255,8 +255,8 @@ impl StageExecution {
 }
 
 impl StageRunner {
-    async fn run(mut self, shutdown_tx: oneshot::Receiver<StageMessage>) {
-        if let Err(e) = self.schedule_tasks(shutdown_tx).await {
+    async fn run(mut self, shutdown_rx: oneshot::Receiver<StageMessage>) {
+        if let Err(e) = self.schedule_tasks(shutdown_rx).await {
             error!(
                 "Stage {:?}-{:?} failed to schedule tasks, error: {:?}",
                 self.stage.query_id, self.stage.id, e
@@ -281,7 +281,7 @@ impl StageRunner {
     /// task is created, it should tell `QueryRunner` to schedule next.
     async fn schedule_tasks(
         &mut self,
-        shutdown_tx: oneshot::Receiver<StageMessage>,
+        shutdown_rx: oneshot::Receiver<StageMessage>,
     ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
@@ -334,13 +334,13 @@ impl StageRunner {
         // Process the stream until finished.
         let mut running_task_cnt = 0;
         let mut sent_signal_to_next = false;
-        let mut shutdown_tx = shutdown_tx;
+        let mut shutdown_rx = shutdown_rx;
         // This loop will stops once receive a stop message, otherwise keep processing status
         // message.
         loop {
             tokio::select! {
                     biased;
-                    _ = &mut shutdown_tx => {
+                    _ = &mut shutdown_rx => {
                     // Received shutdown signal from query runner, should send abort RPC to all CNs.
                     // change state to aborted. Note that the task cancel can only happen after schedule all these tasks to CN.
                     // This can be an optimization for future: How to stop before schedule tasks.
