@@ -1,4 +1,7 @@
-query TTII rowsort
+# Convert 'statement ok' below into 'query TTII rowsort' onse UPDATE parsing works.
+
+# query TTII rowsort
+statement ok
 select	 i_name,
          substr(i_data, 1, 3) as brand,
          i_price,
@@ -12,104 +15,105 @@ where	 i_id = st_i_id
                 where s_comment like '%bad%'))
 group by i_name, substr(i_data, 1, 3), i_price
 order by supplier_cnt desc;
-----
-00R R24yPmkkgL6L 6m4 L i 26.24 1
-00R4wRkR0LL04R4P060L6B06 006 16.81 1
-06wy wk22RNywgg0R 4gP 83.83 1
-0B4R wgm Rw0 BmNy4 Lyy 46.94 1
-0BNL202wNmg4BPyi 0im 56.59 1
-0NP2 ww6BR4mmiwP46P4L ik2 19.61 1
-0Nk0y46NgyLgRLNNk6 gwi 11.59 1
-0Nw24w4L4RNwmg02yNB42LLL P6i 80.83 1
-0gNLB6220yLLwRkB46LNRmg B4g 84.03 1
-0kP6k0igRPmgkm iBB 49.62 1
-0kRw2kPLRky42P2kLLiw 0Nm 84.56 1
-2L0w22wy k 2626BB m6N 42.18 1
-2LmP2Rwiki0gRw g 4 73.27 1
-2Nkkg46B0B0i 4N L BRi 16.17 1
-2P4 Nykmi N6RkgR0 Bw4 67.21 1
-2PmRPPLm yLi6wPm i kNy 76.47 1
-2RmPRyi2my0mNm yNP 30.4 1
-2y244Pg w6LiRPPBg 6kg 64 70.27 1
-4Bwkyyky220NPmR2Bw0 P2y 53.61 1
-4iLi20wi4y2iNwmBN4NiL 6wR 91.18 1
-4iiNR mPyi 4 k0 70.29 1
-4kkP6LNNPk0i22L2gmi2B N4L 8.95 1
-4y 664262R2LLPw606 NP4 88.2 1
-4yiBgmyw 6NRP4i2 406P LBP 69.67 1
-4ym RgPkP0Lmi24N4LBiLP4 22 97.57 1
-6Ni4P2wgy40wmy6g Lm4yw 2k0 77.25 1
-B44imm6Bi4Rw NN 2OR 22.67 1
-BNN0RwL2N6 iikRg6Py2B wR4 59.31 1
-BNR06R6wkNy64By0i 4 kBB 82.1 1
-BNyNPR62my6P2 4LmBm Nky 98.67 1
-Bg6Lw4 NLmi imPmkwwyP6PB NBN 90.06 1
-BkL66L20kg iBB0LN i26 22.31 1
-BwiLy2BwL4gBgiNL0y0 yy k4P 98.65 1
-LLy02gLB0m6PiN2B0BLm40P m4P 84.14 1
-LN4L4R2PN0wyBkBy 2k4 69.23 1
-LNmwmiP 4y0B0kRw6 L02 8.91 1
-Li2RBiyBR 6RBk2wm0 26L 94.77 1
-LiNN2k0NyBP66gLmy RPw 70.12 1
-Lmk66N4Pm N LB6N6LL imi 66.25 1
-LyBw2yy2yNLwNww i R 56.7 1
-N2m2mkRi00ik06gwmggw L w 98.28 1
-N6ikLkkgi2 gwL mBk 35.78 1
-Ngm 4 w0i0P4 P mii 94.81 1
-NmkkBNBm6ygRm20B R wNm 86.26 1
-Nw42L0y6w4L6N wg0 Li0 3.97 1
-Nw62LNPBBkPB40LNm0ky NP6 36.07 1
-NywmykRkL2NgNBkL Lgk 30.84 1
-P0y4wgk4y4BLPPBkim Nw 94.66 1
-PBBkyLwL4RLNNkLw2k g4L 28.67 1
-PPgg0mLPLiw2 iiP PiL wBi 62.99 1
-PPky 6Bgk0 R0LNLLR204L iPy 27.36 1
-PR464g0k0iL kPgN0k6g0 g0 k2y 99.77 1
-PgRPyLRRR0kP66L64 iPy 96.14 1
-Pmm0R yyPy6mR4ky2 g02 47.04 1
-Py2R20P6i ik0yw R20 39.7 1
-R 4 Bi4y B2mN42R4PgL LBw 45.07 1
-R4iLmygg64Lgwi 6 P 90.22 1
-RRg4y006w0g00w24Nw0 yim 17.56 1
-Rk0y2 k0ww4wPLw4y gm6 83.81 1
-Rmgk402k6PRNBLLy 4L0R P0 92.56 1
-Rmwy6NB4y2mkP iP 3.22 1
-RwyP6 wwNP y6mP Bg Pk0 11.97 1
-Ry2 PPPi224444B4mi04NgR2 iyP 28.6 1
-Ry6RkRiRNy6mPy0 wBg 26.46 1
-Rym4BkLg00kPg4NNBm By6 10.88 1
-g2k2mPLLNykLwmiLwk Nki 89.45 1
-g66NiNR44mRi0LiRgLi Bw4 13.31 1
-g6Ry4L26LiLLyLmmNm2yBm L4m 26.86 1
-gB6kg4NP202iiRgw62Rg0m66 iik 16.79 1
-gN0my4m6wyRm2R LPP 65.61 1
-gP yk46LgByP2wiw N y2 78.61 1
-gg2N66iw m66N6R0 60N 44.53 1
-ggLi0k myPLwPLgPR N6N 63.16 1
-giNkRNPyi646yRk 240 96.74 1
-giyPmgPRLmy6NLwywL 6 N 68.65 1
-gkw2BgP Nmy LNR 0gy 46.43 1
-gm0B0gLg gygmi PwBNLy6 kiP 97.28 1
-gwLNwmP0BkNg2wLL4ky0 Rm4 54.7 1
-i64NiBBBN0yNwN4NBi gR4 44.48 1
-i6gwLLyi02PLR PB0y0 4y0 72.47 1
-iNLPyyyBmyBB64 yNNmi ii 87.18 1
-iR0LgPyBLmBygBLyP0i 6m0 32.28 1
-iR66NBPywRRB0LL L m 38.95 1
-iRL 02 BRi NkB kLmBy4yk kwy 50.68 1
-igm wLm0wmw6B2BwPi26k4i RRg 66.89 1
-kP6w46LL0mwiLy Ri 96.23 1
-kmRyygPB0R LPRB6NLLgPw 0iy 63.15 1
-m4NBwRkP26wBy0PBB 2 wBi 53.89 1
-mLyRgBP246Lw 2Ng L Ngy 15.73 1
-mRyPN R0gL0gg2PN4iPm0B 04B 25.27 1
-mgR2w64ByP0ww 6PgiNPP 0R 7.45 1
-mgRyy LkB04 g64B6 R P 6.99 1
-w24kmP RNBLmw6Bmki 0RN 95.49 1
-w2PBiBLmk2yyykN LRi 85.37 1
-w4424y2ywPw2BBP642iPw Bg0 78.43 1
-w6BkPi0B iPR6g2m4mi iRg 27.66 1
-wPyByR N N2wP64N wN6 9.39 1
-y6i g 4N mPgLNi2L66iiy L00 45.46 1
-yk6Rw6P mm2kLk62 LRg 15.88 1
-ykk42LBLm6i02gkwyR gwB 37.6 1
+
+# ----
+# 00R R24yPmkkgL6L 6m4 L i 26.24 1
+# 00R4wRkR0LL04R4P060L6B06 006 16.81 1
+# 06wy wk22RNywgg0R 4gP 83.83 1
+# 0B4R wgm Rw0 BmNy4 Lyy 46.94 1
+# 0BNL202wNmg4BPyi 0im 56.59 1
+# 0NP2 ww6BR4mmiwP46P4L ik2 19.61 1
+# 0Nk0y46NgyLgRLNNk6 gwi 11.59 1
+# 0Nw24w4L4RNwmg02yNB42LLL P6i 80.83 1
+# 0gNLB6220yLLwRkB46LNRmg B4g 84.03 1
+# 0kP6k0igRPmgkm iBB 49.62 1
+# 0kRw2kPLRky42P2kLLiw 0Nm 84.56 1
+# 2L0w22wy k 2626BB m6N 42.18 1
+# 2LmP2Rwiki0gRw g 4 73.27 1
+# 2Nkkg46B0B0i 4N L BRi 16.17 1
+# 2P4 Nykmi N6RkgR0 Bw4 67.21 1
+# 2PmRPPLm yLi6wPm i kNy 76.47 1
+# 2RmPRyi2my0mNm yNP 30.4 1
+# 2y244Pg w6LiRPPBg 6kg 64 70.27 1
+# 4Bwkyyky220NPmR2Bw0 P2y 53.61 1
+# 4iLi20wi4y2iNwmBN4NiL 6wR 91.18 1
+# 4iiNR mPyi 4 k0 70.29 1
+# 4kkP6LNNPk0i22L2gmi2B N4L 8.95 1
+# 4y 664262R2LLPw606 NP4 88.2 1
+# 4yiBgmyw 6NRP4i2 406P LBP 69.67 1
+# 4ym RgPkP0Lmi24N4LBiLP4 22 97.57 1
+# 6Ni4P2wgy40wmy6g Lm4yw 2k0 77.25 1
+# B44imm6Bi4Rw NN 2OR 22.67 1
+# BNN0RwL2N6 iikRg6Py2B wR4 59.31 1
+# BNR06R6wkNy64By0i 4 kBB 82.1 1
+# BNyNPR62my6P2 4LmBm Nky 98.67 1
+# Bg6Lw4 NLmi imPmkwwyP6PB NBN 90.06 1
+# BkL66L20kg iBB0LN i26 22.31 1
+# BwiLy2BwL4gBgiNL0y0 yy k4P 98.65 1
+# LLy02gLB0m6PiN2B0BLm40P m4P 84.14 1
+# LN4L4R2PN0wyBkBy 2k4 69.23 1
+# LNmwmiP 4y0B0kRw6 L02 8.91 1
+# Li2RBiyBR 6RBk2wm0 26L 94.77 1
+# LiNN2k0NyBP66gLmy RPw 70.12 1
+# Lmk66N4Pm N LB6N6LL imi 66.25 1
+# LyBw2yy2yNLwNww i R 56.7 1
+# N2m2mkRi00ik06gwmggw L w 98.28 1
+# N6ikLkkgi2 gwL mBk 35.78 1
+# Ngm 4 w0i0P4 P mii 94.81 1
+# NmkkBNBm6ygRm20B R wNm 86.26 1
+# Nw42L0y6w4L6N wg0 Li0 3.97 1
+# Nw62LNPBBkPB40LNm0ky NP6 36.07 1
+# NywmykRkL2NgNBkL Lgk 30.84 1
+# P0y4wgk4y4BLPPBkim Nw 94.66 1
+# PBBkyLwL4RLNNkLw2k g4L 28.67 1
+# PPgg0mLPLiw2 iiP PiL wBi 62.99 1
+# PPky 6Bgk0 R0LNLLR204L iPy 27.36 1
+# PR464g0k0iL kPgN0k6g0 g0 k2y 99.77 1
+# PgRPyLRRR0kP66L64 iPy 96.14 1
+# Pmm0R yyPy6mR4ky2 g02 47.04 1
+# Py2R20P6i ik0yw R20 39.7 1
+# R 4 Bi4y B2mN42R4PgL LBw 45.07 1
+# R4iLmygg64Lgwi 6 P 90.22 1
+# RRg4y006w0g00w24Nw0 yim 17.56 1
+# Rk0y2 k0ww4wPLw4y gm6 83.81 1
+# Rmgk402k6PRNBLLy 4L0R P0 92.56 1
+# Rmwy6NB4y2mkP iP 3.22 1
+# RwyP6 wwNP y6mP Bg Pk0 11.97 1
+# Ry2 PPPi224444B4mi04NgR2 iyP 28.6 1
+# Ry6RkRiRNy6mPy0 wBg 26.46 1
+# Rym4BkLg00kPg4NNBm By6 10.88 1
+# g2k2mPLLNykLwmiLwk Nki 89.45 1
+# g66NiNR44mRi0LiRgLi Bw4 13.31 1
+# g6Ry4L26LiLLyLmmNm2yBm L4m 26.86 1
+# gB6kg4NP202iiRgw62Rg0m66 iik 16.79 1
+# gN0my4m6wyRm2R LPP 65.61 1
+# gP yk46LgByP2wiw N y2 78.61 1
+# gg2N66iw m66N6R0 60N 44.53 1
+# ggLi0k myPLwPLgPR N6N 63.16 1
+# giNkRNPyi646yRk 240 96.74 1
+# giyPmgPRLmy6NLwywL 6 N 68.65 1
+# gkw2BgP Nmy LNR 0gy 46.43 1
+# gm0B0gLg gygmi PwBNLy6 kiP 97.28 1
+# gwLNwmP0BkNg2wLL4ky0 Rm4 54.7 1
+# i64NiBBBN0yNwN4NBi gR4 44.48 1
+# i6gwLLyi02PLR PB0y0 4y0 72.47 1
+# iNLPyyyBmyBB64 yNNmi ii 87.18 1
+# iR0LgPyBLmBygBLyP0i 6m0 32.28 1
+# iR66NBPywRRB0LL L m 38.95 1
+# iRL 02 BRi NkB kLmBy4yk kwy 50.68 1
+# igm wLm0wmw6B2BwPi26k4i RRg 66.89 1
+# kP6w46LL0mwiLy Ri 96.23 1
+# kmRyygPB0R LPRB6NLLgPw 0iy 63.15 1
+# m4NBwRkP26wBy0PBB 2 wBi 53.89 1
+# mLyRgBP246Lw 2Ng L Ngy 15.73 1
+# mRyPN R0gL0gg2PN4iPm0B 04B 25.27 1
+# mgR2w64ByP0ww 6PgiNPP 0R 7.45 1
+# mgRyy LkB04 g64B6 R P 6.99 1
+# w24kmP RNBLmw6Bmki 0RN 95.49 1
+# w2PBiBLmk2yyykN LRi 85.37 1
+# w4424y2ywPw2BBP642iPw Bg0 78.43 1
+# w6BkPi0B iPR6g2m4mi iRg 27.66 1
+# wPyByR N N2wP64N wN6 9.39 1
+# y6i g 4N mPgLNi2L66iiy L00 45.46 1
+# yk6Rw6P mm2kLk62 LRg 15.88 1
+# ykk42LBLm6i02gkwyR gwB 37.6 1
