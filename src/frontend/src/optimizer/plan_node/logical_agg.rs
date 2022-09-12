@@ -603,10 +603,9 @@ impl LogicalAgg {
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 
-    // Check if the output of the aggregation needs to be sorted and return ordering for group keys
-    // If so, push down the sort below the aggregation and use sort merge aggregation
-    // The required order of the output must be satisfied by the order of the group key
-    // The data type of the columns need to be int32
+    // Check if the output of the aggregation needs to be sorted and return ordering req by group
+    // keys If group key order satisfies required order, push down the sort below the
+    // aggregation and use sort aggregation. The data type of the columns need to be int32
     fn output_requires_order_on_group_keys(&self, required_order: &Order) -> (bool, Order) {
         let group_key_order = Order {
             field_order: self
