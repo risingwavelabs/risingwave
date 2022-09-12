@@ -3,6 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+apt install dnsutils
 export HOST_IP=$(dig +short myip.opendns.com @resolver1.opendns.com)
 
 source ci/scripts/common.env.sh
