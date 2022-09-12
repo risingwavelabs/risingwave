@@ -327,7 +327,7 @@ where
                 }
             }
 
-            let source_actors = fragments.node_source_actor_states();
+            let source_actors = fragments.worker_source_actor_states();
             for (worker_id, actor_states) in source_actors {
                 for (actor_id, actor_state) in actor_states {
                     if check_state(actor_state, fragments.table_id(), actor_id) {
@@ -448,7 +448,7 @@ where
         bail!("fragment not found: {}", fragment_id)
     }
 
-    // Add the newly added Actor to the `FragmentManager`
+    /// Add the newly added Actor to the `FragmentManager`
     pub async fn pre_apply_reschedules(
         &self,
         mut created_actors: HashMap<FragmentId, HashMap<ActorId, (StreamActor, ActorStatus)>>,
@@ -480,7 +480,7 @@ where
         applied_reschedules
     }
 
-    // Undo the changes in `pre_apply_reschedules`
+    /// Undo the changes in `pre_apply_reschedules`
     pub async fn cancel_apply_reschedules(
         &self,
         applied_reschedules: HashMap<FragmentId, HashSet<ActorId>>,

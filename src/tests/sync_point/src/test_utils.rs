@@ -99,7 +99,7 @@ pub async fn get_meta_client() -> MetaClient {
     let meta_addr = std::env::var("RW_META_ADDR").unwrap();
     let mut client = MetaClient::new(&meta_addr).await.unwrap();
     let worker_id = client
-        .register(WorkerType::Generic, &"127.0.0.1:2333".parse().unwrap(), 0)
+        .register(WorkerType::RiseCtl, &"127.0.0.1:2333".parse().unwrap(), 0)
         .await
         .unwrap();
     client.set_worker_id(worker_id);

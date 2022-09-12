@@ -56,7 +56,7 @@ pub fn gen_sink_plan(
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
 ) -> Result<(PlanRef, ProstSink)> {
-    let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
+    let (schema_name, _) = Binder::resolve_table_name(stmt.sink_name.clone())?;
 
     let (database_id, schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
@@ -73,11 +73,13 @@ pub fn gen_sink_plan(
             )?;
         }
 
-        catalog_reader.check_relation_name_duplicated(
-            session.database(),
-            &schema_name,
-            sink_name.as_str(),
-        )?
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &schema_name)?
+            .id();
+        (db_id, schema_id)
     };
 
     let (associated_table_id, associated_table_name, associated_table_desc) = {
@@ -133,6 +135,16 @@ pub async fn handle_create_sink(
     let session = context.session_ctx.clone();
 
     let (sink, graph) = {
+        {
+            let catalog_reader = session.env().catalog_reader().read_guard();
+            let (schema_name, table_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
+            catalog_reader.check_relation_name_duplicated(
+                session.database(),
+                &schema_name,
+                &table_name,
+            )?;
+        }
+
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
 
         (sink, build_graph(plan))
