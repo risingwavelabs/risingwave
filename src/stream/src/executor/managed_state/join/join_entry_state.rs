@@ -138,7 +138,7 @@ mod tests {
             // Pk is only a `i64` here, so encoding method does not matter.
             let pk = Row(pk).serialize();
             let join_row = JoinRow { row, degree: 0 };
-            managed_state.insert(pk, join_row.encode().unwrap());
+            managed_state.insert(pk, join_row.encode());
         }
 
         for ((_, matched_row), (d1, d2)) in managed_state

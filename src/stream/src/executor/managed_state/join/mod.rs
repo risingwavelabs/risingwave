@@ -102,11 +102,11 @@ impl JoinRow {
         (self.row, degree)
     }
 
-    pub fn encode(&self) -> StreamExecutorResult<EncodedJoinRow> {
-        Ok(EncodedJoinRow {
+    pub fn encode(&self) -> EncodedJoinRow {
+        EncodedJoinRow {
             row: self.row.serialize(),
             degree: self.degree,
-        })
+        }
     }
 }
 
@@ -430,7 +430,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     .context("Fail to fetch a degree")?;
                 entry_state.insert(
                     pk,
-                    JoinRow::new(row.into_owned(), *degree_i64.as_int64() as u64).encode()?,
+                    JoinRow::new(row.into_owned(), *degree_i64.as_int64() as u64).encode(),
                 );
             }
         } else {
@@ -441,7 +441,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 let row = row?;
                 let pk = row
                     .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-                entry_state.insert(pk, JoinRow::new(row.into_owned(), 0).encode()?);
+                entry_state.insert(pk, JoinRow::new(row.into_owned(), 0).encode());
             }
         };
 
@@ -461,7 +461,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let pk = value
                 .row
                 .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-            entry.insert(pk, value.encode()?);
+            entry.insert(pk, value.encode());
         }
         // If no cache maintained, only update the flush buffer.
         let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
@@ -478,7 +478,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         if let Some(entry) = self.inner.get_mut(key) {
             let pk =
                 value.extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-            entry.insert(pk, join_row.encode()?);
+            entry.insert(pk, join_row.encode());
         }
         // If no cache maintained, only update the state table.
         self.state.table.insert(value)?;
