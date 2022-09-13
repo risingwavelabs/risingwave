@@ -180,7 +180,10 @@ impl CacheFile {
         let core = self.core.clone();
         asyncify(move || {
             let mut buf = DioBuffer::with_capacity_in(len, &DIO_BUFFER_ALLOCATOR);
-            buf.resize(len, 0);
+            buf.reserve(len);
+            unsafe {
+                buf.set_len(len);
+            }
             core.file.read_exact_at(&mut buf, offset)?;
             Ok(buf)
         })

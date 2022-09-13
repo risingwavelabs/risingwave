@@ -89,10 +89,12 @@ where
         };
         self.blocs.push(bloc);
 
-        self.buffer.resize(offset + len, 0);
+        let buffer_len = utils::align_up(self.block_size, offset + len);
+        self.buffer.reserve(buffer_len);
+        unsafe {
+            self.buffer.set_len(buffer_len);
+        }
         value.encode(&mut self.buffer[offset..offset + len]);
-        self.buffer
-            .resize(utils::align_up(self.block_size, self.buffer.len()), 0);
 
         self.keys.push(key);
     }
