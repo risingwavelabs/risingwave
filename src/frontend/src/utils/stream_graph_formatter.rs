@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::{stream_node, StreamFragmentGraph, StreamNode};
 
