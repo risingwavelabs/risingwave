@@ -77,7 +77,7 @@ impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table_v2().expect("not table source");
+        let source = source_desc.source.as_table().expect("not table source");
         let row_id_index = source_desc.row_id_index;
 
         let mut notifiers = Vec::new();
@@ -95,7 +95,7 @@ impl InsertExecutor {
                 for _ in 0..len {
                     builder.append_null()?
                 }
-                columns.insert(row_id_index, Column::from(builder.finish()?))
+                columns.insert(row_id_index, Column::from(builder.finish()))
             }
 
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
@@ -116,7 +116,7 @@ impl InsertExecutor {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_inserted as i64))?;
 
-            let array = array_builder.finish()?;
+            let array = array_builder.finish();
             let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
             yield ret_chunk
@@ -235,7 +235,7 @@ mod tests {
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
-        let source = source_desc.source.as_table_v2().unwrap();
+        let source = source_desc.source.as_table().unwrap();
         let mut reader = source
             .stream_reader(vec![0.into(), 1.into(), 2.into()])
             .await?;
@@ -296,7 +296,7 @@ mod tests {
         .into();
         assert_eq!(*chunk.columns()[2].array(), array);
 
-        // There's nothing in store since `TableSourceV2` has no side effect.
+        // There's nothing in store since `TableSource` has no side effect.
         // Data will be materialized in associated streaming task.
         let epoch = u64::MAX;
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
