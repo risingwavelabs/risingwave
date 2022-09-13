@@ -119,7 +119,7 @@ pub(super) fn handle_explain(
         vec![]
     };
 
-    if options.explain_type == ExplainType::DistSQL {
+    if options.explain_type == ExplainType::DistSql {
         match plan.convention() {
             Convention::Logical => unreachable!(),
             Convention::Batch => {
