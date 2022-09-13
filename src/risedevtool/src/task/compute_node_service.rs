@@ -95,15 +95,20 @@ impl ComputeNodeService {
                     "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
                 ));
             }
-            (false, provide_minio, provide_aws_s3) => {
-                add_storage_backend(&config.id, provide_minio, provide_aws_s3, hummock_in_memory_strategy, cmd)?
-            }
+            (false, provide_minio, provide_aws_s3) => add_storage_backend(
+                &config.id,
+                provide_minio,
+                provide_aws_s3,
+                hummock_in_memory_strategy,
+                cmd,
+            )?,
         };
 
         if provide_compute_node.len() > 1 && !is_shared_backend {
-            return Err(anyhow!(
-                "should use a shared backend (e.g. MinIO) for multiple compute-node configuration. Consider adding `use: minio` in risedev config."
-            ));
+            println!("warning!");
+            // return Err(anyhow!(
+            //     "should use a shared backend (e.g. MinIO) for multiple compute-node
+            // configuration. Consider adding `use: minio` in risedev config." ));
         }
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();

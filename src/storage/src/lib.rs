@@ -50,6 +50,7 @@
 #![feature(assert_matches)]
 #![feature(is_sorted)]
 #![feature(btree_drain_filter)]
+#![feature(exact_size_is_empty)]
 
 pub mod hummock;
 pub mod keyspace;

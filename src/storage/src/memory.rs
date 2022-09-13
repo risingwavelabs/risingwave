@@ -15,6 +15,7 @@
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::iter::Fuse;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
@@ -30,6 +31,73 @@ use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
+
+mod batch_iter {
+    use itertools::Itertools;
+
+    use super::*;
+
+    pub struct Iter<K, V> {
+        inner: Arc<RwLock<BTreeMap<K, V>>>,
+
+        range: (Bound<K>, Bound<K>),
+
+        current: std::vec::IntoIter<(K, V)>,
+    }
+
+    impl<K, V> Iter<K, V> {
+        pub fn new(inner: Arc<RwLock<BTreeMap<K, V>>>, range: (Bound<K>, Bound<K>)) -> Self {
+            Self {
+                inner,
+                range,
+                current: Vec::new().into_iter(),
+            }
+        }
+    }
+
+    impl<K, V> Iter<K, V>
+    where
+        K: Ord + Clone,
+        V: Clone,
+    {
+        const BATCH_SIZE: usize = 256;
+
+        fn refill(&mut self) {
+            assert!(self.current.is_empty());
+
+            let batch: Vec<(K, V)> = self
+                .inner
+                .read()
+                .range((self.range.0.as_ref(), self.range.1.as_ref()))
+                .take(Self::BATCH_SIZE)
+                .map(|(k, v)| (K::clone(k), V::clone(v)))
+                .collect_vec();
+
+            if let Some((last_key, _)) = batch.last() {
+                self.range.0 = Bound::Excluded(K::clone(last_key));
+            }
+            self.current = batch.into_iter();
+        }
+    }
+
+    impl<K, V> Iterator for Iter<K, V>
+    where
+        K: Ord + Clone,
+        V: Clone,
+    {
+        type Item = (K, V);
+
+        fn next(&mut self) -> Option<Self::Item> {
+            match self.current.next() {
+                Some(r) => Some(r),
+                None => {
+                    self.refill();
+                    self.current.next()
+                }
+            }
+        }
+    }
+}
 
 type KeyWithEpoch = (Bytes, Reverse<u64>);
 
@@ -145,11 +213,11 @@ impl StateStore for MemoryStateStore {
                 if *key_epoch > epoch {
                     continue;
                 }
-                if Some(key) != last_key.as_ref() {
+                if Some(key) != last_key {
                     if let Some(value) = value {
                         data.push((key.clone(), value.clone()));
                     }
-                    last_key = Some(key.clone());
+                    last_key = Some(key);
                 }
                 if let Some(limit) = limit && data.len() >= limit {
                     break;
@@ -201,10 +269,8 @@ impl StateStore for MemoryStateStore {
     {
         async move {
             Ok(MemoryStateStoreIter::new(
-                self.scan(None, key_range, None, read_options)
-                    .await
-                    .unwrap()
-                    .into_iter(),
+                batch_iter::Iter::new(self.inner.clone(), to_bytes_range(key_range)),
+                read_options.epoch,
             ))
         }
     }
@@ -223,14 +289,14 @@ impl StateStore for MemoryStateStore {
 
     fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
-            // memory backend doesn't support wait for epoch, so this is a no-op.
+            // memory backend doesn't need to wait for epoch, so this is a no-op.
             Ok(())
         }
     }
 
     fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
         async move {
-            // memory backend doesn't support push to S3, so this is a no-op
+            // memory backend doesn't need to push to S3, so this is a no-op
             Ok(SyncResult {
                 sync_succeed: true,
                 ..Default::default()
@@ -246,12 +312,20 @@ impl StateStore for MemoryStateStore {
 }
 
 pub struct MemoryStateStoreIter {
-    inner: std::vec::IntoIter<(Bytes, Bytes)>,
+    inner: Fuse<batch_iter::Iter<KeyWithEpoch, Option<Bytes>>>,
+
+    epoch: u64,
+
+    last_key: Option<Bytes>,
 }
 
 impl MemoryStateStoreIter {
-    fn new(iter: std::vec::IntoIter<(Bytes, Bytes)>) -> Self {
-        Self { inner: iter }
+    pub fn new(inner: batch_iter::Iter<KeyWithEpoch, Option<Bytes>>, epoch: u64) -> Self {
+        Self {
+            inner: inner.fuse(),
+            epoch,
+            last_key: None,
+        }
     }
 }
 
@@ -263,8 +337,18 @@ impl StateStoreIter for MemoryStateStoreIter {
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            let item = self.inner.next();
-            Ok(item)
+            for ((key, Reverse(key_epoch)), value) in self.inner.by_ref() {
+                if key_epoch > self.epoch {
+                    continue;
+                }
+                if Some(&key) != self.last_key.as_ref() {
+                    self.last_key = Some(key.clone());
+                    if let Some(value) = value {
+                        return Ok(Some((key, value)));
+                    }
+                }
+            }
+            Ok(None)
         }
     }
 }
