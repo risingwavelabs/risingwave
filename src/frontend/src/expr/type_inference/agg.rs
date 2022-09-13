@@ -14,12 +14,11 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_expr::expr::AggKind;
 
 // Use AggCall to infer return type
 use super::super::AggCall;
-use super::DataTypeName;
 
 // Same as FuncSign in type_inference/func.rs except this is for aggregate function
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]

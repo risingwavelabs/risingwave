@@ -84,10 +84,10 @@ impl SingleChunkExecutor {
     }
 }
 
-/// This test checks whether batch task and streaming task work together for `TableV2` creation,
+/// This test checks whether batch task and streaming task work together for `Table` creation,
 /// insertion, deletion, and materialization.
 #[tokio::test]
-async fn test_table_v2_materialize() -> Result<()> {
+async fn test_table_materialize() -> Result<()> {
     use risingwave_pb::data::DataType;
 
     let memory_state_store = MemoryStateStore::new();

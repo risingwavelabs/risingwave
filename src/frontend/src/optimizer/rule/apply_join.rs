@@ -47,8 +47,20 @@ pub struct ApplyJoinRule {}
 impl Rule for ApplyJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
-        let (apply_left, apply_right, apply_on, apply_join_type, correlated_id, correlated_indices) =
-            apply.clone().decompose();
+        let (
+            apply_left,
+            apply_right,
+            apply_on,
+            apply_join_type,
+            correlated_id,
+            correlated_indices,
+            max_one_row,
+        ) = apply.clone().decompose();
+
+        if max_one_row {
+            return None;
+        }
+
         assert_eq!(apply_join_type, JoinType::Inner);
         let join: &LogicalJoin = apply_right.as_logical_join()?;
 
@@ -217,6 +229,7 @@ impl ApplyJoinRule {
             },
             correlated_id,
             correlated_indices,
+            false,
         );
 
         let new_join = LogicalJoin::new(
@@ -328,6 +341,7 @@ impl ApplyJoinRule {
             },
             correlated_id,
             correlated_indices,
+            false,
         );
         let new_join = LogicalJoin::new(
             join.left().clone(),
@@ -462,6 +476,7 @@ impl ApplyJoinRule {
             },
             correlated_id,
             correlated_indices.clone(),
+            false,
         );
         let new_join_right = LogicalApply::create(
             apply_left.clone(),
@@ -472,6 +487,7 @@ impl ApplyJoinRule {
             },
             correlated_id,
             correlated_indices,
+            false,
         );
         let new_join = LogicalJoin::new(
             new_join_left.clone(),

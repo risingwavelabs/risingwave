@@ -25,17 +25,44 @@ import {
   useToast,
   VStack,
 } from "@chakra-ui/react"
-import { Dag, dagStratify } from "d3-dag"
+import * as d3 from "d3"
+import { dagStratify } from "d3-dag"
+import { toLower } from "lodash"
 import Head from "next/head"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
 import DependencyGraph from "../components/DependencyGraph"
+import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
-import { TableFragments } from "../proto/gen/meta"
+import { ActorBox } from "../lib/layout"
+import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
+import { StreamNode } from "../proto/gen/stream_plan"
 import { getFragments, getMaterializedViews } from "./api/streaming"
 
-function buildFragmentDependencyAsEdges(fragments: TableFragments): Dag {
-  const edges = []
+function buildPlanNodeDependency(
+  fragment: TableFragments_Fragment
+): d3.HierarchyNode<any> {
+  const actor = fragment.actors[0]
+
+  const hierarchyActorNode = (node: StreamNode): any => {
+    return {
+      name: node.nodeBody?.$case.toString() || "unknown",
+      children: (node.input || []).map(hierarchyActorNode),
+      operatorId: node.operatorId,
+    }
+  }
+
+  return d3.hierarchy({
+    name:
+      actor.dispatcher.map((d) => `${toLower(d.type)}Dispatcher`).join(",") ||
+      "noDispatcher",
+    children: actor.nodes ? [hierarchyActorNode(actor.nodes)] : [],
+    operatorId: "dispatcher",
+  })
+}
+
+function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
+  const nodes: ActorBox[] = []
   const actorToFragmentMapping = new Map<number, number>()
   for (const fragmentId in fragments.fragments) {
     const fragment = fragments.fragments[fragmentId]
@@ -54,13 +81,16 @@ function buildFragmentDependencyAsEdges(fragments: TableFragments): Dag {
         }
       }
     }
-    edges.push({
+    nodes.push({
       id: fragment.fragmentId.toString(),
       name: `Fragment ${fragment.fragmentId}`,
       parentIds: Array.from(parentIds).map((x) => x.toString()),
-    })
+      width: 0,
+      height: 0,
+      order: fragment.fragmentId,
+    } as ActorBox)
   }
-  return dagStratify()(edges)
+  return nodes
 }
 
 const SIDEBAR_WIDTH = 200
@@ -72,7 +102,6 @@ function useFetch<T>(fetchFn: () => Promise<T>) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const abortController = new AbortController()
         const res = await fetchFn()
         setResponse(res)
       } catch (e: any) {
@@ -97,16 +126,20 @@ export default function Streaming() {
   const { response: fragmentList } = useFetch(getFragments)
 
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
-
   const router = useRouter()
 
   const fragmentDependencyCallback = useCallback(() => {
     if (fragmentList) {
       if (router.query.id) {
         const mvId = parseInt(router.query.id as string)
-        const fragment = fragmentList.find((x) => x.tableId === mvId)
-        if (fragment) {
-          return buildFragmentDependencyAsEdges(fragment)
+        const fragments = fragmentList.find((x) => x.tableId === mvId)
+        if (fragments) {
+          const fragmentDep = buildFragmentDependencyAsEdges(fragments)
+          return {
+            fragments,
+            fragmentDep,
+            fragmentDepDag: dagStratify()(fragmentDep),
+          }
         }
       }
     }
@@ -124,17 +157,36 @@ export default function Streaming() {
     return () => {}
   }, [router, router.query.id, mvList])
 
-  const fragmentDependency = fragmentDependencyCallback()
+  const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
+  const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
+  const fragments = fragmentDependencyCallback()?.fragments
+
+  const planNodeDependenciesCallback = useCallback(() => {
+    const fragments_ = fragments?.fragments
+    if (fragments_) {
+      const planNodeDependencies = new Map<string, d3.HierarchyNode<any>>()
+      for (const fragmentId in fragments_) {
+        const fragment = fragments_[fragmentId]
+        const dep = buildPlanNodeDependency(fragment)
+        planNodeDependencies.set(fragmentId, dep)
+      }
+      return planNodeDependencies
+    }
+    return undefined
+  }, [fragments?.fragments])
+
+  const planNodeDependencies = planNodeDependenciesCallback()
 
   const retVal = (
-    <Flex p={3} height="100vh" flexDirection="column">
+    <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
       <Title>Streaming Plan</Title>
-      <Flex flexDirection="row" height="100%" width="full">
+      <Flex flexDirection="row" height="full" width="full">
         <VStack
           mr={3}
           spacing={3}
           alignItems="flex-start"
           width={SIDEBAR_WIDTH}
+          height="full"
         >
           <FormControl>
             <FormLabel>Materialized View</FormLabel>
@@ -152,20 +204,37 @@ export default function Streaming() {
                   ))}
             </Select>
           </FormControl>
-          <Box>
+          <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Plan</Text>
-            {fragmentDependency && (
-              <DependencyGraph
-                svgWidth={SIDEBAR_WIDTH}
-                mvDependency={fragmentDependency}
-                onSelectedIdChange={(id) => setSelectedFragmentId(parseInt(id))}
-                selectedId={selectedFragmentId?.toString()}
-              />
+            {fragmentDependencyDag && (
+              <Box flex="1" overflowY="scroll">
+                <DependencyGraph
+                  svgWidth={SIDEBAR_WIDTH}
+                  mvDependency={fragmentDependencyDag}
+                  onSelectedIdChange={(id) =>
+                    setSelectedFragmentId(parseInt(id))
+                  }
+                  selectedId={selectedFragmentId?.toString()}
+                />
+              </Box>
             )}
-          </Box>
+          </Flex>
         </VStack>
-        <Box flex={1} height="full" ml={3}>
+        <Box
+          flex={1}
+          height="full"
+          ml={3}
+          overflowX="scroll"
+          overflowY="scroll"
+        >
           <Text fontWeight="semibold">Fragment Graph</Text>
+          {planNodeDependencies && fragmentDependency && (
+            <FragmentGraph
+              selectedFragmentId={selectedFragmentId?.toString()}
+              fragmentDependency={fragmentDependency}
+              planNodeDependencies={planNodeDependencies}
+            />
+          )}
         </Box>
       </Flex>
     </Flex>

@@ -55,7 +55,6 @@ impl ObserverNodeImpl for ComputeObserverNode {
 
             Info::HummockVersionDeltas(hummock_version_deltas) => {
                 self.local_version_manager.try_update_pinned_version(
-                    None,
                     pin_version_response::Payload::VersionDeltas(HummockVersionDeltas {
                         delta: hummock_version_deltas.version_deltas,
                     }),
@@ -76,7 +75,6 @@ impl ObserverNodeImpl for ComputeObserverNode {
                 self.handle_catalog_snapshot(snapshot.tables);
 
                 self.local_version_manager.try_update_pinned_version(
-                    None,
                     pin_version_response::Payload::PinnedVersion(snapshot.hummock_version.unwrap()),
                 );
 

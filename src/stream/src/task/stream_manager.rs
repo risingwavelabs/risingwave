@@ -235,6 +235,9 @@ impl LocalStreamManager {
             .streaming_metrics
             .barrier_sync_latency
             .start_timer();
+        dispatch_state_store!(self.state_store(), store, {
+            store.seal_epoch(epoch);
+        });
         let res = dispatch_state_store!(self.state_store(), store, {
             match store.sync(epoch).await {
                 Ok(sync_result) => Ok((sync_result.uncommitted_ssts, sync_result.sync_succeed)),
@@ -284,7 +287,7 @@ impl LocalStreamManager {
     }
 
     /// Force stop all actors on this worker.
-    pub async fn stop_all_actors(&self, epoch: Epoch) -> Result<()> {
+    pub async fn stop_all_actors(&self, barrier: &Barrier) -> Result<()> {
         let (actor_ids_to_send, actor_ids_to_collect) = {
             let core = self.core.lock();
             let actor_ids_to_send = core.context.lock_barrier_manager().all_senders();
@@ -294,12 +297,6 @@ impl LocalStreamManager {
         if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
             return Ok(());
         }
-        let barrier = &Barrier {
-            epoch,
-            mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
-            checkpoint: true,
-            passed_actors: vec![],
-        };
 
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 

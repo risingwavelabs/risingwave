@@ -1463,6 +1463,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "darwin-libproc"
+version = "0.2.0"
+source = "git+https://github.com/risingwavelabs/darwin-libproc.git?rev=a502be24bd0971463f5bcbfe035a248d8ba503b7#a502be24bd0971463f5bcbfe035a248d8ba503b7"
+dependencies = [
+ "darwin-libproc-sys",
+ "libc",
+ "memchr",
+]
+
+[[package]]
+name = "darwin-libproc-sys"
+version = "0.2.0"
+source = "git+https://github.com/risingwavelabs/darwin-libproc.git?rev=a502be24bd0971463f5bcbfe035a248d8ba503b7#a502be24bd0971463f5bcbfe035a248d8ba503b7"
+
+[[package]]
 name = "dashmap"
 version = "5.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4265,6 +4280,7 @@ dependencies = [
  "chrono",
  "comfy-table",
  "crc32fast",
+ "darwin-libproc",
  "either",
  "enum-as-inner",
  "fixedbitset",
@@ -4297,6 +4313,8 @@ dependencies = [
  "serde_json",
  "smallvec",
  "spin 0.9.4",
+ "strum",
+ "strum_macros",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -4485,7 +4503,9 @@ dependencies = [
  "futures",
  "madsim-tokio",
  "parking_lot 0.12.1",
+ "regex",
  "risingwave_common",
+ "risingwave_common_service",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
@@ -4923,6 +4943,7 @@ dependencies = [
  "madsim-tokio",
  "paste",
  "rand 0.8.5",
+ "risingwave_common",
  "risingwave_expr",
  "risingwave_frontend",
  "risingwave_sqlparser",
