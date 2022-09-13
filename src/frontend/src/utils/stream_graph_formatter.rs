@@ -84,11 +84,11 @@ impl StreamGraphFormatter {
                     match dist.r#type() {
                         risingwave_pb::stream_plan::DispatcherType::Unspecified => unreachable!(),
                         risingwave_pb::stream_plan::DispatcherType::Hash =>
-                            format!("hash({:?})", dist.column_indices),
+                            format!("Hash({:?})", dist.column_indices),
                         risingwave_pb::stream_plan::DispatcherType::Broadcast => unreachable!(),
-                        risingwave_pb::stream_plan::DispatcherType::Simple => "simple".to_string(),
+                        risingwave_pb::stream_plan::DispatcherType::Simple => "Single".to_string(),
                         risingwave_pb::stream_plan::DispatcherType::NoShuffle =>
-                            "no_shuffle".to_string(),
+                            "No_shuffle".to_string(),
                     },
                     upstream_fragment_id
                 )
