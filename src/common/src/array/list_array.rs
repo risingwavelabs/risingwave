@@ -116,6 +116,7 @@ impl ArrayBuilder for ListArrayBuilder {
         if self.bitmap.pop().is_some() {
             let start = self.offsets.pop().unwrap();
             let end = *self.offsets.last().unwrap();
+            self.len -= end - start;
             for _ in end..start {
                 self.value.pop().unwrap()
             }
