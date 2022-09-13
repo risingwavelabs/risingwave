@@ -40,7 +40,7 @@ mod tests {
         for i in &v {
             builder.append(*i).unwrap();
         }
-        let a = builder.finish().unwrap();
+        let a = builder.finish();
         let res = v.iter().zip_eq(a.iter()).all(|(a, b)| *a == b);
         assert!(res)
     }
@@ -53,7 +53,7 @@ mod tests {
             NaiveDateWrapper::with_days(67890).ok(),
         ];
 
-        let array = NaiveDateArray::from_slice(&input).unwrap();
+        let array = NaiveDateArray::from_slice(&input);
         let buffers = array.to_protobuf().values;
 
         assert_eq!(buffers.len(), 1);

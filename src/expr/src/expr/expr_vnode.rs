@@ -74,7 +74,7 @@ impl Expression for VnodeExpression {
         hash_values
             .into_iter()
             .try_for_each(|h| builder.append(Some(h.to_vnode() as i16)))?;
-        Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
+        Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
