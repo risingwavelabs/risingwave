@@ -137,7 +137,7 @@ impl StreamMaterialize {
                 c
             })
             .collect_vec();
-
+        let value_indices = (0..columns.len()).collect_vec();
         let mut in_order = FixedBitSet::with_capacity(schema.len());
         let mut order_keys = vec![];
 
@@ -176,6 +176,7 @@ impl StreamMaterialize {
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
             vnode_col_idx: None,
+            value_idx: value_indices,
         };
 
         Ok(Self { base, input, table })

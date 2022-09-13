@@ -33,6 +33,7 @@ pub struct TableCatalogBuilder {
     // can remove it later
     stream_key: Vec<usize>,
     properties: WithOptions,
+    value_index: Vec<usize>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -113,6 +114,7 @@ impl TableCatalogBuilder {
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
             vnode_col_idx,
+            value_idx: self.value_index,
         }
     }
 
