@@ -268,7 +268,7 @@ mod tests {
             let row2 = Row(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);
             let row3 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(6))]);
             let rows = vec![row1.clone(), row2.clone(), row3.clone()];
-            let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
+            let deserializer = OrderedRowDeserializer::new(schema, order_types);
             let mut array = vec![];
             for row in &rows {
                 let mut row_bytes = vec![];
@@ -300,7 +300,7 @@ mod tests {
                 Some(ScalarImpl::Decimal(Decimal::NegativeINF)),
             ]);
             let rows = vec![row1.clone(), row2.clone(), row3.clone()];
-            let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
+            let deserializer = OrderedRowDeserializer::new(schema, order_types);
             let mut array = vec![];
             for row in &rows {
                 let mut row_bytes = vec![];
@@ -335,7 +335,7 @@ mod tests {
 
             let schema = vec![DataType::Varchar];
             let order_types = vec![OrderType::Descending];
-            let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
+            let deserializer = OrderedRowDeserializer::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_0_len];
             assert_eq!(
                 deserializer.deserialize(prefix_slice).unwrap(),
@@ -350,7 +350,7 @@ mod tests {
 
             let order_types = vec![OrderType::Descending, OrderType::Ascending];
             let schema = vec![DataType::Varchar, DataType::Int16];
-            let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
+            let deserializer = OrderedRowDeserializer::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_1_len];
             assert_eq!(deserializer.deserialize(prefix_slice).unwrap(), row1);
         }
