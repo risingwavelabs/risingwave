@@ -33,6 +33,7 @@ use crate::hummock::iterator::{
     HummockIteratorDirection, HummockIteratorUnion, OrderedMergeIteratorInner,
     UnorderedMergeIteratorInner,
 };
+use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -203,11 +204,10 @@ pub enum SharedBufferEvent {
         join_handle_sender: oneshot::Sender<Vec<JoinHandle<()>>>,
     },
 
-    /// An epoch has been synced.
-    EpochSynced(Vec<HummockEpoch>),
-
     /// Clear shared buffer and reset all states
     Clear(oneshot::Sender<()>),
+
+    Shutdown,
 }
 
 impl SharedBuffer {

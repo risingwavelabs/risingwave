@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, VecDeque};
+use std::iter::once;
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
@@ -20,7 +21,8 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::future::{join_all, try_join_all};
+use futures::future::{join_all, select, try_join_all, Either};
+use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
@@ -48,6 +50,7 @@ use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
+use crate::hummock::upload_handle_manager::{UploadHandleManager, UploadHandleManagerSelectAll};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef, TrackerId,
@@ -56,7 +59,7 @@ use crate::hummock::{
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SyncResult {
     /// The size of all synced shared buffers.
     pub sync_size: usize,
@@ -155,6 +158,12 @@ pub struct LocalVersionManager {
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
+}
+
+impl Drop for LocalVersionManager {
+    fn drop(&mut self) {
+        self.buffer_tracker.send_event(SharedBufferEvent::Shutdown);
+    }
 }
 
 impl LocalVersionManager {
@@ -677,24 +686,19 @@ impl LocalVersionManager {
         local_version_manager: Arc<LocalVersionManager>,
         mut buffer_size_change_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
     ) {
-        let mut epoch_join_handle = HashMap::new();
-        let try_flush_shared_buffer =
-            |epoch_join_handle: &mut HashMap<HummockEpoch, Vec<JoinHandle<()>>>| {
-                // Keep issuing new flush task until flush is not needed or we can issue
-                // no more task
-                while local_version_manager.buffer_tracker.need_more_flush() {
-                    if let Some((epoch, join_handle)) =
-                        local_version_manager.clone().flush_shared_buffer()
-                    {
-                        epoch_join_handle
-                            .entry(epoch)
-                            .or_insert_with(Vec::new)
-                            .push(join_handle);
-                    } else {
-                        break;
-                    }
+        let try_flush_shared_buffer = |upload_handle_manager: &mut UploadHandleManager| {
+            // Keep issuing new flush task until flush is not needed or we can issue
+            // no more task
+            while local_version_manager.buffer_tracker.need_more_flush() {
+                if let Some((epoch, join_handle)) =
+                    local_version_manager.clone().flush_shared_buffer()
+                {
+                    upload_handle_manager.add_epoch_handle(epoch, once(join_handle));
+                } else {
+                    break;
                 }
-            };
+            }
+        };
 
         let grant_write_request = |request| {
             let WriteRequest {
@@ -713,16 +717,32 @@ impl LocalVersionManager {
             });
         };
 
+        let mut upload_handle_manager = UploadHandleManager::new();
         let mut pending_write_requests: VecDeque<_> = VecDeque::new();
 
         // While the current Arc is not the only strong reference to the local version manager
-        while Arc::strong_count(&local_version_manager) > 1 {
-            if let Some(event) = buffer_size_change_receiver.recv().await {
+        loop {
+            let event = match select(
+                upload_handle_manager.next_finished_epoch(),
+                buffer_size_change_receiver.recv().boxed(),
+            )
+            .await
+            {
+                Either::Left((epoch_result, _)) => {
+                    match epoch_result {
+                        Ok(epoch) => {}
+                        Err(e) => {}
+                    }
+                    continue;
+                }
+                Either::Right((event, _)) => event,
+            };
+            if let Some(event) = event {
                 match event {
                     SharedBufferEvent::WriteRequest(request) => {
                         if local_version_manager.buffer_tracker.can_write() {
                             grant_write_request(request);
-                            try_flush_shared_buffer(&mut epoch_join_handle);
+                            try_flush_shared_buffer(&mut upload_handle_manager);
                         } else {
                             info!(
                                 "write request is blocked: epoch {}, size: {}",
@@ -735,7 +755,7 @@ impl LocalVersionManager {
                     SharedBufferEvent::MayFlush => {
                         // Only check and flush shared buffer after batch has been added to shared
                         // buffer.
-                        try_flush_shared_buffer(&mut epoch_join_handle);
+                        try_flush_shared_buffer(&mut upload_handle_manager);
                     }
                     SharedBufferEvent::BufferRelease(size) => {
                         local_version_manager
@@ -756,7 +776,7 @@ impl LocalVersionManager {
                             has_granted = true;
                         }
                         if has_granted {
-                            try_flush_shared_buffer(&mut epoch_join_handle);
+                            try_flush_shared_buffer(&mut upload_handle_manager);
                         }
                     }
                     SharedBufferEvent::SyncEpoch {
@@ -764,24 +784,21 @@ impl LocalVersionManager {
                         new_sync_epoch,
                         join_handle_sender,
                     } => {
-                        let join_handle = epoch_join_handle
-                            .drain_filter(|&epoch, _| {
-                                prev_max_sync_epoch < epoch && epoch <= new_sync_epoch
-                            })
-                            .flat_map(|(_, join_handles)| join_handles)
-                            .collect_vec();
-                        let _ = join_handle_sender.send(join_handle).inspect_err(|e| {
-                            error!("unable to send join handles Err {:?}", e);
-                        });
+                        // TODO: implement it
+                        // let join_handle = epoch_join_handle
+                        //     .drain_filter(|&epoch, _| {
+                        //         prev_max_sync_epoch < epoch && epoch <= new_sync_epoch
+                        //     })
+                        //     .flat_map(|(_, join_handles)| join_handles)
+                        //     .collect_vec();
+                        // let _ = join_handle_sender.send(join_handle).inspect_err(|e| {
+                        //     error!("unable to send join handles Err {:?}", e);
+                        // });
                     }
-                    SharedBufferEvent::EpochSynced(_epochs) => {
-                        // TODO: may remove this event
-                    }
-
                     SharedBufferEvent::Clear(notifier) => {
                         // Wait for all ongoing flush to finish.
                         let ongoing_flush_handles: Vec<_> =
-                            epoch_join_handle.drain().flat_map(|e| e.1).collect();
+                            upload_handle_manager.drain_epoch_handle(..);
                         if let Err(e) = try_join_all(ongoing_flush_handles).await {
                             error!("Failed to join flush handle {:?}", e)
                         }
@@ -803,6 +820,9 @@ impl LocalVersionManager {
 
                         // Notify completion of the Clear event.
                         notifier.send(()).unwrap();
+                    }
+                    SharedBufferEvent::Shutdown => {
+                        break;
                     }
                 };
             } else {
