@@ -1149,7 +1149,7 @@ mod tests {
         let columns = builders
             .into_iter()
             .map(|builder| {
-                let array = builder.finish().unwrap();
+                let array = builder.finish();
                 Column::new(Arc::new(array.into()))
             })
             .collect::<Vec<_>>();
