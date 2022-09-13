@@ -280,7 +280,6 @@ impl<S: StateStore> StateTable<S> {
                     })
             })
             .collect_vec();
-
         Self {
             mem_table: MemTable::new(),
             keyspace,

@@ -86,10 +86,10 @@ pub fn streaming_partial_deserialize(
     let mut values = Vec::with_capacity(value_indices.len());
     let mut value_data_types = vec![];
     for value_idx in value_indices {
-        value_data_types.push(data_types[*value_idx].clone());
+        value_data_types.push(&data_types[*value_idx]);
     }
     for ty in value_data_types {
-        values.push(deserialize_datum(&mut row, &ty)?);
+        values.push(deserialize_datum(&mut row, ty)?);
     }
 
     Ok(Row(values))

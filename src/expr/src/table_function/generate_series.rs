@@ -16,11 +16,12 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::multizip;
+use num_traits::Zero;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, IntervalArray,
     NaiveDateTimeArray,
 };
-use risingwave_common::types::{CheckedAdd, Scalar, ScalarRef};
+use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
 use super::*;
@@ -38,6 +39,7 @@ impl<T: Array, S: Array> GenerateSeries<T, S>
 where
     T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
+    for<'a> S::RefItem<'a>: IsNegative,
 {
     fn new(start: BoxedExpression, stop: BoxedExpression, step: BoxedExpression) -> Self {
         Self {
@@ -54,11 +56,22 @@ where
         stop: T::RefItem<'_>,
         step: S::RefItem<'_>,
     ) -> Result<ArrayRef> {
+        if step.is_zero() {
+            return Err(ExprError::InvalidParam {
+                name: "step",
+                reason: "must be non-zero".to_string(),
+            });
+        }
+
         let mut builder = T::Builder::new(DEFAULT_CHUNK_BUFFER_SIZE);
 
         let mut cur: T::OwnedItem = start.to_owned_scalar();
 
-        while cur <= stop {
+        while if step.is_negative() {
+            cur >= stop
+        } else {
+            cur <= stop
+        } {
             builder.append(Some(cur.as_scalar_ref())).unwrap();
             cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
         }
@@ -71,6 +84,7 @@ impl<T: Array, S: Array> TableFunction for GenerateSeries<T, S>
 where
     T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
+    for<'a> S::RefItem<'a>: IsNegative,
     for<'a> &'a T: From<&'a ArrayImpl>,
     for<'a> &'a S: From<&'a ArrayImpl>,
 {
@@ -151,6 +165,7 @@ mod tests {
     #[test]
     fn test_generate_i32_series() {
         generate_series_test_case(2, 4, 1);
+        generate_series_test_case(4, 2, -1);
         generate_series_test_case(0, 9, 2);
         generate_series_test_case(0, (DEFAULT_CHUNK_BUFFER_SIZE * 2 + 3) as i32, 1);
     }
@@ -186,6 +201,7 @@ mod tests {
         generate_time_series_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8 + 1);
         generate_time_series_test_case(start_time, stop_time, one_hour_step, 24 * 8 + 1);
         generate_time_series_test_case(start_time, stop_time, one_day_step, 8 + 1);
+        generate_time_series_test_case(stop_time, start_time, -one_day_step, 8 + 1);
     }
 
     fn generate_time_series_test_case(

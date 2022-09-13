@@ -91,7 +91,8 @@ pub struct TableCatalog {
     /// hash distribution
     pub vnode_col_idx: Option<usize>,
 
-    /// The value indices, used to partial encoding.
+    /// The column indices which are stored in the state store's value with row-encoding. Currently
+    /// is not supported yet and expected to be `[0..columns.len()]`
     pub value_indices: Vec<usize>,
 }
 
