@@ -67,7 +67,7 @@ pub struct ManagedStringAggState<S: StateStore> {
     state_table_order_types: Vec<OrderType>,
 
     /// In-memory all-or-nothing cache.
-    cache: Cache<StringAggData>,
+    cache: Cache<OrderedRow, StringAggData>,
 
     /// Whether the cache is fully synced to state table.
     cache_synced: bool,
@@ -173,13 +173,13 @@ impl<S: StateStore> ManagedStringAggState<S> {
                     if self.cache_synced {
                         self.cache.insert(cache_key, cache_data);
                     }
-                    state_table.insert(state_row)?;
+                    state_table.insert(state_row);
                 }
                 Delete | UpdateDelete => {
                     if self.cache_synced {
                         self.cache.remove(cache_key);
                     }
-                    state_table.delete(state_row)?;
+                    state_table.delete(state_row);
                 }
             }
         }

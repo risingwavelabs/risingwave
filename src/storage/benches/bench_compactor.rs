@@ -15,13 +15,10 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
-use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::SstableInfo;
@@ -39,9 +36,8 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompactorSstableStore, CompressionAlgorithm, InMemWriter, MemoryLimiter,
-    SstableBuilder, SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
-    SstableWriter, SstableWriterOptions, TieredCache,
+    CachePolicy, CompactorSstableStore, CompressionAlgorithm, MemoryLimiter, SstableBuilder,
+    SstableBuilderOptions, SstableIterator, SstableStore, SstableWriterOptions, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -66,26 +62,6 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     }
 }
 
-pub async fn put_sst(
-    sst_id: HummockSstableId,
-    data: Bytes,
-    meta: SstableMeta,
-    sstable_store: SstableStoreRef,
-    options: SstableWriterOptions,
-) {
-    let mut writer = sstable_store.clone().create_sst_writer(sst_id, options);
-    for block_meta in &meta.block_metas {
-        let offset = block_meta.offset as usize;
-        let end_offset = offset + block_meta.len as usize;
-        writer
-            .write_block(&data[offset..end_offset], block_meta)
-            .unwrap();
-    }
-    let output = writer.finish(meta.block_metas.len() as u32).unwrap();
-    output.await.unwrap().unwrap();
-    sstable_store.put_sst_meta(sst_id, meta).await.unwrap()
-}
-
 pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
     let user_key = format!("key_test_{:08}", idx * 2).as_bytes().to_vec();
     key_with_epoch(user_key, epoch)
@@ -93,16 +69,27 @@ pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
 
 const MAX_KEY_COUNT: usize = 128 * 1024;
 
-fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, SstableMeta) {
+fn build_table(
+    sstable_store: SstableStoreRef,
+    sstable_id: u64,
+    range: Range<u64>,
+    epoch: u64,
+) -> SstableInfo {
     let opt = SstableBuilderOptions {
         capacity: 32 * 1024 * 1024,
         block_capacity: 16 * 1024,
         restart_interval: 16,
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
-        estimate_bloom_filter_capacity: 1024 * 1024,
     };
-    let writer = InMemWriter::from(&opt);
+    let writer = sstable_store.create_sst_writer(
+        sstable_id,
+        SstableWriterOptions {
+            capacity_hint: None,
+            tracker: None,
+            policy: CachePolicy::Fill,
+        },
+    );
     let mut builder = SstableBuilder::new_for_test(sstable_id, writer, opt);
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch);
@@ -116,12 +103,18 @@ fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, Sstabl
             .unwrap();
     }
     let output = builder.finish().unwrap();
-    (output.writer_output, output.meta)
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let handle = output.writer_output;
+    let sst = output.sst_info;
+    runtime.block_on(handle).unwrap().unwrap();
+    sst
 }
 
-async fn scan_all_table(sstable_store: SstableStoreRef) {
+async fn scan_all_table(info: &SstableInfo, sstable_store: SstableStoreRef) {
     let mut stats = StoreLocalStatistic::default();
-    let table = sstable_store.sstable(1, &mut stats).await.unwrap();
+    let table = sstable_store.sstable(info, &mut stats).await.unwrap();
     let default_read_options = Arc::new(SstableIteratorReadOptions::default());
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
@@ -134,34 +127,31 @@ async fn scan_all_table(sstable_store: SstableStoreRef) {
 
 fn bench_table_build(c: &mut Criterion) {
     c.bench_function("bench_table_build", |b| {
+        let sstable_store = mock_sstable_store();
         b.iter(|| {
-            let _ = build_table(0, 0..(MAX_KEY_COUNT as u64), 1);
+            let _ = build_table(sstable_store.clone(), 0, 0..(MAX_KEY_COUNT as u64), 1);
         });
     });
 }
 
 fn bench_table_scan(c: &mut Criterion) {
-    let (data, meta) = build_table(0, 0..(MAX_KEY_COUNT as u64), 1);
     let sstable_store = mock_sstable_store();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
-    let sstable_store1 = sstable_store.clone();
-    runtime.block_on(async move {
-        let mut opts = default_writer_opts();
-        opts.policy = CachePolicy::NotFill;
-        put_sst(1, data, meta, sstable_store1, opts).await;
-    });
+    let info = build_table(sstable_store.clone(), 0, 0..(MAX_KEY_COUNT as u64), 1);
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
     let sstable_store1 = sstable_store.clone();
+    let info1 = info.clone();
     runtime.block_on(async move {
-        scan_all_table(sstable_store1).await;
+        scan_all_table(&info1, sstable_store1).await;
     });
 
     c.bench_function("bench_table_iterator", |b| {
+        let info1 = info.clone();
         b.to_async(FuturesExecutor)
-            .iter(|| scan_all_table(sstable_store.clone()));
+            .iter(|| scan_all_table(&info1, sstable_store.clone()));
     });
 }
 
@@ -172,7 +162,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         restart_interval: 16,
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
-        estimate_bloom_filter_capacity: 1024 * 1024,
     };
     let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
         32,
@@ -197,73 +186,16 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
     .unwrap();
 }
 
-pub fn generate_tables(metas: Vec<(u64, SstableMeta)>) -> Vec<SstableInfo> {
-    metas
-        .into_iter()
-        .map(|(id, meta)| SstableInfo {
-            id,
-            key_range: Some(risingwave_pb::hummock::KeyRange {
-                left: meta.smallest_key.clone(),
-                right: meta.largest_key.clone(),
-                inf: false,
-            }),
-            file_size: meta.estimated_size as u64,
-            table_ids: vec![id as u32],
-        })
-        .collect_vec()
-}
-
 fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let sstable_store = mock_sstable_store();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-    let sstable_store1 = sstable_store.clone();
     let test_key_size = 256 * 1024;
-    let (data1, meta1) = build_table(1, 0..test_key_size, 1);
-    let (data2, meta2) = build_table(2, 0..test_key_size, 1);
-    let level1 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone())]);
-    runtime.block_on(async move {
-        put_sst(
-            1,
-            data1,
-            meta1,
-            sstable_store1.clone(),
-            default_writer_opts(),
-        )
-        .await;
-        put_sst(
-            2,
-            data2,
-            meta2,
-            sstable_store1.clone(),
-            default_writer_opts(),
-        )
-        .await;
-    });
+    let info1 = build_table(sstable_store.clone(), 1, 0..test_key_size, 1);
+    let info2 = build_table(sstable_store.clone(), 2, 0..test_key_size, 1);
+    let level1 = vec![info1, info2];
 
-    let (data1, meta1) = build_table(1, 0..test_key_size, 2);
-    let (data2, meta2) = build_table(2, 0..test_key_size, 2);
-    let sstable_store1 = sstable_store.clone();
-    let level2 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone())]);
-    runtime.block_on(async move {
-        put_sst(
-            3,
-            data1,
-            meta1,
-            sstable_store1.clone(),
-            default_writer_opts(),
-        )
-        .await;
-        put_sst(
-            4,
-            data2,
-            meta2,
-            sstable_store1.clone(),
-            default_writer_opts(),
-        )
-        .await;
-    });
+    let info1 = build_table(sstable_store.clone(), 3, 0..test_key_size, 2);
+    let info2 = build_table(sstable_store.clone(), 4, 0..test_key_size, 2);
+    let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {
         b.to_async(FuturesExecutor).iter(|| {

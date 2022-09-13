@@ -7,7 +7,7 @@ extend = [
   { path = "src/risedevtool/kafka.toml" },
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
-  { path = "src/frontend/test_runner/planner_test.toml" },
+  { path = "src/frontend/planner_test/planner_test.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -505,6 +505,18 @@ script = """
 set -e
 
 cargo run -p risingwave_simulation "$@"
+"""
+
+[tasks.sslt-cov]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Run e2e tests in deterministic simulation mode and report code coverage"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim-cov" }
+script = """
+#!/bin/bash
+set -e
+
+cargo llvm-cov run -p risingwave_simulation --html "$@"
 """
 
 [tasks.check-hakari]

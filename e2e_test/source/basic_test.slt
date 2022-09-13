@@ -107,6 +107,16 @@ statement ok
 select * from s8
 
 statement ok
+create materialized source s9 with (
+  connector = 'kafka', topic = 'avro_bin',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format avro message 'test_student' row schema location 'file:///risingwave/avro-simple-schema.avsc'
+
+statement ok
+select * from s9
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -242,3 +252,6 @@ drop source s6
 
 statement ok
 drop source s8
+
+statement ok
+drop source s9

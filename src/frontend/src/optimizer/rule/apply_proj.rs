@@ -26,7 +26,7 @@ pub struct ApplyProjRule {}
 impl Rule for ApplyProjRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_id, correlated_indices) =
+        let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         let project = right.as_logical_project()?;
         assert_eq!(join_type, JoinType::Inner);
@@ -76,6 +76,7 @@ impl Rule for ApplyProjRule {
             new_on,
             correlated_id,
             correlated_indices,
+            max_one_row,
         );
 
         let new_project = LogicalProject::create(new_apply, exprs);

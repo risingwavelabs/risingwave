@@ -20,12 +20,11 @@ use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{FragmentType, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{FragmentType, SourceNode, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::manager::{SourceId, WorkerId};
+use crate::manager::WorkerId;
 use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for table fragments.
@@ -177,16 +176,15 @@ impl TableFragments {
         }
     }
 
-    pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
-        if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
-            if s.source_type == SourceType::Source as i32 {
-                return Some(s.source_id);
-            }
+    /// Find the source node inside the stream node, if any.
+    pub fn find_source_node(stream_node: &StreamNode) -> Option<&SourceNode> {
+        if let Some(NodeBody::Source(source)) = stream_node.node_body.as_ref() {
+            return Some(source);
         }
 
         for child in &stream_node.input {
-            if let Some(source_id) = Self::fetch_stream_source_id(child) {
-                return Some(source_id);
+            if let Some(source) = Self::find_source_node(child) {
+                return Some(source);
             }
         }
 
@@ -194,7 +192,7 @@ impl TableFragments {
     }
 
     /// Returns actors that contains Chain node.
-    pub fn chain_actor_ids(&self) -> Vec<ActorId> {
+    pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
         self.fragments
             .values()
             .flat_map(|fragment| {
@@ -204,6 +202,18 @@ impl TableFragments {
                     .filter(|actor| Self::contains_chain(actor.nodes.as_ref().unwrap()))
                     .map(|actor| actor.actor_id)
             })
+            .collect()
+    }
+
+    /// Returns fragments that contains Chain node.
+    pub fn chain_fragment_ids(&self) -> HashSet<FragmentId> {
+        self.fragments
+            .values()
+            .filter(|fragment| {
+                let actor = fragment.actors.first().unwrap();
+                Self::contains_chain(actor.nodes.as_ref().unwrap())
+            })
+            .map(|f| f.fragment_id)
             .collect()
     }
 
@@ -251,6 +261,15 @@ impl TableFragments {
         map
     }
 
+    pub fn actor_to_worker(&self) -> HashMap<ActorId, WorkerId> {
+        let mut map = HashMap::default();
+        for (&actor_id, actor_status) in &self.actor_status {
+            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
+            map.insert(actor_id, node_id);
+        }
+        map
+    }
+
     pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
         for fragment in self.fragments.values_mut() {
             if fragment.vnode_mapping.is_some() {
@@ -288,7 +307,7 @@ impl TableFragments {
         actors
     }
 
-    pub fn node_source_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
+    pub fn worker_source_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
         let mut map = BTreeMap::default();
         let source_actor_ids = self.source_actor_ids();
         for &actor_id in &source_actor_ids {

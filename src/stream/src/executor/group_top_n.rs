@@ -27,7 +27,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
-use super::managed_state::top_n::ManagedTopNStateNew;
+use super::managed_state::top_n::ManagedTopNState;
 use super::top_n::{generate_executor_pk_indices_info, TopNCache};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
@@ -41,7 +41,6 @@ impl<S: StateStore> GroupTopNExecutor<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
-        total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
         group_by: Vec<usize>,
@@ -58,7 +57,6 @@ impl<S: StateStore> GroupTopNExecutor<S> {
                 order_pairs,
                 offset_and_limit,
                 pk_indices,
-                total_count,
                 executor_id,
                 key_indices,
                 group_by,
@@ -90,7 +88,7 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore> {
     internal_key_order_types: Vec<OrderType>,
 
     /// We are interested in which element is in the range of [offset, offset+limit).
-    managed_state: ManagedTopNStateNew<S>,
+    managed_state: ManagedTopNState<S>,
 
     /// which column we used to group the data.
     group_by: Vec<usize>,
@@ -111,7 +109,6 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
-        total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
         group_by: Vec<usize>,
@@ -123,8 +120,7 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
 
-        let managed_state =
-            ManagedTopNStateNew::<S>::new(total_count, state_table, ordered_row_deserializer);
+        let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
 
         Ok(Self {
             info: ExecutorInfo {
@@ -184,12 +180,11 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone(), epoch)?;
+                        .insert(ordered_pk_row.clone(), row.clone());
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state
-                        .delete(&ordered_pk_row, row.clone(), epoch)?;
+                    self.managed_state.delete(&ordered_pk_row, row.clone());
                 }
             }
 
@@ -209,7 +204,7 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
                 )
                 .await?;
         }
-        // compare the those two ranges and emit the differantial result
+
         generate_output(res_rows, res_ops, &self.schema)
     }
 
@@ -373,7 +368,6 @@ mod tests {
                 order_types,
                 (0, 2),
                 vec![1, 2, 0],
-                0,
                 1,
                 vec![],
                 vec![1],
@@ -466,7 +460,6 @@ mod tests {
                 order_types,
                 (1, 2),
                 vec![1, 2, 0],
-                0,
                 1,
                 vec![],
                 vec![1],
@@ -552,7 +545,6 @@ mod tests {
                 order_types,
                 (0, 2),
                 vec![1, 2, 0],
-                0,
                 1,
                 vec![],
                 vec![1, 2],

@@ -132,7 +132,7 @@ impl dyn PlanNode {
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
-    pub fn to_stream_prost(&self) -> StreamPlanProst {
+    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanProst {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost();
         }
@@ -140,18 +140,18 @@ impl dyn PlanNode {
             return stream_index_scan.adhoc_to_stream_prost();
         }
 
-        let node = Some(self.to_stream_prost_body());
+        let node = Some(self.to_stream_prost_body(state));
         let input = self
             .inputs()
             .into_iter()
-            .map(|plan| plan.to_stream_prost())
+            .map(|plan| plan.to_stream_prost(state))
             .collect();
         // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
             identity: format!("{}", self),
             node_body: node,
-            operator_id: self.id().0 as u64,
+            operator_id: self.id().0 as _,
             stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
@@ -232,6 +232,7 @@ mod logical_insert;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
+mod logical_over_agg;
 mod logical_project;
 mod logical_project_set;
 mod logical_scan;
@@ -295,6 +296,7 @@ pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
+pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
 pub use logical_project::{LogicalProject, LogicalProjectBuilder};
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
@@ -325,6 +327,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
@@ -362,6 +365,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
+            , { Logical, OverAgg }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -433,6 +437,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
+            , { Logical, OverAgg }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }

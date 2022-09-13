@@ -552,8 +552,14 @@ impl StreamGraphBuilder {
                         if let Some(table) = &mut node.left_table {
                             update_table(table, "HashJoinLeft");
                         }
+                        if let Some(table) = &mut node.left_degree_table {
+                            update_table(table, "HashJoinDegreeLeft");
+                        }
                         if let Some(table) = &mut node.right_table {
                             update_table(table, "HashJoinRight");
+                        }
+                        if let Some(table) = &mut node.right_degree_table {
+                            update_table(table, "HashJoinDegreeRight");
                         }
                     }
 
@@ -589,12 +595,9 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::AppendOnlyTopN(node) => {
-                        node.table_id_l += table_id_offset;
-                        node.table_id_h += table_id_offset;
-
-                        // TODO add catalog::Table to AppendOnlyTopN
-                        check_and_fill_internal_table(node.table_id_l, None);
-                        check_and_fill_internal_table(node.table_id_h, None);
+                        if let Some(table) = &mut node.table {
+                            update_table(table, "AppendOnlyTopNNode");
+                        }
                     }
                     NodeBody::TopN(node) => {
                         if let Some(table) = &mut node.table {
@@ -1019,60 +1022,54 @@ impl ActorGraphBuilder {
         stream_node: &StreamNode,
         fragment: &mut Fragment,
     ) -> MetaResult<()> {
-        match stream_node.get_node_body()? {
+        let table_ids = match stream_node.get_node_body()? {
             NodeBody::Materialize(node) => {
-                let table_id = node.get_table_id();
-                fragment.state_table_ids.push(table_id);
+                vec![node.get_table_id()]
             }
             NodeBody::Source(node) => {
-                fragment.state_table_ids.push(node.state_table_id);
+                vec![node.state_table_id]
             }
             NodeBody::Arrange(node) => {
-                let table_id = node.table.as_ref().unwrap().id;
-                fragment.state_table_ids.push(table_id);
+                vec![node.table.as_ref().unwrap().id]
             }
-            NodeBody::HashAgg(node) => {
-                for table in &node.internal_tables {
-                    fragment.state_table_ids.push(table.id);
-                }
-            }
-            NodeBody::GlobalSimpleAgg(node) => {
-                for table in &node.internal_tables {
-                    fragment.state_table_ids.push(table.id);
-                }
-            }
+            NodeBody::HashAgg(node) => node
+                .internal_tables
+                .iter()
+                .map(|table| table.id)
+                .collect_vec(),
+            NodeBody::GlobalSimpleAgg(node) => node
+                .internal_tables
+                .iter()
+                .map(|table| table.id)
+                .collect_vec(),
             NodeBody::HashJoin(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.left_table.as_ref().unwrap().id);
-                fragment
-                    .state_table_ids
-                    .push(node.right_table.as_ref().unwrap().id);
+                vec![
+                    node.left_table.as_ref().unwrap().id,
+                    node.left_degree_table.as_ref().unwrap().id,
+                    node.right_table.as_ref().unwrap().id,
+                    node.right_degree_table.as_ref().unwrap().id,
+                ]
             }
             NodeBody::DynamicFilter(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.left_table.as_ref().unwrap().id);
-                fragment
-                    .state_table_ids
-                    .push(node.right_table.as_ref().unwrap().id);
+                vec![
+                    node.left_table.as_ref().unwrap().id,
+                    node.right_table.as_ref().unwrap().id,
+                ]
             }
             NodeBody::AppendOnlyTopN(node) => {
-                fragment.state_table_ids.push(node.table_id_l);
-                fragment.state_table_ids.push(node.table_id_h);
+                vec![node.table.as_ref().unwrap().id]
             }
             NodeBody::GroupTopN(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.table.as_ref().unwrap().id);
+                vec![node.table.as_ref().unwrap().id]
             }
             NodeBody::TopN(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.table.as_ref().unwrap().id);
+                vec![node.table.as_ref().unwrap().id]
             }
-            _ => {}
-        }
+            _ => {
+                vec![]
+            }
+        };
+        fragment.state_table_ids.extend(table_ids);
         let input_nodes = stream_node.get_input();
         for input_node in input_nodes {
             Self::record_internal_state_tables(input_node, fragment)?;

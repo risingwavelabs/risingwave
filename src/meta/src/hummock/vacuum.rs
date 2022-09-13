@@ -314,7 +314,7 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_vacuum() {
         let (env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
-        let compactor_manager = Arc::new(CompactorManager::new());
+        let compactor_manager = Arc::new(CompactorManager::new(1));
         let vacuum = Arc::new(VacuumManager::new(env, hummock_manager, compactor_manager));
         let (join_handle, shutdown_sender) =
             start_vacuum_scheduler(vacuum, Duration::from_secs(60));
@@ -326,7 +326,7 @@ mod tests {
     async fn test_vacuum_basic() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
-        let compactor_manager = Arc::new(CompactorManager::default());
+        let compactor_manager = Arc::new(CompactorManager::new(1));
         let vacuum = Arc::new(VacuumManager::new(
             env,
             hummock_manager.clone(),

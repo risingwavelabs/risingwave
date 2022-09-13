@@ -1,5 +1,9 @@
 include ../tpch/create_tables.slt.part
 
+# First, create materialized views with empty data
+include ./tpch/create_views.slt.part
+
+# Then, insert the data into the tables
 include ../tpch/insert_customer.slt.part
 include ../tpch/insert_lineitem.slt.part
 include ../tpch/insert_nation.slt.part
@@ -9,11 +13,11 @@ include ../tpch/insert_partsupp.slt.part
 include ../tpch/insert_region.slt.part
 include ../tpch/insert_supplier.slt.part
 
+# Ensure that the upstream data is fully consumed
 statement ok
 flush;
 
-include ./tpch/create_views.slt.part
-
+# Test each query
 include ./tpch/q1.slt.part
 include ./tpch/q2.slt.part
 include ./tpch/q3.slt.part
@@ -28,10 +32,14 @@ include ./tpch/q11.slt.part
 include ./tpch/q12.slt.part
 include ./tpch/q13.slt.part
 include ./tpch/q14.slt.part
+include ./tpch/q15.slt.part
+include ./tpch/q16.slt.part
 include ./tpch/q17.slt.part
 include ./tpch/q18.slt.part
 include ./tpch/q19.slt.part
 include ./tpch/q20.slt.part
+# FIXME: streaming TPC-H Q21 outputs empty result (#5291)
+# include ./tpch/q21.slt.part
 include ./tpch/q22.slt.part
 
 include ./tpch/drop_views.slt.part

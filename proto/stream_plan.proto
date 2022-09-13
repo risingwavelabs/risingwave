@@ -177,16 +177,6 @@ message TopNNode {
   uint64 offset = 2;
   catalog.Table table = 3;
 }
-message AppendOnlyTopNNode {
-  repeated plan_common.ColumnOrder column_orders = 1;
-  // 0 means no limit as limit of 0 means this node should be optimized away
-  uint64 limit = 2;
-  uint64 offset = 3;
-  repeated uint32 distribution_key = 4;
-  // Used for internal table states
-  uint32 table_id_l = 5;
-  uint32 table_id_h = 6;
-}
 
 message GroupTopNNode {
   // 0 means no limit as limit of 0 means this node should be optimized away
@@ -205,12 +195,16 @@ message HashJoinNode {
   catalog.Table left_table = 6;
   // Used for internal table states.
   catalog.Table right_table = 7;
+  // Used for internal table states.
+  catalog.Table left_degree_table = 8;
+  // Used for internal table states.
+  catalog.Table right_degree_table = 9;
+  // The output indices of current node
+  repeated uint32 output_indices = 10;
+  repeated bool null_safe = 11;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
-  bool is_append_only = 8;
-  // The output indices of current node
-  repeated uint32 output_indices = 9;
-  repeated bool null_safe = 10;
+  bool is_append_only = 12;
 }
 
 message DynamicFilterNode {
@@ -369,7 +363,7 @@ message StreamNode {
     SimpleAggNode local_simple_agg = 104;
     SimpleAggNode global_simple_agg = 105;
     HashAggNode hash_agg = 106;
-    AppendOnlyTopNNode append_only_top_n = 107;
+    TopNNode append_only_top_n = 107;
     HashJoinNode hash_join = 108;
     TopNNode top_n = 109;
     HopWindowNode hop_window = 110;

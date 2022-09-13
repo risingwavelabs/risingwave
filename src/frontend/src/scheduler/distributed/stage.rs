@@ -56,7 +56,7 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum StageState {
     Pending,
     Started,
@@ -201,17 +201,6 @@ impl StageExecution {
     }
 
     pub async fn stop(&self) {
-        // Set state to failed.
-        {
-            let mut state = self.state.write().await;
-            // Ignore if already finished.
-            if *state == StageState::Completed {
-                return;
-            }
-            // FIXME: Be careful for state jump back.
-            *state = StageState::Failed
-        }
-
         // Send message to tell Stage Runner stop.
         if let Some(shutdown_tx) = self.shutdown_rx.write().await.take() {
             // It's possible that the stage has not been scheduled, so the channel sender is
@@ -266,8 +255,8 @@ impl StageExecution {
 }
 
 impl StageRunner {
-    async fn run(mut self, shutdown_tx: oneshot::Receiver<StageMessage>) {
-        if let Err(e) = self.schedule_tasks(shutdown_tx).await {
+    async fn run(mut self, shutdown_rx: oneshot::Receiver<StageMessage>) {
+        if let Err(e) = self.schedule_tasks(shutdown_rx).await {
             error!(
                 "Stage {:?}-{:?} failed to schedule tasks, error: {:?}",
                 self.stage.query_id, self.stage.id, e
@@ -292,7 +281,7 @@ impl StageRunner {
     /// task is created, it should tell `QueryRunner` to schedule next.
     async fn schedule_tasks(
         &mut self,
-        shutdown_tx: oneshot::Receiver<StageMessage>,
+        shutdown_rx: oneshot::Receiver<StageMessage>,
     ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
@@ -345,13 +334,13 @@ impl StageRunner {
         // Process the stream until finished.
         let mut running_task_cnt = 0;
         let mut sent_signal_to_next = false;
-        let mut shutdown_tx = shutdown_tx;
+        let mut shutdown_rx = shutdown_rx;
         // This loop will stops once receive a stop message, otherwise keep processing status
         // message.
         loop {
             tokio::select! {
                     biased;
-                    _ = &mut shutdown_tx => {
+                    _ = &mut shutdown_rx => {
                     // Received shutdown signal from query runner, should send abort RPC to all CNs.
                     // change state to aborted. Note that the task cancel can only happen after schedule all these tasks to CN.
                     // This can be an optimization for future: How to stop before schedule tasks.
@@ -453,11 +442,15 @@ impl StageRunner {
         {
             // Changing state
             let mut s = self.state.write().await;
-            match mem::replace(&mut *s, StageState::Failed) {
+            let state = mem::replace(&mut *s, StageState::Failed);
+            match state {
                 StageState::Started => {
                     *s = StageState::Running;
                 }
-                _ => unreachable!(),
+                _ => unreachable!(
+                    "The state can not be {:?} for query-{:?}-{:?} to do notify ",
+                    state, self.stage.query_id.id, self.stage.id
+                ),
             }
         }
         self.send_event(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
@@ -468,6 +461,17 @@ impl StageRunner {
     /// failed or completed, cuz the abort task will not fail if the task has already die.
     /// See PR (#4560).
     async fn abort_all_running_tasks(&self) -> SchedulerResult<()> {
+        // Set state to failed.
+        {
+            let mut state = self.state.write().await;
+            // Ignore if already finished.
+            if *state == StageState::Completed {
+                return Ok(());
+            }
+            // FIXME: Be careful for state jump back.
+            *state = StageState::Failed
+        }
+
         for (task, task_status) in self.tasks.iter() {
             // 1. Collect task info and client.
             let loc = &task_status.get_status().location;

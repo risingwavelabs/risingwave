@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
@@ -32,11 +33,11 @@ use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::ScheduledLocations;
-use crate::barrier::{BarrierManagerRef, Command};
+use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{
-    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, MetaSrvEnv, SchemaId,
-    WorkerId,
+    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, IdGeneratorManagerRef,
+    MetaSrvEnv, SchemaId, WorkerId,
 };
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
@@ -91,13 +92,13 @@ impl CreateMaterializedViewContext {
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager<S: MetaStore> {
     /// Manages definition and status of fragments and actors
-    fragment_manager: FragmentManagerRef<S>,
+    pub(super) fragment_manager: FragmentManagerRef<S>,
 
     /// Broadcasts and collect barriers
-    barrier_manager: BarrierManagerRef<S>,
+    pub(crate) barrier_scheduler: BarrierScheduler<S>,
 
     /// Maintains information of the cluster
-    cluster_manager: ClusterManagerRef<S>,
+    pub(crate) cluster_manager: ClusterManagerRef<S>,
 
     /// Maintains streaming sources from external system like kafka
     source_manager: SourceManagerRef<S>,
@@ -106,7 +107,10 @@ pub struct GlobalStreamManager<S: MetaStore> {
     scheduler: Scheduler<S>,
 
     /// Client Pool to stream service on compute nodes
-    client_pool: StreamClientPoolRef,
+    pub(crate) client_pool: StreamClientPoolRef,
+
+    /// id generator manager.
+    pub(crate) id_gen_manager: IdGeneratorManagerRef<S>,
 
     compaction_group_manager: CompactionGroupManagerRef<S>,
 }
@@ -118,7 +122,7 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         fragment_manager: FragmentManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        barrier_scheduler: BarrierScheduler<S>,
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
@@ -126,11 +130,12 @@ where
         Ok(Self {
             scheduler: Scheduler::new(cluster_manager.clone()),
             fragment_manager,
-            barrier_manager,
+            barrier_scheduler,
             cluster_manager,
             source_manager,
             client_pool: env.stream_client_pool_ref(),
             compaction_group_manager,
+            id_gen_manager: env.id_gen_manager_ref(),
         })
     }
 
@@ -337,6 +342,25 @@ where
     pub async fn create_materialized_view(
         &self,
         table_fragments: &mut TableFragments,
+        context: &mut CreateMaterializedViewContext,
+    ) -> MetaResult<()> {
+        let mut revert_funcs = vec![];
+        if let Err(e) = self
+            .create_materialized_view_impl(&mut revert_funcs, table_fragments, context)
+            .await
+        {
+            for revert_func in revert_funcs.into_iter().rev() {
+                revert_func.await;
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    async fn create_materialized_view_impl(
+        &self,
+        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
+        table_fragments: &mut TableFragments,
         CreateMaterializedViewContext {
             dispatchers,
             upstream_worker_actors,
@@ -347,19 +371,6 @@ where
             ..
         }: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
-        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
-        // It MUST be cleared before Ok returns.
-        let mut revert_funcs = scopeguard::guard(
-            vec![],
-            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
-                tokio::spawn(async move {
-                    for revert_func in revert_funcs.into_iter().rev() {
-                        revert_func.await;
-                    }
-                });
-            },
-        );
-
         // Schedule actors to parallel units. `locations` will record the parallel unit that an
         // actor is scheduled to, and the worker node this parallel unit is on.
         let mut locations = {
@@ -662,7 +673,7 @@ where
             .await?;
 
         if let Err(err) = self
-            .barrier_manager
+            .barrier_scheduler
             .run_command(Command::CreateMaterializedView {
                 table_fragments: table_fragments.clone(),
                 table_sink_map: table_sink_map.clone(),
@@ -680,8 +691,6 @@ where
         self.source_manager
             .patch_update(Some(source_fragments), Some(init_split_assignment))
             .await?;
-
-        revert_funcs.clear();
         Ok(())
     }
 
@@ -700,7 +709,7 @@ where
             source_fragments
         };
 
-        self.barrier_manager
+        self.barrier_scheduler
             .run_command(Command::DropMaterializedView(*table_id))
             .await?;
 
@@ -884,8 +893,7 @@ mod tests {
         global_stream_manager: GlobalStreamManager<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
-        join_handles: Vec<JoinHandle<()>>,
-        shutdown_txs: Vec<Sender<()>>,
+        join_handle_shutdown_txs: Vec<(JoinHandle<()>, Sender<()>)>,
     }
 
     impl MockServices {
@@ -933,7 +941,13 @@ mod tests {
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
-            let compactor_manager = Arc::new(CompactorManager::new());
+            // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
+            // heartbeat thread here, so it doesn't matter.
+            let compactor_manager = Arc::new(
+                CompactorManager::new_with_meta(env.clone(), 1)
+                    .await
+                    .unwrap(),
+            );
 
             let hummock_manager = Arc::new(
                 HummockManager::new(
@@ -946,14 +960,8 @@ mod tests {
                 .await?,
             );
 
-            let barrier_manager = Arc::new(GlobalBarrierManager::new(
-                env.clone(),
-                cluster_manager.clone(),
-                catalog_manager.clone(),
-                fragment_manager.clone(),
-                hummock_manager,
-                meta_metrics.clone(),
-            ));
+            let (barrier_scheduler, scheduled_barriers) =
+                BarrierScheduler::new_pair(hummock_manager.clone());
 
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await?);
@@ -962,7 +970,7 @@ mod tests {
                 SourceManager::new(
                     env.clone(),
                     cluster_manager.clone(),
-                    barrier_manager.clone(),
+                    barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
                     compaction_group_manager.clone(),
@@ -970,10 +978,21 @@ mod tests {
                 .await?,
             );
 
+            let barrier_manager = Arc::new(GlobalBarrierManager::new(
+                scheduled_barriers,
+                env.clone(),
+                cluster_manager.clone(),
+                catalog_manager.clone(),
+                fragment_manager.clone(),
+                hummock_manager,
+                source_manager.clone(),
+                meta_metrics.clone(),
+            ));
+
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
                 fragment_manager.clone(),
-                barrier_manager.clone(),
+                barrier_scheduler.clone(),
                 cluster_manager.clone(),
                 source_manager.clone(),
                 compaction_group_manager.clone(),
@@ -985,16 +1004,16 @@ mod tests {
                 global_stream_manager: stream_manager,
                 fragment_manager,
                 state,
-                join_handles: vec![join_handle_2, join_handle],
-                shutdown_txs: vec![shutdown_tx_2, shutdown_tx],
+                join_handle_shutdown_txs: vec![
+                    (join_handle_2, shutdown_tx_2),
+                    (join_handle, shutdown_tx),
+                ],
             })
         }
 
         async fn stop(self) {
-            for shutdown_tx in self.shutdown_txs {
+            for (join_handle, shutdown_tx) in self.join_handle_shutdown_txs {
                 shutdown_tx.send(()).unwrap();
-            }
-            for join_handle in self.join_handles {
                 join_handle.await.unwrap();
             }
         }

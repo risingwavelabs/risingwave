@@ -17,10 +17,11 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
+use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
-use super::SstableMeta;
+use crate::hummock::compactor::TaskProgressTracker;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -38,11 +39,8 @@ pub trait TableBuilderFactory {
 }
 
 pub struct SplitTableOutput {
-    pub sst_id: HummockSstableId,
-    pub meta: SstableMeta,
+    pub sst_info: SstableInfo,
     pub upload_join_handle: UploadJoinHandle,
-    pub bloom_filter_size: usize,
-    pub table_ids: Vec<u32>,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -62,6 +60,8 @@ where
 
     /// Statistics.
     pub stats: Arc<StateStoreMetrics>,
+
+    task_progress_tracker: Option<TaskProgressTracker>,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -69,12 +69,17 @@ where
     F: TableBuilderFactory,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(builder_factory: F, stats: Arc<StateStoreMetrics>) -> Self {
+    pub fn new(
+        builder_factory: F,
+        stats: Arc<StateStoreMetrics>,
+        task_progress_tracker: Option<TaskProgressTracker>,
+    ) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
             stats,
+            task_progress_tracker,
         }
     }
 
@@ -84,6 +89,7 @@ where
             sst_outputs: Vec::new(),
             current_builder: None,
             stats: Arc::new(StateStoreMetrics::unused()),
+            task_progress_tracker: None,
         }
     }
 
@@ -149,26 +155,19 @@ where
     pub fn seal_current(&mut self) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.take() {
             let builder_output = builder.finish()?;
-            let meta = builder_output.meta;
-
-            let bloom_filter_size = meta.bloom_filter.len();
-
-            if bloom_filter_size != 0 {
-                self.stats
-                    .sstable_bloom_filter_size
-                    .observe(bloom_filter_size as _);
+            if let Some(tracker) = &self.task_progress_tracker {
+                tracker.inc_ssts_sealed();
             }
 
-            self.stats
-                .sstable_meta_size
-                .observe(meta.encoded_size() as _);
+            if builder_output.bloom_filter_size != 0 {
+                self.stats
+                    .sstable_bloom_filter_size
+                    .observe(builder_output.bloom_filter_size as _);
+            }
 
             self.sst_outputs.push(SplitTableOutput {
-                sst_id: builder_output.sstable_id,
-                meta,
                 upload_join_handle: builder_output.writer_output,
-                bloom_filter_size,
-                table_ids: builder_output.table_ids,
+                sst_info: builder_output.sst_info,
             });
         }
         Ok(())
@@ -246,7 +245,6 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: 0,
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
@@ -264,7 +262,6 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
-            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let mut builder = CapacitySplitTableBuilder::new_for_test(builder_factory);

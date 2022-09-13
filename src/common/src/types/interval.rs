@@ -16,15 +16,16 @@ use std::cmp::Ordering;
 use std::fmt::{Display, Formatter, Write as _};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::ops::{Add, Sub};
+use std::ops::{Add, Neg, Sub};
 
 use anyhow::anyhow;
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::BytesMut;
-use num_traits::{CheckedAdd, CheckedSub};
+use num_traits::{CheckedAdd, CheckedSub, Zero};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use smallvec::SmallVec;
 
+use super::ops::IsNegative;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
 
@@ -104,11 +105,18 @@ impl IntervalUnit {
     /// If day is positive, complement the ms negative value.
     /// These rules only use in interval comparison.
     pub fn justify_interval(&mut self) {
-        let month = (self.months * 30) as i64 * DAY_MS;
-        self.ms = self.ms + month + (self.days) as i64 * DAY_MS;
-        self.days = (self.ms / DAY_MS) as i32;
-        self.ms %= DAY_MS;
-        self.months = 0;
+        let total_ms = self.total_ms();
+        *self = Self {
+            months: 0,
+            days: (total_ms / DAY_MS) as i32,
+            ms: total_ms % DAY_MS,
+        }
+    }
+
+    pub fn justified(&self) -> Self {
+        let mut interval = *self;
+        interval.justify_interval();
+        interval
     }
 
     #[must_use]
@@ -132,6 +140,10 @@ impl IntervalUnit {
             days: (days as i32),
             ms: (remaining_ms as i64),
         }
+    }
+
+    pub fn total_ms(&self) -> i64 {
+        self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
     }
 
     #[must_use]
@@ -276,11 +288,7 @@ impl Serialize for IntervalUnit {
     where
         S: serde::Serializer,
     {
-        let IntervalUnit { months, days, ms } = {
-            let mut justified = *self;
-            justified.justify_interval();
-            justified
-        };
+        let IntervalUnit { months, days, ms } = self.justified();
         // serialize the `IntervalUnit` as a tuple
         (months, days, ms).serialize(serializer)
     }
@@ -354,8 +362,7 @@ impl PartialOrd for IntervalUnit {
 
 impl Hash for IntervalUnit {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        let mut interval = *self;
-        interval.justify_interval();
+        let interval = self.justified();
         interval.months.hash(state);
         interval.ms.hash(state);
         interval.days.hash(state);
@@ -364,10 +371,8 @@ impl Hash for IntervalUnit {
 
 impl PartialEq for IntervalUnit {
     fn eq(&self, other: &Self) -> bool {
-        let mut interval = *self;
-        interval.justify_interval();
-        let mut other = *other;
-        other.justify_interval();
+        let interval = self.justified();
+        let other = other.justified();
         interval.days == other.days && interval.ms == other.ms
     }
 }
@@ -406,6 +411,35 @@ impl CheckedSub for IntervalUnit {
         let days = self.days.checked_sub(other.days)?;
         let ms = self.ms.checked_sub(other.ms)?;
         Some(IntervalUnit { months, days, ms })
+    }
+}
+
+impl Zero for IntervalUnit {
+    fn zero() -> Self {
+        Self::new(0, 0, 0)
+    }
+
+    fn is_zero(&self) -> bool {
+        self.months == 0 && self.days == 0 && self.ms == 0
+    }
+}
+
+impl IsNegative for IntervalUnit {
+    fn is_negative(&self) -> bool {
+        let i = self.justified();
+        i.months < 0 || (i.months == 0 && i.days < 0) || (i.months == 0 && i.days == 0 && i.ms < 0)
+    }
+}
+
+impl Neg for IntervalUnit {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self {
+            months: -self.months,
+            days: -self.days,
+            ms: -self.ms,
+        }
     }
 }
 
