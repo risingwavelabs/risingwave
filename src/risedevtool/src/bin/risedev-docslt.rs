@@ -97,7 +97,7 @@ fn extract_slt_blocks(markdown: &str, position: FilePosition) -> Vec<SltBlock> {
     slt_blocks
 }
 
-fn generate_slt_files_for_package(package_name: &str) -> Result<()> {
+fn generate_slt_files(package_name: &str) -> Result<()> {
     print!("Generating SLT files for package `{package_name}`...");
     std::io::stdout().flush().unwrap();
 
@@ -234,7 +234,7 @@ fn main() -> Result<()> {
         default_packages
     };
     for package in packages {
-        generate_slt_files_for_package(package)?;
+        generate_slt_files(package)?;
     }
     Ok(())
 }
