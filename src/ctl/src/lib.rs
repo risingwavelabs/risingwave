@@ -62,6 +62,15 @@ enum Commands {
 enum HummockCommands {
     /// list latest Hummock version on meta node
     ListVersion,
+
+    /// list hummock version deltas in the meta store
+    ListVersionDeltas {
+        #[clap(short, long = "start-version-delta-id", default_value_t = 0)]
+        start_id: u64,
+
+        #[clap(short, long = "num-epochs", default_value_t = 100)]
+        num_epochs: u32,
+    },
     /// list all Hummock key-value pairs
     ListKv {
         #[clap(short, long = "epoch", default_value_t = u64::MAX)]
@@ -143,6 +152,12 @@ pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
         Commands::Hummock(HummockCommands::ListVersion) => {
             cmd_impl::hummock::list_version().await?;
+        }
+        Commands::Hummock(HummockCommands::ListVersionDeltas {
+            start_id,
+            num_epochs,
+        }) => {
+            cmd_impl::hummock::list_version_deltas(start_id, num_epochs).await?;
         }
         Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
             cmd_impl::hummock::list_kv(epoch, table_id).await?;

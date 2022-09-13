@@ -90,6 +90,21 @@ where
         }))
     }
 
+    async fn get_version_deltas(
+        &self,
+        request: Request<GetVersionDeltasRequest>,
+    ) -> Result<Response<GetVersionDeltasResponse>, Status> {
+        let req = request.into_inner();
+        let version_deltas = self
+            .hummock_manager
+            .get_version_deltas(req.start_id, req.num_epochs)
+            .await?;
+        let resp = GetVersionDeltasResponse {
+            version_deltas: Some(version_deltas),
+        };
+        Ok(Response::new(resp))
+    }
+
     async fn report_compaction_tasks(
         &self,
         request: Request<ReportCompactionTasksRequest>,
