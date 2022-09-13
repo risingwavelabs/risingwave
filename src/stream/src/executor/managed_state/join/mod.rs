@@ -102,11 +102,11 @@ impl JoinRow {
         (self.row, degree)
     }
 
-    pub fn encode(&self) -> StreamExecutorResult<EncodedJoinRow> {
-        Ok(EncodedJoinRow {
-            row: self.row.serialize()?,
+    pub fn encode(&self) -> EncodedJoinRow {
+        EncodedJoinRow {
+            row: self.row.serialize(),
             degree: self.degree,
-        })
+        }
     }
 }
 
@@ -430,7 +430,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     .context("Fail to fetch a degree")?;
                 entry_state.insert(
                     pk,
-                    JoinRow::new(row.into_owned(), *degree_i64.as_int64() as u64).encode()?,
+                    JoinRow::new(row.into_owned(), *degree_i64.as_int64() as u64).encode(),
                 );
             }
         } else {
@@ -441,7 +441,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 let row = row?;
                 let pk = row
                     .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-                entry_state.insert(pk, JoinRow::new(row.into_owned(), 0).encode()?);
+                entry_state.insert(pk, JoinRow::new(row.into_owned(), 0).encode());
             }
         };
 
@@ -456,37 +456,35 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a join row
-    pub fn insert(&mut self, key: &K, value: JoinRow) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, key: &K, value: JoinRow) {
         if let Some(entry) = self.inner.get_mut(key) {
             let pk = value
                 .row
                 .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-            entry.insert(pk, value.encode()?);
+            entry.insert(pk, value.encode());
         }
         // If no cache maintained, only update the flush buffer.
         let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
-        self.state.table.insert(row)?;
-        self.degree_state.table.insert(degree)?;
-        Ok(())
+        self.state.table.insert(row);
+        self.degree_state.table.insert(degree);
     }
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
-    pub fn insert_row(&mut self, key: &K, value: Row) -> StreamExecutorResult<()> {
+    pub fn insert_row(&mut self, key: &K, value: Row) {
         let join_row = JoinRow::new(value.clone(), 0);
 
         if let Some(entry) = self.inner.get_mut(key) {
             let pk =
                 value.extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-            entry.insert(pk, join_row.encode()?);
+            entry.insert(pk, join_row.encode());
         }
         // If no cache maintained, only update the state table.
-        self.state.table.insert(value)?;
-        Ok(())
+        self.state.table.insert(value);
     }
 
     /// Delete a join row
-    pub fn delete(&mut self, key: &K, value: JoinRow) -> StreamExecutorResult<()> {
+    pub fn delete(&mut self, key: &K, value: JoinRow) {
         if let Some(entry) = self.inner.get_mut(key) {
             let pk = value
                 .row
@@ -496,14 +494,13 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         // If no cache maintained, only update the state table.
         let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
-        self.state.table.delete(row)?;
-        self.degree_state.table.delete(degree)?;
-        Ok(())
+        self.state.table.delete(row);
+        self.degree_state.table.delete(degree);
     }
 
     /// Delete a row
     /// Used when the side does not need to update degree.
-    pub fn delete_row(&mut self, key: &K, value: Row) -> StreamExecutorResult<()> {
+    pub fn delete_row(&mut self, key: &K, value: Row) {
         if let Some(entry) = self.inner.get_mut(key) {
             let pk =
                 value.extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
@@ -511,8 +508,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
 
         // If no cache maintained, only update the state table.
-        self.state.table.delete(value)?;
-        Ok(())
+        self.state.table.delete(value);
     }
 
     /// Insert a [`JoinEntryState`]
@@ -527,7 +523,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let new_degree = join_row
             .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
 
-        self.degree_state.table.update(old_degree, new_degree)?;
+        self.degree_state.table.update(old_degree, new_degree);
         Ok(())
     }
 
@@ -538,7 +534,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let new_degree = join_row
             .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
 
-        self.degree_state.table.update(old_degree, new_degree)?;
+        self.degree_state.table.update(old_degree, new_degree);
         Ok(())
     }
 

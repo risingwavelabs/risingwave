@@ -917,8 +917,10 @@ pub enum Statement {
     ///
     /// Note: this is a PostgreSQL-specific statement.
     ShowVariable { variable: Vec<Ident> },
-    /// `{ BEGIN [ TRANSACTION | WORK ] | START TRANSACTION } ...`
+    /// `START TRANSACTION ...`
     StartTransaction { modes: Vec<TransactionMode> },
+    /// `BEGIN [ TRANSACTION | WORK ]`
+    BEGIN { modes: Vec<TransactionMode> },
     /// ABORT
     Abort,
     /// `SET TRANSACTION ...`
@@ -1370,6 +1372,13 @@ impl fmt::Display for Statement {
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
+            }
+            Statement::BEGIN { modes } => {
+                write!(f, "BEGIN")?;
+                if !modes.is_empty() {
+                    write!(f, " {}", display_comma_separated(modes))?;
+                }
+                Ok(())
             }
         }
     }
