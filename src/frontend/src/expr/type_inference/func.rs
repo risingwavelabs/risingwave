@@ -172,6 +172,9 @@ fn infer_type_for_special(
             ensure_arity!("array_cat", | inputs | == 2);
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
+            // return_type is left_type or right_type if types match. Else None
+            // If it is None, it will throw the error
+            let mut err_msg_debug: String = String::from("");
             let return_type = match (&left_type, &right_type) {
                 (
                     DataType::List {
@@ -182,19 +185,46 @@ fn infer_type_for_special(
                     },
                 ) => {
                     if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
-                        Some(left_type.clone())
+                        Some(left_type.clone()) // success
                     } else if left_type == **right_elem_type {
-                        Some(right_type.clone())
+                        Some(right_type.clone()) // success
+                    } else if left_elem_type.is_numeric() && right_elem_type.is_numeric() {
+                        // maybe introduce a multi match version where we can cast the types?
+                        // How does DataType work?
+                        // what is our base type here?
+                        // is not numeric, because it is a list
+                        err_msg_debug = String::from("both numeric"); // selects this branch :)
+                        let inputs_owned = std::mem::take(inputs);
+                        *inputs = inputs_owned
+                            .into_iter()
+                            .map(|input| {
+                                input.cast_explicit(
+                                    // cannot cast type "integer[]" to "numeric" in Explicit
+                                    // DataType::Decimal
+
+                                    //  QueryError: Scheduler error: Expr error: Array error: Invalid datum type
+                                    DataType::List {
+                                        datatype: { Box::new(DataType::Decimal) },
+                                    },
+                                )
+                            })
+                            .try_collect()?;
+
+                        Some(DataType::Decimal)
                     } else {
+                        err_msg_debug = String::from("first none");
                         None
                     }
                 }
-                _ => None,
+                _ => {
+                    err_msg_debug = String::from("second none");
+                    None
+                } // fail, did not even match
             };
             Ok(Some(return_type.ok_or_else(|| {
                 ErrorCode::BindError(format!(
-                    "Cannot concatenate {} and {}",
-                    left_type, right_type
+                    "Cannot concatenate {} and {}. {}",
+                    left_type, right_type, err_msg_debug
                 ))
             })?))
         }

@@ -80,6 +80,7 @@ impl ArrayConcatExpression {
     /// - `select array_cat(array[66], array[123]);` => `[66,123]`
     /// - `select array_cat(array[66], null::int[]);` => `[66]`
     /// - `select array_cat(null::int[], array[123]);` => `[123]`
+    /// TODO: Concat arrays with similar types: https://github.com/risingwavelabs/risingwave/issues/5100
     fn concat_array(left: DatumRef, right: DatumRef) -> Datum {
         match (left, right) {
             (None, right) => right.map(ScalarRefImpl::into_scalar_impl),
@@ -94,8 +95,8 @@ impl ArrayConcatExpression {
                 )
                 .into(),
             ),
-            _ => {
-                panic!("the operands must be two arrays with the same data type");
+            _ => { // We are not here! We get "ERROR:  QueryError: Bind error: Cannot concatenate integer[] and numeric[]"
+                panic!("the operands must be two arrays with the same data type.");
             }
         }
     }
