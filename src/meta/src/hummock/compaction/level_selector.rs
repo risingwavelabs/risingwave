@@ -19,12 +19,9 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
-use risingwave_hummock_sdk::key::{user_key, FullKey};
-use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch, VersionedComparator};
+use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, KeyRange};
+use risingwave_pb::hummock::CompactionConfig;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
@@ -256,51 +253,10 @@ impl DynamicLevelSelector {
             let idx = input.target_level - base_level + 1;
             self.config.compression_algorithm[idx].clone()
         };
-        let mut splits = vec![];
-        const SPLIT_RANGE_STEP: usize = 8;
-        let mut keys = input
-            .input_levels
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| {
-                FullKey::from_user_key_slice(
-                    user_key(&table.key_range.as_ref().unwrap().left),
-                    HummockEpoch::MAX,
-                )
-                .into_inner()
-            })
-            .collect_vec();
-        let total_file_size = input
-            .input_levels
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| table.file_size)
-            .sum::<u64>();
-
-        if (total_file_size > self.config.sub_level_max_compaction_bytes
-            || total_file_size > self.config.max_bytes_for_level_base)
-            && keys.len() >= SPLIT_RANGE_STEP * 2
-        {
-            splits.push(KeyRange::new(vec![], vec![]));
-            keys.sort_by(|a, b| VersionedComparator::compare_key(a.as_ref(), b.as_ref()));
-            let concurrency = std::cmp::min(
-                keys.len() / SPLIT_RANGE_STEP,
-                self.config.max_sub_compaction as usize,
-            );
-            let step = (keys.len() + concurrency - 1) / concurrency;
-            assert!(step > 1);
-            for (idx, key) in keys.into_iter().enumerate() {
-                if idx > 0 && idx % step == 0 {
-                    splits.last_mut().unwrap().right = key.clone();
-                    splits.push(KeyRange::new(key, vec![]));
-                }
-            }
-        }
         CompactionTask {
             input,
             compression_algorithm,
             target_file_size,
-            splits,
         }
     }
 }
@@ -374,7 +330,7 @@ pub mod tests {
     use itertools::Itertools;
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
-    use risingwave_pb::hummock::{Level, LevelType, OverlappingLevel, SstableInfo};
+    use risingwave_pb::hummock::{KeyRange, Level, LevelType, OverlappingLevel, SstableInfo};
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
