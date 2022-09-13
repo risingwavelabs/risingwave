@@ -379,7 +379,7 @@ message GetVersionDeltasRequest {
 }
 
 message GetVersionDeltasResponse {
-    HummockVersionDeltas version_deltas = 1;
+  HummockVersionDeltas version_deltas = 1;
 }
 
 service HummockManagerService {
