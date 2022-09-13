@@ -69,7 +69,6 @@ async fn test_update_pinned_version() {
                 epochs[i],
                 StaticCompactionGroupId::StateDefault.into(),
                 batches[i].clone(),
-                false,
                 Default::default(),
             )
             .await
@@ -91,13 +90,12 @@ async fn test_update_pinned_version() {
             epochs[2],
             StaticCompactionGroupId::StateDefault.into(),
             batches[2].clone(),
-            true,
             Default::default(),
         )
         .await
         .unwrap();
     let local_version = local_version_manager.get_local_version();
-    assert!(local_version.get_shared_buffer(epochs[2]).is_none(),);
+    assert!(local_version.get_shared_buffer(epochs[2]).is_some(),);
 
     let build_batch = |pairs, epoch| {
         SharedBufferBatch::new(
@@ -110,7 +108,6 @@ async fn test_update_pinned_version() {
     };
 
     let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[0], &(..));
-    assert!(read_version.replicated_batches.is_empty());
     assert_eq!(
         read_version.shared_buffer_data,
         vec![vec![vec![UncommittedData::Batch(build_batch(
@@ -120,7 +117,6 @@ async fn test_update_pinned_version() {
     );
 
     let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[1], &(..));
-    assert!(read_version.replicated_batches.is_empty());
     assert_eq!(
         read_version.shared_buffer_data,
         vec![
@@ -137,12 +133,12 @@ async fn test_update_pinned_version() {
 
     let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
     assert_eq!(
-        read_version.replicated_batches,
-        vec![vec![build_batch(batches[2].clone(), epochs[2])]]
-    );
-    assert_eq!(
         read_version.shared_buffer_data,
         vec![
+            vec![vec![UncommittedData::Batch(build_batch(
+                batches[2].clone(),
+                epochs[2]
+            ))]],
             vec![vec![UncommittedData::Batch(build_batch(
                 batches[1].clone(),
                 epochs[1]
@@ -166,7 +162,7 @@ async fn test_update_pinned_version() {
         max_committed_epoch: epochs[0],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert_eq!(
@@ -174,11 +170,6 @@ async fn test_update_pinned_version() {
         SharedBufferBatch::measure_batch_size(
             &LocalVersionManager::build_shared_buffer_item_batches(batches[1].clone(), epochs[1])
         )
-    );
-    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
-    assert_eq!(
-        read_version.replicated_batches,
-        vec![vec![build_batch(batches[2].clone(), epochs[2])]]
     );
 
     let result = local_version_manager
@@ -193,27 +184,26 @@ async fn test_update_pinned_version() {
         max_committed_epoch: epochs[1],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
-    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
-    assert_eq!(
-        read_version.replicated_batches,
-        vec![vec![build_batch(batches[2].clone(), epochs[2])]]
-    );
 
+    let result = local_version_manager
+        .sync_shared_buffer(epochs[2])
+        .await
+        .unwrap();
+    assert!(result.sync_succeed);
     // Update version for epochs[2]
     let version = HummockVersion {
         id: initial_version_id + 3,
         max_committed_epoch: epochs[2],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
-    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
-    assert!(read_version.replicated_batches.is_empty());
 }
 
 #[tokio::test]
@@ -246,7 +236,6 @@ async fn test_update_uncommitted_ssts() {
                 epochs[i],
                 StaticCompactionGroupId::StateDefault.into(),
                 kvs[i].clone(),
-                false,
                 Default::default(),
             )
             .await
@@ -368,8 +357,9 @@ async fn test_update_uncommitted_ssts() {
         max_committed_epoch: epochs[0],
         ..Default::default()
     };
-    assert!(local_version_manager
-        .try_update_pinned_version(None, Payload::PinnedVersion(version.clone())));
+    assert!(
+        local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version.clone()))
+    );
     let local_version = local_version_manager.get_local_version();
     // Check shared buffer
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
@@ -384,7 +374,7 @@ async fn test_update_uncommitted_ssts() {
         max_committed_epoch: epochs[1],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version.clone()));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version.clone()));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
@@ -423,7 +413,6 @@ async fn test_clear_shared_buffer() {
                 epochs[i],
                 StaticCompactionGroupId::StateDefault.into(),
                 batches[i].clone(),
-                false,
                 Default::default(),
             )
             .await
@@ -488,7 +477,6 @@ async fn test_sst_gc_watermark() {
                 epochs[i],
                 StaticCompactionGroupId::StateDefault.into(),
                 batches[i].clone(),
-                false,
                 Default::default(),
             )
             .await
@@ -524,7 +512,7 @@ async fn test_sst_gc_watermark() {
         ..Default::default()
     };
     // Watermark held by epoch 0 is removed.
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     // Global watermark determined by epoch 1.
     assert_eq!(
         local_version_manager
@@ -538,7 +526,7 @@ async fn test_sst_gc_watermark() {
         max_committed_epoch: epochs[1],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     assert_eq!(
         local_version_manager
             .get_sstable_id_manager()

@@ -35,6 +35,7 @@ use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
 };
 use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::SourceChangeSplitMutation;
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
@@ -345,8 +346,9 @@ pub(crate) fn fetch_source_fragments(
 ) {
     for fragment in table_fragments.fragments() {
         for actor in &fragment.actors {
-            if let Some(source_id) =
-                TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+            if let Some(source_id) = TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
+                .filter(|s| s.source_type() == SourceType::Source)
+                .map(|s| s.source_id)
             {
                 source_fragments
                     .entry(source_id)
@@ -693,6 +695,11 @@ where
         Ok(())
     }
 
+    pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
+        let core = self.core.lock().await;
+        core.actor_splits.clone()
+    }
+
     async fn tick(&self) -> MetaResult<()> {
         let diff = {
             let mut core_guard = self.core.lock().await;
@@ -701,17 +708,7 @@ where
 
         if !diff.is_empty() {
             let command = Command::Plain(Some(Mutation::Splits(SourceChangeSplitMutation {
-                actor_splits: diff
-                    .iter()
-                    .map(|(&actor_id, splits)| {
-                        (
-                            actor_id,
-                            ConnectorSplits {
-                                splits: splits.iter().map(ConnectorSplit::from).collect(),
-                            },
-                        )
-                    })
-                    .collect(),
+                actor_splits: build_actor_splits(&diff),
             })));
             tracing::debug!("pushing down mutation {:#?}", command);
 
@@ -757,4 +754,19 @@ where
     pub async fn get_actor_splits(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
         self.core.lock().await.get_actor_splits()
     }
+}
+
+pub fn build_actor_splits(
+    diff: &HashMap<ActorId, Vec<SplitImpl>>,
+) -> HashMap<u32, ConnectorSplits> {
+    diff.iter()
+        .map(|(&actor_id, splits)| {
+            (
+                actor_id,
+                ConnectorSplits {
+                    splits: splits.iter().map(ConnectorSplit::from).collect(),
+                },
+            )
+        })
+        .collect()
 }

@@ -317,7 +317,7 @@ mod tests {
         // when upload data is successful, but upload meta is fail and delete is fail
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-        let _ = gen_test_sstable(
+        let table = gen_test_sstable(
             default_builder_opt_for_test(),
             0,
             kv_iter,
@@ -327,7 +327,10 @@ mod tests {
 
         let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
-            sstable_store.sstable(0, &mut stats).await.unwrap(),
+            sstable_store
+                .sstable(&table.get_sstable_info(), &mut stats)
+                .await
+                .unwrap(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions { prefetch: true }),
         );

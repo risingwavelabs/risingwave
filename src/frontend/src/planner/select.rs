@@ -25,8 +25,8 @@ use crate::expr::{
 };
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalJoin, LogicalOverAgg, LogicalProject, LogicalProjectSet,
-    LogicalValues, PlanAggCall, PlanRef,
+    LogicalAgg, LogicalApply, LogicalOverAgg, LogicalProject, LogicalProjectSet, LogicalValues,
+    PlanAggCall, PlanRef,
 };
 use crate::planner::Planner;
 use crate::utils::Condition;
@@ -117,10 +117,9 @@ impl Planner {
     }
 
     /// For `(NOT) EXISTS subquery` or `(NOT) IN subquery`, we can plan it as
-    /// `LeftSemi/LeftAnti` [`LogicalApply`] (correlated) or [`LogicalJoin`].
-    ///
-    /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] (correlated) or
-    /// [`LogicalJoin`] using [`Self::substitute_subqueries`].
+    /// `LeftSemi/LeftAnti` [`LogicalApply`]
+    /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] using
+    /// [`Self::substitute_subqueries`].
     fn plan_where(&mut self, mut input: PlanRef, where_clause: ExprImpl) -> Result<PlanRef> {
         if !where_clause.has_subquery() {
             return Ok(LogicalFilter::create_with_expr(input, where_clause));
@@ -201,13 +200,14 @@ impl Planner {
                 .into())
             }
         };
-        *input = Self::create_join(
+        *input = Self::create_apply(
             correlated_id,
             correlated_indices,
             input.clone(),
             right_plan,
             on,
             join_type,
+            false,
         );
         Ok(())
     }
@@ -215,8 +215,8 @@ impl Planner {
     /// Substitutes all [`Subquery`] in `exprs`.
     ///
     /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
-    /// replaced by a new `LeftOuter` [`LogicalApply`] (correlated) or [`LogicalJoin`]
-    /// (uncorrelated) node, whose left side is `root` and right side is the planned subquery.
+    /// replaced by a new `LeftOuter` [`LogicalApply`] whose left side is `root` and right side is
+    /// the planned subquery.
     ///
     /// The [`InputRef`]s' indexes start from `root.schema().len()`,
     /// which means they are additional columns beyond the original `root`.
@@ -279,37 +279,36 @@ impl Planner {
                 }
             }
 
-            root = Self::create_join(
+            root = Self::create_apply(
                 correlated_id,
                 correlated_indices,
                 root,
                 right,
                 ExprImpl::literal_bool(true),
                 JoinType::LeftOuter,
+                true,
             );
         }
         Ok((root, exprs))
     }
 
-    fn create_join(
+    fn create_apply(
         correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
         left: PlanRef,
         right: PlanRef,
         on: ExprImpl,
         join_type: JoinType,
+        max_one_row: bool,
     ) -> PlanRef {
-        if !correlated_indices.is_empty() {
-            LogicalApply::create(
-                left,
-                right,
-                join_type,
-                Condition::with_expr(on),
-                correlated_id,
-                correlated_indices,
-            )
-        } else {
-            LogicalJoin::create(left, right, join_type, on)
-        }
+        LogicalApply::create(
+            left,
+            right,
+            join_type,
+            Condition::with_expr(on),
+            correlated_id,
+            correlated_indices,
+            max_one_row,
+        )
     }
 }

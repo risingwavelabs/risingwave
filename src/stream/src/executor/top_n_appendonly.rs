@@ -41,7 +41,6 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
-        total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
@@ -57,7 +56,6 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 order_pairs,
                 offset_and_limit,
                 pk_indices,
-                total_count,
                 executor_id,
                 key_indices,
                 state_table,
@@ -100,7 +98,6 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
-        total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
@@ -113,8 +110,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
 
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
-        let managed_state =
-            ManagedTopNState::<S>::new(total_count, state_table, ordered_row_deserializer);
+        let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
 
         Ok(Self {
             info: ExecutorInfo {
@@ -138,7 +134,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     async fn apply_chunk(
         &mut self,
         chunk: StreamChunk,
-        epoch: u64,
+        _epoch: u64,
     ) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.cache.limit);
         let mut res_rows = Vec::with_capacity(self.cache.limit);
@@ -155,7 +151,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                 continue;
             }
             self.managed_state
-                .insert(ordered_pk_row.clone(), row.clone(), epoch)?;
+                .insert(ordered_pk_row.clone(), row.clone());
 
             // Then insert input row to corresponding cache range according to its order key
             if self.cache.low.len() < self.cache.offset {
@@ -193,7 +189,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
             let res = self.cache.middle.pop_last().unwrap();
             res_ops.push(Op::Delete);
             res_rows.push(res.1.clone());
-            self.managed_state.delete(&res.0, res.1, epoch)?;
+            self.managed_state.delete(&res.0, res.1);
 
             res_ops.push(Op::Insert);
             res_rows.push(elem_to_compare_with_middle.1.clone());
@@ -204,7 +200,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
             // Unlike normal topN, append only topN does not necessarily use the high part of the
             // cache
         }
-        // compare the those two ranges and emit the differantial result
+
         generate_output(res_rows, res_ops, &self.schema)
     }
 
@@ -332,7 +328,6 @@ mod tests {
                 order_pairs,
                 (0, 5),
                 vec![0, 1],
-                0,
                 1,
                 vec![],
                 state_table,
@@ -415,7 +410,6 @@ mod tests {
                 order_pairs,
                 (3, 4),
                 vec![0, 1],
-                0,
                 1,
                 vec![],
                 state_table,

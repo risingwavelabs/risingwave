@@ -52,6 +52,7 @@ use crate::manager::{
 use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::meta_store::MetaStore;
+use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
 mod command;
@@ -126,6 +127,8 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
     hummock_manager: HummockManagerRef<S>,
+
+    source_manager: SourceManagerRef<S>,
 
     metrics: Arc<MetaMetrics>,
 
@@ -455,6 +458,7 @@ where
     S: MetaStore,
 {
     /// Create a new [`crate::barrier::GlobalBarrierManager`].
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv<S>,
@@ -462,6 +466,7 @@ where
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
+        source_manager: SourceManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
@@ -483,6 +488,7 @@ where
             catalog_manager,
             fragment_manager,
             hummock_manager,
+            source_manager,
             metrics,
             env,
         }
@@ -856,9 +862,7 @@ where
                         }
                     }
                 } else if prev_epoch != INVALID_EPOCH {
-                    self.hummock_manager
-                        .update_current_epoch(prev_epoch)
-                        .await?;
+                    self.hummock_manager.update_current_epoch(prev_epoch)?;
                 }
                 node.timer.take().unwrap().observe_duration();
                 node.wait_commit_timer.take().unwrap().observe_duration();
