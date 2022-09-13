@@ -75,3 +75,5 @@ pub fn streaming_deserialize(data_types: &[DataType], mut row: impl Buf) -> Resu
 
     Ok(Row(values))
 }
+
+
