@@ -4129,7 +4129,6 @@ dependencies = [
  "isahc",
  "itertools",
  "kafka",
- "md5",
  "pulldown-cmark",
  "redis",
  "regex",

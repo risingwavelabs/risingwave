@@ -16,7 +16,6 @@ indicatif = "0.16"
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = "0.10"
 kafka = { version = "0.9", default-features = false }
-md5 = "0.7"
 pulldown-cmark = "0.9"
 redis = "0.21"
 regex = "1"
