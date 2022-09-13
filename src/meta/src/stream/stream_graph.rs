@@ -630,11 +630,15 @@ impl StreamGraphBuilder {
                     _ => {}
                 }
 
-                for (idx, input) in stream_node.input.iter().enumerate() {
-                    match input.get_node_body()? {
-                        NodeBody::Exchange(_) => {
+                for (input, new_input) in stream_node
+                    .input
+                    .iter()
+                    .zip_eq(new_stream_node.input.iter_mut())
+                {
+                    *new_input = match input.get_node_body()? {
+                        NodeBody::Exchange(e) => {
                             assert!(!input.get_fields().is_empty());
-                            new_stream_node.input[idx] = StreamNode {
+                            StreamNode {
                                 input: vec![],
                                 stream_key: input.stream_key.clone(),
                                 node_body: Some(NodeBody::Merge(MergeNode {
@@ -642,27 +646,24 @@ impl StreamGraphBuilder {
                                         .remove(&input.get_operator_id())
                                         .expect("failed to find upstream actor id for given exchange node").as_global_ids(),
                                     upstream_fragment_id: upstream_fragment_id.get(&input.get_operator_id()).unwrap().as_global_id(),
+                                    upstream_dispatcher_type: e.get_strategy()?.r#type,
                                     fields: input.get_fields().clone(),
                                 })),
                                 fields: input.get_fields().clone(),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
                                 append_only: input.append_only,
-                            };
+                            }
                         }
-                        NodeBody::Chain(_) => {
-                            new_stream_node.input[idx] = self.resolve_chain_node(input)?;
-                        }
-                        _ => {
-                            new_stream_node.input[idx] = self.build_inner(
-                                ctx,
-                                input,
-                                actor_id,
-                                fragment_id,
-                                upstream_actor_id,
-                                upstream_fragment_id,
-                            )?;
-                        }
+                        NodeBody::Chain(_) => self.resolve_chain_node(input)?,
+                        _ => self.build_inner(
+                            ctx,
+                            input,
+                            actor_id,
+                            fragment_id,
+                            upstream_actor_id,
+                            upstream_fragment_id,
+                        )?,
                     }
                 }
                 Ok(new_stream_node)
@@ -690,6 +691,7 @@ impl StreamGraphBuilder {
                 node_body: Some(NodeBody::Merge(MergeNode {
                     upstream_actor_id: vec![],
                     upstream_fragment_id: 0,
+                    upstream_dispatcher_type: DispatcherType::NoShuffle as _,
                     fields: chain_node.upstream_fields.clone(),
                 })),
                 fields: chain_node.upstream_fields.clone(),
@@ -876,7 +878,9 @@ impl ActorGraphBuilder {
                             FragmentDistributionType::Hash
                         } as i32,
                         actors,
+                        // Will be filled in `Scheduler::schedule` later.
                         vnode_mapping: None,
+                        // Will be filled in `record_internal_state_tables` later.
                         state_table_ids: vec![],
                     },
                 )
