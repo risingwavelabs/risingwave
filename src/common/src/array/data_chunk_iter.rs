@@ -286,6 +286,15 @@ impl Row {
         result
     }
 
+    pub fn partial_serialize(&self, value_indices: &[usize]) -> Vec<u8> {
+        let mut result = vec![];
+        for value_idx in value_indices {
+            serialize_datum(&self.0[*value_idx], &mut result);
+        }
+
+        result
+    }
+
     /// Serialize part of the row into memcomparable bytes.
     pub fn extract_memcomparable_by_indices(
         &self,

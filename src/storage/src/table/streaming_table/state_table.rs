@@ -461,6 +461,48 @@ impl<S: StateStore> StateTable<S> {
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
+    /// Insert a row into state table. Must provide a full row corresponding to the column desc of
+    /// the table.
+    pub fn partial_insert(&mut self, value: Row) {
+        let pk = value.by_indices(self.pk_indices());
+
+        let key_bytes =
+            serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
+        let value_bytes = value.partial_serialize(&self._value_indices);
+        self.mem_table
+            .insert(key_bytes, value_bytes)
+            .unwrap_or_else(|e| self.handle_mem_table_error(e));
+    }
+
+    /// Delete a row from state table. Must provide a full row of old value corresponding to the
+    /// column desc of the table.
+    pub fn partial_delete(&mut self, old_value: Row) {
+        let pk = old_value.by_indices(self.pk_indices());
+        let key_bytes =
+            serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
+        let value_bytes = old_value.serialize();
+        self.mem_table
+            .delete(key_bytes, value_bytes)
+            .unwrap_or_else(|e| self.handle_mem_table_error(e));
+    }
+
+    /// Update a row. The old and new value should have the same pk.
+    pub fn partial_update(&mut self, old_value: Row, new_value: Row) {
+        let old_pk = old_value.by_indices(self.pk_indices());
+        let new_pk = new_value.by_indices(self.pk_indices());
+        debug_assert_eq!(old_pk, new_pk);
+
+        let new_key_bytes = serialize_pk_with_vnode(
+            &new_pk,
+            &self.pk_serializer,
+            self.compute_vnode_by_pk(&new_pk),
+        );
+
+        self.mem_table
+            .update(new_key_bytes, old_value.serialize(), new_value.serialize())
+            .unwrap_or_else(|e| self.handle_mem_table_error(e));
+    }
+
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
