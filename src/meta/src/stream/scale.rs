@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::cmp::min;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
-
+use std::ops::{BitAnd, Not};
 use anyhow::{anyhow, Context};
 use chrono::format::Item;
 use futures::future::BoxFuture;
 use futures::Stream;
-use itertools::{Itertools, repeat_n};
+use itertools::{repeat_n, Itertools, equal};
+use num_traits::abs;
 use risingwave_common::bail;
-use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT, VNODE_BITS};
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
@@ -36,7 +39,6 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use uuid::Uuid;
-use risingwave_common::buffer::Bitmap;
 
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
@@ -275,6 +277,104 @@ impl<S> GlobalStreamManager<S>
         Ok(())
     }
 
+    fn rebalance_actor_vnode(
+        fragment: &Fragment,
+        actors_to_remove: &BTreeMap<ActorId, ParallelUnitId>,
+        actors_to_create: &BTreeMap<ActorId, ParallelUnitId>,
+    ) {
+        let mut actors = fragment.actors.clone();
+        assert!(actors.len() > actors_to_remove.len());
+        let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
+        assert_ne!(target_actor_count, 0);
+
+        // fixme
+        let expected = (VIRTUAL_NODE_COUNT as f64 / target_actor_count as f64) as i32;
+
+        let mut v = VecDeque::with_capacity(actors_to_create.len() + actors.len());
+
+        for actor in actors {
+            if let Some(buffer) = actor.vnode_bitmap.as_ref() {
+                let bitmap = Bitmap::from(buffer);
+                if actors_to_remove.contains_key(&actor.actor_id) {
+                    v.push_front((actor.actor_id as ActorId, bitmap.num_high_bits() as i32, bitmap));
+                } else {
+                    v.push_back((actor.actor_id as ActorId, (bitmap.num_high_bits() as i32) - expected, bitmap));
+                }
+            }
+        }
+
+        for (actor_id, _) in actors_to_create {
+            let bitmap = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT).finish();
+            v.push_back((*actor_id as ActorId, expected * -1, bitmap))
+        }
+
+        let mut v = v.into_iter().collect_vec();
+
+        let mut src_idx = 0: usize;
+        let mut dst_idx = v.len() - 1;
+
+
+        let mut src_offset = 0;
+        let mut dst_offset = 0;
+
+        while src_idx < dst_idx {
+            let (_, src_balance, src_bitmap) = &mut v[src_idx];
+            let (_, dst_balance, dst_bitmap) = &mut v[dst_idx];
+
+            let n = min(abs(src_balance), abs(dst_balance));
+            // moving n vnodes
+
+            //let src_next = src_bitmap.next_set_bit(src_offset).unwrap();
+
+            for _ in 0..n {
+                src_offset = src_bitmap.next_set_bit(src_offset).unwrap();
+            }
+
+
+            if src_balance == 0 {
+                src_idx += 1;
+
+                let mask = BitmapBuilder::zeroed(src_offset).append_bitmap(&Bitmap::all_high_bits(VIRTUAL_NODE_COUNT - src_offset)).finish();
+                src_bitmap.bitand(&mask)
+            }
+
+            if dst_balance == 0 {
+                dst_idx -= 1;
+            }
+        }
+
+
+        // while !src_iter.eq(&dst_iter) {
+        //
+        // }
+        //
+        // equal(src_iter, dst_iter)
+
+        // let removed_actors = actors.drain_filter(|actor| actors_to_remove.contains_key(&actor.actor_id));
+        //
+        // let mut v = Vec::with_capacity(actors_to_create.len() + actors.len());
+        //
+        // let mut total_balance = 0;
+        //
+        // for removed_actor in removed_actors {
+        //     if let Some(buffer) = removed_actor.vnode_bitmap.as_ref() {
+        //         let bitmap = risingwave_common::buffer::Bitmap::from(buffer);
+        //         let balance = bitmap.num_high_bits().as_i32();
+        //         total_balance += balance;
+        //         v.push((removed_actor.actor_id as ActorId, balance, bitmap));
+        //     }
+        // }
+        //
+        // for actor in actors {
+        //     if let Some(buffer) = actor.vnode_bitmap.as_ref() {
+        //         let bitmap = risingwave_common::buffer::Bitmap::from(buffer);
+        //         let balance = bitmap.num_high_bits().as_i32() - expected;
+        //         total_balance += balance;
+        //         v.push((actor.actor_id as ActorId, balance, bitmap));
+        //     }
+        // }
+    }
+
     async fn reschedule_actors_impl(
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
@@ -355,12 +455,19 @@ impl<S> GlobalStreamManager<S>
             assert!(!fragment.actors.is_empty());
 
             let mut sample_actors: Vec<_> = if actors_to_create.len() == actors_to_remove.len() {
-                actors_to_remove.keys().map(|actor_id| ctx.actor_map.get(actor_id).unwrap()).collect()
+                actors_to_remove
+                    .keys()
+                    .map(|actor_id| ctx.actor_map.get(actor_id).unwrap())
+                    .collect()
             } else {
-                repeat(fragment.actors.first().unwrap()).take(actors_to_create.len()).collect()
+                repeat(fragment.actors.first().unwrap())
+                    .take(actors_to_create.len())
+                    .collect()
             };
 
-            for (actor_to_create, sample_actor) in actors_to_create.iter().zip_eq(sample_actors.into_iter()) {
+            for (actor_to_create, sample_actor) in
+            actors_to_create.iter().zip_eq(sample_actors.into_iter())
+            {
                 let new_actor_id = actor_to_create.0;
                 let new_parallel_unit_id = actor_to_create.1;
                 let mut new_actor = sample_actor.clone();
@@ -398,46 +505,43 @@ impl<S> GlobalStreamManager<S>
             }
         }
 
-        for fragment_id in reschedule.keys() {
-            let actors_to_create = fragment_actors_to_create
-                .get(fragment_id)
-                .cloned()
-                .unwrap_or_default();
-            let actors_to_remove = fragment_actors_to_remove
-                .get(fragment_id)
-                .cloned()
-                .unwrap_or_default();
-
-            if actors_to_remove.len() == actors_to_create.len() {
-                continue;
-            }
-
-            // for (actor_id, _) in &actors_to_remove {
-            //     let actor = ctx.actor_map.get(actor_id).unwrap();
-            //
-            //     if let Some(buffer) = actor.vnode_bitmap.as_ref() {
-            //         let bitmap = Bitmap::from(buffer);
-            //
-            //         println!("hb for actor {}", )
-            //     }
-            //
-            // }
-
-
-            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
-
-            for actor in fragment.actors.iter() {
-                if let Some(buffer) = actor.vnode_bitmap.as_ref() {
-                    let bitmap = Bitmap::from(buffer);
-
-                    println!("hb for actor {} {}", actor.actor_id, bitmap.num_high_bits());
-                }
-            }
-
-        }
-
-
-        todo!();
+        // for fragment_id in reschedule.keys() {
+        //     let actors_to_create = fragment_actors_to_create
+        //         .get(fragment_id)
+        //         .cloned()
+        //         .unwrap_or_default();
+        //     let actors_to_remove = fragment_actors_to_remove
+        //         .get(fragment_id)
+        //         .cloned()
+        //         .unwrap_or_default();
+        //
+        //     if actors_to_remove.len() == actors_to_create.len() {
+        //         continue;
+        //     }
+        //
+        //     let fragment = ctx.fragment_map.get(fragment_id).unwrap();
+        //
+        //     assert_ne!(fragment.actors.len(), 1);
+        //
+        //     // let actors = fragment.actors.iter().drain_filter(|x| {
+        //     //
+        //     // })
+        //
+        //     //       let mut actors = fragment.actors.clone();
+        //
+        //     // let
+        //
+        //     // for actor in fragment.actors.iter() {
+        //     //     if let Some(buffer) = actor.vnode_bitmap.as_ref() {
+        //     //         let bitmap = Bitmap::from(buffer);
+        //     //
+        //     //         bitmap.
+        //     //         println!("hb for actor {} {}/{}", actor.actor_id, bitmap.num_high_bits(),
+        //     // bitmap.len());     }
+        //     // }
+        // }
+        //
+        // todo!();
 
         // todo: update actor vnode mapping when scale in/out
 
@@ -951,4 +1055,12 @@ impl<S> GlobalStreamManager<S>
 
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rebalance_plan() {}
 }
