@@ -41,6 +41,8 @@ serde_derive = "1"
 serde_json = "1"
 smallvec = "1"
 spin = "0.9"
+strum = "0.24"
+strum_macros = "0.24"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"
@@ -57,6 +59,10 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229b2c1fcc44118bef7eff127128" }
 procfs = { version = "0.12", default-features = false }
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7"}
+libc = "0.2.72"
 
 [dev-dependencies]
 rand = "0.8"

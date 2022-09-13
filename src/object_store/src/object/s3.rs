@@ -260,6 +260,7 @@ impl StreamingUploader for S3StreamingUploader {
             };
         }
         if let Err(e) = self.flush_and_complete().await {
+            tracing::warn!("Failed to upload object {}: {:?}", self.key, e);
             self.abort().await?;
             return Err(e);
         }

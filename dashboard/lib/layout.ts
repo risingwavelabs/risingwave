@@ -15,8 +15,7 @@
  *
  */
 
-import { max } from "lodash"
-import { ActorBox } from "../components/FragmentGraph"
+import { cloneDeep, max } from "lodash"
 import { GraphNode } from "./algo"
 
 interface DagNode {
@@ -269,6 +268,36 @@ function gridLayout(
   return rtn
 }
 
+export interface ActorBox {
+  id: string
+  name: string
+  order: number // preference order, actor box with larger order will be placed at right
+  width: number
+  height: number
+  parentIds: string[]
+}
+
+export interface ActorPoint {
+  id: string
+  name: string
+  order: number // preference order, actor box with larger order will be placed at right
+  parentIds: string[]
+}
+
+export interface ActorBoxPosition {
+  id: string
+  x: number
+  y: number
+  data: ActorBox
+}
+
+export interface ActorPointPosition {
+  id: string
+  x: number
+  y: number
+  data: ActorPoint
+}
+
 /**
  * @param fragments
  * @returns the coordination of the top-left corner of the actor box
@@ -277,7 +306,7 @@ export function layout(
   fragments: Array<ActorBox>,
   layerMargin: number,
   rowMargin: number
-): Map<ActorBox, [number, number]> {
+): ActorBoxPosition[] {
   let layoutMap = gridLayout(fragments)
   let layerRequiredWidth = new Map<number, number>()
   let rowRequiredHeight = new Map<number, number>()
@@ -342,18 +371,136 @@ export function layout(
     getCumulativeMargin(i, rowMargin, rowCumulativeHeight, rowRequiredHeight)
   }
 
-  let rtn = new Map<ActorBox, [number, number]>()
-  for (let item of layoutMap) {
-    let ab = item[0],
-      layer = item[1][0],
-      row = item[1][1]
+  let rtn: Array<ActorBoxPosition> = []
+
+  for (let [data, [layer, row]] of layoutMap) {
     let x = layerCumulativeWidth.get(layer)
     let y = rowCumulativeHeight.get(row)
     if (x !== undefined && y !== undefined) {
-      rtn.set(ab, [x, y])
+      rtn.push({
+        id: data.id,
+        x,
+        y,
+        data,
+      })
     } else {
       throw Error(`x of layer ${layer}: ${x}, y of row ${row}: ${y} `)
     }
   }
   return rtn
+}
+
+export function flipLayout(
+  fragments: Array<ActorBox>,
+  layerMargin: number,
+  rowMargin: number
+): ActorBoxPosition[] {
+  const fragments_ = cloneDeep(fragments)
+  for (let fragment of fragments_) {
+    ;[fragment.width, fragment.height] = [fragment.height, fragment.width]
+  }
+  const actorPosition = layout(fragments_, rowMargin, layerMargin)
+  return actorPosition.map(({ id, x, y, data }) => ({
+    id,
+    data,
+    x: y,
+    y: x,
+  }))
+}
+
+export function layoutPoint(
+  fragments: Array<ActorPoint>,
+  layerMargin: number,
+  rowMargin: number,
+  nodeRadius: number
+): ActorPointPosition[] {
+  const fragmentBoxes: Array<ActorBox> = []
+  for (let { id, name, order, parentIds, ...others } of fragments) {
+    fragmentBoxes.push({
+      id,
+      name,
+      parentIds,
+      width: nodeRadius * 2,
+      height: nodeRadius * 2,
+      order,
+      ...others,
+    })
+  }
+  const result = layout(fragmentBoxes, layerMargin, rowMargin)
+  return result.map(({ id, x, y, data }) => ({
+    id,
+    data,
+    x: x + nodeRadius,
+    y: y + nodeRadius,
+  }))
+}
+
+export function flipLayoutPoint(
+  fragments: Array<ActorPoint>,
+  layerMargin: number,
+  rowMargin: number,
+  nodeRadius: number
+): ActorPointPosition[] {
+  const actorPosition = layoutPoint(
+    fragments,
+    rowMargin,
+    layerMargin,
+    nodeRadius
+  )
+  return actorPosition.map(({ id, x, y, data }) => ({
+    id,
+    data,
+    x: y,
+    y: x,
+  }))
+}
+
+export function generatePointLinks(layoutMap: ActorPointPosition[]) {
+  const links = []
+  const fragmentMap = new Map<string, ActorPointPosition>()
+  for (const x of layoutMap) {
+    fragmentMap.set(x.id, x)
+  }
+  for (const fragment of layoutMap) {
+    for (const parentId of fragment.data.parentIds) {
+      const parentFragment = fragmentMap.get(parentId)!
+      links.push({
+        points: [
+          { x: fragment.x, y: fragment.y },
+          { x: parentFragment.x, y: parentFragment.y },
+        ],
+        source: fragment.id,
+        target: parentId,
+      })
+    }
+  }
+  return links
+}
+
+export function generateBoxLinks(layoutMap: ActorBoxPosition[]) {
+  const links = []
+  const fragmentMap = new Map<string, ActorBoxPosition>()
+  for (const x of layoutMap) {
+    fragmentMap.set(x.id, x)
+  }
+  for (const fragment of layoutMap) {
+    for (const parentId of fragment.data.parentIds) {
+      const parentFragment = fragmentMap.get(parentId)!
+      links.push({
+        points: [
+          {
+            x: fragment.x + fragment.data.width / 2,
+            y: fragment.y + fragment.data.height / 2,
+          },
+          {
+            x: parentFragment.x + parentFragment.data.width / 2,
+            y: parentFragment.y + parentFragment.data.height / 2,
+          },
+        ],
+        source: fragment.id,
+        target: parentId,
+      })
+    }
+  }
+  return links
 }

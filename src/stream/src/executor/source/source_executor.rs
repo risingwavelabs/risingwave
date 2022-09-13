@@ -178,7 +178,7 @@ impl<S: StateStore> SourceExecutor<S> {
 }
 
 impl<S: StateStore> SourceExecutor<S> {
-    fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
+    fn get_diff(&mut self, rhs: ConnectorState) -> ConnectorState {
         // rhs can not be None because we do not support split number reduction
 
         let split_change = rhs.unwrap();
@@ -191,6 +191,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 Some(s) => target_state.push(s.clone()),
                 None => {
                     no_change_flag = false;
+                    // write new assigned split to state cache. snapshot is base on cache.
+                    self.state_cache
+                        .entry(sc.id())
+                        .or_insert_with(|| sc.clone());
                     target_state.push(sc.clone())
                 }
             }
@@ -218,10 +222,10 @@ impl<S: StateStore> SourceExecutor<S> {
         state: ConnectorState,
     ) -> StreamExecutorResult<Box<SourceStreamReaderImpl>> {
         let reader = match self.source_desc.source.as_ref() {
-            SourceImpl::TableV2(t) => t
+            SourceImpl::Table(t) => t
                 .stream_reader(self.column_ids.clone())
                 .await
-                .map(SourceStreamReaderImpl::TableV2),
+                .map(SourceStreamReaderImpl::Table),
             SourceImpl::Connector(c) => c
                 .stream_reader(
                     state,
@@ -245,6 +249,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .stack_trace("source_recv_first_barrier")
             .await
             .unwrap();
+
+        // If the first barrier is configuration change, then the source executor must be newly
+        // created, and we should start with the paused state.
+        let start_with_paused = barrier.is_update();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
             if let Mutation::Add { splits, .. } = mutation.as_ref() {
@@ -283,6 +291,9 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
+        if start_with_paused {
+            stream.pause_source();
+        }
 
         yield Message::Barrier(barrier);
 
@@ -292,7 +303,6 @@ impl<S: StateStore> SourceExecutor<S> {
                 Either::Left(barrier) => {
                     let barrier = barrier?;
                     let epoch = barrier.epoch.prev;
-                    self.take_snapshot(epoch).await?;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
@@ -336,6 +346,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             _ => {}
                         }
                     }
+                    self.take_snapshot(epoch).await?;
                     self.state_cache.clear();
                     yield Message::Barrier(barrier);
                 }
@@ -376,7 +387,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     // Refill row id column for source.
                     chunk = match self.source_desc.source.as_ref() {
                         SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true).await,
-                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false).await,
+                        SourceImpl::Table(_) => self.refill_row_id_column(chunk, false).await,
                     };
 
                     self.metrics
@@ -535,7 +546,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table_v2().unwrap();
+            let table_source = source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
@@ -660,7 +671,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table_v2().unwrap();
+            let table_source = source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
@@ -762,6 +773,7 @@ mod tests {
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+        let source_state_handler = SourceStateHandler::new(keyspace.clone());
 
         let source_exec = SourceExecutor::new(
             ActorContext::create(0),
@@ -847,6 +859,12 @@ mod tests {
         barrier_tx.send(change_split_mutation).unwrap();
 
         let _ = materialize.next().await.unwrap(); // barrier
+
+        // there must exist state for new add partition
+        source_state_handler
+            .restore_states("3-1".to_string().into(), curr_epoch + 1)
+            .await?
+            .unwrap();
 
         let chunk_2 = (materialize.next().await.unwrap().unwrap())
             .into_chunk()

@@ -110,7 +110,43 @@ impl Collector for ProcessCollector {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+impl Collector for ProcessCollector {
+    fn desc(&self) -> Vec<&Desc> {
+        self.descs.iter().collect()
+    }
+
+    fn collect(&self) -> Vec<proto::MetricFamily> {
+        let pid = unsafe { libc::getpid() };
+        let proc_info = match darwin_libproc::task_info(pid) {
+            Ok(info) => info,
+            Err(_) => {
+                return Vec::new();
+            }
+        };
+
+        // memory
+        self.vsize.set(proc_info.pti_virtual_size as i64);
+        self.rss.set(proc_info.pti_resident_size as i64);
+
+        // cpu
+        let cpu_total_mfs = {
+            // both pti_total_user and pti_total_system are returned in nano seconds
+            let total: u64 = proc_info.pti_total_user + proc_info.pti_total_system;
+            self.cpu_total.inc_by(total - self.cpu_total.get());
+            self.cpu_total.collect()
+        };
+
+        // collect MetricFamilies.
+        let mut mfs = Vec::with_capacity(4);
+        mfs.extend(cpu_total_mfs);
+        mfs.extend(self.vsize.collect());
+        mfs.extend(self.rss.collect());
+        mfs
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 impl Collector for ProcessCollector {
     fn desc(&self) -> Vec<&Desc> {
         self.descs.iter().collect()
