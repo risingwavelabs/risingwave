@@ -16,9 +16,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    ArrayBuilderImpl, ArrayResult, Op, Row, RowRef, StreamChunk,
-};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayResult, Op, Row, RowRef, StreamChunk};
 use risingwave_common::types::DataType;
 
 /// Build a array and it's corresponding operations.
