@@ -88,7 +88,6 @@ pub struct CompactionTask {
     pub input: CompactionInput,
     pub compression_algorithm: String,
     pub target_file_size: u64,
-    pub splits: Vec<KeyRange>,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -133,6 +132,7 @@ impl CompactStatus {
             self.pick_compaction(levels, task_id, compaction_config)?
         };
 
+        let splits = vec![];
         let select_level_id = ret.input.input_levels[0].level_idx;
         let target_level_id = ret.input.target_level;
 
@@ -144,7 +144,7 @@ impl CompactStatus {
 
         let compact_task = CompactTask {
             input_ssts: ret.input.input_levels,
-            splits: ret.splits,
+            splits,
             watermark: HummockEpoch::MAX,
             sorted_output_ssts: vec![],
             task_id,

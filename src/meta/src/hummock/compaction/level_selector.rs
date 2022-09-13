@@ -253,12 +253,10 @@ impl DynamicLevelSelector {
             let idx = input.target_level - base_level + 1;
             self.config.compression_algorithm[idx].clone()
         };
-        let splits: Vec<KeyRange> = vec![];
         CompactionTask {
             input,
             compression_algorithm,
             target_file_size,
-            splits,
         }
     }
 }
