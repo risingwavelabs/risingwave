@@ -5,6 +5,7 @@ edition = "2021"
 
 [features]
 static-link = ["workspace-static-link"]
+sync_point = ["sync-point/sync_point"]
 
 [dependencies]
 anyhow = "1"
