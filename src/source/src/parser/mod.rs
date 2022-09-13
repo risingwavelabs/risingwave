@@ -203,6 +203,8 @@ impl SourceStreamChunkRowWriter<'_> {
                     .for_each(A::rollback);
             })?;
 
+        A::finish(self);
+
         Ok(WriteGuard(()))
     }
 
