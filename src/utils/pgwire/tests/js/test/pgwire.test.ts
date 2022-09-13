@@ -11,6 +11,8 @@ describe('PgwireTest', () => {
     try {
       const conn = await pool.connect();
       try {
+        // FIXME: RisingWave currently will fail on this test due to the lacking support of prepared statement.
+        // Related issue: https://github.com/risingwavelabs/risingwave/issues/5293
         const res = await conn.query({
           text: 'SELECT $1::int AS number',
           values: ['1'],
