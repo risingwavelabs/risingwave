@@ -31,6 +31,14 @@ impl PrometheusGen {
             .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
             .join(",");
 
+        let frontend_targets = config
+            .provide_frontend
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
+            .join(",");
+
         let meta_node_targets = config
             .provide_meta_node
             .as_ref()
@@ -127,6 +135,10 @@ scrape_configs:
   - job_name: etcd
     static_configs:
       - targets: [{etcd_targets}]
+
+  - job_name: frontend
+    static_configs:
+      - targets: [{frontend_targets}]
 
   - job_name: redpanda
     static_configs:
