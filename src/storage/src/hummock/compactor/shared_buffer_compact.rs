@@ -96,7 +96,10 @@ async fn compact_shared_buffer(
             data_list.iter().map(|data| {
                 let data_size = match data {
                     UncommittedData::Sst(sst) => sst.1.file_size,
-                    UncommittedData::Batch(batch) => batch.size() as u64,
+                    UncommittedData::Batch(batch) => {
+                        // calculate encoded bytes of key var length
+                        (batch.get_payload().len() * 8 + batch.size()) as u64
+                    }
                 };
                 (data_size, data.start_user_key())
             })
