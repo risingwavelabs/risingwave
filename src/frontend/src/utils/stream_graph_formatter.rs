@@ -64,7 +64,7 @@ impl StreamGraphFormatter {
     ) -> std::fmt::Result {
         writeln!(f, "Fragment {}", fragment.get_fragment_id())?;
         self.explain_node(1, fragment.node.as_ref().unwrap(), f)?;
-        writeln!(f, "")
+        writeln!(f)
     }
 
     fn explain_node(
