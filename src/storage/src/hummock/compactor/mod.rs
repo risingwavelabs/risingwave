@@ -848,10 +848,6 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
                 last_key = key;
             }
             compact_task.splits = splits;
-        } else {
-            compact_task.splits = vec![KeyRange_vec::inf()];
         }
-    } else {
-        compact_task.splits = vec![KeyRange_vec::inf()];
     }
 }

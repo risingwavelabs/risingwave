@@ -19,6 +19,7 @@ mod min_overlap_compaction_picker;
 mod overlap_strategy;
 mod prost_type;
 mod tier_compaction_picker;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 pub use tier_compaction_picker::TierCompactionPicker;
 mod base_level_compaction_picker;
@@ -132,7 +133,6 @@ impl CompactStatus {
             self.pick_compaction(levels, task_id, compaction_config)?
         };
 
-        let splits = vec![];
         let select_level_id = ret.input.input_levels[0].level_idx;
         let target_level_id = ret.input.target_level;
 
@@ -144,7 +144,7 @@ impl CompactStatus {
 
         let compact_task = CompactTask {
             input_ssts: ret.input.input_levels,
-            splits,
+            splits: vec![KeyRange::inf()],
             watermark: HummockEpoch::MAX,
             sorted_output_ssts: vec![],
             task_id,
