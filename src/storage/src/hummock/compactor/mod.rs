@@ -851,7 +851,7 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
                 }
                 last_key = key;
             }
+            compact_task.splits = splits;
         }
-        compact_task.splits = splits;
     }
 }
