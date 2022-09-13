@@ -306,6 +306,7 @@ async fn kill_node() {}
 
 async fn run_slt_task(glob: &str, host: &str) {
     let risingwave = Risingwave::connect(host.to_string(), "dev".to_string()).await;
+    let kill = ARGS.kill_compute || ARGS.kill_meta || ARGS.kill_frontend || ARGS.kill_compactor;
     if ARGS.kill_compute || ARGS.kill_meta {
         risingwave
             .client
@@ -323,14 +324,20 @@ async fn run_slt_task(glob: &str, host: &str) {
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
             }
-            let is_create = matches!(&record, sqllogictest::Record::Statement { sql, .. } 
-                if sql.starts_with("CREATE") || sql.starts_with("create"));
-            let is_drop = matches!(&record, sqllogictest::Record::Statement { sql, .. } 
-                if sql.starts_with("DROP") || sql.starts_with("drop"));
-            let dont_kill = matches!(&record, sqllogictest::Record::Statement { sql, .. } 
-                if sql.starts_with("INSERT") || sql.starts_with("UPDATE") || sql.starts_with("FLUSH")
-                || sql.starts_with("insert") || sql.starts_with("update") || sql.starts_with("flush"));
-            if dont_kill {
+            let (is_create, is_drop, is_write) =
+                if let sqllogictest::Record::Statement { sql, .. } = &record {
+                    let sql =
+                        (sql.trim_start().split_once(' ').unwrap_or_default().0).to_lowercase();
+                    (
+                        sql == "create",
+                        sql == "drop",
+                        sql == "insert" || sql == "update" || sql == "delete" || sql == "flush",
+                    )
+                } else {
+                    (false, false, false)
+                };
+            // we won't kill during insert/update/delete/flush since the atomicity is not guaranteed
+            if !kill || is_write {
                 match tester.run_async(record).await {
                     Ok(_) => continue,
                     Err(e) => panic!("{}", e),
@@ -343,14 +350,15 @@ async fn run_slt_task(glob: &str, host: &str) {
                 kill_node().await;
                 tokio::time::sleep(Duration::from_secs(30)).await;
             });
+            // retry up to 5 times until it succeed
             for i in 0usize.. {
                 let delay = Duration::from_secs(1 << i);
                 match tester.run_async(record.clone()).await {
                     Ok(_) => break,
                     // allow 'table exists' error when retry CREATE statement
-                    Err(e) if is_create && e.to_string().contains("exists") => break,
+                    Err(e) if is_create && i != 0 && e.to_string().contains("exists") => break,
                     // allow 'not found' error when retry DROP statement
-                    Err(e) if is_drop && e.to_string().contains("not found") => break,
+                    Err(e) if is_drop && i != 0 && e.to_string().contains("not found") => break,
                     Err(e) if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),
                     Err(e) => tracing::error!("failed to run test: {e}\nretry after {delay:?}"),
                 }
