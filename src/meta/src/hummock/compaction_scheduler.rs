@@ -293,7 +293,7 @@ mod tests {
         generate_test_tables, get_sst_ids, register_sstable_infos_to_compaction_group,
         setup_compute_env, to_local_sstable_info,
     };
-    use crate::hummock::{CompactionScheduler, CompactorManager, HummockManager};
+    use crate::hummock::{CompactionScheduler, HummockManager};
     use crate::storage::MetaStore;
 
     async fn add_ssts<S>(
@@ -325,7 +325,7 @@ mod tests {
     async fn test_pick_and_assign() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
-        let compactor_manager = Arc::new(CompactorManager::new_for_test());
+        let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         let compaction_scheduler =
             CompactionScheduler::new(env, hummock_manager.clone(), compactor_manager.clone());
 
@@ -429,7 +429,7 @@ mod tests {
     async fn test_failpoints() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
-        let compactor_manager = Arc::new(CompactorManager::new_for_test());
+        let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         let compaction_scheduler =
             CompactionScheduler::new(env, hummock_manager.clone(), compactor_manager.clone());
 
