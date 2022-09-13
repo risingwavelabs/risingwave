@@ -31,6 +31,7 @@ pub struct BatchTopN {
 
 impl BatchTopN {
     pub fn new(logical: LogicalTopN) -> Self {
+        assert!(logical.group_key().is_empty());
         let ctx = logical.base.ctx.clone();
         let base = PlanBase::new_batch(
             ctx,

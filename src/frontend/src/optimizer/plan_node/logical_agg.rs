@@ -37,12 +37,15 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, BatchSortAgg, LogicalProject};
+use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
-    Direction, Distribution, FunctionalDependencySet, Order, RequiredDist,
+    Direction, Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, Substitute};
 
-/// See also [`crate::expr::OrderByExpr`]
+/// Rewritten version of [`crate::expr::OrderByExpr`] which uses `InputRef` instead of `ExprImpl`.
+/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
+///
 /// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
 #[derive(Clone)]
 pub struct PlanAggOrderByField {
@@ -110,7 +113,8 @@ impl PlanAggOrderByField {
     }
 }
 
-/// Aggregation Call
+/// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
+/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
 #[derive(Clone)]
 pub struct PlanAggCall {
     /// Kind of aggregation function
@@ -120,16 +124,19 @@ pub struct PlanAggCall {
     pub return_type: DataType,
 
     /// Column indexes of input columns.
-    /// It's vary-length by design:
-    /// can be 0-len (`RowCount`), 1-len (`Max`, `Min`), 2-len (`StringAgg`).
+    ///
+    /// Its length can be:
+    /// - 0 (`RowCount`)
+    /// - 1 (`Max`, `Min`)
+    /// - 2 (`StringAgg`).
+    ///
     /// Usually, we mark the first column as the aggregated column.
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
     pub order_by_fields: Vec<PlanAggOrderByField>,
     /// Selective aggregation: only the input rows for which
-    /// the filter_clause evaluates to true will be fed to aggregate function.
-    /// Other rows are discarded.
+    /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,
 }
 
@@ -258,20 +265,19 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                 }
             }
             if !that.order_by_fields.is_empty() {
-                let clause_text = that
-                    .order_by_fields
-                    .iter()
-                    .map(|e| {
-                        format!(
+                write!(
+                    f,
+                    " order_by({})",
+                    that.order_by_fields.iter().format_with(", ", |e, f| {
+                        f(&format_args!(
                             "{:?}",
                             PlanAggOrderByFieldDisplay {
                                 plan_agg_order_by_field: e,
                                 input_schema: self.input_schema,
                             }
-                        )
+                        ))
                     })
-                    .join(", ");
-                write!(f, " order_by({})", clause_text)?;
+                )?;
             }
             write!(f, ")")?;
         }
@@ -595,6 +601,64 @@ impl LogicalAgg {
         self.agg_calls
             .iter()
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
+    }
+
+    // Check if the output of the aggregation needs to be sorted and return ordering req by group
+    // keys If group key order satisfies required order, push down the sort below the
+    // aggregation and use sort aggregation. The data type of the columns need to be int32
+    fn output_requires_order_on_group_keys(&self, required_order: &Order) -> (bool, Order) {
+        let group_key_order = Order {
+            field_order: self
+                .group_key()
+                .iter()
+                .map(|group_by_idx| {
+                    let direct = if required_order.field_order.contains(&FieldOrder {
+                        index: *group_by_idx,
+                        direct: Desc,
+                    }) {
+                        // If output requires descending order, use descending order
+                        Desc
+                    } else {
+                        // In all other cases use ascending order
+                        Asc
+                    };
+                    FieldOrder {
+                        index: *group_by_idx,
+                        direct,
+                    }
+                })
+                .collect(),
+        };
+        return (
+            !required_order.field_order.is_empty()
+                && group_key_order.satisfies(required_order)
+                && self.group_key().iter().all(|group_by_idx| {
+                    self.schema().fields().get(*group_by_idx).unwrap().data_type == DataType::Int32
+                }),
+            group_key_order,
+        );
+    }
+
+    // Check if the input is already sorted, and hence sort merge aggregation can be used
+    // It can only be used, if the input is sorted on all group key indices and the
+    // datatype of the column is int32
+    fn input_provides_order_on_group_keys(&self, new_logical: &LogicalAgg) -> bool {
+        self.group_key().iter().all(|group_by_idx| {
+            new_logical
+                .input()
+                .order()
+                .field_order
+                .iter()
+                .any(|field_order| field_order.index == *group_by_idx)
+                && new_logical
+                    .input()
+                    .schema()
+                    .fields()
+                    .get(*group_by_idx)
+                    .unwrap()
+                    .data_type
+                    == DataType::Int32
+        })
     }
 }
 
@@ -1231,29 +1295,27 @@ impl PredicatePushdown for LogicalAgg {
 
 impl ToBatch for LogicalAgg {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
+        self.to_batch_with_order_required(&Order::any())
+    }
+
+    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+        let mut input_order = Order::any();
+        let (output_requires_order, group_key_order) =
+            self.output_requires_order_on_group_keys(required_order);
+        if output_requires_order {
+            // Push down sort before aggregation
+            input_order = self
+                .o2i_col_mapping()
+                .rewrite_provided_order(&group_key_order);
+        }
+        let new_input = self.input().to_batch_with_order_required(&input_order)?;
         let new_logical = self.clone_with_input(new_input);
         if self.group_key().is_empty() {
-            Ok(BatchSimpleAgg::new(new_logical).into())
-        } else if self.group_key().iter().all(|group_by_idx| {
-            new_logical
-                .input()
-                .order()
-                .field_order
-                .iter()
-                .any(|field_order| field_order.index == *group_by_idx)
-                && new_logical
-                    .input()
-                    .schema()
-                    .fields()
-                    .get(*group_by_idx)
-                    .unwrap()
-                    .data_type
-                    == DataType::Int32
-        }) {
-            Ok(BatchSortAgg::new(new_logical).into())
+            required_order.enforce_if_not_satisfies(BatchSimpleAgg::new(new_logical).into())
+        } else if self.input_provides_order_on_group_keys(&new_logical) || output_requires_order {
+            required_order.enforce_if_not_satisfies(BatchSortAgg::new(new_logical).into())
         } else {
-            Ok(BatchHashAgg::new(new_logical).into())
+            required_order.enforce_if_not_satisfies(BatchHashAgg::new(new_logical).into())
         }
     }
 }

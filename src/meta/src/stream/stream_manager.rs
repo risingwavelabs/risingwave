@@ -33,7 +33,7 @@ use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::ScheduledLocations;
-use crate::barrier::{BarrierManagerRef, Command};
+use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{
     ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, IdGeneratorManagerRef,
@@ -95,7 +95,7 @@ pub struct GlobalStreamManager<S: MetaStore> {
     pub(super) fragment_manager: FragmentManagerRef<S>,
 
     /// Broadcasts and collect barriers
-    pub(crate) barrier_manager: BarrierManagerRef<S>,
+    pub(crate) barrier_scheduler: BarrierScheduler<S>,
 
     /// Maintains information of the cluster
     pub(crate) cluster_manager: ClusterManagerRef<S>,
@@ -122,7 +122,7 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         fragment_manager: FragmentManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        barrier_scheduler: BarrierScheduler<S>,
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
@@ -130,7 +130,7 @@ where
         Ok(Self {
             scheduler: Scheduler::new(cluster_manager.clone()),
             fragment_manager,
-            barrier_manager,
+            barrier_scheduler,
             cluster_manager,
             source_manager,
             client_pool: env.stream_client_pool_ref(),
@@ -673,7 +673,7 @@ where
             .await?;
 
         if let Err(err) = self
-            .barrier_manager
+            .barrier_scheduler
             .run_command(Command::CreateMaterializedView {
                 table_fragments: table_fragments.clone(),
                 table_sink_map: table_sink_map.clone(),
@@ -709,7 +709,7 @@ where
             source_fragments
         };
 
-        self.barrier_manager
+        self.barrier_scheduler
             .run_command(Command::DropMaterializedView(*table_id))
             .await?;
 
@@ -893,8 +893,7 @@ mod tests {
         global_stream_manager: GlobalStreamManager<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
-        join_handles: Vec<JoinHandle<()>>,
-        shutdown_txs: Vec<Sender<()>>,
+        join_handle_shutdown_txs: Vec<(JoinHandle<()>, Sender<()>)>,
     }
 
     impl MockServices {
@@ -961,14 +960,8 @@ mod tests {
                 .await?,
             );
 
-            let barrier_manager = Arc::new(GlobalBarrierManager::new(
-                env.clone(),
-                cluster_manager.clone(),
-                catalog_manager.clone(),
-                fragment_manager.clone(),
-                hummock_manager,
-                meta_metrics.clone(),
-            ));
+            let (barrier_scheduler, scheduled_barriers) =
+                BarrierScheduler::new_pair(hummock_manager.clone());
 
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await?);
@@ -977,7 +970,7 @@ mod tests {
                 SourceManager::new(
                     env.clone(),
                     cluster_manager.clone(),
-                    barrier_manager.clone(),
+                    barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
                     compaction_group_manager.clone(),
@@ -985,10 +978,21 @@ mod tests {
                 .await?,
             );
 
+            let barrier_manager = Arc::new(GlobalBarrierManager::new(
+                scheduled_barriers,
+                env.clone(),
+                cluster_manager.clone(),
+                catalog_manager.clone(),
+                fragment_manager.clone(),
+                hummock_manager,
+                source_manager.clone(),
+                meta_metrics.clone(),
+            ));
+
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
                 fragment_manager.clone(),
-                barrier_manager.clone(),
+                barrier_scheduler.clone(),
                 cluster_manager.clone(),
                 source_manager.clone(),
                 compaction_group_manager.clone(),
@@ -1000,16 +1004,16 @@ mod tests {
                 global_stream_manager: stream_manager,
                 fragment_manager,
                 state,
-                join_handles: vec![join_handle_2, join_handle],
-                shutdown_txs: vec![shutdown_tx_2, shutdown_tx],
+                join_handle_shutdown_txs: vec![
+                    (join_handle_2, shutdown_tx_2),
+                    (join_handle, shutdown_tx),
+                ],
             })
         }
 
         async fn stop(self) {
-            for shutdown_tx in self.shutdown_txs {
+            for (join_handle, shutdown_tx) in self.join_handle_shutdown_txs {
                 shutdown_tx.send(()).unwrap();
-            }
-            for join_handle in self.join_handles {
                 join_handle.await.unwrap();
             }
         }

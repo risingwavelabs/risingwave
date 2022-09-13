@@ -77,7 +77,7 @@ impl DeleteExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table_v2().expect("not table source");
+        let source = source_desc.source.as_table().expect("not table source");
 
         let mut notifiers = Vec::new();
 
@@ -199,7 +199,7 @@ mod tests {
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
-        let source = source_desc.source.as_table_v2().unwrap();
+        let source = source_desc.source.as_table().unwrap();
         let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
 
         // Delete

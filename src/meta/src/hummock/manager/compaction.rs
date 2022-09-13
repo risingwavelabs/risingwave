@@ -122,4 +122,18 @@ where
             .expect("compaction group exists")
             .compaction_config()
     }
+
+    #[named]
+    pub async fn list_all_tasks_ids(&self) -> Vec<HummockCompactionTaskId> {
+        let compaction = read_lock!(self, compaction).await;
+        compaction
+            .compaction_statuses
+            .iter()
+            .flat_map(|(_, cs)| {
+                cs.level_handlers
+                    .iter()
+                    .flat_map(|lh| lh.pending_tasks_ids())
+            })
+            .collect_vec()
+    }
 }

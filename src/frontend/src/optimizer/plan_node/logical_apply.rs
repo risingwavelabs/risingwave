@@ -41,28 +41,37 @@ pub struct LogicalApply {
     correlated_id: CorrelatedId,
     /// The indices of `CorrelatedInputRef`s in `right`.
     correlated_indices: Vec<usize>,
+    /// If the subquery produces more than one result we have to report an error.
+    max_one_row: bool,
 }
 
 impl fmt::Display for LogicalApply {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "LogicalApply {{ type: {:?}, on: {}, correlated_id: {} }}",
-            &self.join_type,
-            {
-                let mut concat_schema = self.left().schema().fields.clone();
-                concat_schema.extend(self.right().schema().fields.clone());
-                let concat_schema = Schema::new(concat_schema);
-                format!(
-                    "{}",
-                    ConditionDisplay {
-                        condition: &self.on,
-                        input_schema: &concat_schema
-                    }
-                )
-            },
-            self.correlated_id
-        )
+        let mut builder = f.debug_struct("LogicalApply");
+
+        builder.field("type", &format_args!("{:?}", &self.join_type));
+
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+        builder.field(
+            "on",
+            &format_args!(
+                "{}",
+                ConditionDisplay {
+                    condition: &self.on,
+                    input_schema: &concat_schema
+                }
+            ),
+        );
+
+        builder.field("correlated_id", &self.correlated_id);
+
+        if self.max_one_row {
+            builder.field("max_one_row", &self.max_one_row);
+        }
+
+        builder.finish()
     }
 }
 
@@ -74,6 +83,7 @@ impl LogicalApply {
         on: Condition,
         correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
+        max_one_row: bool,
     ) -> Self {
         let ctx = left.ctx();
         let out_column_num =
@@ -105,6 +115,7 @@ impl LogicalApply {
             join_type,
             correlated_id,
             correlated_indices,
+            max_one_row,
         }
     }
 
@@ -115,6 +126,7 @@ impl LogicalApply {
         on: Condition,
         correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
+        max_one_row: bool,
     ) -> PlanRef {
         Self::new(
             left,
@@ -123,6 +135,7 @@ impl LogicalApply {
             on,
             correlated_id,
             correlated_indices,
+            max_one_row,
         )
         .into()
     }
@@ -141,6 +154,7 @@ impl LogicalApply {
         JoinType,
         CorrelatedId,
         Vec<usize>,
+        bool,
     ) {
         (
             self.left,
@@ -149,6 +163,7 @@ impl LogicalApply {
             self.join_type,
             self.correlated_id,
             self.correlated_indices,
+            self.max_one_row,
         )
     }
 
@@ -160,12 +175,23 @@ impl LogicalApply {
         self.correlated_indices.to_owned()
     }
 
+    pub fn max_one_row(&self) -> bool {
+        self.max_one_row
+    }
+
     /// Translate Apply.
     ///
     /// Used to convert other kinds of Apply to cross Apply.
     pub fn translate_apply(self, new_apply_left: PlanRef, eq_predicates: Vec<ExprImpl>) -> PlanRef {
-        let (apply_left, apply_right, on, apply_type, correlated_id, correlated_indices) =
-            self.decompose();
+        let (
+            apply_left,
+            apply_right,
+            on,
+            apply_type,
+            correlated_id,
+            correlated_indices,
+            max_one_row,
+        ) = self.decompose();
         let apply_left_len = apply_left.schema().len();
         let correlated_indices_len = correlated_indices.len();
 
@@ -176,6 +202,7 @@ impl LogicalApply {
             Condition::true_cond(),
             correlated_id,
             correlated_indices,
+            max_one_row,
         );
 
         let on = Self::rewrite_on(on, correlated_indices_len, apply_left_len).and(Condition {
@@ -243,6 +270,7 @@ impl PlanTreeNodeBinary for LogicalApply {
             self.on.clone(),
             self.correlated_id,
             self.correlated_indices.clone(),
+            self.max_one_row,
         )
     }
 }

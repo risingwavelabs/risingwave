@@ -15,6 +15,7 @@
 use std::cmp;
 use std::sync::Arc;
 
+use aws_sdk_s3::client::fluent_builders::GetObject;
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
@@ -24,6 +25,7 @@ use futures::future::try_join_all;
 use futures::stream;
 use hyper::Body;
 use itertools::Itertools;
+use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 
 use super::object_metrics::ObjectStoreMetrics;
@@ -258,6 +260,7 @@ impl StreamingUploader for S3StreamingUploader {
             };
         }
         if let Err(e) = self.flush_and_complete().await {
+            tracing::warn!("Failed to upload object {}: {:?}", self.key, e);
             self.abort().await?;
             return Err(e);
         }
@@ -336,19 +339,17 @@ impl ObjectStore for S3ObjectStore {
         fail_point!("s3_read_err", |_| Err(ObjectError::internal(
             "s3 read error"
         )));
-        let req = self.client.get_object().bucket(&self.bucket).key(path);
 
-        let range = match block_loc.as_ref() {
-            None => None,
-            Some(block_location) => block_location.byte_range_specifier(),
-        };
+        let (start_pos, end_pos) = block_loc.as_ref().map_or((None, None), |block_loc| {
+            (
+                Some(block_loc.offset),
+                Some(
+                    block_loc.offset + block_loc.size - 1, // End is inclusive.
+                ),
+            )
+        });
 
-        let req = if let Some(range) = range {
-            req.range(range)
-        } else {
-            req
-        };
-
+        let req = self.obj_store_request(path, start_pos, end_pos);
         let resp = req.send().await?;
         let val = resp.body.collect().await?.into_bytes();
 
@@ -391,6 +392,24 @@ impl ObjectStore for S3ObjectStore {
                 .as_secs_f64(),
             total_size: resp.content_length as usize,
         })
+    }
+
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    async fn streaming_read(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        fail_point!("s3_streaming_read_err", |_| Err(ObjectError::internal(
+            "s3 streaming read error"
+        )));
+
+        let req = self.obj_store_request(path, start_pos, None);
+        let resp = req.send().await?;
+
+        Ok(Box::new(resp.body.into_async_read()))
     }
 
     /// Permanently deletes the whole object.
@@ -536,6 +555,34 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
+        }
+    }
+
+    /// Generates an HTTP GET request to download the object specified in `path`. If given,
+    /// `start_pos` and `end_pos` specify the first and last byte to download, respectively. Both
+    /// are inclusive and 0-based. For example, set `start_pos = 0` and `end_pos = 7` to download
+    /// the first 8 bytes. If neither is given, the request will download the whole object.
+    fn obj_store_request(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+        end_pos: Option<usize>,
+    ) -> GetObject {
+        let req = self.client.get_object().bucket(&self.bucket).key(path);
+
+        match (start_pos, end_pos) {
+            (None, None) => {
+                // No range is given. Return request as is.
+                req
+            }
+            _ => {
+                // At least one boundary is given. Return request with range limitation.
+                req.range(format!(
+                    "bytes={}-{}",
+                    start_pos.map_or(String::new(), |pos| pos.to_string()),
+                    end_pos.map_or(String::new(), |pos| pos.to_string())
+                ))
+            }
         }
     }
 }

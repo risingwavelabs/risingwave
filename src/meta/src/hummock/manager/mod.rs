@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
 use prost::Message;
@@ -31,7 +32,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
-    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
+    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -91,10 +92,6 @@ pub struct HummockManager<S: MetaStore> {
 
     compactor_manager: CompactorManagerRef,
 }
-pub enum EpochType {
-    CommittedEpoch(u64),
-    CurrentEpoch(u64),
-}
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
 
@@ -139,7 +136,7 @@ macro_rules! read_lock {
     };
 }
 pub(crate) use read_lock;
-use risingwave_pb::hummock::pin_version_response::{HummockVersionDeltas, Payload};
+use risingwave_pb::hummock::pin_version_response::Payload;
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -304,7 +301,6 @@ where
                 id: FIRST_VERSION_ID,
                 levels: Default::default(),
                 max_committed_epoch: INVALID_EPOCH,
-                max_current_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
             // Initialize independent levels via corresponding compaction group' config.
@@ -345,7 +341,7 @@ where
         self.max_committed_epoch
             .store(redo_state.max_committed_epoch, Ordering::Relaxed);
         self.max_current_epoch
-            .store(redo_state.max_current_epoch, Ordering::Relaxed);
+            .fetch_max(redo_state.max_committed_epoch, Ordering::Relaxed);
         versioning_guard.current_version = redo_state;
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
@@ -411,7 +407,6 @@ where
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
-        last_pinned: HummockVersionId,
     ) -> Result<pin_version_response::Payload> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -421,29 +416,17 @@ where
             context_id,
             HummockPinnedVersion {
                 context_id,
-                min_pinned_id: 0,
+                min_pinned_id: INVALID_VERSION_ID,
             },
         );
 
         let version_id = versioning.current_version.id;
 
-        let ret = {
-            if last_pinned <= version_id
-                && versioning.hummock_version_deltas.contains_key(&last_pinned)
-            {
-                Payload::VersionDeltas(HummockVersionDeltas {
-                    delta: versioning
-                        .hummock_version_deltas
-                        .range((Excluded(last_pinned), Included(version_id)))
-                        .map(|(_, delta)| delta.clone())
-                        .collect_vec(),
-                })
-            } else {
-                Payload::PinnedVersion(versioning.current_version.clone())
-            }
-        };
+        let ret = Payload::PinnedVersion(versioning.current_version.clone());
 
-        if context_pinned_version.min_pinned_id == 0 {
+        if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
+            || context_pinned_version.min_pinned_id > version_id
+        {
             context_pinned_version.min_pinned_id = version_id;
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }
@@ -480,26 +463,6 @@ where
 
         context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(self, Some(context_id), context_pinned_version)?;
-
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            self.check_state_consistency().await;
-        }
-
-        Ok(())
-    }
-
-    /// Remove this context from context pin info.
-    #[named]
-    pub async fn unpin_version(&self, context_id: HummockContextId) -> Result<()> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        let _timer = start_measure_real_process_timer!(self);
-        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning_guard.pinned_versions);
-        let release_version = pinned_versions.remove(context_id);
-        if release_version.is_some() {
-            commit_multi_var!(self, Some(context_id), pinned_versions)?;
-        }
 
         #[cfg(test)]
         {
@@ -835,6 +798,10 @@ where
         compact_task: &CompactTask,
         assignee_context_id: HummockContextId,
     ) -> Result<()> {
+        fail_point!("assign_compaction_task_fail", |_| Err(anyhow::anyhow!(
+            "assign_compaction_task_fail"
+        )
+        .into()));
         let mut compaction_guard = write_lock!(self, compaction).await;
         let _timer = start_measure_real_process_timer!(self);
         let compaction = compaction_guard.deref_mut();
@@ -1031,6 +998,7 @@ where
     }
 
     /// Caller should ensure `epoch` > `max_committed_epoch`
+    #[named]
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
@@ -1044,29 +1012,6 @@ where
         // 2. Or the owners of these table_ids have been dropped, but their stale states are still
         // committed. This is OK since compaction filter will remove these stale states
         // later.
-        self.update_version(EpochType::CommittedEpoch(epoch), sstables, sst_to_context)
-            .await
-    }
-
-    /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
-    pub async fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> Result<()> {
-        // We only update `max_current_epoch`!
-        self.update_version(
-            EpochType::CurrentEpoch(max_current_epoch),
-            vec![],
-            HashMap::new(),
-        )
-        .await
-    }
-
-    #[named]
-    /// Update version based on different kinds of epoch
-    pub async fn update_version(
-        &self,
-        epoch: EpochType,
-        sstables: Vec<LocalSstableInfo>,
-        sst_to_context: HashMap<HummockSstableId, HummockContextId>,
-    ) -> Result<()> {
         for (compaction_group_id, sst) in &sstables {
             let compaction_group = self
                 .compaction_group_manager
@@ -1091,12 +1036,6 @@ where
                 if sstables.is_empty() {
                     return;
                 }
-                let epoch = match epoch {
-                    EpochType::CommittedEpoch(epoch) => epoch,
-                    EpochType::CurrentEpoch(_) => {
-                        return;
-                    }
-                };
                 let compactor = match self.compactor_manager.random_compactor() {
                     None => {
                         tracing::warn!(
@@ -1106,10 +1045,10 @@ where
                     }
                     Some(compactor) => compactor,
                 };
-                let sst_ids = sstables.iter().map(|(_, sst_id)| sst_id.id).collect_vec();
+                let sst_infos = sstables.iter().map(|(_, sst)| sst.clone()).collect_vec();
                 if compactor
                     .send_task(Task::ValidationTask(ValidationTask {
-                        sst_ids,
+                        sst_infos,
                         sst_id_to_worker_id: sst_to_context.clone(),
                         epoch,
                     }))
@@ -1155,33 +1094,14 @@ where
         new_hummock_version.id = new_version_id;
         new_version_delta.id = new_version_id;
 
-        let (max_committed_epoch, max_current_epoch) = match epoch {
-            EpochType::CommittedEpoch(committed_epoch) => {
-                if committed_epoch <= new_hummock_version.max_committed_epoch {
-                    return Err(anyhow::anyhow!(
-                        "Epoch {} <= max_committed_epoch {}",
-                        committed_epoch,
-                        new_hummock_version.max_committed_epoch
-                    )
-                    .into());
-                }
-                (
-                    committed_epoch,
-                    new_hummock_version.max_current_epoch.max(committed_epoch),
-                )
-            }
-            EpochType::CurrentEpoch(current_epoch) => {
-                if current_epoch <= new_hummock_version.max_current_epoch {
-                    return Err(anyhow::anyhow!(
-                        "Epoch {} <= max_current_epoch {}",
-                        current_epoch,
-                        new_hummock_version.max_current_epoch
-                    )
-                    .into());
-                }
-                (new_hummock_version.max_committed_epoch, current_epoch)
-            }
-        };
+        if epoch <= new_hummock_version.max_committed_epoch {
+            return Err(anyhow::anyhow!(
+                "Epoch {} <= max_committed_epoch {}",
+                epoch,
+                new_hummock_version.max_committed_epoch
+            )
+            .into());
+        }
 
         let mut modified_compaction_groups = vec![];
         // Append SSTs to a new version.
@@ -1204,7 +1124,7 @@ where
                 .l0
                 .as_mut()
                 .expect("Expect level 0 is not empty");
-            let l0_sub_level_id = max_committed_epoch;
+            let l0_sub_level_id = epoch;
             let level_delta = LevelDelta {
                 level_idx: 0,
                 inserted_table_infos: group_sstables.clone(),
@@ -1217,16 +1137,12 @@ where
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
-        new_version_delta.max_committed_epoch = max_committed_epoch;
-        new_version_delta.max_current_epoch = max_current_epoch;
-        new_hummock_version.max_committed_epoch = max_committed_epoch;
-        new_hummock_version.max_current_epoch = max_current_epoch;
+        new_version_delta.max_committed_epoch = epoch;
+        new_hummock_version.max_committed_epoch = epoch;
         commit_multi_var!(self, None, new_version_delta)?;
         versioning.current_version = new_hummock_version;
-        self.max_committed_epoch
-            .store(max_committed_epoch, Ordering::Release);
-        self.max_current_epoch
-            .store(max_current_epoch, Ordering::Release);
+        self.max_committed_epoch.store(epoch, Ordering::Release);
+        self.max_current_epoch.fetch_max(epoch, Ordering::Release);
         // Update metrics
         trigger_commit_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
@@ -1238,19 +1154,15 @@ where
             );
         }
 
-        tracing::trace!(
-            "new committed epoch {}, current epoch {}",
-            max_committed_epoch,
-            max_current_epoch
-        );
+        tracing::trace!("new committed epoch {}", epoch);
 
         self.env
             .notification_manager()
             .notify_frontend_asynchronously(
                 Operation::Update, // Frontends don't care about operation.
                 Info::HummockSnapshot(HummockSnapshot {
-                    committed_epoch: max_committed_epoch,
-                    current_epoch: max_current_epoch,
+                    committed_epoch: epoch,
+                    current_epoch: self.max_current_epoch.load(Ordering::Relaxed),
                 }),
             );
         self.env
@@ -1276,6 +1188,26 @@ where
         {
             self.check_state_consistency().await;
         }
+        Ok(())
+    }
+
+    /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
+    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> Result<()> {
+        // We only update `max_current_epoch`!
+        let original_epoch = self
+            .max_current_epoch
+            .fetch_max(max_current_epoch, Ordering::Release);
+        assert!(original_epoch < max_current_epoch);
+        tracing::trace!("new current epoch {}", max_current_epoch);
+        self.env
+            .notification_manager()
+            .notify_frontend_asynchronously(
+                Operation::Update, // Frontends don't care about operation.
+                Info::HummockSnapshot(HummockSnapshot {
+                    committed_epoch: self.max_committed_epoch.load(Ordering::Relaxed),
+                    current_epoch: max_current_epoch,
+                }),
+            );
         Ok(())
     }
 
@@ -1558,7 +1490,6 @@ fn apply_version_delta<'a>(
     let mut version_delta = HummockVersionDelta {
         prev_id: old_version.id,
         max_committed_epoch: old_version.max_committed_epoch,
-        max_current_epoch: old_version.max_current_epoch,
         trivial_move,
         ..Default::default()
     };
