@@ -339,12 +339,14 @@ where
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
 
-                Some(Mutation::Update(UpdateMutation {
+                let mutation = Mutation::Update(UpdateMutation {
                     actor_dispatcher_update,
                     actor_merge_update,
                     actor_vnode_bitmap_update,
                     dropped_actors,
-                }))
+                });
+                tracing::trace!("update mutation: {mutation:#?}");
+                Some(mutation)
             }
         };
 

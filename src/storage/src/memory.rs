@@ -189,14 +189,6 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn replicate_batch(
-        &self,
-        _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_> {
-        async move { unimplemented!() }
-    }
-
     fn iter<R, B>(
         &self,
         _prefix_hint: Option<Vec<u8>>,

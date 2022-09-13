@@ -77,8 +77,6 @@ pub struct MetaOpts {
     pub vacuum_interval_sec: u64,
     /// Threshold used by worker node to filter out new SSTs when scanning object store.
     pub min_sst_retention_time_sec: u64,
-    /// Compaction scheduler retries compactor selection with this interval.
-    pub compactor_selection_retry_interval_sec: u64,
     /// The spin interval when collecting global GC watermark in hummock
     pub collect_gc_watermark_spin_interval_sec: u64,
     /// Enable sanity check when SSTs are committed
@@ -97,7 +95,6 @@ impl Default for MetaOpts {
             checkpoint_frequency: 20,
             vacuum_interval_sec: 30,
             min_sst_retention_time_sec: 3600 * 24 * 7,
-            compactor_selection_retry_interval_sec: 5,
             collect_gc_watermark_spin_interval_sec: 5,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,

@@ -157,11 +157,13 @@ impl LocalBarrierManager {
                 .senders
                 .get(&actor_id)
                 .unwrap_or_else(|| panic!("sender for actor {} does not exist", actor_id));
-            sender.send(barrier.clone()).unwrap();
+            sender.send(barrier.clone()).unwrap_or_else(|e| {
+                panic!("failed to send barrier to actor {}: {:?}", actor_id, e.0)
+            });
         }
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
-        if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
+        if let Some(actors) = barrier.all_stop_actors() {
             trace!("remove actors {:?} from senders", actors);
             for actor in actors {
                 self.senders.remove(actor);

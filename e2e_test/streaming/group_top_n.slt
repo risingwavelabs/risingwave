@@ -35,3 +35,98 @@ drop materialized view mv;
 
 statement ok
 drop table t;
+
+# Test Window TopN
+# The following example is adapted from 
+# https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/sql/queries/window-topn/
+
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+statement ok
+CREATE TABLE bid (
+    "bidtime" TIMESTAMP,
+    "price" BIGINT,
+    "item" VARCHAR,
+    "supplier_id" VARCHAR
+);
+
+statement ok
+insert into bid values 
+    ('2020-04-15 08:05', 4, 'A', 'supplier1'),
+    ('2020-04-15 08:06', 4, 'C', 'supplier2'),
+    ('2020-04-15 08:07', 2, 'G', 'supplier1'),
+    ('2020-04-15 08:08', 2, 'B', 'supplier3'),
+    ('2020-04-15 08:09', 5, 'D', 'supplier4'),
+    ('2020-04-15 08:11', 2, 'B', 'supplier3'),
+    ('2020-04-15 08:13', 1, 'E', 'supplier1'),
+    ('2020-04-15 08:15', 3, 'H', 'supplier2'),
+    ('2020-04-15 08:17', 6, 'F', 'supplier5');
+
+# Window Top-N follows directly after Window TVF
+# Top 3 items which have the highest price for every tumbling 10 minutes window
+statement ok
+CREATE MATERIALIZED VIEW mv as 
+SELECT window_start, window_end, item, price
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY window_start, window_end ORDER BY price DESC) as rownum
+    FROM
+        TUMBLE(Bid, bidtime, INTERVAL '10' MINUTE)
+) WHERE rownum <= 3;
+
+query TTIT
+select * from mv order by window_start, price desc, item;
+----
+2020-04-15 08:00:00 2020-04-15 08:10:00 D 5
+2020-04-15 08:00:00 2020-04-15 08:10:00 A 4
+2020-04-15 08:00:00 2020-04-15 08:10:00 C 4
+2020-04-15 08:10:00 2020-04-15 08:20:00 F 6
+2020-04-15 08:10:00 2020-04-15 08:20:00 H 3
+2020-04-15 08:10:00 2020-04-15 08:20:00 B 2
+
+statement ok
+drop materialized view mv;
+
+# Window Top-N which follows after Window Aggregation
+# Top 3 suppliers who have the highest sales for every tumbling 10 minutes window.
+statement ok
+CREATE MATERIALIZED VIEW mv as 
+SELECT window_start, window_end, supplier_id, price, cnt
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY window_start, window_end ORDER BY price DESC) as rownum
+    FROM (
+    SELECT window_start, window_end, supplier_id, SUM(price) as price, COUNT(*) as cnt
+    FROM
+        TUMBLE(Bid, bidtime, INTERVAL '10' MINUTE)
+    GROUP BY window_start, window_end, supplier_id
+    )
+) WHERE rownum <= 3;
+
+query TTITI
+select * from mv order by window_start, price desc, supplier_id;
+----
+2020-04-15 08:00:00 2020-04-15 08:10:00 supplier1 6 2
+2020-04-15 08:00:00 2020-04-15 08:10:00 supplier4 5 1
+2020-04-15 08:00:00 2020-04-15 08:10:00 supplier2 4 1
+2020-04-15 08:10:00 2020-04-15 08:20:00 supplier5 6 1
+2020-04-15 08:10:00 2020-04-15 08:20:00 supplier2 3 1
+2020-04-15 08:10:00 2020-04-15 08:20:00 supplier3 2 1
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table bid;

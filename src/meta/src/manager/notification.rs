@@ -62,10 +62,7 @@ impl NotificationManager {
             while let Some(task) = task_rx.recv().await {
                 let mut guard = core.lock().await;
                 guard.current_version += 1;
-                match task.target {
-                    WorkerType::Generic => guard.notify_all(task.operation, &task.info),
-                    _ => guard.notify(task.target, task.operation, &task.info),
-                };
+                guard.notify(task.target, task.operation, &task.info);
                 if let Some(tx) = task.callback_tx {
                     tx.send(guard.current_version).unwrap();
                 }
@@ -126,11 +123,6 @@ impl NotificationManager {
 
     pub fn notify_compute_asynchronously(&self, operation: Operation, info: Info) {
         self.notify_asynchronously(WorkerType::ComputeNode, operation, info);
-    }
-
-    /// To notify all the `worker_type` sender
-    pub async fn notify_all_node(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(WorkerType::Generic, operation, info).await
     }
 
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
@@ -249,12 +241,5 @@ impl NotificationManagerCore {
                 })
                 .is_ok()
         });
-    }
-
-    fn notify_all(&mut self, operation: Operation, info: &Info) {
-        self.notify(WorkerType::Frontend, operation, info);
-        self.notify(WorkerType::ComputeNode, operation, info);
-        self.notify(WorkerType::Compactor, operation, info);
-        self.notify(WorkerType::RiseCtl, operation, info);
     }
 }

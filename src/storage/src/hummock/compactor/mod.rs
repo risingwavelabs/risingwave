@@ -665,31 +665,35 @@ impl Compactor {
             ssts.push(sst_info);
 
             let tracker_cloned = task_progress_tracker.clone();
-            upload_join_handles.push(upload_join_handle.and_then(|_| async move {
-                if let Some(tracker) = tracker_cloned {
-                    tracker.inc_ssts_uploaded();
-                }
-                Ok(())
-            }));
-
-            if self.context.is_share_buffer_compact {
-                self.context
-                    .stats
-                    .shared_buffer_to_sstable_size
-                    .observe(sst_size as _);
-            } else {
-                self.context.stats.compaction_upload_sst_counts.inc();
-            }
+            let context_cloned = self.context.clone();
+            upload_join_handles.push(
+                upload_join_handle
+                    .map_err(HummockError::sstable_upload_error)
+                    .and_then(move |upload_result| async move {
+                        upload_result?;
+                        if let Some(tracker) = tracker_cloned {
+                            tracker.inc_ssts_uploaded();
+                        }
+                        if context_cloned.is_share_buffer_compact {
+                            context_cloned
+                                .stats
+                                .shared_buffer_to_sstable_size
+                                .observe(sst_size as _);
+                        } else {
+                            context_cloned.stats.compaction_upload_sst_counts.inc();
+                        }
+                        Ok(())
+                    }),
+            );
         }
 
-        try_join_all(upload_join_handles)
-            .await
-            .map_err(|e| HummockError::other(format!("fail to upload sst data: {:?}", e)))?;
-
+        // Check if there are any failed uploads. Report all of those SSTs.
+        try_join_all(upload_join_handles).await?;
         self.context
             .stats
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
+
         Ok(ssts)
     }
 

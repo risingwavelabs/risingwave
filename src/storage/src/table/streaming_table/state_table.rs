@@ -27,9 +27,9 @@ use risingwave_common::array::{Op, Row, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
-use risingwave_common::types::VirtualNode;
+use risingwave_common::types::{DataType, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
 use risingwave_pb::catalog::Table;
@@ -43,6 +43,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
+use crate::table::streaming_table::mem_table::MemTableError;
 use crate::table::{compute_vnode, DataTypes, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
@@ -58,6 +59,9 @@ pub struct StateTable<S: StateStore> {
 
     /// Used for serializing the primary key.
     pk_serializer: OrderedRowSerializer,
+
+    /// Used for deserializing the primary key. Debug-only for now.
+    pk_deserializer: OrderedRowDeserializer,
 
     /// Datatypes of each column, used for deserializing the row.
     data_types: DataTypes,
@@ -108,7 +112,7 @@ impl<S: StateStore> StateTable<S> {
             .iter()
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
-        let order_types = table_catalog
+        let order_types: Vec<OrderType> = table_catalog
             .order_key
             .iter()
             .map(|col_order| {
@@ -145,7 +149,13 @@ impl<S: StateStore> StateTable<S> {
             .collect_vec();
 
         let keyspace = Keyspace::table_root(store, &table_id);
-        let pk_serializer = OrderedRowSerializer::new(order_types);
+        let pk_serializer = OrderedRowSerializer::new(order_types.clone());
+
+        let pk_data_types = pk_indices
+            .iter()
+            .map(|i| table_columns[*i].data_type.clone())
+            .collect();
+        let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, order_types);
 
         let data_types = table_columns.iter().map(|c| c.data_type.clone()).collect();
 
@@ -172,6 +182,7 @@ impl<S: StateStore> StateTable<S> {
             mem_table: MemTable::new(),
             keyspace,
             pk_serializer,
+            pk_deserializer,
             data_types,
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
@@ -216,7 +227,14 @@ impl<S: StateStore> StateTable<S> {
     ) -> Self {
         let keyspace = Keyspace::table_root(store, &table_id);
 
-        let pk_serializer = OrderedRowSerializer::new(order_types);
+        let pk_serializer = OrderedRowSerializer::new(order_types.clone());
+
+        let pk_data_types = pk_indices
+            .iter()
+            .map(|i| table_columns[*i].data_type.clone())
+            .collect();
+        let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, order_types);
+
         let data_types = table_columns.iter().map(|c| c.data_type.clone()).collect();
         let dist_key_in_pk_indices = dist_key_indices
             .iter()
@@ -236,6 +254,7 @@ impl<S: StateStore> StateTable<S> {
             mem_table: MemTable::new(),
             keyspace,
             pk_serializer,
+            pk_deserializer,
             data_types,
             pk_indices,
             dist_key_indices,
@@ -359,31 +378,65 @@ impl<S: StateStore> StateTable<S> {
 
 // write
 impl<S: StateStore> StateTable<S> {
+    fn pretty_row_op(row_op: &RowOp, data_types: &[DataType]) -> String {
+        match row_op {
+            RowOp::Insert(after) => {
+                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
+                format!("Insert({:?})", &after)
+            }
+            RowOp::Delete(before) => {
+                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
+                format!("Delete({:?})", &before)
+            }
+            RowOp::Update((before, after)) => {
+                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
+                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
+                format!("Update({:?}, {:?})", &before, &after)
+            }
+        }
+    }
+
+    fn handle_mem_table_error(&self, e: MemTableError) {
+        match e {
+            MemTableError::Conflict { key, prev, new } => {
+                let key = self.pk_deserializer.deserialize(&key).unwrap();
+                panic!(
+                    "mem-table operation conflicts! key: {:?}, prev: {}, new: {}",
+                    &key,
+                    Self::pretty_row_op(&prev, self.data_types.as_ref()),
+                    Self::pretty_row_op(&new, self.data_types.as_ref())
+                )
+            }
+        }
+    }
+
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
-    pub fn insert(&mut self, value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, value: Row) {
         let pk = value.by_indices(self.pk_indices());
 
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = value.serialize().map_err(err)?;
-        self.mem_table.insert(key_bytes, value_bytes);
-        Ok(())
+        let value_bytes = value.serialize();
+        self.mem_table
+            .insert(key_bytes, value_bytes)
+            .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
     /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
-    pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, old_value: Row) {
         let pk = old_value.by_indices(self.pk_indices());
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = old_value.serialize().map_err(err)?;
-        self.mem_table.delete(key_bytes, value_bytes);
-        Ok(())
+        let value_bytes = old_value.serialize();
+        self.mem_table
+            .delete(key_bytes, value_bytes)
+            .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
     /// Update a row. The old and new value should have the same pk.
-    pub fn update(&mut self, old_value: Row, new_value: Row) -> StorageResult<()> {
+    pub fn update(&mut self, old_value: Row, new_value: Row) {
         let old_pk = old_value.by_indices(self.pk_indices());
         let new_pk = new_value.by_indices(self.pk_indices());
         debug_assert_eq!(old_pk, new_pk);
@@ -394,11 +447,9 @@ impl<S: StateStore> StateTable<S> {
             self.compute_vnode_by_pk(&new_pk),
         );
 
-        let old_value_bytes = old_value.serialize().map_err(err)?;
-        let new_value_bytes = new_value.serialize().map_err(err)?;
         self.mem_table
-            .update(new_key_bytes, old_value_bytes, new_value_bytes);
-        Ok(())
+            .update(new_key_bytes, old_value.serialize(), new_value.serialize())
+            .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
@@ -437,6 +488,7 @@ impl<S: StateStore> StateTable<S> {
                             Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
                             Op::Delete | Op::UpdateDelete => self.mem_table.delete(key, value),
                         }
+                        .unwrap_or_else(|e| self.handle_mem_table_error(e))
                     }
                 }
             }
@@ -446,6 +498,7 @@ impl<S: StateStore> StateTable<S> {
                         Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
                         Op::Delete | Op::UpdateDelete => self.mem_table.delete(key, value),
                     }
+                    .unwrap_or_else(|e| self.handle_mem_table_error(e))
                 }
             }
         }

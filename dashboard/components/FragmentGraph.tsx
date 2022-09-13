@@ -1,25 +1,22 @@
 import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { cloneDeep } from "lodash"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef } from "react"
+import {
+  ActorBox,
+  ActorBoxPosition,
+  generateBoxLinks,
+  layout,
+} from "../lib/layout"
 
 interface Point {
   x: number
   y: number
 }
 
-export interface ActorBox {
-  id: string
-  name: string
-  order: number // preference order, actor box with larger order will be placed at right
-  width: number
-  height: number
-  parentIds: string[]
-}
-
 function treeLayoutFlip<Datum>(
   root: d3.HierarchyNode<Datum>,
-  { nodeRadius, dx, dy }: { nodeRadius: number; dx: number; dy: number }
+  { dx, dy }: { dx: number; dy: number }
 ): d3.HierarchyPointNode<Datum> {
   const tree = d3.tree<Datum>().nodeSize([dy, dx])
 
@@ -65,127 +62,283 @@ function boundBox<Datum>(
 const nodeRadius = 12
 const nodeMarginX = nodeRadius * 6
 const nodeMarginY = nodeRadius * 4
-const actorMarginX = nodeRadius * 2
-const actorMarginY = nodeRadius * 2
+const actorMarginX = nodeRadius
+const actorMarginY = nodeRadius
+const actorDistanceX = nodeRadius * 5
+const actorDistanceY = nodeRadius * 5
 
 export default function FragmentGraph({
-  planNodeDependency,
+  planNodeDependencies,
+  fragmentDependency,
+  selectedFragmentId,
 }: {
-  planNodeDependency: d3.HierarchyNode<any>
+  planNodeDependencies: Map<string, d3.HierarchyNode<any>>
+  fragmentDependency: ActorBox[]
+  selectedFragmentId: string | undefined
 }) {
   const svgRef = useRef<any>()
-  const [svgWidth, setSvgWidth] = useState(0)
-  const [svgHeight, setSvgHeight] = useState(0)
 
   const planNodeDependencyDagCallback = useCallback(() => {
-    const root = cloneDeep(planNodeDependency)
-    const layoutRoot = treeLayoutFlip(root, {
-      nodeRadius,
-      dx: nodeMarginX,
-      dy: nodeMarginY,
+    const deps = cloneDeep(planNodeDependencies)
+    const fragmentDependencyDag = cloneDeep(fragmentDependency)
+    const layoutActorResult = new Map<
+      string,
+      { layoutRoot: d3.HierarchyPointNode<any>; width: number; height: number }
+    >()
+    for (const [fragmentId, fragmentRoot] of deps) {
+      const layoutRoot = treeLayoutFlip(fragmentRoot, {
+        dx: nodeMarginX,
+        dy: nodeMarginY,
+      })
+      let { width, height } = boundBox(layoutRoot, {
+        margin: {
+          left: nodeRadius * 4 + actorMarginX,
+          right: nodeRadius * 4 + actorMarginX,
+          top: nodeRadius * 3 + actorMarginY,
+          bottom: nodeRadius * 4 + actorMarginY,
+        },
+      })
+      layoutActorResult.set(fragmentId, { layoutRoot, width, height })
+    }
+    const fragmentLayout = layout(
+      fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
+        const { width, height } = layoutActorResult.get(id)!
+        return { width, height, id, ...data }
+      }),
+      actorDistanceX,
+      actorDistanceY
+    )
+    const fragmentLayoutPosition = new Map<string, { x: number; y: number }>()
+    fragmentLayout.forEach(({ id, x, y }: ActorBoxPosition) => {
+      fragmentLayoutPosition.set(id, { x, y })
     })
-    let { width, height } = boundBox(layoutRoot, {
-      margin: {
-        left: nodeRadius * 4 + actorMarginX,
-        right: nodeRadius * 4 + actorMarginX,
-        top: nodeRadius * 3 + actorMarginY,
-        bottom: nodeRadius * 4 + actorMarginY,
-      },
+    const layoutResult = []
+    for (const [fragmentId, result] of layoutActorResult) {
+      const { x, y } = fragmentLayoutPosition.get(fragmentId)!
+      layoutResult.push({ id: fragmentId, x, y, ...result })
+    }
+    let svgWidth = 0
+    let svgHeight = 0
+    layoutResult.forEach(({ x, y, width, height }) => {
+      svgHeight = Math.max(svgHeight, y + height + 50)
+      svgWidth = Math.max(svgWidth, x + width)
     })
-    return { layoutRoot, width, height }
-  }, [planNodeDependency])
+    const links = generateBoxLinks(fragmentLayout)
+    return { layoutResult, fragmentLayout, svgWidth, svgHeight, links }
+  }, [planNodeDependencies, fragmentDependency])
 
-  const planNodeDependencyDag = planNodeDependencyDagCallback()
+  type PlanNodeDesc = {
+    layoutRoot: d3.HierarchyPointNode<any>
+    width: number
+    height: number
+    x: number
+    y: number
+    id: string
+  }
+
+  const {
+    svgWidth,
+    svgHeight,
+    links,
+    fragmentLayout: fragmentDependencyDag,
+    layoutResult: planNodeDependencyDag,
+  } = planNodeDependencyDagCallback()
 
   useEffect(() => {
-    const { layoutRoot, width, height } = planNodeDependencyDag
+    if (planNodeDependencyDag) {
+      const svgNode = svgRef.current
+      const svgSelection = d3.select(svgNode)
 
-    const svgNode = svgRef.current
-    const svgSelection = d3.select(svgNode)
+      // How to draw edges
+      const treeLink = d3
+        .linkHorizontal<any, Point>()
+        .x((d: Point) => d.x)
+        .y((d: Point) => d.y)
 
-    // How to draw edges
-    const treeLink = d3
-      .linkHorizontal<any, Point>()
-      .x((d: Point) => d.x)
-      .y((d: Point) => d.y)
+      const isSelected = (d: any) => d === selectedFragmentId
 
-    // Actor bounding box
-    svgSelection
-      .select(".bounding-box")
-      .attr("width", width - actorMarginX * 2)
-      .attr("height", height - actorMarginY * 2)
-      .attr("x", actorMarginX)
-      .attr("y", actorMarginY)
-      .attr("fill", "white")
-      .attr("stroke-width", 1)
-      .attr("rx", 5)
-      .attr("stroke", theme.colors.gray[500])
+      const applyActor = (
+        gSel: d3.Selection<SVGGElement, PlanNodeDesc, SVGGElement, undefined>
+      ) => {
+        gSel.attr("transform", ({ x, y }) => `translate(${x}, ${y})`)
 
-    svgSelection
-      .select(".links")
-      .attr("fill", "none")
-      .attr("stroke", theme.colors.gray[700])
-      .attr("stroke-width", 1.5)
-      .selectAll("path")
-      .data(layoutRoot.links())
-      .join("path")
-      .attr("d", treeLink)
+        // Actor text
+        let text = gSel.select<SVGTextElement>(".actor-text")
+        if (text.empty()) {
+          text = gSel.append("text").attr("class", "actor-text")
+        }
 
-    const nodes = svgSelection
-      .select(".nodes")
-      .attr("stroke-linejoin", "round")
-      .attr("stroke-width", 3)
+        text
+          .attr("fill", "black")
+          .text(({ id }) => `Fragment #${id}`)
+          .attr("font-family", "inherit")
+          .attr("text-anchor", "end")
+          .attr("dy", ({ height }) => height - actorMarginY + 12)
+          .attr("dx", ({ width }) => width - actorMarginX)
+          .attr("fill", "black")
+          .attr("font-size", 12)
 
-    const applyActorNode = (g: any) => {
-      g.attr("transform", (d: any) => `translate(${d.x},${d.y})`)
+        // Actor bounding box
+        let boundingBox = gSel.select<SVGRectElement>(".bounding-box")
+        if (boundingBox.empty()) {
+          boundingBox = gSel.append("rect").attr("class", "bounding-box")
+        }
 
-      let circle = g.select("circle")
-      if (circle.empty()) {
-        circle = g.append("circle")
+        boundingBox
+          .attr("width", ({ width }) => width - actorMarginX * 2)
+          .attr("height", ({ height }) => height - actorMarginY * 2)
+          .attr("x", actorMarginX)
+          .attr("y", actorMarginY)
+          .attr("fill", "white")
+          .attr("stroke-width", ({ id }) => (isSelected(id) ? 3 : 1))
+          .attr("rx", 5)
+          .attr("stroke", ({ id }) =>
+            isSelected(id) ? theme.colors.teal[500] : theme.colors.gray[500]
+          )
+
+        // Actor links
+        let linkSelection = gSel.select<SVGGElement>(".links")
+        if (linkSelection.empty()) {
+          linkSelection = gSel.append("g").attr("class", "links")
+        }
+
+        const applyLink = (
+          sel: d3.Selection<
+            SVGPathElement,
+            d3.HierarchyPointLink<any>,
+            SVGGElement,
+            PlanNodeDesc
+          >
+        ) => sel.attr("d", treeLink)
+
+        const createLink = (
+          sel: d3.Selection<
+            d3.EnterElement,
+            d3.HierarchyPointLink<any>,
+            SVGGElement,
+            PlanNodeDesc
+          >
+        ) => {
+          sel
+            .append("path")
+            .attr("fill", "none")
+            .attr("stroke", theme.colors.gray[700])
+            .attr("stroke-width", 1.5)
+            .call(applyLink)
+          return sel
+        }
+
+        const links = linkSelection
+          .selectAll<SVGPathElement, null>("path")
+          .data(({ layoutRoot }) => layoutRoot.links())
+
+        links.enter().call(createLink)
+        links.call(applyLink)
+        links.exit().remove()
+
+        // Actor nodes
+        let nodes = gSel.select<SVGGElement>(".nodes")
+        if (nodes.empty()) {
+          nodes = gSel.append("g").attr("class", "nodes")
+        }
+
+        const applyActorNode = (g: any) => {
+          g.attr("transform", (d: any) => `translate(${d.x},${d.y})`)
+
+          let circle = g.select("circle")
+          if (circle.empty()) {
+            circle = g.append("circle")
+          }
+
+          circle
+            .attr("fill", theme.colors.teal[500])
+            .attr("r", nodeRadius)
+            .style("cursor", "pointer")
+
+          let text = g.select("text")
+          if (text.empty()) {
+            text = g.append("text")
+          }
+
+          text
+            .attr("fill", "black")
+            .text((d: any) => d.data.name)
+            .attr("font-family", "inherit")
+            .attr("text-anchor", "middle")
+            .attr("dy", nodeRadius * 1.8)
+            .attr("fill", "black")
+            .attr("font-size", 12)
+            .attr("transform", "rotate(-8)")
+
+          return g
+        }
+
+        const createActorNode = (sel: any) =>
+          sel.append("g").attr("class", "actor-node").call(applyActorNode)
+
+        const actorNodeSelection = nodes
+          .selectAll(".actor-node")
+          .data(({ layoutRoot }) => layoutRoot.descendants())
+
+        actorNodeSelection.exit().remove()
+        actorNodeSelection.enter().call(createActorNode)
+        actorNodeSelection.call(applyActorNode)
       }
 
-      circle
-        .attr("fill", theme.colors.teal[500])
-        .attr("r", nodeRadius)
-        .style("cursor", "pointer")
-
-      let text = g.select("text")
-      if (text.empty()) {
-        text = g.append("text")
+      const createActor = (
+        sel: d3.Selection<d3.EnterElement, PlanNodeDesc, SVGGElement, undefined>
+      ) => {
+        const gSel = sel.append("g").attr("class", "actor").call(applyActor)
+        return gSel
       }
 
-      text
-        .attr("fill", "black")
-        .text((d: any) => d.data.name)
-        .attr("font-family", "inherit")
-        .attr("text-anchor", "middle")
-        .attr("dy", nodeRadius * 1.8)
-        .attr("fill", "black")
-        .attr("font-size", 12)
-        .attr("transform", "rotate(-8)")
+      const actorSelection = svgSelection
+        .select<SVGGElement>(".actors")
+        .selectAll<SVGGElement, null>(".actor")
+        .data(planNodeDependencyDag)
 
-      return g
+      actorSelection.enter().call(createActor)
+      actorSelection.call(applyActor)
+      actorSelection.exit().remove()
+
+      const edgeSelection = svgSelection
+        .select<SVGGElement>(".actor-links")
+        .selectAll<SVGPathElement, null>(".actor-link")
+        .data(links)
+
+      const curveStyle = d3.curveMonotoneX
+
+      const line = d3
+        .line<{ x: number; y: number }>()
+        .curve(curveStyle)
+        .x(({ x }) => x)
+        .y(({ y }) => y)
+
+      const applyEdge = (sel: any) =>
+        sel
+          .attr("d", ({ points }: any) => line(points))
+          .attr("fill", "none")
+          .attr("stroke-width", (d: any) =>
+            isSelected(d.source) || isSelected(d.target) ? 2 : 1
+          )
+          .attr("stroke", (d: any) =>
+            isSelected(d.source) || isSelected(d.target)
+              ? theme.colors.teal["500"]
+              : theme.colors.gray["300"]
+          )
+      const createEdge = (sel: any) =>
+        sel.append("path").attr("class", "actor-link").call(applyEdge)
+
+      edgeSelection.enter().call(createEdge)
+      edgeSelection.call(applyEdge)
+      edgeSelection.exit().remove()
     }
-
-    const createActorNode = (sel: any) =>
-      sel.append("g").attr("class", "actor-node").call(applyActorNode)
-
-    const actorNodeSelection = nodes
-      .selectAll(".actor-node")
-      .data(layoutRoot.descendants())
-    actorNodeSelection.exit().remove()
-    actorNodeSelection.enter().call(createActorNode)
-    actorNodeSelection.call(applyActorNode)
-
-    setSvgHeight(height)
-    setSvgWidth(width)
-  }, [planNodeDependencyDag])
+  }, [fragmentDependencyDag, planNodeDependencyDag, links, selectedFragmentId])
 
   return (
     <svg ref={svgRef} width={`${svgWidth}px`} height={`${svgHeight}px`}>
-      <rect className="bounding-box" />
-      <g className="links" />
-      <g className="nodes" />
+      <g className="actor-links" />
+      <g className="actors" />
     </svg>
   )
 }

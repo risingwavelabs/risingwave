@@ -39,7 +39,6 @@ macro_rules! define_state_store_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
-        type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl SyncFutureTrait<'a>;
 
@@ -83,8 +82,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         B: 'static + Send + AsRef<[u8]>;
 
     type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
-
-    type ReplicateBatchFuture<'a>: EmptyFutureTrait<'a>;
 
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
 
@@ -153,13 +150,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_>;
-
-    /// Functions the same as `ingest_batch`, except that data won't be persisted.
-    fn replicate_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_>;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
