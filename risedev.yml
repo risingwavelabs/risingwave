@@ -365,10 +365,13 @@ risedev:
       enable-tiered-cache: true
     - use: frontend
       port: 4565
+      exporter-port: 2222
     - use: frontend
       port: 4566
+      exporter-port: 2223
     - use: frontend
       port: 4567
+      exporter-port: 2224
     - use: compactor
 
   ci-kafka:
@@ -589,6 +592,9 @@ template:
     # Redpanda used by this Prometheus instance
     provide-redpanda: "redpanda*"
 
+    # Frontend used by this Prometheus instance
+    provide-frontend: "frontend*"
+
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -598,6 +604,9 @@ template:
 
     # Listen address
     listen-address: ${address}
+    
+    # Prometheus exporter listen port
+    exporter-port: 2222
 
     # Id of this instance
     id: frontend-${port}

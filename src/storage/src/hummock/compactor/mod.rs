@@ -285,10 +285,10 @@ impl Compactor {
         // Sort by split/key range index.
         output_ssts.sort_by_key(|(split_index, _)| *split_index);
 
-        sync_point::on("BEFORE_COMPACT_REPORT").await;
+        sync_point::sync_point!("BEFORE_COMPACT_REPORT");
         // After a compaction is done, mutate the compaction task.
         Self::compact_done(&mut compact_task, context.clone(), output_ssts, task_status).await;
-        sync_point::on("AFTER_COMPACT_REPORT").await;
+        sync_point::sync_point!("AFTER_COMPACT_REPORT");
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
             "Finished compaction task in {:?}ms: \n{}",

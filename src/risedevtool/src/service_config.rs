@@ -79,6 +79,7 @@ pub struct FrontendConfig {
     #[serde(with = "string")]
     pub port: u16,
     pub listen_address: String,
+    pub exporter_port: u16,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
@@ -173,6 +174,7 @@ pub struct PrometheusConfig {
     pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub provide_etcd: Option<Vec<EtcdConfig>>,
     pub provide_redpanda: Option<Vec<RedPandaConfig>>,
+    pub provide_frontend: Option<Vec<FrontendConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -212,7 +212,7 @@ where
         if let Some(vacuum_task) = request.into_inner().vacuum_task {
             self.vacuum_manager.report_vacuum_task(vacuum_task).await?;
         }
-        sync_point::on("AFTER_REPORT_VACUUM").await;
+        sync_point::sync_point!("AFTER_REPORT_VACUUM");
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
     }
 

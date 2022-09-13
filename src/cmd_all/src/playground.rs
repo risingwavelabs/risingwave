@@ -198,7 +198,7 @@ pub async fn playground() -> Result<()> {
         }
     }
 
-    sync_point::on("CLUSTER_READY").await;
+    sync_point::sync_point!("CLUSTER_READY");
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.

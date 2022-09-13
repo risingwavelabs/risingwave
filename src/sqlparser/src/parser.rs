@@ -2377,13 +2377,13 @@ impl Parser {
                         match explain_type {
                             Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                             Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                             _ => unreachable!("{}", keyword),
                         }
                     }
                     Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                     Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                     _ => unreachable!("{}", keyword),
                 }
             }
