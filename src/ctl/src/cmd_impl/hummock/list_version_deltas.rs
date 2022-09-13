@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod list_version;
-pub use list_version::*;
-mod list_kv;
-pub use list_kv::*;
-mod sst_dump;
-pub use sst_dump::*;
-mod list_version_deltas;
-pub mod observer;
-mod trigger_full_gc;
-mod trigger_manual_compaction;
+use risingwave_rpc_client::HummockMetaClient;
 
-pub use list_version_deltas::*;
-pub use trigger_full_gc::*;
-pub use trigger_manual_compaction::*;
+use crate::common::MetaServiceOpts;
+
+pub async fn list_version_deltas(start_id: u64, num_epochs: u32) -> anyhow::Result<()> {
+    let meta_opts = MetaServiceOpts::from_env()?;
+    let meta_client = meta_opts.create_meta_client().await?;
+    let resp = meta_client.get_version_deltas(start_id, num_epochs).await?;
+    println!("{:#?}", resp.version_deltas);
+    Ok(())
+}
