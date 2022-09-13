@@ -16,13 +16,14 @@
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
+use itertools::Itertools;
 use serde_json::Value as JsonValue;
 
 #[derive(Parser)]
@@ -179,14 +180,12 @@ fn generate_slt_files(package_name: &str) -> Result<()> {
     }
 
     for filename in slt_blocks_per_file.keys() {
-        let filename_digest = format!("{:x}", md5::compute(filename));
-        let file_name = Path::new(filename).file_name().unwrap().to_str().unwrap();
-        let file_basename = Path::new(file_name)
-            .file_prefix()
-            .unwrap()
-            .to_str()
-            .unwrap();
-        let slt_filename = format!("{file_basename}_{filename_digest}.slt");
+        let mut filepath = PathBuf::from(filename);
+        filepath.set_extension("slt");
+        let slt_filename = filepath
+            .components()
+            .filter_map(|comp| comp.as_os_str().to_str().filter(|s| *s != "src"))
+            .join("__");
         let mut slt_file = std::fs::File::create(slt_dir.join(slt_filename))?;
         write!(
             slt_file,
