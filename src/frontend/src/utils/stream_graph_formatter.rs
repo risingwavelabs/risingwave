@@ -47,7 +47,7 @@ impl StreamGraphFormatter {
         f: &mut impl std::fmt::Write,
     ) -> std::fmt::Result {
         self.edges.clear();
-        for edge in graph.edges.iter() {
+        for edge in &graph.edges {
             self.edges.insert(edge.link_id, edge.clone());
         }
 
@@ -95,7 +95,7 @@ impl StreamGraphFormatter {
             _ => node.identity.clone(),
         };
         writeln!(f, "{}{}", " ".repeat(level * 2), one_line_explain)?;
-        for input in node.input.iter() {
+        for input in &node.input {
             self.explain_node(level + 1, input, f)?;
         }
         Ok(())
