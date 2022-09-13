@@ -86,6 +86,7 @@ pub struct SourceStreamChunkRowWriter<'a> {
 /// `WriteGuard` can't be constructed directly in other mods due to a private field, so it can be
 /// used to ensure that all methods on [`SourceStreamChunkRowWriter`] are called at least once in
 /// the [`SourceParser::parse`] implementation.
+#[derive(Debug)]
 pub struct WriteGuard(());
 
 trait OpAction {
