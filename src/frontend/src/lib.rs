@@ -61,6 +61,8 @@ mod meta_client;
 pub mod test_utils;
 mod user;
 
+mod monitor;
+
 use std::ffi::OsString;
 use std::iter;
 use std::sync::Arc;
@@ -90,6 +92,15 @@ pub struct FrontendOpts {
     /// No given `config_path` means to use default config.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    #[clap(long, default_value = "127.0.0.1:2222")]
+    pub prometheus_listener_addr: String,
+
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = close metrics
+    /// >0 = open metrics
+    #[clap(long, default_value = "0")]
+    pub metrics_level: u32,
 }
 
 impl Default for FrontendOpts {
