@@ -20,15 +20,21 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::plan_common::JoinType;
 
 use super::{
     BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
     ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
+use crate::expr::{
+    CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef,
+};
+use crate::optimizer::plan_node::{
+    BatchSeqScan, LogicalFilter, LogicalJoin, LogicalProject, LogicalValues,
+};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
@@ -502,6 +508,15 @@ impl LogicalScan {
         }
     }
 
+    fn i2o_col_mapping_inner(&self) -> ColIndexMapping {
+        let input_len = self.table_desc.columns.len();
+        let mut map = vec![None; input_len];
+        for (i, key) in self.output_col_idx.iter().enumerate() {
+            map[i] = Some(*key);
+        }
+        ColIndexMapping::new(map)
+    }
+
     // For every index, check if the order of the index satisfies the required_order
     // If yes, use an index scan
     fn use_index_scan_if_order_is_satisfied(
@@ -523,7 +538,11 @@ impl LogicalScan {
                     })
                     .collect(),
             }
-            .satisfies(required_order)
+            .satisfies(
+                &self
+                    .i2o_col_mapping_inner()
+                    .rewrite_provided_order(required_order),
+            )
         })?;
 
         let p2s_mapping = index.primary_to_secondary_mapping();
@@ -537,9 +556,69 @@ impl LogicalScan {
                 index.index_table.table_desc().into(),
                 p2s_mapping,
             );
-            Some(index_scan.to_batch())
+            return Some(index_scan.to_batch());
         } else {
-            None
+            let index_scan = LogicalScan::create(
+                index.index_table.name.clone(),
+                false,
+                index.index_table.table_desc().into(),
+                vec![],
+                self.ctx(),
+            );
+
+            let primary_table_scan = LogicalScan::create(
+                index.primary_table.name.clone(),
+                false,
+                index.primary_table.table_desc().into(),
+                vec![],
+                self.ctx(),
+            );
+
+            let conjunctions = index
+                .primary_table_order_key_ref_to_index_table()
+                .iter()
+                .zip_eq(index.primary_table.order_key.iter())
+                .map(|(x, y)| {
+                    ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
+                        ExprType::IsNotDistinctFrom,
+                        vec![
+                            ExprImpl::InputRef(Box::new(InputRef::new(
+                                x.index,
+                                index.index_table.columns[x.index].data_type().clone(),
+                            ))),
+                            ExprImpl::InputRef(Box::new(InputRef::new(
+                                y.index + index.index_item.len(),
+                                index.primary_table.columns[y.index].data_type().clone(),
+                            ))),
+                        ],
+                        DataType::Boolean,
+                    )))
+                })
+                .collect_vec();
+            let on = Condition { conjunctions };
+            let join = LogicalJoin::new(
+                index_scan.into(),
+                primary_table_scan.into(),
+                JoinType::Inner,
+                on,
+            );
+            let batch_lookup_join = join.to_batch_lookup_join().unwrap();
+            let batch_proj = BatchProject::new_with_order(
+                LogicalProject::new(
+                    batch_lookup_join.into(),
+                    self.required_col_idx()
+                        .iter()
+                        .map(|r_q| {
+                            ExprImpl::InputRef(Box::new(InputRef::new(
+                                index.index_table.columns().len() + r_q,
+                                self.table_desc.columns.get(*r_q).unwrap().data_type.clone(),
+                            )))
+                        })
+                        .collect_vec(),
+                ),
+                required_order.clone(),
+            );
+            return Some(Ok(batch_proj.into()));
         }
     }
 }
