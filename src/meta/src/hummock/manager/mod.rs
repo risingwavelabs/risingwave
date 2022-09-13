@@ -874,12 +874,11 @@ where
             let current_version = &mut versioning.current_version;
             let mut hummock_version_deltas =
                 BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-            let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
             let version_delta = apply_version_delta(
                 &mut hummock_version_deltas,
                 current_version,
                 compact_task,
-                is_trivial_move,
+                CompactStatus::is_trivial_move_task(compact_task),
             );
 
             commit_multi_var!(
