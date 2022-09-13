@@ -590,6 +590,26 @@ where
             .id_gen_manager()
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await?;
+        if !compaction
+            .compaction_statuses
+            .contains_key(&compaction_group_id)
+        {
+            let group_config = self
+                .compaction_group_manager()
+                .compaction_group(compaction_group_id)
+                .await
+                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
+            let mut compact_statuses =
+                BTreeMapTransaction::new(&mut compaction.compaction_statuses);
+            let new_compact_status = compact_statuses.new_entry_insert_txn(
+                compaction_group_id,
+                CompactStatus::new(
+                    compaction_group_id,
+                    group_config.compaction_config().max_level,
+                ),
+            );
+            commit_multi_var!(self, None, new_compact_status)?;
+        }
         let mut compact_status = VarTransaction::new(
             compaction
                 .compaction_statuses
