@@ -9,3 +9,6 @@ futures-util = "0.3"
 spin = "0.9"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["sync", "time"] }
+
+[features]
+sync_point = []

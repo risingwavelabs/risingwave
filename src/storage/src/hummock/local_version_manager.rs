@@ -505,22 +505,20 @@ impl LocalVersionManager {
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        self.sync_shared_buffer_le_epoch(epoch, prev_max_sync_epoch)
-            .await
+        self.sync_shared_buffer_le_epoch(epoch).await
     }
 
     /// Sync all shared buffer that less than or equal to the `epoch`.
     async fn sync_shared_buffer_le_epoch(
         &self,
         new_sync_epoch: HummockEpoch,
-        prev_max_sync_epoch: HummockEpoch,
     ) -> HummockResult<SyncResult> {
         // Get epochs that less than epoch and add to sync_uncommitted_data, we must keep the write
         // lock.
         let (task_payload, sync_size) =
             { self.local_version.write().start_syncing(new_sync_epoch) };
         let uncommitted_ssts = self
-            .run_sync_upload_task(task_payload, new_sync_epoch, prev_max_sync_epoch)
+            .run_sync_upload_task(task_payload, new_sync_epoch)
             .await?;
         tracing::info!(
             "sync epoch {} finished. Task size {}",
@@ -542,11 +540,10 @@ impl LocalVersionManager {
         &self,
         task_payload: UploadTaskPayload,
         epoch: HummockEpoch,
-        prev_max_sync_epoch: HummockEpoch,
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         let ssts = self
             .shared_buffer_uploader
-            .flush(task_payload, prev_max_sync_epoch, epoch) // set watermark to be MIN so that all epoch will be written
+            .flush(task_payload, epoch)
             .await?;
         self.local_version.write().data_synced(epoch, ssts.clone());
         Ok(ssts)
@@ -558,10 +555,7 @@ impl LocalVersionManager {
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
     ) -> HummockResult<()> {
-        let task_result = self
-            .shared_buffer_uploader
-            .flush(task_payload, epoch, epoch)
-            .await;
+        let task_result = self.shared_buffer_uploader.flush(task_payload, epoch).await;
 
         let mut local_version_guard = self.local_version.write();
         let shared_buffer_guard = local_version_guard

@@ -273,7 +273,7 @@ async fn test_update_uncommitted_ssts() {
         };
         // Check uncommitted ssts
         let epoch_uncommitted_ssts = local_version_manager
-            .run_sync_upload_task(payload, epochs[0], max_commit_epoch)
+            .run_sync_upload_task(payload, epochs[0])
             .await
             .unwrap();
         assert_eq!(epoch_uncommitted_ssts.len(), 1);
@@ -315,7 +315,7 @@ async fn test_update_uncommitted_ssts() {
         };
 
         let epoch_uncommitted_ssts = local_version_manager
-            .run_sync_upload_task(payload, epochs[1], epochs[0])
+            .run_sync_upload_task(payload, epochs[1])
             .await
             .unwrap();
         assert_eq!(epoch_uncommitted_ssts.len(), 1);

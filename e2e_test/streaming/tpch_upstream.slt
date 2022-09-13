@@ -33,10 +33,13 @@ include ./tpch/q12.slt.part
 include ./tpch/q13.slt.part
 include ./tpch/q14.slt.part
 include ./tpch/q15.slt.part
+include ./tpch/q16.slt.part
 include ./tpch/q17.slt.part
 include ./tpch/q18.slt.part
 include ./tpch/q19.slt.part
 include ./tpch/q20.slt.part
+# FIXME: streaming TPC-H Q21 outputs empty result (#5291)
+# include ./tpch/q21.slt.part
 include ./tpch/q22.slt.part
 
 include ./tpch/drop_views.slt.part
