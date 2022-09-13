@@ -137,8 +137,6 @@ impl CompactStatus {
         let select_level_id = ret.input.input_levels[0].level_idx;
         let target_level_id = ret.input.target_level;
 
-        let splits = vec![KeyRange::inf()];
-
         let compression_algorithm = match ret.compression_algorithm.as_str() {
             "Lz4" => 1,
             "Zstd" => 2,
@@ -147,7 +145,7 @@ impl CompactStatus {
 
         let compact_task = CompactTask {
             input_ssts: ret.input.input_levels,
-            splits,
+            splits: ret.splits,
             watermark: HummockEpoch::MAX,
             sorted_output_ssts: vec![],
             task_id,

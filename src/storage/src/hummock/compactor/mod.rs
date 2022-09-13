@@ -824,7 +824,7 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
                     .collect_vec(),
             );
         }
-        // sort_by key, as for every data block has the same size;
+        // sort by key, as for every data block has the same size;
         indexes.sort_by(|a, b| VersionedComparator::compare_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits: Vec<KeyRange_vec> = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
@@ -832,11 +832,7 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
             indexes.len() as u64,
             context.options.max_sub_compaction as u64,
         );
-        let sub_compaction_data_size = if compaction_size > sstable_size && parallelism > 1 {
-            compaction_size / parallelism
-        } else {
-            compaction_size
-        };
+        let sub_compaction_data_size = compaction_size / parallelism;
 
         if parallelism > 1 {
             let mut last_buffer_size = 0;
@@ -852,6 +848,8 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
                 last_key = key;
             }
             compact_task.splits = splits;
+        } else {
+            compact_task.splits = vec![KeyRange_vec::inf()];
         }
     }
 }
