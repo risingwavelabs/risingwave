@@ -97,7 +97,7 @@ pub struct StateTable<S: StateStore> {
     /// hash distribution
     pub vnode_col_idx_in_pk: Option<usize>,
 
-    _value_indices: Vec<usize>,
+    value_indices: Vec<usize>,
 }
 
 /// init Statetable
@@ -179,7 +179,7 @@ impl<S: StateStore> StateTable<S> {
                 let vnode_col_idx = vnode_col_idx.index as usize;
                 pk_indices.iter().position(|&i| vnode_col_idx == i)
             });
-        let _value_indices = table_catalog
+        let value_indices = table_catalog
             .value_indices
             .iter()
             .map(|val| *val as usize)
@@ -197,7 +197,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
             disable_sanity_check: false,
             vnode_col_idx_in_pk,
-            _value_indices,
+            value_indices,
         }
     }
 
@@ -257,7 +257,7 @@ impl<S: StateStore> StateTable<S> {
                     })
             })
             .collect_vec();
-        let _value_indices = (0..table_columns.len()).collect_vec();
+        let value_indices = (0..table_columns.len()).collect_vec();
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -271,7 +271,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: Default::default(),
             disable_sanity_check: false,
             vnode_col_idx_in_pk: None,
-            _value_indices,
+            value_indices,
         }
     }
 
@@ -468,7 +468,7 @@ impl<S: StateStore> StateTable<S> {
 
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = value.partial_serialize(&self._value_indices);
+        let value_bytes = value.partial_serialize(&self.value_indices);
         self.mem_table
             .insert(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
