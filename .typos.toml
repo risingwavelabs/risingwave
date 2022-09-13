@@ -7,4 +7,4 @@ ot = "ot"
 inout = "inout"
 
 [files]
-extend-exclude = ["src/tests/regress/data", "e2e_test", "**/*.svg", "scripts", "ci/ch-benchmark/init"]
+extend-exclude = ["src/tests/regress/data", "e2e_test", "**/*.svg", "scripts"]

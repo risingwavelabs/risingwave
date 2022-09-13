@@ -7,7 +7,7 @@ services:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     ports:
-      - 5432:5432
+      - '5432:5432'
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
@@ -17,7 +17,7 @@ services:
   zookeeper:
     image: confluentinc/cp-zookeeper
     ports:
-      - 2181:2181
+      - "2181:2181"
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
@@ -31,47 +31,15 @@ services:
       - zookeeper
     environment:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,OUTSIDE://localhost:29092
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,OUTSIDE://${HOST_IP}:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_BROKER_ID: 1
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_JMX_PORT: 9991
     healthcheck:
       test: nc -z ${HOST_IP} 29092 || exit -1
       interval: 5s
       timeout: 10s
       retries: 5
-
-  postgres:
-    image: debezium/postgres:13
-    ports:
-      - 25432:5432
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d ch_benchmark_db" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=ch_benchmark_db
-      - PGPASSWORD=pw
-    volumes:
-      - ./ch-benchmark/init:/docker-entrypoint-initdb.d
-
-  debezium:
-    image: debezium/connect:1.4
-    environment:
-      BOOTSTRAP_SERVERS: kafka:9092
-      CONFIG_STORAGE_TOPIC: connect_configs
-      OFFSET_STORAGE_TOPIC: connect_offsets
-    depends_on:
-      - kafka
-    ports:
-      - 8083:8083
-    volumes:
-      - ./ch-benchmark/connectors:/connectors
 
   rw-build-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220826

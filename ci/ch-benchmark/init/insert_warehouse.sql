@@ -1,1 +1,0 @@
-INSERT INTO warehouse VALUES (1,'mwLkm4','N20BRLw P6g06PN2Lm4i',' kR ggN PkkkL','Pw 0Rii4kNL4ggLgR','mR','718311111',0.0356,585362);
