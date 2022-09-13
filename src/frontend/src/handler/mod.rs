@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
+use pgwire::pg_response::StatementType::{ABORT, BEGIN, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
@@ -63,7 +63,6 @@ pub async fn handle(
     match stmt {
         Statement::Explain {
             statement,
-            describe_alias: _,
             analyze,
             options,
         } => explain::handle_explain(context, *statement, options, analyze),
@@ -76,17 +75,47 @@ pub async fn handle(
             name,
             columns,
             constraints,
-            ..
-        } => create_table::handle_create_table(context, name, columns, constraints).await,
+            with_options: _, // It is put in OptimizerContext
+
+            // Not supported things
+            or_replace,
+            temporary,
+            if_not_exists,
+            query,
+        } => {
+            if or_replace {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE OR REPLACE TABLE".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if temporary {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE TEMPORARY TABLE".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if if_not_exists {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE TABLE IF NOT EXISTS".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if query.is_some() {
+                return Err(ErrorCode::NotImplemented("CREATE AS".to_string(), None.into()).into());
+            }
+            create_table::handle_create_table(context, name, columns, constraints).await
+        }
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
-            ..
         } => create_database::handle_create_database(context, db_name, if_not_exists).await,
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
-            ..
         } => create_schema::handle_create_schema(context, schema_name, if_not_exists).await,
         Statement::CreateUser(stmt) => create_user::handle_create_user(context, stmt).await,
         Statement::AlterUser(stmt) => alter_user::handle_alter_user(context, stmt).await,
@@ -173,11 +202,16 @@ pub async fn handle(
         // TODO: Track issues #2595 #2541
         Statement::StartTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
             START_TRANSACTION,
-            "Ignored temporarily.See detail in issue#2541".to_string(),
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        // BEGIN is similar to START TRANSACTION.
+        Statement::BEGIN { .. } => Ok(PgResponse::empty_result_with_notice(
+            BEGIN,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         Statement::Abort { .. } => Ok(PgResponse::empty_result_with_notice(
             ABORT,
-            "Ignored temporarily.See detail in issue#2541".to_string(),
+            "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         _ => {
             Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())

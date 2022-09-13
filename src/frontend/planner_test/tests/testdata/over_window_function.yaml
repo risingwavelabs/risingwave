@@ -77,8 +77,8 @@
             LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimizer_error: |
     internal error: OverAgg can not be transformed. Plan:
-    LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
-      LogicalProject { exprs: [t.x, ROW_NUMBER] }
+    LogicalProject { exprs: [t.x, ROW_NUMBER] }
+      LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
         LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
           LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
@@ -146,6 +146,77 @@
     internal error: OverAgg can not be transformed. Plan:
     LogicalProject { exprs: [t.x, t.y] }
       LogicalFilter { predicate: (3:Int32 <= ROW_NUMBER) AND (ROW_NUMBER <= 5:Int32) }
-        LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
-          LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
-            LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+        LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
+          LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+- id: create_bid
+  sql: |
+    /*
+    The following example is adapted from
+    https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/sql/queries/window-topn/
+
+    Licensed to the Apache Software Foundation (ASF) under one
+    or more contributor license agreements.  See the NOTICE file
+    distributed with this work for additional information
+    regarding copyright ownership.  The ASF licenses this file
+    to you under the Apache License, Version 2.0 (the
+    "License"); you may not use this file except in compliance
+    with the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing,
+    software distributed under the License is distributed on an
+    "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied.  See the License for the
+    specific language governing permissions and limitations
+    under the License.
+    */
+    CREATE TABLE bid (
+      "bidtime" TIMESTAMP,
+      "price" BIGINT,
+      "item" VARCHAR,
+      "supplier_id" VARCHAR
+    );
+- before:
+  - create_bid
+  sql: |
+    -- Window Top-N which follows after Window Aggregation
+    -- Top 3 suppliers who have the highest sales for every tumbling 10 minutes window.
+    SELECT window_start, window_end, supplier_id, price, cnt
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY window_start, window_end ORDER BY price DESC) as rownum
+      FROM (
+        SELECT window_start, window_end, supplier_id, SUM(price) as price, COUNT(*) as cnt
+        FROM
+          TUMBLE(Bid, bidtime, INTERVAL '10' MINUTE)
+        GROUP BY window_start, window_end, supplier_id
+      )
+    ) WHERE rownum <= 3;
+  stream_plan: |
+    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, cnt], pk_columns: [window_start, window_end, supplier_id] }
+      StreamGroupTopN { order: "[sum(bid.price) DESC]", limit: 3, offset: 0, group_key: [0, 1] }
+        StreamExchange { dist: HashShard(TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)) }
+          StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id, sum(bid.price), count] }
+            StreamHashAgg { group_key: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id], aggs: [count, sum(bid.price), count] }
+              StreamExchange { dist: HashShard(TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id) }
+                StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id, bid.price, bid._row_id] }
+                  StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+- before:
+  - create_bid
+  sql: |
+    -- Window Top-N follows directly after Window TVF
+    -- Top 3 items which have the highest price for every tumbling 10 minutes window.
+    SELECT window_start, window_end, supplier_id, price
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY window_start, window_end ORDER BY price DESC) as rownum
+        FROM
+          TUMBLE(Bid, bidtime, INTERVAL '10' MINUTE)
+    ) WHERE rownum <= 3;
+  stream_plan: |
+    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, bid._row_id(hidden)], pk_columns: [bid._row_id] }
+      StreamExchange { dist: HashShard(bid._row_id) }
+        StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id, bid.price, bid._row_id] }
+          StreamGroupTopN { order: "[bid.price DESC]", limit: 3, offset: 0, group_key: [5, 6] }
+            StreamExchange { dist: HashShard(TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)) }
+              StreamProject { exprs: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id, TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)] }
+                StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
