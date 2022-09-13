@@ -623,53 +623,11 @@ where
         compact_task.watermark = watermark;
 
         if CompactStatus::is_trivial_move_task(&compact_task) && can_trivial_move {
-            compact_status.report_compact_task(&compact_task);
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
-            let mut versioning_guard = write_lock!(self, versioning).await;
-
-            // need to regain the newest version ynder the protection of a write lock, otherwise the
-            // old version may be used to overwrite the new one
-            let versioning = versioning_guard.deref_mut();
-            let current_version = &mut versioning.current_version;
-            let mut hummock_version_deltas =
-                BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-            let version_delta = apply_version_delta(
-                &mut hummock_version_deltas,
-                current_version,
-                &compact_task,
-                true,
-            );
-
-            commit_multi_var!(self, None, hummock_version_deltas)?;
-            current_version.apply_version_delta(&version_delta);
-
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            self.env
-                .notification_manager()
-                .notify_compute_asynchronously(
-                    Operation::Add,
-                    Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                        version_deltas: vec![versioning
-                            .hummock_version_deltas
-                            .last_key_value()
-                            .unwrap()
-                            .1
-                            .clone()],
-                    }),
-                );
-            trigger_sst_stat(
-                &self.metrics,
-                Some(
-                    compaction
-                        .compaction_statuses
-                        .get(&compaction_group_id)
-                        .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
-                ),
-                &versioning.current_version,
-                compaction_group_id,
-            );
-
+            self.report_compact_task_impl(None, &compact_task, Some(compaction_guard))
+                .await?;
             tracing::info!(
                 "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
                 compaction_group_id,
@@ -745,10 +703,10 @@ where
                 compact_task.input_ssts[0].level_idx,
                 start_time.elapsed()
             );
+            drop(compaction_guard);
         }
         #[cfg(test)]
         {
-            drop(compaction_guard);
             self.check_state_consistency().await;
         }
 
@@ -763,7 +721,8 @@ where
 
     pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
         assert_eq!(compact_task.task_status(), TaskStatus::Canceled);
-        self.report_compact_task_impl(None, compact_task).await
+        self.report_compact_task_impl(None, compact_task, None)
+            .await
     }
 
     pub async fn get_compact_task(
@@ -840,7 +799,7 @@ where
         compact_task: &CompactTask,
     ) -> Result<bool> {
         let ret = self
-            .report_compact_task_impl(Some(context_id), compact_task)
+            .report_compact_task_impl(Some(context_id), compact_task, None)
             .await?;
 
         Ok(ret)
@@ -858,8 +817,12 @@ where
         &self,
         context_id: Option<HummockContextId>,
         compact_task: &CompactTask,
+        compaction_guard: Option<RwLockWriteGuard<'_, Compaction>>,
     ) -> Result<bool> {
-        let mut compaction_guard = write_lock!(self, compaction).await;
+        let mut compaction_guard = match compaction_guard {
+            None => write_lock!(self, compaction).await,
+            Some(compaction_guard) => compaction_guard,
+        };
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
         let mut compact_status = VarTransaction::new(
@@ -911,11 +874,12 @@ where
             let current_version = &mut versioning.current_version;
             let mut hummock_version_deltas =
                 BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
+            let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
             let version_delta = apply_version_delta(
                 &mut hummock_version_deltas,
                 current_version,
                 compact_task,
-                false,
+                is_trivial_move,
             );
 
             commit_multi_var!(
