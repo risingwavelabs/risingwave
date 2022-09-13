@@ -71,7 +71,7 @@ impl RegexpMatches {
             builder.append_datum(&Some(list.into()))?;
         }
 
-        Ok(Arc::new(builder.finish()?))
+        Ok(Arc::new(builder.finish()))
     }
 }
 

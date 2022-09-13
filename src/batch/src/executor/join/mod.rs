@@ -161,8 +161,8 @@ fn convert_datum_refs_to_chunk(
     // Finish each array builder and get Column.
     let result_columns = output_array_builders
         .into_iter()
-        .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-        .try_collect()?;
+        .map(|builder| Column::new(Arc::new(builder.finish())))
+        .collect();
 
     Ok(DataChunk::new(result_columns, num_tuples))
 }
@@ -198,7 +198,7 @@ mod tests {
             for _ in 0..length {
                 builder.append(Some(i as i32)).unwrap();
             }
-            let arr = builder.finish().unwrap();
+            let arr = builder.finish();
             columns.push(Column::new(Arc::new(arr.into())))
         }
         let chunk1: DataChunk = DataChunk::new(columns.clone(), length);

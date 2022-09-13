@@ -132,7 +132,7 @@ where
         }
     }
 
-    builder.finish().unwrap()
+    builder.finish()
 }
 
 pub fn seed_rand_array<A>(size: usize, seed: u64) -> A

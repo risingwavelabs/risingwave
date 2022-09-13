@@ -138,10 +138,10 @@ impl Array for Utf8Array {
 }
 
 impl Utf8Array {
-    pub fn from_slice(data: &[Option<&str>]) -> ArrayResult<Self> {
+    pub fn from_slice(data: &[Option<&str>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i)?;
+            builder.append(*i).unwrap();
         }
         builder.finish()
     }
@@ -205,12 +205,12 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         Ok(())
     }
 
-    fn finish(self) -> ArrayResult<Utf8Array> {
-        Ok(Utf8Array {
+    fn finish(self) -> Utf8Array {
+        Utf8Array {
             bitmap: (self.bitmap).finish(),
             data: self.data,
             offset: self.offset,
-        })
+        }
     }
 }
 
@@ -326,7 +326,7 @@ mod tests {
                 builder.append(None).unwrap();
             }
         }
-        builder.finish().unwrap();
+        builder.finish();
     }
 
     #[test]
@@ -339,7 +339,7 @@ mod tests {
         }
         let guard = partial_writer.finish()?;
         let builder = guard.into_inner();
-        let array = builder.finish()?;
+        let array = builder.finish();
         assert_eq!(array.len(), 1);
         assert_eq!(array.value_at(0), Some("ranran"));
         assert_eq!(unsafe { array.value_at_unchecked(0) }, Some("ranran"));
@@ -358,11 +358,7 @@ mod tests {
             Some("666666"),
         ];
 
-        let result_array = Utf8Array::from_slice(&input);
-
-        assert!(result_array.is_ok());
-        let array = result_array.unwrap();
-
+        let array = Utf8Array::from_slice(&input);
         assert_eq!(array.len(), input.len());
 
         assert_eq!(
@@ -384,10 +380,7 @@ mod tests {
             Some("666666"),
         ];
 
-        let result_array = Utf8Array::from_slice(&input);
-
-        assert!(result_array.is_ok());
-        let array = result_array.unwrap();
+        let array = Utf8Array::from_slice(&input);
         let buffers = array.to_protobuf().values;
         assert!(buffers.len() >= 2);
     }
@@ -430,10 +423,7 @@ mod tests {
                 .collect_vec(),
         ];
 
-        let arrs = vecs
-            .iter()
-            .map(|v| Utf8Array::from_slice(v).unwrap())
-            .collect_vec();
+        let arrs = vecs.iter().map(|v| Utf8Array::from_slice(v)).collect_vec();
 
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
