@@ -26,6 +26,8 @@ mod bloom;
 use bloom::Bloom;
 pub mod builder;
 pub use builder::*;
+pub mod writer;
+pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
 use bytes::{Buf, BufMut};
@@ -51,6 +53,7 @@ const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
 
 /// [`Sstable`] is a handle for accessing SST.
+#[derive(Clone)]
 pub struct Sstable {
     pub id: HummockSstableId,
     pub meta: SstableMeta,
@@ -58,7 +61,7 @@ pub struct Sstable {
 
 impl Debug for Sstable {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GrpcExchangeSource")
+        f.debug_struct("Sstable")
             .field("id", &self.id)
             .field("meta", &self.meta)
             .finish()
@@ -108,6 +111,7 @@ impl Sstable {
             }),
             file_size: self.meta.estimated_size as u64,
             table_ids: vec![],
+            meta_offset: self.meta.meta_offset,
         }
     }
 }
@@ -160,6 +164,7 @@ pub struct SstableMeta {
     pub key_count: u32,
     pub smallest_key: Vec<u8>,
     pub largest_key: Vec<u8>,
+    pub meta_offset: u64,
     /// Format version, for further compatibility.
     pub version: u32,
 }
@@ -178,20 +183,26 @@ impl SstableMeta {
     /// ```
     pub fn encode_to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
+        self.encode_to(&mut buf);
+        buf
+    }
+
+    pub fn encode_to(&self, buf: &mut Vec<u8>) {
+        let start_offset = buf.len();
         buf.put_u32_le(self.block_metas.len() as u32);
         for block_meta in &self.block_metas {
-            block_meta.encode(&mut buf);
+            block_meta.encode(buf);
         }
-        put_length_prefixed_slice(&mut buf, &self.bloom_filter);
+        put_length_prefixed_slice(buf, &self.bloom_filter);
         buf.put_u32_le(self.estimated_size as u32);
         buf.put_u32_le(self.key_count as u32);
-        put_length_prefixed_slice(&mut buf, &self.smallest_key);
-        put_length_prefixed_slice(&mut buf, &self.largest_key);
-        let checksum = xxhash64_checksum(&buf);
+        put_length_prefixed_slice(buf, &self.smallest_key);
+        put_length_prefixed_slice(buf, &self.largest_key);
+        buf.put_u64_le(self.meta_offset);
+        let checksum = xxhash64_checksum(&buf[start_offset..]);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
         buf.put_u32_le(MAGIC);
-        buf
     }
 
     pub fn decode(buf: &mut &[u8]) -> HummockResult<Self> {
@@ -224,6 +235,7 @@ impl SstableMeta {
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
+        let meta_offset = buf.get_u64_le();
 
         Ok(Self {
             block_metas,
@@ -232,6 +244,7 @@ impl SstableMeta {
             key_count,
             smallest_key,
             largest_key,
+            meta_offset,
             version,
         })
     }
@@ -252,6 +265,7 @@ impl SstableMeta {
             + self.smallest_key.len()
             + 4 // key len
             + self.largest_key.len()
+            + 8 // footer
             + 8 // checksum
             + 4 // version
             + 4 // magic
@@ -289,9 +303,12 @@ mod tests {
             key_count: 123,
             smallest_key: b"0-smallest-key".to_vec(),
             largest_key: b"9-largest-key".to_vec(),
+            meta_offset: 123,
             version: VERSION,
         };
+        let sz = meta.encoded_size();
         let buf = meta.encode_to_bytes();
+        assert_eq!(sz, buf.len());
         let decoded_meta = SstableMeta::decode(&mut &buf[..]).unwrap();
         assert_eq!(decoded_meta, meta);
     }

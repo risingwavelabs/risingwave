@@ -28,6 +28,9 @@ buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
+echo "--- Download mise"
+buildkite-agent artifact download avro-simple-schema.avsc ./
+
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
 chmod +x ./target/debug/risedev-dev
@@ -43,4 +46,4 @@ echo "--- e2e test w/ Rust frontend - source with kafka"
 cargo make clean-data
 cargo make ci-start ci-kafka
 ./scripts/source/prepare_ci_kafka.sh
-timeout 2m sqllogictest -p 4566 -d dev  './e2e_test/source/**/*.slt'
+sqllogictest -p 4566 -d dev  './e2e_test/source/**/*.slt'

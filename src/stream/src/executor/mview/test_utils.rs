@@ -17,12 +17,10 @@ use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 
-pub async fn gen_basic_table(
-    row_count: usize,
-) -> RowBasedStorageTable<MemoryStateStore, READ_ONLY> {
+pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore> {
     let state_store = MemoryStateStore::new();
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
@@ -40,7 +38,7 @@ pub async fn gen_basic_table(
         order_types,
         pk_indices,
     );
-    let table = RowBasedStorageTable::new_for_test(
+    let table = StorageTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -51,15 +49,13 @@ pub async fn gen_basic_table(
 
     for idx in 0..row_count {
         let idx = idx as i32;
-        state
-            .insert(Row(vec![
-                Some(idx.into()),
-                Some(idx.into()),
-                Some(idx.into()),
-            ]))
-            .unwrap();
+        state.insert(Row(vec![
+            Some(idx.into()),
+            Some(idx.into()),
+            Some(idx.into()),
+        ]));
     }
     state.commit(epoch).await.unwrap();
 
-    table.into()
+    table
 }

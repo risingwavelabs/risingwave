@@ -198,7 +198,7 @@ impl Condition {
         self,
         left_col_num: usize,
         right_col_num: usize,
-    ) -> (Vec<(InputRef, InputRef)>, Self) {
+    ) -> (Vec<(InputRef, InputRef, bool)>, Self) {
         let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
         let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
 
@@ -208,7 +208,9 @@ impl Condition {
             if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
                 others.push(expr)
             } else if let Some(columns) = expr.as_eq_cond() {
-                eq_keys.push(columns);
+                eq_keys.push((columns.0, columns.1, false));
+            } else if let Some(columns) = expr.as_is_not_distinct_from_cond() {
+                eq_keys.push((columns.0, columns.1, true));
             } else {
                 others.push(expr)
             }
@@ -383,10 +385,20 @@ impl Condition {
                         // column = NULL
                         return Ok(false_cond());
                     };
-                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l != value) {
+                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| if let Some(l) = l {
+                        l != value
+                    } else {
+                        true
+                    }) {
                         return Ok(false_cond());
                     }
-                    eq_conds = vec![value];
+                    eq_conds = vec![Some(value)];
+                } else if let Some(input_ref) = expr.as_is_null() {
+                    assert_eq!(input_ref.index, order_column_ids[i]);
+                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l.is_some()) {
+                        return Ok(false_cond());
+                    }
+                    eq_conds = vec![None];
                 } else if let Some((input_ref, in_const_list)) = expr.as_in_const_list() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     let mut scalars = HashSet::new();
@@ -398,7 +410,7 @@ impl Condition {
                         let Some(value) = value else {
                             continue;
                         };
-                        scalars.insert(value);
+                        scalars.insert(Some(value));
                     }
                     if scalars.is_empty() {
                         // There're only NULLs in the in-list

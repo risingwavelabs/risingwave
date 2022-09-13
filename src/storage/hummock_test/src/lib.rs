@@ -23,4 +23,6 @@ mod snapshot_tests;
 #[cfg(test)]
 mod state_store_tests;
 #[cfg(test)]
+mod test_utils;
+#[cfg(test)]
 mod vacuum_tests;

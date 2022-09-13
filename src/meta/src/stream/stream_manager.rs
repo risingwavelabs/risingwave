@@ -15,13 +15,13 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
-use risingwave_pb::catalog::{Source, Table};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnitMapping, WorkerType};
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -30,15 +30,14 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use risingwave_rpc_client::StreamClientPoolRef;
-use tokio::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
 use super::ScheduledLocations;
-use crate::barrier::{BarrierManagerRef, Command};
+use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{
-    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, MetaSrvEnv,
-    NotificationManagerRef, Relation, SchemaId, WorkerId,
+    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, IdGeneratorManagerRef,
+    MetaSrvEnv, SchemaId, WorkerId,
 };
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
@@ -58,8 +57,6 @@ pub struct CreateMaterializedViewContext {
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
     /// Dependent table ids
     pub dependent_table_ids: HashSet<TableId>,
-    /// Temporary source info used during `create_materialized_source`
-    pub affiliated_source: Option<Source>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
     /// Internal TableID to Table mapping
@@ -95,13 +92,13 @@ impl CreateMaterializedViewContext {
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager<S: MetaStore> {
     /// Manages definition and status of fragments and actors
-    fragment_manager: FragmentManagerRef<S>,
+    pub(super) fragment_manager: FragmentManagerRef<S>,
 
     /// Broadcasts and collect barriers
-    barrier_manager: BarrierManagerRef<S>,
+    pub(crate) barrier_scheduler: BarrierScheduler<S>,
 
     /// Maintains information of the cluster
-    cluster_manager: ClusterManagerRef<S>,
+    pub(crate) cluster_manager: ClusterManagerRef<S>,
 
     /// Maintains streaming sources from external system like kafka
     source_manager: SourceManagerRef<S>,
@@ -110,13 +107,12 @@ pub struct GlobalStreamManager<S: MetaStore> {
     scheduler: Scheduler<S>,
 
     /// Client Pool to stream service on compute nodes
-    client_pool: StreamClientPoolRef,
+    pub(crate) client_pool: StreamClientPoolRef,
+
+    /// id generator manager.
+    pub(crate) id_gen_manager: IdGeneratorManagerRef<S>,
 
     compaction_group_manager: CompactionGroupManagerRef<S>,
-
-    notification_manager: NotificationManagerRef,
-
-    processing_table: Mutex<HashMap<u32, Table>>, // mutex for immutable self
 }
 
 impl<S> GlobalStreamManager<S>
@@ -126,7 +122,7 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         fragment_manager: FragmentManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        barrier_scheduler: BarrierScheduler<S>,
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
@@ -134,13 +130,12 @@ where
         Ok(Self {
             scheduler: Scheduler::new(cluster_manager.clone()),
             fragment_manager,
-            barrier_manager,
+            barrier_scheduler,
             cluster_manager,
             source_manager,
             client_pool: env.stream_client_pool_ref(),
             compaction_group_manager,
-            notification_manager: env.notification_manager_ref(),
-            processing_table: Mutex::new(HashMap::default()),
+            id_gen_manager: env.id_gen_manager_ref(),
         })
     }
 
@@ -346,7 +341,25 @@ where
     /// then upstream.)
     pub async fn create_materialized_view(
         &self,
-        relation: &Relation,
+        table_fragments: &mut TableFragments,
+        context: &mut CreateMaterializedViewContext,
+    ) -> MetaResult<()> {
+        let mut revert_funcs = vec![];
+        if let Err(e) = self
+            .create_materialized_view_impl(&mut revert_funcs, table_fragments, context)
+            .await
+        {
+            for revert_func in revert_funcs.into_iter().rev() {
+                revert_func.await;
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    async fn create_materialized_view_impl(
+        &self,
+        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         table_fragments: &mut TableFragments,
         CreateMaterializedViewContext {
             dispatchers,
@@ -354,25 +367,10 @@ where
             table_sink_map,
             dependent_table_ids,
             table_properties,
-            internal_table_id_map,
             chain_fragment_upstream_table_map,
-            affiliated_source,
             ..
         }: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
-        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
-        // It MUST be cleared before Ok returns.
-        let mut revert_funcs = scopeguard::guard(
-            vec![],
-            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
-                tokio::spawn(async move {
-                    for revert_func in revert_funcs.into_iter().rev() {
-                        revert_func.await;
-                    }
-                });
-            },
-        );
-
         // Schedule actors to parallel units. `locations` will record the parallel unit that an
         // actor is scheduled to, and the worker node this parallel unit is on.
         let mut locations = {
@@ -417,8 +415,6 @@ where
         )
         .await?;
 
-        #[expect(clippy::no_effect_underscore_binding)]
-        let _dependent_table_ids = &*dependent_table_ids;
         let dispatchers = &*dispatchers;
         let upstream_worker_actors = &*upstream_worker_actors;
 
@@ -642,57 +638,6 @@ where
             }
         }));
 
-        {
-            // lock before notify to avoid notify when some node re-subscribe
-            let mut processing_table_guard = self.processing_table.lock().await;
-            // Success Register to compaction group, we can push catalog to CN / Compactor
-            for (table_id, table_catalog) in internal_table_id_map {
-                let table_catalog = match table_catalog.to_owned() {
-                    Some(table) => table,
-
-                    None => Table {
-                        id: *table_id,
-                        ..Default::default()
-                    },
-                };
-
-                processing_table_guard.insert(*table_id, table_catalog.clone());
-                self.notify_compute_and_compactor(
-                    Operation::Add,
-                    Info::Table(table_catalog.clone()),
-                )
-                .await;
-            }
-
-            match relation {
-                Relation::Table(mview) => {
-                    processing_table_guard.insert(mview.id, mview.clone());
-                    self.notify_compute_and_compactor(Operation::Add, Info::Table(mview.clone()))
-                        .await;
-                }
-
-                Relation::Index(_, mview) => {
-                    processing_table_guard.insert(mview.id, mview.clone());
-                    self.notify_compute_and_compactor(Operation::Add, Info::Table(mview.clone()))
-                        .await;
-                }
-
-                _ => {}
-            }
-
-            if let Some(source) = affiliated_source {
-                processing_table_guard.insert(
-                    source.id,
-                    Table {
-                        id: source.id,
-                        ..Default::default()
-                    },
-                );
-                self.notify_compute_and_compactor(Operation::Add, Info::Source(source.clone()))
-                    .await;
-            }
-        }
-
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
         for (worker_id, actors) in worker_actors {
@@ -728,7 +673,7 @@ where
             .await?;
 
         if let Err(err) = self
-            .barrier_manager
+            .barrier_scheduler
             .run_command(Command::CreateMaterializedView {
                 table_fragments: table_fragments.clone(),
                 table_sink_map: table_sink_map.clone(),
@@ -746,14 +691,12 @@ where
         self.source_manager
             .patch_update(Some(source_fragments), Some(init_split_assignment))
             .await?;
-
-        revert_funcs.clear();
         Ok(())
     }
 
     /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
-    pub async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<TableFragments> {
+    pub async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<()> {
         let table_fragments = self
             .fragment_manager
             .select_table_fragments_by_table_id(table_id)
@@ -766,7 +709,7 @@ where
             source_fragments
         };
 
-        self.barrier_manager
+        self.barrier_scheduler
             .run_command(Command::DropMaterializedView(*table_id))
             .await?;
 
@@ -797,58 +740,7 @@ where
             );
         }
 
-        // Remove internal_tables push to CN and Compactor
-        // TODO: notify compute and compactor to drop the catalog
-        self.remove_processing_table(
-            table_fragments
-                .internal_table_ids()
-                .into_iter()
-                .chain(std::iter::once((*table_id).into()))
-                .collect(),
-            false,
-        )
-        .await;
-        Ok(table_fragments)
-    }
-
-    pub fn processing_table(&self) -> HashMap<u32, Table> {
-        self.processing_table.try_lock().unwrap().clone()
-    }
-
-    pub async fn remove_processing_table(&self, table_ids: Vec<u32>, notify: bool) {
-        let mut processing_table_guard = self.processing_table.lock().await;
-        for table_id in table_ids {
-            processing_table_guard.remove(&table_id);
-
-            if notify {
-                self.notify_compute_and_compactor(
-                    Operation::Delete,
-                    Info::Table(Table {
-                        id: table_id,
-                        ..Default::default()
-                    }),
-                )
-                .await;
-            }
-        }
-    }
-
-    pub async fn get_processing_table_guard(&self) -> MutexGuard<'_, HashMap<u32, Table>> {
-        self.processing_table.lock().await
-    }
-
-    // For creating and destroying, compactor and compute must maintain the Catalog for compaction
-    // that it can build the prefix_bloom_filter by Catalog until last barrier through the whole
-    // graph. we notify the `Add` before `Barrier Command` and notify the `Delete` after `Barrier
-    // Command` in StreamManager
-    async fn notify_compute_and_compactor(&self, operation: Operation, info: Info) {
-        self.notification_manager
-            .notify_compute(operation, info.clone())
-            .await;
-
-        self.notification_manager
-            .notify_compactor(operation, info)
-            .await;
+        Ok(())
     }
 }
 #[cfg(test)]
@@ -879,10 +771,9 @@ mod tests {
 
     use super::*;
     use crate::barrier::GlobalBarrierManager;
-    use crate::error::meta_error_to_tonic;
     use crate::hummock::compaction_group::manager::CompactionGroupManager;
     use crate::hummock::{CompactorManager, HummockManager};
-    use crate::manager::{CatalogManager, ClusterManager, FragmentManager, MetaSrvEnv, Relation};
+    use crate::manager::{CatalogManager, ClusterManager, FragmentManager, MetaSrvEnv};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -937,10 +828,7 @@ mod tests {
             let req = request.into_inner();
             let mut guard = self.inner.actor_infos.lock().unwrap();
             for info in req.get_info() {
-                guard.insert(
-                    info.get_actor_id(),
-                    info.get_host().map_err(meta_error_to_tonic)?.clone(),
-                );
+                guard.insert(info.get_actor_id(), info.get_host()?.clone());
             }
 
             Ok(Response::new(BroadcastActorInfoTableResponse {
@@ -1005,8 +893,7 @@ mod tests {
         global_stream_manager: GlobalStreamManager<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
-        join_handles: Vec<JoinHandle<()>>,
-        shutdown_txs: Vec<Sender<()>>,
+        join_handle_shutdown_txs: Vec<(JoinHandle<()>, Sender<()>)>,
     }
 
     impl MockServices {
@@ -1035,8 +922,11 @@ mod tests {
             sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
-            let cluster_manager =
-                Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
+            let meta_metrics = Arc::new(MetaMetrics::new());
+            let cluster_manager = Arc::new(
+                ClusterManager::new(env.clone(), Duration::from_secs(3600), meta_metrics.clone())
+                    .await?,
+            );
             let host = HostAddress {
                 host: host.to_string(),
                 port: port as i32,
@@ -1049,10 +939,15 @@ mod tests {
 
             let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
-            let meta_metrics = Arc::new(MetaMetrics::new());
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
-            let compactor_manager = Arc::new(CompactorManager::new());
+            // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
+            // heartbeat thread here, so it doesn't matter.
+            let compactor_manager = Arc::new(
+                CompactorManager::new_with_meta(env.clone(), 1)
+                    .await
+                    .unwrap(),
+            );
 
             let hummock_manager = Arc::new(
                 HummockManager::new(
@@ -1065,14 +960,8 @@ mod tests {
                 .await?,
             );
 
-            let barrier_manager = Arc::new(GlobalBarrierManager::new(
-                env.clone(),
-                cluster_manager.clone(),
-                catalog_manager.clone(),
-                fragment_manager.clone(),
-                hummock_manager,
-                meta_metrics.clone(),
-            ));
+            let (barrier_scheduler, scheduled_barriers) =
+                BarrierScheduler::new_pair(hummock_manager.clone());
 
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await?);
@@ -1081,7 +970,7 @@ mod tests {
                 SourceManager::new(
                     env.clone(),
                     cluster_manager.clone(),
-                    barrier_manager.clone(),
+                    barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
                     compaction_group_manager.clone(),
@@ -1089,10 +978,21 @@ mod tests {
                 .await?,
             );
 
+            let barrier_manager = Arc::new(GlobalBarrierManager::new(
+                scheduled_barriers,
+                env.clone(),
+                cluster_manager.clone(),
+                catalog_manager.clone(),
+                fragment_manager.clone(),
+                hummock_manager,
+                source_manager.clone(),
+                meta_metrics.clone(),
+            ));
+
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
                 fragment_manager.clone(),
-                barrier_manager.clone(),
+                barrier_scheduler.clone(),
                 cluster_manager.clone(),
                 source_manager.clone(),
                 compaction_group_manager.clone(),
@@ -1104,16 +1004,16 @@ mod tests {
                 global_stream_manager: stream_manager,
                 fragment_manager,
                 state,
-                join_handles: vec![join_handle_2, join_handle],
-                shutdown_txs: vec![shutdown_tx_2, shutdown_tx],
+                join_handle_shutdown_txs: vec![
+                    (join_handle_2, shutdown_tx_2),
+                    (join_handle, shutdown_tx),
+                ],
             })
         }
 
         async fn stop(self) {
-            for shutdown_tx in self.shutdown_txs {
+            for (join_handle, shutdown_tx) in self.join_handle_shutdown_txs {
                 shutdown_tx.send(()).unwrap();
-            }
-            for join_handle in self.join_handles {
                 join_handle.await.unwrap();
             }
         }
@@ -1160,11 +1060,7 @@ mod tests {
 
         services
             .global_stream_manager
-            .create_materialized_view(
-                &Relation::Table(Table::default()),
-                &mut table_fragments,
-                &mut ctx,
-            )
+            .create_materialized_view(&mut table_fragments, &mut ctx)
             .await?;
 
         for actor in actors {
@@ -1239,11 +1135,7 @@ mod tests {
 
         services
             .global_stream_manager
-            .create_materialized_view(
-                &Relation::Table(Table::default()),
-                &mut table_fragments,
-                &mut ctx,
-            )
+            .create_materialized_view(&mut table_fragments, &mut ctx)
             .await?;
 
         for actor in actors {
@@ -1340,11 +1232,7 @@ mod tests {
 
         services
             .global_stream_manager
-            .create_materialized_view(
-                &Relation::Table(Table::default()),
-                &mut table_fragments,
-                &mut ctx,
-            )
+            .create_materialized_view(&mut table_fragments, &mut ctx)
             .await
             .unwrap();
 

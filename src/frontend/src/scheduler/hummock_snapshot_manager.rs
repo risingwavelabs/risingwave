@@ -48,6 +48,7 @@ pub struct HummockSnapshotManager {
 }
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 
+#[derive(Debug)]
 enum EpochOperation {
     RequestEpoch {
         query_id: QueryId,
@@ -156,19 +157,15 @@ impl HummockSnapshotManager {
             .fetch_max(epoch.current_epoch, Ordering::Relaxed);
     }
 
-    pub async fn unpin_snapshot(&self, epoch: u64, query_id: &QueryId) -> SchedulerResult<()> {
+    pub async fn unpin_snapshot(&self, epoch: u64, query_id: &QueryId) {
         let msg = EpochOperation::ReleaseEpoch {
             query_id: query_id.clone(),
             epoch,
         };
-        self.sender.send(msg).await.map_err(|_| {
-            SchedulerError::Internal(anyhow!(
-                "Failed to unpin snapshot for query: {:?}, epoch: {}",
-                query_id,
-                epoch,
-            ))
-        })?;
-        Ok(())
+        self.sender
+            .send(msg)
+            .await
+            .expect("Unpin channel should never closed");
     }
 }
 

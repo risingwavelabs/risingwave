@@ -18,6 +18,7 @@ dyn-clone = "1"
 either = "1"
 enum-as-inner = "0.5"
 farmhash = "1"
+fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hyper = "0.14"
@@ -62,12 +63,14 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
 tracing-futures = "0.2"
 twox-hash = "1"
 url = "2"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

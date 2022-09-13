@@ -41,7 +41,7 @@ pub enum PsqlError {
     ParseError(BoxedError),
 
     #[error("BindError: {0}")]
-    BindError(IoError),
+    BindError(BoxedError),
 
     #[error("ExecuteError: {0}")]
     ExecuteError(BoxedError),
@@ -57,11 +57,30 @@ pub enum PsqlError {
 
     #[error("{0}")]
     IoError(#[from] IoError),
+
+    #[error("Cancel Not Found")]
+    CancelNotFound,
 }
 
 impl PsqlError {
     /// Construct a Cancel error. Used when Ctrl-c a processing query. Similar to PG.
     pub fn cancel() -> Self {
         PsqlError::CancelMsg("ERROR:  canceling statement due to user request".to_string())
+    }
+
+    pub fn no_statement_in_describe() -> Self {
+        PsqlError::DescribeError("No statement found".to_string())
+    }
+
+    pub fn no_statement_in_bind() -> Self {
+        PsqlError::BindError("No statement found".into())
+    }
+
+    pub fn no_portal_in_describe() -> Self {
+        PsqlError::DescribeError("No portal found".to_string())
+    }
+
+    pub fn no_portal_in_execute() -> Self {
+        PsqlError::ExecuteError("No portal found".into())
     }
 }

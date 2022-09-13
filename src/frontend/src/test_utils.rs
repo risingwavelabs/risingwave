@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use pgwire::error::PsqlResult;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
@@ -51,6 +53,7 @@ use crate::session::{AuthContext, FrontendEnv, OptimizerContext, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
+use crate::utils::WithOptions;
 use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
@@ -68,6 +71,14 @@ impl SessionManager for LocalFrontend {
         _user_name: &str,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
+    }
+
+    fn connect_for_cancel(
+        &self,
+        _process_id: i32,
+        _secret_key: i32,
+    ) -> PsqlResult<Arc<Self::Session>> {
+        todo!()
     }
 }
 
@@ -120,10 +131,17 @@ impl LocalFrontend {
                 let mut binder = Binder::new(&session);
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
-                .plan(bound)
-                .unwrap()
-                .gen_batch_distributed_plan()
+            Planner::new(
+                OptimizerContext::new(
+                    session,
+                    Arc::from(raw_sql.as_str()),
+                    WithOptions::try_from(statement)?,
+                )
+                .into(),
+            )
+            .plan(bound)
+            .unwrap()
+            .gen_batch_distributed_plan()
         } else {
             unreachable!()
         }
@@ -138,6 +156,8 @@ impl LocalFrontend {
                 DEFAULT_SUPER_USER_ID,
             )),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
 
@@ -151,6 +171,8 @@ impl LocalFrontend {
             self.env.clone(),
             Arc::new(AuthContext::new(database, user_name, user_id)),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
 }
@@ -465,7 +487,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         let mut user_info = lock.get_user_by_name(&old_name).unwrap().clone();
         request.update_fields.into_iter().for_each(|field| {
             if field == UpdateField::Super as i32 {
-                user_info.is_supper = update_user.is_supper;
+                user_info.is_super = update_user.is_super;
             } else if field == UpdateField::Login as i32 {
                 user_info.can_login = update_user.can_login;
             } else if field == UpdateField::CreateDb as i32 {
@@ -558,7 +580,7 @@ impl MockUserInfoWriter {
         user_info.write().create_user(UserInfo {
             id: DEFAULT_SUPER_USER_ID,
             name: DEFAULT_SUPER_USER.to_string(),
-            is_supper: true,
+            is_super: true,
             can_create_db: true,
             can_create_user: true,
             can_login: true,

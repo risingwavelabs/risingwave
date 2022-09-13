@@ -20,8 +20,9 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::{TableCatalog, TableId};
+use crate::catalog::{FragmentId, TableCatalog, TableId};
 use crate::optimizer::property::{Direction, FieldOrder};
+use crate::utils::WithOptions;
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
@@ -31,7 +32,8 @@ pub struct TableCatalogBuilder {
     // FIXME(stonepage): stream_key should be meaningless in internal state table, check if we
     // can remove it later
     stream_key: Vec<usize>,
-    properties: HashMap<String, String>,
+    properties: WithOptions,
+    value_indices: Vec<usize>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -73,8 +75,8 @@ impl TableCatalogBuilder {
         });
     }
 
-    /// Add `properties` for `TableCatalog`
-    pub fn add_properties(&mut self, properties: HashMap<String, String>) {
+    /// Set the `properties` for `TableCatalog`.
+    pub fn set_properties(&mut self, properties: WithOptions) {
         self.properties = properties;
     }
 
@@ -91,7 +93,12 @@ impl TableCatalogBuilder {
     }
 
     /// Consume builder and create `TableCatalog` (for proto).
-    pub fn build(self, distribution_key: Vec<usize>, append_only: bool) -> TableCatalog {
+    pub fn build(
+        self,
+        distribution_key: Vec<usize>,
+        append_only: bool,
+        vnode_col_idx: Option<usize>,
+    ) -> TableCatalog {
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -104,6 +111,10 @@ impl TableCatalogBuilder {
             appendonly: append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: self.properties,
+            // TODO(zehua): replace it with FragmentId::placeholder()
+            fragment_id: FragmentId::MAX - 1,
+            vnode_col_idx,
+            value_indices: self.value_indices,
         }
     }
 
@@ -113,6 +124,7 @@ impl TableCatalogBuilder {
         distribution_key: Vec<usize>,
         append_only: bool,
         column_mapping: &[usize],
+        vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
         // Transform indices to set for checking.
         let input_dist_key_indices_set: HashSet<usize> =
@@ -123,7 +135,7 @@ impl TableCatalogBuilder {
         // Only if all `distribution_key` is in `column_mapping`, we return transformed dist key
         // indices, otherwise empty.
         if !column_mapping_indices_set.is_superset(&input_dist_key_indices_set) {
-            return self.build(vec![], append_only);
+            return self.build(vec![], append_only, None);
         }
 
         // Transform `distribution_key` (based on input schema) to distribution indices on internal
@@ -137,8 +149,13 @@ impl TableCatalogBuilder {
                     .expect("Have checked that all input indices must be found")
             })
             .collect();
-
-        self.build(dist_indices_on_table_columns, append_only)
+        let vnode_col_idx_in_table_columns =
+            vnode_col_idx.and_then(|x| column_mapping.iter().position(|col_idx| *col_idx == x));
+        self.build(
+            dist_indices_on_table_columns,
+            append_only,
+            vnode_col_idx_in_table_columns,
+        )
     }
 }
 

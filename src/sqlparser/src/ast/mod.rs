@@ -37,9 +37,8 @@ pub use self::ddl::{
 };
 pub use self::operator::{BinaryOperator, UnaryOperator};
 pub use self::query::{
-    Cte, Fetch, Join, JoinConstraint, JoinOperator, LateralView, Offset, OffsetRows, OrderByExpr,
-    Query, Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top,
-    Values, With,
+    Cte, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr, Query, Select,
+    SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top, Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{DateTimeField, TrimWhereField, Value};
@@ -328,7 +327,7 @@ pub enum Expr {
     /// e.g. {1, 2, 3},
     Array(Vec<Expr>),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
-    ArrayIndex { obj: Box<Expr>, indices: Vec<Expr> },
+    ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
 }
 
 impl fmt::Display for Expr {
@@ -515,11 +514,8 @@ impl fmt::Display for Expr {
                     .as_slice()
                     .join(", ")
             ),
-            Expr::ArrayIndex { obj, indices } => {
-                write!(f, "{}", obj)?;
-                for i in indices {
-                    write!(f, "[{}]", i)?;
-                }
+            Expr::ArrayIndex { obj, index } => {
+                write!(f, "{}[{}]", obj, index)?;
                 Ok(())
             }
             Expr::Array(exprs) => write!(
@@ -581,15 +577,7 @@ impl fmt::Display for WindowSpec {
         }
         if let Some(window_frame) = &self.window_frame {
             f.write_str(delim)?;
-            if let Some(end_bound) = &window_frame.end_bound {
-                write!(
-                    f,
-                    "{} BETWEEN {} AND {}",
-                    window_frame.units, window_frame.start_bound, end_bound
-                )?;
-            } else {
-                write!(f, "{} {}", window_frame.units, window_frame.start_bound)?;
-            }
+            window_frame.fmt(f)?;
         }
         Ok(())
     }
@@ -631,6 +619,20 @@ pub enum WindowFrameUnits {
     Rows,
     Range,
     Groups,
+}
+
+impl fmt::Display for WindowFrame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(end_bound) = &self.end_bound {
+            write!(
+                f,
+                "{} BETWEEN {} AND {}",
+                self.units, self.start_bound, end_bound
+            )
+        } else {
+            write!(f, "{} {}", self.units, self.start_bound)
+        }
+    }
 }
 
 impl fmt::Display for WindowFrameUnits {
@@ -865,10 +867,9 @@ pub enum Statement {
         /// Optional schema
         columns: Vec<ColumnDef>,
         constraints: Vec<TableConstraint>,
-        table_properties: Vec<SqlOption>,
         with_options: Vec<SqlOption>,
+        /// `AS ( query )`
         query: Option<Box<Query>>,
-        like: Option<ObjectName>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -916,8 +917,10 @@ pub enum Statement {
     ///
     /// Note: this is a PostgreSQL-specific statement.
     ShowVariable { variable: Vec<Ident> },
-    /// `{ BEGIN [ TRANSACTION | WORK ] | START TRANSACTION } ...`
+    /// `START TRANSACTION ...`
     StartTransaction { modes: Vec<TransactionMode> },
+    /// `BEGIN [ TRANSACTION | WORK ]`
+    BEGIN { modes: Vec<TransactionMode> },
     /// ABORT
     Abort,
     /// `SET TRANSACTION ...`
@@ -947,8 +950,6 @@ pub enum Statement {
     CreateDatabase {
         db_name: ObjectName,
         if_not_exists: bool,
-        location: Option<String>,
-        managed_location: Option<String>,
     },
     /// GRANT privileges ON objects TO grantees
     Grant {
@@ -985,8 +986,6 @@ pub enum Statement {
     },
     /// EXPLAIN / DESCRIBE for select_statement
     Explain {
-        // If true, query used the MySQL `DESCRIBE` alias for explain
-        describe_alias: bool,
         /// Carry out the command and show actual run times and other statistics.
         analyze: bool,
         /// A SQL query that specifies what to explain
@@ -1011,16 +1010,11 @@ impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Statement::Explain {
-                describe_alias,
                 analyze,
                 statement,
                 options,
             } => {
-                if *describe_alias {
-                    write!(f, "DESCRIBE ")?;
-                } else {
-                    write!(f, "EXPLAIN ")?;
-                }
+                write!(f, "EXPLAIN ")?;
 
                 if *analyze {
                     write!(f, "ANALYZE ")?;
@@ -1110,20 +1104,12 @@ impl fmt::Display for Statement {
             Statement::CreateDatabase {
                 db_name,
                 if_not_exists,
-                location,
-                managed_location,
             } => {
                 write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
                     write!(f, " IF NOT EXISTS")?;
                 }
                 write!(f, " {}", db_name)?;
-                if let Some(l) = location {
-                    write!(f, " LOCATION '{}'", l)?;
-                }
-                if let Some(ml) = managed_location {
-                    write!(f, " MANAGEDLOCATION '{}'", ml)?;
-                }
                 Ok(())
             }
             Statement::CreateView {
@@ -1153,13 +1139,11 @@ impl fmt::Display for Statement {
                 name,
                 columns,
                 constraints,
-                table_properties,
                 with_options,
                 or_replace,
                 if_not_exists,
                 temporary,
                 query,
-                like,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1182,12 +1166,9 @@ impl fmt::Display for Statement {
                         write!(f, ", ")?;
                     }
                     write!(f, "{})", display_comma_separated(constraints))?;
-                } else if query.is_none() && like.is_none() {
+                } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
-                }
-                if !table_properties.is_empty() {
-                    write!(f, " WITH ({})", display_comma_separated(table_properties))?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
@@ -1391,6 +1372,13 @@ impl fmt::Display for Statement {
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
+            }
+            Statement::BEGIN { modes } => {
+                write!(f, "BEGIN")?;
+                if !modes.is_empty() {
+                    write!(f, " {}", display_comma_separated(modes))?;
+                }
+                Ok(())
             }
         }
     }
@@ -1962,5 +1950,20 @@ mod tests {
             vec![Expr::Identifier(Ident::new("d"))],
         ]);
         assert_eq!("CUBE (a, (b, c), d)", format!("{}", cube));
+    }
+
+    #[test]
+    fn test_array_index_display() {
+        let array_index = Expr::ArrayIndex {
+            obj: Box::new(Expr::Identifier(Ident::new("v1"))),
+            index: Box::new(Expr::Value(Value::Number("1".into()))),
+        };
+        assert_eq!("v1[1]", format!("{}", array_index));
+
+        let array_index2 = Expr::ArrayIndex {
+            obj: Box::new(array_index),
+            index: Box::new(Expr::Value(Value::Number("1".into()))),
+        };
+        assert_eq!("v1[1][1]", format!("{}", array_index2));
     }
 }

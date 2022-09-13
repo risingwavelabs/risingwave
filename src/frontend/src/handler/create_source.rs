@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
@@ -21,19 +24,20 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_source::ProtobufParser;
-use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
+use risingwave_source::{AvroParser, ProtobufParser};
+use risingwave_sqlparser::ast::{
+    AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema,
+};
 
 use super::create_table::{
     bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
 };
 use super::privilege::check_privileges;
-use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
 use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{OptimizerContext, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenterV2;
+use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn make_prost_source(
     session: &SessionImpl,
@@ -46,17 +50,25 @@ pub(crate) fn make_prost_source(
     let (database_id, schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
-        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
-        check_privileges(
-            session,
-            &vec![ObjectCheckItem::new(
-                schema.owner(),
-                Action::Create,
-                Object::SchemaId(schema.id()),
-            )],
-        )?;
+        if schema_name != DEFAULT_SCHEMA_NAME {
+            let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+            check_privileges(
+                session,
+                &vec![ObjectCheckItem::new(
+                    schema.owner(),
+                    Action::Create,
+                    Object::SchemaId(schema.id()),
+                )],
+            )?;
+        }
 
-        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &schema_name)?
+            .id();
+        (db_id, schema_id)
     };
 
     Ok(ProstSource {
@@ -67,6 +79,22 @@ pub(crate) fn make_prost_source(
         info: Some(source_info),
         owner: session.user_id(),
     })
+}
+
+/// Map an Avro schema to a relational schema.
+async fn extract_avro_table_schema(
+    schema: &AvroSchema,
+    with_properties: HashMap<String, String>,
+) -> Result<Vec<ProstColumnCatalog>> {
+    let parser = AvroParser::new(schema.row_schema_location.0.as_str(), with_properties).await?;
+    let vec_column_desc = parser.map_to_columns()?;
+    Ok(vec_column_desc
+        .into_iter()
+        .map(|c| ProstColumnCatalog {
+            column_desc: Some(c),
+            is_hidden: false,
+        })
+        .collect_vec())
 }
 
 /// Map a protobuf schema to a relational schema.
@@ -88,11 +116,11 @@ pub async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
-    let with_properties = handle_with_properties("create_source", stmt.with_properties.0)?;
-
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
+
+    let with_properties = context.with_options.inner().clone();
 
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
@@ -104,6 +132,20 @@ pub async fn handle_create_source(
                 properties: with_properties.clone(),
                 row_format: RowFormatType::Protobuf as i32,
                 row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+                row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
+                columns,
+                pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
+            }
+        }
+        SourceSchema::Avro(avro_schema) => {
+            assert_eq!(columns.len(), 1);
+            assert_eq!(pk_column_ids, vec![0.into()]);
+            assert_eq!(row_id_index, Some(0));
+            columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
+            StreamSourceInfo {
+                properties: with_properties.clone(),
+                row_format: RowFormatType::Avro as i32,
+                row_schema_location: avro_schema.row_schema_location.0.clone(),
                 row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
                 columns,
                 pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
@@ -128,13 +170,18 @@ pub async fn handle_create_source(
     };
 
     let session = context.session_ctx.clone();
+    {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (schema_name, name) = Binder::resolve_table_name(stmt.source_name.clone())?;
+        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+    }
     let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {
         let (graph, table) = {
             let (plan, table) =
                 gen_materialized_source_plan(context.into(), source.clone(), session.user_id())?;
-            let graph = StreamFragmenterV2::build_graph(plan);
+            let graph = build_graph(plan);
 
             (graph, table)
         };

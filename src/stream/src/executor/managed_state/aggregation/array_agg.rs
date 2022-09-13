@@ -55,7 +55,7 @@ pub struct ManagedArrayAggState<S: StateStore> {
     state_table_order_types: Vec<OrderType>,
 
     /// In-memory all-or-nothing cache.
-    cache: Cache<Datum>,
+    cache: Cache<OrderedRow, Datum>,
 
     /// Whether the cache is fully synced to state table.
     cache_synced: bool,
@@ -124,12 +124,12 @@ impl<S: StateStore> ManagedArrayAggState<S> {
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, columns));
 
-        for (i, op) in ops.iter().enumerate() {
-            let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
-            if !visible {
-                continue;
-            }
-
+        // should not skip NULL value like `string_agg` and `min`/`max`
+        for (i, op) in ops
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
+        {
             let state_row = Row::new(
                 self.state_table_col_mapping
                     .upstream_columns()
@@ -144,13 +144,13 @@ impl<S: StateStore> ManagedArrayAggState<S> {
                     if self.cache_synced {
                         self.cache.insert(cache_key, cache_data);
                     }
-                    state_table.insert(state_row)?;
+                    state_table.insert(state_row);
                 }
                 Delete | UpdateDelete => {
                     if self.cache_synced {
                         self.cache.remove(cache_key);
                     }
-                    state_table.delete(state_row)?;
+                    state_table.delete(state_row);
                 }
             }
         }

@@ -22,43 +22,23 @@ use crate::error::{Result, RwError};
 
 pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 
-/// TODO(TaoWu): The configs here may be preferable to be managed under corresponding module
-/// separately.
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ComputeNodeConfig {
-    // For connection
-    #[serde(default)]
-    pub server: ServerConfig,
-
-    // Below for batch query.
-    #[serde(default)]
-    pub batch: BatchConfig,
-
-    // Below for streaming.
-    #[serde(default)]
-    pub streaming: StreamingConfig,
-
-    // Below for Hummock.
-    #[serde(default)]
-    pub storage: StorageConfig,
-}
-
-pub fn load_config(path: &str) -> ComputeNodeConfig {
+pub fn load_config<S>(path: &str) -> Result<S>
+where
+    for<'a> S: Deserialize<'a> + Default,
+{
     if path.is_empty() {
         tracing::warn!("risingwave.toml not found, using default config.");
-        return ComputeNodeConfig::default();
+        return Ok(S::default());
     }
-
-    ComputeNodeConfig::init(path.to_owned().into()).unwrap()
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct FrontendConfig {
-    // For connection
-    #[serde(default)]
-    pub server: ServerConfig,
+    let config_str = fs::read_to_string(PathBuf::from(path.to_owned())).map_err(|e| {
+        RwError::from(InternalError(format!(
+            "failed to open config file '{}': {}",
+            path, e
+        )))
+    })?;
+    let config: S = toml::from_str(config_str.as_str())
+        .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
+    Ok(config)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -135,9 +115,6 @@ pub struct StorageConfig {
     #[serde(default = "default::share_buffer_compaction_worker_threads_number")]
     pub share_buffer_compaction_worker_threads_number: u32,
 
-    // /// Size threshold to trigger shared buffer flush.
-    // #[serde(default = "default::shared_buffer_threshold")]
-    // pub shared_buffer_threshold: u32,
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
     #[serde(default = "default::shared_buffer_capacity_mb")]
@@ -183,6 +160,10 @@ pub struct StorageConfig {
 
     #[serde(default)]
     pub file_cache: FileCacheConfig,
+
+    /// Whether to enable streaming upload for sstable.
+    #[serde(default = "default::min_sst_size_for_streaming_upload")]
+    pub min_sst_size_for_streaming_upload: u64,
 }
 
 impl Default for StorageConfig {
@@ -207,36 +188,6 @@ pub struct FileCacheConfig {
 impl Default for FileCacheConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
-    }
-}
-
-impl ComputeNodeConfig {
-    pub fn init(path: PathBuf) -> Result<ComputeNodeConfig> {
-        let config_str = fs::read_to_string(path.clone()).map_err(|e| {
-            RwError::from(InternalError(format!(
-                "failed to open config file '{}': {}",
-                path.to_string_lossy(),
-                e
-            )))
-        })?;
-        let config: ComputeNodeConfig = toml::from_str(config_str.as_str())
-            .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
-        Ok(config)
-    }
-}
-
-impl FrontendConfig {
-    pub fn init(path: PathBuf) -> Result<Self> {
-        let config_str = fs::read_to_string(path.clone()).map_err(|e| {
-            RwError::from(InternalError(format!(
-                "failed to open config file '{}': {}",
-                path.to_string_lossy(),
-                e
-            )))
-        })?;
-        let config: FrontendConfig = toml::from_str(config_str.as_str())
-            .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
-        Ok(config)
     }
 }
 
@@ -269,12 +220,6 @@ mod default {
 
     pub fn share_buffer_compaction_worker_threads_number() -> u32 {
         4
-    }
-
-    #[expect(dead_code)]
-    pub fn shared_buffer_threshold() -> u32 {
-        // 192MB
-        201326592
     }
 
     pub fn shared_buffer_capacity_mb() -> u32 {
@@ -347,6 +292,11 @@ mod default {
         // 96 MiB
         96 * 1024 * 1024
     }
+
+    pub fn min_sst_size_for_streaming_upload() -> u64 {
+        // 32MB
+        32 * 1024 * 1024
+    }
 }
 
 pub mod constant {
@@ -368,7 +318,7 @@ pub mod constant {
             }
         }
 
-        pub const TABLE_OPTION_DUMMY_RETAINTION_SECOND: u32 = 0;
-        pub const PROPERTIES_RETAINTION_SECOND_KEY: &str = "retention_seconds";
+        pub const TABLE_OPTION_DUMMY_RETENTION_SECOND: u32 = 0;
+        pub const PROPERTIES_RETENTION_SECOND_KEY: &str = "retention_seconds";
     }
 }

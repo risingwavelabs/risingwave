@@ -14,6 +14,7 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use prometheus::{IntCounter, Opts};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -21,6 +22,7 @@ use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
+use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::exchange_source::ExchangeSourceImpl;
 use crate::execution::grpc_exchange::GrpcExchangeSource;
@@ -55,7 +57,15 @@ pub trait CreateSource: Send {
 }
 
 #[derive(Clone)]
-pub struct DefaultCreateSource {}
+pub struct DefaultCreateSource {
+    client_pool: ComputeClientPoolRef,
+}
+
+impl DefaultCreateSource {
+    pub fn new(client_pool: ComputeClientPoolRef) -> Self {
+        Self { client_pool }
+    }
+}
 
 #[async_trait::async_trait]
 impl CreateSource for DefaultCreateSource {
@@ -84,7 +94,12 @@ impl CreateSource for DefaultCreateSource {
             );
 
             Ok(ExchangeSourceImpl::Grpc(
-                GrpcExchangeSource::create(prost_source.clone()).await?,
+                GrpcExchangeSource::create(
+                    self.client_pool.get_by_addr(peer_addr).await?,
+                    task_output_id.clone(),
+                    prost_source.local_execute_plan.clone(),
+                )
+                .await?,
             ))
         }
     }
@@ -109,7 +124,8 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
 
         ensure!(!node.get_sources().is_empty());
         let prost_sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
-        let source_creators = vec![DefaultCreateSource {}; prost_sources.len()];
+        let source_creators =
+            vec![DefaultCreateSource::new(source.context().client_pool()); prost_sources.len()];
         let mut sources: Vec<ExchangeSourceImpl> = vec![];
 
         for (prost_source, source_creator) in prost_sources.iter().zip_eq(source_creators) {
@@ -152,7 +168,9 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
         let mut stream = select_all(
             self.sources
                 .into_iter()
-                .map(|source| data_chunk_stream(source, self.metrics.clone()))
+                .map(|source| {
+                    data_chunk_stream(source, self.metrics.clone(), self.identity.clone())
+                })
                 .collect_vec(),
         )
         .boxed();
@@ -165,26 +183,57 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 }
 
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
-async fn data_chunk_stream(mut source: ExchangeSourceImpl, metrics: Option<BatchTaskMetrics>) {
+async fn data_chunk_stream(
+    mut source: ExchangeSourceImpl,
+    metrics: Option<BatchTaskMetrics>,
+    identity: String,
+) {
+    // create the collector
+    let source_id = source.get_task_id();
+    let counter = if let Some(ref metrics) = metrics {
+        let mut labels = metrics.task_labels();
+        labels.insert("executor_id".to_string(), identity.clone());
+        labels.insert(
+            "source_query_id".to_string(),
+            source_id.query_id.to_string(),
+        );
+        labels.insert(
+            "source_stage_id".to_string(),
+            source_id.stage_id.to_string(),
+        );
+        labels.insert("source_task_id".to_string(), source_id.task_id.to_string());
+
+        let opts = Opts::new(
+            "batch_exchange_recv_row_number",
+            "Total number of row that have been received from upstream source",
+        )
+        .const_labels(labels);
+        let counter = IntCounter::with_opts(opts).unwrap();
+        metrics.register(Box::new(counter.clone()))?;
+        Some(counter)
+    } else {
+        // no metrics to collect, no counter
+        None
+    };
+
     loop {
         if let Some(res) = source.take_data().await? {
             if res.cardinality() == 0 {
                 debug!("Exchange source {:?} output empty chunk.", source);
             }
-            if let Some(metrics) = metrics.as_ref() {
-                let source_id = source.get_task_id();
-                metrics
-                    .exchange_recv_row_number
-                    .with_label_values(&[
-                        &source_id.stage_id.to_string(),
-                        &source_id.task_id.to_string(),
-                    ])
-                    .inc_by(res.cardinality().try_into().unwrap());
+
+            if let Some(ref counter) = counter {
+                counter.inc_by(res.cardinality().try_into().unwrap());
             }
+
             yield res;
             continue;
         }
         break;
+    }
+
+    if let (Some(counter), Some(metrics)) = (counter, metrics) {
+        metrics.unregister(Box::new(counter));
     }
 }
 

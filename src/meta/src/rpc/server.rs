@@ -23,6 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
+use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
@@ -36,12 +37,13 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
+use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
-use crate::barrier::GlobalBarrierManager;
+use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
-use crate::hummock::CompactionScheduler;
+use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
 };
@@ -117,7 +119,7 @@ pub async fn rpc_serve(
             .await
         }
         MetaStoreBackend::Mem => {
-            let meta_store = Arc::new(MemStore::default());
+            let meta_store = Arc::new(MemStore::shared());
             rpc_serve_with_store(
                 meta_store,
                 address_info,
@@ -310,10 +312,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     monitor_process(meta_metrics.registry()).unwrap();
-    let compactor_manager = Arc::new(hummock::CompactorManager::new());
+    let compactor_manager = Arc::new(
+        hummock::CompactorManager::new_with_meta(env.clone(), max_heartbeat_interval.as_secs())
+            .await
+            .unwrap(),
+    );
 
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), max_heartbeat_interval)
+        ClusterManager::new(env.clone(), max_heartbeat_interval, meta_metrics.clone())
             .await
             .unwrap(),
     );
@@ -343,20 +349,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
-    let barrier_manager = Arc::new(GlobalBarrierManager::new(
-        env.clone(),
-        cluster_manager.clone(),
-        catalog_manager.clone(),
-        fragment_manager.clone(),
-        hummock_manager.clone(),
-        meta_metrics.clone(),
-    ));
+    let (barrier_scheduler, scheduled_barriers) =
+        BarrierScheduler::new_pair(hummock_manager.clone());
 
     let source_manager = Arc::new(
         SourceManager::new(
             env.clone(),
             cluster_manager.clone(),
-            barrier_manager.clone(),
+            barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
             compaction_group_manager.clone(),
@@ -364,6 +364,17 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .await
         .unwrap(),
     );
+
+    let barrier_manager = Arc::new(GlobalBarrierManager::new(
+        scheduled_barriers,
+        env.clone(),
+        cluster_manager.clone(),
+        catalog_manager.clone(),
+        fragment_manager.clone(),
+        hummock_manager.clone(),
+        source_manager.clone(),
+        meta_metrics.clone(),
+    ));
 
     {
         let source_manager = source_manager.clone();
@@ -376,7 +387,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         GlobalStreamManager::new(
             env.clone(),
             fragment_manager.clone(),
-            barrier_manager.clone(),
+            barrier_scheduler.clone(),
             cluster_manager.clone(),
             source_manager.clone(),
             compaction_group_manager.clone(),
@@ -425,18 +436,21 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
+
     let scale_srv = ScaleServiceImpl::<S>::new(
-        barrier_manager.clone(),
+        barrier_scheduler.clone(),
         fragment_manager.clone(),
         cluster_manager.clone(),
         source_manager,
         catalog_manager.clone(),
+        stream_manager.clone(),
         ddl_lock,
     );
+
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
-        barrier_manager.clone(),
+        barrier_scheduler.clone(),
         fragment_manager.clone(),
     );
     let hummock_srv = HummockServiceImpl::new(
@@ -452,9 +466,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         catalog_manager,
         cluster_manager.clone(),
         hummock_manager.clone(),
-        stream_manager.clone(),
         fragment_manager.clone(),
     );
+    let health_srv = HealthServiceImpl::new();
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -464,7 +478,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     }
 
     let mut sub_tasks = hummock::start_hummock_workers(
-        hummock_manager,
+        hummock_manager.clone(),
         compactor_manager,
         vacuum_trigger,
         notification_manager,
@@ -472,13 +486,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         &env.opts,
     )
     .await;
+    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
     sub_tasks.push((lease_handle, lease_shutdown));
-    #[cfg(not(test))]
-    {
+    if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
         );
-
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 
@@ -511,6 +524,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(DdlServiceServer::new(ddl_srv))
             .add_service(UserServiceServer::new(user_srv))
             .add_service(ScaleServiceServer::new(scale_srv))
+            .add_service(HealthServer::new(health_srv))
             .serve(address_info.listen_addr)
             .await
             .unwrap();

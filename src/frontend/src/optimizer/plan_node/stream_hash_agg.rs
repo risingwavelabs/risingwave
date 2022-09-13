@@ -14,21 +14,24 @@
 
 use std::fmt;
 
-use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone)]
 pub struct StreamHashAgg {
     pub base: PlanBase,
+    /// an optional column index which is the vnode of each row computed by the input's consistent
+    /// hash distribution
+    vnode_col_idx: Option<usize>,
     logical: LogicalAgg,
 }
 
 impl StreamHashAgg {
-    pub fn new(logical: LogicalAgg) -> Self {
+    pub fn new(logical: LogicalAgg, vnode_col_idx: Option<usize>) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
         let input = logical.input();
@@ -48,7 +51,11 @@ impl StreamHashAgg {
             dist,
             false,
         );
-        StreamHashAgg { base, logical }
+        StreamHashAgg {
+            base,
+            vnode_col_idx,
+            logical,
+        }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -76,26 +83,32 @@ impl PlanTreeNodeUnary for StreamHashAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
     }
 }
 impl_plan_tree_node_for_unary! { StreamHashAgg }
 
-impl ToStreamProst for StreamHashAgg {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamHashAgg {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let (internal_tables, column_mappings) = self.logical.infer_internal_table_catalog();
+        let (internal_tables, column_mappings) = self
+            .logical
+            .infer_internal_table_catalog(self.vnode_col_idx);
         ProstStreamNode::HashAgg(HashAggNode {
-            group_key: self.group_key().iter().map(|idx| *idx as u32).collect_vec(),
+            group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             agg_calls: self
                 .agg_calls()
                 .iter()
                 .map(PlanAggCall::to_protobuf)
-                .collect_vec(),
+                .collect(),
             internal_tables: internal_tables
                 .into_iter()
-                .map(|table_catalog| table_catalog.to_state_table_prost())
-                .collect_vec(),
+                .map(|table| {
+                    table
+                        .with_id(state.gen_table_id_wrapped())
+                        .to_internal_table_prost()
+                })
+                .collect(),
             column_mappings: column_mappings
                 .into_iter()
                 .map(|v| ColumnMapping {

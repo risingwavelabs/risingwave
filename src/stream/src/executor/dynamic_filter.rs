@@ -70,7 +70,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         is_right_table_writer: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        // TODO: enable sanity check for dynamic filter <https://github.com/singularity-data/risingwave/issues/3893>
+        // TODO: enable sanity check for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
         state_table_l.disable_sanity_check();
         state_table_r.disable_sanity_check();
 
@@ -336,7 +336,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     if self.is_right_table_writer {
                         if let Some(row) = current_epoch_row.take() {
                             assert_eq!(epoch, barrier.epoch.prev);
-                            self.right_table.insert(row)?;
+                            self.right_table.insert(row);
                             self.right_table.commit(epoch).await?;
                         }
                     }

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::ops::Bound::{self, *};
-use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -28,7 +27,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterato
 use crate::hummock::shared_buffer::SharedBufferIteratorType;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIterator, SstableIteratorType};
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::StoreLocalStatistic;
 
 pub enum DirectedUserIterator {
     Forward(UserIterator),
@@ -56,11 +55,10 @@ pub trait DirectedUserIteratorBuilder {
         iterator_iter: impl IntoIterator<
             Item = UserIteratorPayloadType<Self::Direction, Self::SstableIteratorType>,
         >,
-        stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> DirectedUserIterator;
 }
 
@@ -145,7 +143,9 @@ pub struct UserIterator {
     min_epoch: HummockEpoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Option<Arc<PinnedVersion>>,
+    _version: Option<PinnedVersion>,
+
+    stats: StoreLocalStatistic,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -175,7 +175,7 @@ impl UserIterator {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> Self {
         Self {
             iterator,
@@ -185,6 +185,7 @@ impl UserIterator {
             last_val: Vec::new(),
             read_epoch,
             min_epoch,
+            stats: StoreLocalStatistic::default(),
             _version: version,
         }
     }
@@ -202,9 +203,12 @@ impl UserIterator {
             let key = to_user_key(full_key);
 
             // handle multi-version
-            if self.last_key.as_slice() != key
-                && (epoch > self.min_epoch && epoch <= self.read_epoch)
-            {
+            if epoch <= self.min_epoch || epoch > self.read_epoch {
+                self.iterator.next().await?;
+                continue;
+            }
+
+            if self.last_key.as_slice() != key {
                 self.last_key.clear();
                 self.last_key.extend_from_slice(key);
 
@@ -221,13 +225,18 @@ impl UserIterator {
                             Unbounded => {}
                         };
 
+                        self.stats.processed_key_count += 1;
                         return Ok(());
                     }
                     // It means that the key is deleted from the storage.
                     // Deleted kv and the previous versions (if any) of the key should not be
                     // returned to user.
-                    HummockValue::Delete => {}
+                    HummockValue::Delete => {
+                        self.stats.skip_key_count += 1;
+                    }
                 }
+            } else {
+                self.stats.skip_key_count += 1;
             }
 
             self.iterator.next().await?;
@@ -307,6 +316,7 @@ impl UserIterator {
     }
 
     pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
         self.iterator.collect_local_statistic(stats);
     }
 }
@@ -317,11 +327,10 @@ impl DirectedUserIteratorBuilder for UserIterator {
 
     fn create(
         iterator_iter: impl IntoIterator<Item = UserIteratorPayloadType<Forward, SstableIterator>>,
-        _stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> DirectedUserIterator {
         let iterator = UnorderedMergeIteratorInner::new(iterator_iter);
         DirectedUserIterator::Forward(Self::new(

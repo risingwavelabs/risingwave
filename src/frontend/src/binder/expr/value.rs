@@ -24,7 +24,7 @@ use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Lite
 impl Binder {
     pub fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
-            Value::Number(s, b) => self.bind_number(s, b),
+            Value::Number(s) => self.bind_number(s),
             Value::SingleQuotedString(s) => self.bind_string(s),
             Value::Boolean(b) => self.bind_bool(b),
             // Both null and string literal will be treated as `unknown` during type inference.
@@ -50,7 +50,7 @@ impl Binder {
         Ok(Literal::new(Some(ScalarImpl::Bool(b)), DataType::Boolean))
     }
 
-    fn bind_number(&mut self, s: String, _b: bool) -> Result<Literal> {
+    fn bind_number(&mut self, s: String) -> Result<Literal> {
         let (data, data_type) = if let Ok(int_32) = s.parse::<i32>() {
             (Some(ScalarImpl::Int32(int_32)), DataType::Int32)
         } else if let Ok(int_64) = s.parse::<i64>() {
@@ -107,23 +107,17 @@ impl Binder {
         Ok(expr)
     }
 
-    pub(super) fn bind_array_index(&mut self, obj: Expr, indices: Vec<Expr>) -> Result<ExprImpl> {
+    pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr(obj)?;
         match obj.return_type() {
             DataType::List {
                 datatype: return_type,
-            } => {
-                let mut indices = indices
-                    .into_iter()
-                    .map(|e| self.bind_expr(e))
-                    .collect::<Result<Vec<ExprImpl>>>()?;
-                indices.insert(0, obj);
-
-                let expr: ExprImpl =
-                    FunctionCall::new_unchecked(ExprType::ArrayAccess, indices, *return_type)
-                        .into();
-                Ok(expr)
-            }
+            } => Ok(FunctionCall::new_unchecked(
+                ExprType::ArrayAccess,
+                vec![obj, self.bind_expr(index)?],
+                *return_type,
+            )
+            .into()),
             data_type => Err(ErrorCode::BindError(format!(
                 "array index applied to type {}, which is not a composite type",
                 data_type
@@ -190,7 +184,7 @@ mod tests {
         ];
 
         for i in 0..values.len() {
-            let value = Value::Number(String::from(values[i]), false);
+            let value = Value::Number(String::from(values[i]));
             let res = binder.bind_value(value).unwrap();
             let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);

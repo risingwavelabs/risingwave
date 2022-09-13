@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
@@ -25,12 +23,13 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::utils::TableCatalogBuilder;
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode};
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMapping;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -192,8 +191,8 @@ impl PlanTreeNodeBinary for StreamHashJoin {
 
 impl_plan_tree_node_for_binary! { StreamHashJoin }
 
-impl ToStreamProst for StreamHashJoin {
-    fn to_stream_prost_body(&self) -> NodeBody {
+impl StreamNode for StreamHashJoin {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         let left_key_indices = self.eq_join_predicate.left_eq_indexes();
         let right_key_indices = self.eq_join_predicate.right_eq_indexes();
         let left_key_indices_prost = left_key_indices.iter().map(|idx| *idx as i32).collect_vec();
@@ -201,22 +200,37 @@ impl ToStreamProst for StreamHashJoin {
             .iter()
             .map(|idx| *idx as i32)
             .collect_vec();
+
+        let (left_table, left_degree_table) =
+            infer_internal_and_degree_table_catalog(self.left(), left_key_indices);
+        let (right_table, right_degree_table) =
+            infer_internal_and_degree_table_catalog(self.right(), right_key_indices);
+
+        let (left_table, left_degree_table) = (
+            left_table.with_id(state.gen_table_id_wrapped()),
+            left_degree_table.with_id(state.gen_table_id_wrapped()),
+        );
+        let (right_table, right_degree_table) = (
+            right_table.with_id(state.gen_table_id_wrapped()),
+            right_degree_table.with_id(state.gen_table_id_wrapped()),
+        );
+
+        let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
+
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: left_key_indices_prost,
             right_key: right_key_indices_prost,
+            null_safe: null_safe_prost,
             condition: self
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            left_table: Some(
-                infer_internal_table_catalog(self.left(), left_key_indices).to_state_table_prost(),
-            ),
-            right_table: Some(
-                infer_internal_table_catalog(self.right(), right_key_indices)
-                    .to_state_table_prost(),
-            ),
+            left_table: Some(left_table.to_internal_table_prost()),
+            right_table: Some(right_table.to_internal_table_prost()),
+            left_degree_table: Some(left_degree_table.to_internal_table_prost()),
+            right_degree_table: Some(right_degree_table.to_internal_table_prost()),
             output_indices: self
                 .logical
                 .output_indices()
@@ -228,27 +242,41 @@ impl ToStreamProst for StreamHashJoin {
     }
 }
 
-fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) -> TableCatalog {
+/// Return hash join internal table catalog and degree table catalog.
+fn infer_internal_and_degree_table_catalog(
+    input: PlanRef,
+    join_key_indices: Vec<usize>,
+) -> (TableCatalog, TableCatalog) {
     let base = input.plan_base();
     let schema = &base.schema;
 
     let append_only = input.append_only();
-    let dist_keys = base.dist.dist_column_indices().to_vec();
 
-    // The pk of hash join internal table should be join_key + input_pk.
+    let internal_table_dist_keys = base.dist.dist_column_indices().to_vec();
+
+    // Find the dist key position in join key.
+    // FIXME(yuhao): currently the dist key position is not the exact position mapped to the join
+    // key when there are duplicate value in join key indices.
+    let degree_table_dist_keys = internal_table_dist_keys
+        .iter()
+        .map(|idx| {
+            join_key_indices
+                .iter()
+                .position(|v| v == idx)
+                .expect("join key should contain dist key.")
+        })
+        .collect_vec();
+
+    // The pk of hash join internal and degree table should be join_key + input_pk.
     let mut pk_indices = join_key_indices;
     // TODO(yuhao): dedup the dist key and pk.
     pk_indices.extend(&base.logical_pk);
 
-    let mut columns_fields = schema.fields().to_vec();
-
-    // The join degree at the end of internal table.
-    let degree_column_field = Field::with_name(DataType::Int64, "_degree");
-    columns_fields.push(degree_column_field);
-
+    // Build internal table
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    let internal_columns_fields = schema.fields().to_vec();
 
-    columns_fields.iter().for_each(|field| {
+    internal_columns_fields.iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
     });
 
@@ -256,20 +284,24 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
 
-    if !base.ctx.inner().with_properties.is_empty() {
-        let properties: HashMap<_, _> = base
-            .ctx
-            .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+    // Build degree table.
+    let mut degree_table_catalog_builder = TableCatalogBuilder::new();
 
-        if !properties.is_empty() {
-            internal_table_catalog_builder.add_properties(properties);
-        }
-    }
+    let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
-    internal_table_catalog_builder.build(dist_keys, append_only)
+    pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
+        degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+        degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
+    });
+    degree_table_catalog_builder.add_column(&degree_column_field);
+
+    internal_table_catalog_builder
+        .set_properties(base.ctx.inner().with_options.internal_table_subset());
+    degree_table_catalog_builder
+        .set_properties(base.ctx.inner().with_options.internal_table_subset());
+
+    (
+        internal_table_catalog_builder.build(internal_table_dist_keys, append_only, None),
+        degree_table_catalog_builder.build(degree_table_dist_keys, append_only, None),
+    )
 }

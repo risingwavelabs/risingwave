@@ -51,13 +51,14 @@ pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
 pub mod store;
 pub mod vacuum;
+mod validator;
 pub mod value;
-
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
+pub use validator::*;
 use value::*;
 
 use self::iterator::HummockIterator;
@@ -65,9 +66,12 @@ use self::key::user_key;
 pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
+use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::{CompactionGroupClient, DummyCompactionGroupClient};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
@@ -90,12 +94,13 @@ pub struct HummockStorage {
 
     sstable_id_manager: SstableIdManagerRef,
 
+    #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
 impl HummockStorage {
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
-    pub async fn for_test(
+    pub fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -111,11 +116,10 @@ impl HummockStorage {
             )),
             filter_key_extractor_manager,
         )
-        .await
     }
 
     /// Creates a [`HummockStorage`].
-    pub async fn new(
+    pub fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -139,17 +143,17 @@ impl HummockStorage {
             write_conflict_detector,
             sstable_id_manager.clone(),
             filter_key_extractor_manager,
-        )
-        .await;
+        );
 
         let instance = Self {
-            options: options.clone(),
+            options,
             local_version_manager,
             hummock_meta_client,
             sstable_store,
             stats,
             compaction_group_client,
             sstable_id_manager,
+            #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
         };
         Ok(instance)
@@ -159,11 +163,11 @@ impl HummockStorage {
         &self,
         sstable: TableHolder,
         internal_key: &[u8],
-        key: &[u8],
         check_bloom_filter: bool,
         stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<Option<Option<Bytes>>> {
-        if check_bloom_filter && !Self::hit_sstable_bloom_filter(sstable.value(), key, stats) {
+    ) -> HummockResult<Option<HummockValue<Bytes>>> {
+        let ukey = user_key(internal_key);
+        if check_bloom_filter && !Self::hit_sstable_bloom_filter(sstable.value(), ukey, stats) {
             return Ok(None);
         }
 
@@ -182,11 +186,12 @@ impl HummockStorage {
 
         // Iterator gets us the key, we tell if it's the key we want
         // or key next to it.
-        let value = match user_key(iter.key()) == key {
-            true => Some(iter.value().into_user_value().map(Bytes::copy_from_slice)),
+        let value = match key::user_key(iter.key()) == ukey {
+            true => Some(iter.value().to_bytes()),
             false => None,
         };
         iter.collect_local_statistic(stats);
+
         Ok(value)
     }
 
@@ -229,5 +234,51 @@ impl HummockStorage {
         }
 
         !surely_not_have
+    }
+
+    /// Get `user_value` from `OrderSortedUncommittedData`. If not get successful, return None.
+    async fn get_from_order_sorted_uncommitted_data(
+        &self,
+        order_sorted_uncommitted_data: OrderSortedUncommittedData,
+        internal_key: &[u8],
+        stats: &mut StoreLocalStatistic,
+        key: &[u8],
+        check_bloom_filter: bool,
+    ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
+        let mut table_counts = 0;
+        let epoch = key::get_epoch(internal_key);
+        for data_list in order_sorted_uncommitted_data {
+            for data in data_list {
+                match data {
+                    UncommittedData::Batch(batch) => {
+                        assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
+                        if let Some(data) = self.get_from_batch(&batch, key) {
+                            return Ok((Some(data), table_counts));
+                        }
+                    }
+
+                    UncommittedData::Sst((_, table_info)) => {
+                        let table = self.sstable_store.sstable(&table_info, stats).await?;
+                        table_counts += 1;
+
+                        if let Some(data) = self
+                            .get_from_table(table, internal_key, check_bloom_filter, stats)
+                            .await?
+                        {
+                            return Ok((Some(data), table_counts));
+                        }
+                    }
+                }
+            }
+        }
+        Ok((None, table_counts))
+    }
+
+    /// Get `user_value` from `SharedBufferBatch`
+    fn get_from_batch(&self, batch: &SharedBufferBatch, key: &[u8]) -> Option<HummockValue<Bytes>> {
+        batch.get(key).map(|v| {
+            self.stats.get_shared_buffer_hit_counts.inc();
+            v
+        })
     }
 }

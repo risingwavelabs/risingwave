@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
@@ -25,7 +25,6 @@ use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
-use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -78,7 +77,7 @@ impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table_v2().expect("not table source");
+        let source = source_desc.source.as_table().expect("not table source");
         let row_id_index = source_desc.row_id_index;
 
         let mut notifiers = Vec::new();
@@ -108,7 +107,7 @@ impl InsertExecutor {
         // Wait for all chunks to be taken / written.
         let rows_inserted = try_join_all(notifiers)
             .await
-            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))?
+            .context("failed to wait chunks to be written")?
             .into_iter()
             .sum::<usize>();
 
@@ -145,7 +144,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source
                 .context()
                 .source_manager_ref()
-                .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
+                .context("source manager not found")?,
             child,
             source.plan_node().get_identity().clone(),
         )))
@@ -188,8 +187,9 @@ mod tests {
         let mut mock_executor = MockExecutor::new(schema.clone());
 
         // Schema of the table
-        let mut schema = schema_test_utils::iii();
+        let mut schema = schema_test_utils::ii();
         schema.fields.push(struct_field);
+        schema.fields.push(Field::unnamed(DataType::Int64)); // row_id column
         let table_columns: Vec<_> = schema
             .fields
             .iter()
@@ -219,8 +219,10 @@ mod tests {
         let col3 = Column::new(array);
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
-        let row_id_index = None;
-        let pk_column_ids = vec![1];
+
+        // To match the row_id column in the schema
+        let row_id_index = Some(3);
+        let pk_column_ids = vec![3];
 
         // Create the table.
         let table_id = TableId::new(0);
@@ -233,7 +235,7 @@ mod tests {
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
-        let source = source_desc.source.as_table_v2().unwrap();
+        let source = source_desc.source.as_table().unwrap();
         let mut reader = source
             .stream_reader(vec![0.into(), 1.into(), 2.into()])
             .await?;
@@ -294,7 +296,7 @@ mod tests {
         .into();
         assert_eq!(*chunk.columns()[2].array(), array);
 
-        // There's nothing in store since `TableSourceV2` has no side effect.
+        // There's nothing in store since `TableSource` has no side effect.
         // Data will be materialized in associated streaming task.
         let epoch = u64::MAX;
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);

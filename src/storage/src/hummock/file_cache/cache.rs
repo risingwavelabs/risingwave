@@ -92,6 +92,8 @@ where
             if batch.is_empty() {
                 // Avoid allocate a new buffer.
                 self.buffer.swap();
+                // Trigger clear free list.
+                batch.finish().await?;
             } else {
                 let (keys, slots) = batch.finish().await?;
 
@@ -194,7 +196,7 @@ where
             options.capacity,
             store.clone(),
         ));
-        store.restore(&indices, &hash_builder)?;
+        store.restore(&indices, &hash_builder).await?;
 
         let buffer = TwoLevelBuffer::new(buffer_capacity);
         let buffer_flusher_notifier = Arc::new(Notify::new());
@@ -263,7 +265,7 @@ where
         }
 
         timer.observe_duration();
-        self.metrics.cache_miss_counter.inc();
+        self.metrics.cache_miss.inc();
 
         Ok(None)
     }
@@ -458,6 +460,11 @@ mod tests {
             holder.trigger();
             holder.wait().await;
         }
+
+        // Trigger free last free list.
+        cache.buffer_flusher_notifier.notify_one();
+        holder.trigger();
+        holder.wait().await;
 
         assert_eq!(cache.store.cache_file_len(), 9 * SHARDS * BS);
         assert_eq!(

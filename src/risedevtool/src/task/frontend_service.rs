@@ -45,7 +45,14 @@ impl FrontendService {
         cmd.arg("--host")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--client-address")
-            .arg(format!("{}:{}", config.address, config.port));
+            .arg(format!("{}:{}", config.address, config.port))
+            .arg("--prometheus-listener-addr")
+            .arg(format!(
+                "{}:{}",
+                config.listen_address, config.exporter_port
+            ))
+            .arg("--metrics-level")
+            .arg("1");
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         match provide_meta_node.len() {
@@ -79,6 +86,10 @@ impl Task for FrontendService {
         let mut cmd = self.frontend()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+
+        let prefix_config = env::var("PREFIX_CONFIG")?;
+        cmd.arg("--config-path")
+            .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;
 
         if !self.config.user_managed {

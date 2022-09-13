@@ -17,11 +17,13 @@ use std::collections::BTreeMap;
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockContextId};
-use risingwave_pb::hummock::CompactTaskAssignment;
+use risingwave_pb::hummock::{CompactTaskAssignment, CompactionConfig};
 
 use crate::hummock::compaction::CompactStatus;
+use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
+use crate::model::BTreeMapTransaction;
 use crate::storage::MetaStore;
 
 #[derive(Default)]
@@ -30,6 +32,58 @@ pub struct Compaction {
     pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
+}
+
+impl Compaction {
+    /// Cancels all tasks assigned to `context_id`.
+    pub fn cancel_assigned_tasks_for_context_ids(
+        &mut self,
+        context_ids: &[HummockContextId],
+    ) -> Result<(
+        BTreeMapTransaction<CompactionGroupId, CompactStatus>,
+        BTreeMapTransaction<HummockCompactionTaskId, CompactTaskAssignment>,
+    )> {
+        let mut compact_statuses = BTreeMapTransaction::new(&mut self.compaction_statuses);
+        let mut compact_task_assignment =
+            BTreeMapTransaction::new(&mut self.compact_task_assignment);
+        for &context_id in context_ids {
+            // Clean up compact_status.
+            for assignment in compact_task_assignment.tree_ref().values() {
+                if assignment.context_id != context_id {
+                    continue;
+                }
+                let task = assignment
+                    .compact_task
+                    .as_ref()
+                    .expect("compact_task shouldn't be None");
+                let mut compact_status = compact_statuses
+                    .get_mut(task.compaction_group_id)
+                    .ok_or(Error::InvalidCompactionGroup(task.compaction_group_id))?;
+                compact_status.report_compact_task(
+                    assignment
+                        .compact_task
+                        .as_ref()
+                        .expect("compact_task shouldn't be None"),
+                );
+            }
+            // Clean up compact_task_assignment.
+            let task_ids_to_remove = compact_task_assignment
+                .tree_ref()
+                .iter()
+                .filter_map(|(task_id, v)| {
+                    if v.context_id == context_id {
+                        Some(*task_id)
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+            for task_id in task_ids_to_remove {
+                compact_task_assignment.remove(task_id);
+            }
+        }
+        Ok((compact_statuses, compact_task_assignment))
+    }
 }
 
 impl<S> HummockManager<S>
@@ -55,6 +109,31 @@ where
             .group_by(|s| s.context_id)
             .into_iter()
             .map(|(k, v)| (k, v.count()))
+            .collect_vec()
+    }
+
+    pub async fn get_compaction_config(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> CompactionConfig {
+        self.compaction_group_manager
+            .compaction_group(compaction_group_id)
+            .await
+            .expect("compaction group exists")
+            .compaction_config()
+    }
+
+    #[named]
+    pub async fn list_all_tasks_ids(&self) -> Vec<HummockCompactionTaskId> {
+        let compaction = read_lock!(self, compaction).await;
+        compaction
+            .compaction_statuses
+            .iter()
+            .flat_map(|(_, cs)| {
+                cs.level_handlers
+                    .iter()
+                    .flat_map(|lh| lh.pending_tasks_ids())
+            })
             .collect_vec()
     }
 }

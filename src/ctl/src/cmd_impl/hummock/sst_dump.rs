@@ -22,8 +22,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::BlockLocation;
-use risingwave_pb::hummock::pin_version_response::Payload;
-use risingwave_rpc_client::{HummockMetaClient, MetaClient};
+use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, SstableMeta, SstableStore,
@@ -39,26 +38,24 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the Sstable store so we can access the SstableMeta
     let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
-    let sstable_store = &*hummock.sstable_store();
-
-    // Retrieves the latest HummockVersion from the meta client so we can access the SstableInfo
-    let version = match meta_client.pin_version(u64::MAX).await? {
-        Payload::VersionDeltas(_) => {
-            unreachable!("should get full version")
-        }
-        Payload::PinnedVersion(version) => version,
-    };
-
-    // SST's timestamp info is only available in object store
+    let observer_manager = hummock_opts
+        .create_observer_manager(meta_client.clone(), hummock.clone())
+        .await?;
+    // This line ensures local version is valid.
+    observer_manager.start().await?;
+    let version = hummock
+        .local_version_manager()
+        .get_pinned_version()
+        .version();
 
     let table_data = load_table_schemas(&meta_client).await?;
-
+    let sstable_store = &*hummock.sstable_store();
     for level in version.get_combined_levels() {
         for sstable_info in &level.table_infos {
             let id = sstable_info.id;
 
             let sstable_cache = sstable_store
-                .sstable(id, &mut StoreLocalStatistic::default())
+                .sstable(sstable_info, &mut StoreLocalStatistic::default())
                 .await?;
             let sstable = sstable_cache.value().as_ref();
             let sstable_meta = &sstable.meta;
@@ -86,8 +83,6 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             print_blocks(id, &table_data, sstable_store, sstable_meta).await?;
         }
     }
-
-    meta_client.unpin_version().await?;
 
     hummock_opts.shutdown().await;
     Ok(())
@@ -164,7 +159,7 @@ fn print_kv_pairs(
 ) -> anyhow::Result<()> {
     println!("\tKV-Pairs:");
 
-    let block = Box::new(Block::decode(&block_data, uncompressed_capacity).unwrap());
+    let block = Box::new(Block::decode(block_data, uncompressed_capacity).unwrap());
     let holder = BlockHolder::from_owned_block(block);
     let mut block_iter = BlockIterator::new(holder);
     block_iter.seek_to_first();

@@ -207,9 +207,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 });
 
                 // TODO: currently not a vectorized implementation
-                states
-                    .iter_mut()
-                    .for_each(|state| state.update_single(&chunk, row_id).unwrap());
+                for state in states {
+                    state.update_single(&chunk, row_id)?
+                }
             }
         }
 

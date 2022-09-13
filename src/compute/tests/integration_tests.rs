@@ -21,7 +21,6 @@ use bytes::Bytes;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanType,
@@ -39,7 +38,7 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::storage_table::RowBasedStorageTable;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -85,10 +84,10 @@ impl SingleChunkExecutor {
     }
 }
 
-/// This test checks whether batch task and streaming task work together for `TableV2` creation,
+/// This test checks whether batch task and streaming task work together for `Table` creation,
 /// insertion, deletion, and materialization.
 #[tokio::test]
-async fn test_table_v2_materialize() -> Result<()> {
+async fn test_table_materialize() -> Result<()> {
     use risingwave_pb::data::DataType;
 
     let memory_state_store = MemoryStateStore::new();
@@ -213,7 +212,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .collect_vec();
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = RowBasedStorageTable::new_for_test(
+    let table = StorageTable::new_for_test(
         memory_state_store.clone(),
         source_table_id,
         column_descs.clone(),
@@ -230,7 +229,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqExecutor2".to_string(),
-        Arc::new(BatchMetrics::for_test()),
+        None,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -292,7 +291,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::for_test()),
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -364,7 +363,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::for_test()),
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -401,7 +400,7 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![OrderType::Ascending],
         vec![0_usize],
     );
-    let table = RowBasedStorageTable::new_for_test(
+    let table = StorageTable::new_for_test(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -411,20 +410,16 @@ async fn test_row_seq_scan() -> Result<()> {
 
     let epoch: u64 = 0;
 
-    state
-        .insert(Row(vec![
-            Some(1_i32.into()),
-            Some(4_i32.into()),
-            Some(7_i64.into()),
-        ]))
-        .unwrap();
-    state
-        .insert(Row(vec![
-            Some(2_i32.into()),
-            Some(5_i32.into()),
-            Some(8_i64.into()),
-        ]))
-        .unwrap();
+    state.insert(Row(vec![
+        Some(1_i32.into()),
+        Some(4_i32.into()),
+        Some(7_i64.into()),
+    ]));
+    state.insert(Row(vec![
+        Some(2_i32.into()),
+        Some(5_i32.into()),
+        Some(8_i64.into()),
+    ]));
     state.commit(epoch).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
@@ -437,7 +432,7 @@ async fn test_row_seq_scan() -> Result<()> {
         )],
         1,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::for_test()),
+        None,
     ));
 
     assert_eq!(executor.schema().fields().len(), 3);

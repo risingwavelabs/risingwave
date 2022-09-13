@@ -27,8 +27,8 @@ risedev:
     # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
-    - use: prometheus
-    - use: grafana
+    # - use: prometheus
+    # - use: grafana
 
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
@@ -266,18 +266,21 @@ risedev:
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-0}
       enable-async-stack-trace: true
+      enable-tiered-cache: true
 
     - use: compute-node
       id: compute-node-1
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-1}
       enable-async-stack-trace: true
+      enable-tiered-cache: true
 
     - use: compute-node
       id: compute-node-2
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-2}
       enable-async-stack-trace: true
+      enable-tiered-cache: true
 
     - use: frontend
       id: frontend-node-0
@@ -314,6 +317,7 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
       enable-tiered-cache: true
     - use: frontend
@@ -325,6 +329,7 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
       port: 5687
       exporter-port: 1222
@@ -346,6 +351,7 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
       port: 5687
       exporter-port: 1222
@@ -360,10 +366,13 @@ risedev:
       enable-tiered-cache: true
     - use: frontend
       port: 4565
+      exporter-port: 2222
     - use: frontend
       port: 4566
+      exporter-port: 2223
     - use: frontend
       port: 4567
+      exporter-port: 2224
     - use: compactor
 
   ci-kafka:
@@ -373,6 +382,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
     - use: zookeeper
@@ -387,13 +397,14 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
     - use: redis
 
 
 compose:
-  risingwave: "ghcr.io/singularity-data/risingwave:latest"
+  risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
   minio: "quay.io/minio/minio:latest"
   redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
@@ -542,6 +553,9 @@ template:
     # 7 days by default.
     min-sst-retention-time-sec: 604800
 
+    # Enable sanity check when SSTs are committed. Disabled by default.
+    enable-committed-sst-sanity-check: false
+
   prometheus:
     # Advertise address of Prometheus
     address: "127.0.0.1"
@@ -582,6 +596,9 @@ template:
     # Redpanda used by this Prometheus instance
     provide-redpanda: "redpanda*"
 
+    # Frontend used by this Prometheus instance
+    provide-frontend: "frontend*"
+
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -591,6 +608,9 @@ template:
 
     # Listen address
     listen-address: ${address}
+    
+    # Prometheus exporter listen port
+    exporter-port: 2222
 
     # Id of this instance
     id: frontend-${port}

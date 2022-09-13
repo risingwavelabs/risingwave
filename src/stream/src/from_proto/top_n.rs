@@ -31,11 +31,6 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::TopN)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let limit = if node.limit == 0 {
-            None
-        } else {
-            Some(node.limit as usize)
-        };
 
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
@@ -53,9 +48,8 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
         Ok(TopNExecutor::new(
             input,
             order_pairs,
-            (node.offset as usize, limit),
+            (node.offset as usize, node.limit as usize),
             params.pk_indices,
-            0,
             params.executor_id,
             key_indices,
             state_table,

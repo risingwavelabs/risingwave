@@ -150,13 +150,12 @@ impl StateStoreImpl {
                     Arc::new(CompactionGroupClientImpl::new(hummock_meta_client.clone()));
                 let inner = HummockStorage::new(
                     config.clone(),
-                    sstable_store.clone(),
+                    sstable_store,
                     hummock_meta_client.clone(),
                     state_store_stats.clone(),
                     compaction_group_client,
                     filter_key_extractor_manager,
-                )
-                .await?;
+                )?;
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
             }
 

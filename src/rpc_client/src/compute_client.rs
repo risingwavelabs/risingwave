@@ -47,6 +47,7 @@ impl ComputeClient {
     pub async fn new(addr: HostAddr) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .tcp_nodelay(true)
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await?;
@@ -95,7 +96,7 @@ impl ComputeClient {
             .await
             .inspect_err(|_| {
                 tracing::error!(
-                    "failed to create stream from remote_input {} from fragment {} to fragment {}",
+                    "failed to create stream from remote_input {} from actor {} to actor {}",
                     self.addr,
                     up_actor_id,
                     down_actor_id

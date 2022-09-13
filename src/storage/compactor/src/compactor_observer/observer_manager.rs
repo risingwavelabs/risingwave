@@ -18,9 +18,9 @@ use std::sync::Arc;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
+    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
 };
-use risingwave_pb::catalog::{Source, Table};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 
@@ -45,10 +45,6 @@ impl ObserverNodeImpl for CompactorObserverNode {
         match info.to_owned() {
             Info::Table(table_catalog) => {
                 self.handle_catalog_notification(resp.operation(), table_catalog);
-            }
-
-            Info::Source(source_catalog) => {
-                self.handle_source_notification(resp.operation(), source_catalog);
             }
 
             Info::HummockVersionDeltas(_) => {}
@@ -108,25 +104,6 @@ impl CompactorObserverNode {
 
             Operation::Delete => {
                 self.filter_key_extractor_manager.remove(table_catalog.id);
-            }
-
-            _ => panic!("receive an unsupported notify {:?}", operation),
-        }
-    }
-
-    fn handle_source_notification(&mut self, operation: Operation, source_catalog: Source) {
-        match operation {
-            Operation::Add | Operation::Update => {
-                self.filter_key_extractor_manager.update(
-                    source_catalog.id,
-                    Arc::new(FilterKeyExtractorImpl::FullKey(
-                        FullKeyFilterKeyExtractor::default(),
-                    )),
-                );
-            }
-
-            Operation::Delete => {
-                self.filter_key_extractor_manager.remove(source_catalog.id);
             }
 
             _ => panic!("receive an unsupported notify {:?}", operation),

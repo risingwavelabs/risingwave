@@ -13,21 +13,29 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
 use futures::StreamExt;
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
+use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
+// use futures_async_stream::try_stream;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::Receiver;
 use tracing::debug;
 
 use super::QueryExecution;
+use crate::catalog::catalog_service::CatalogReader;
+use crate::handler::query::QueryResultSet;
+use crate::handler::util::to_pg_rows;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult,
+    ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError, SchedulerResult,
 };
 
 pub struct QueryResultFetcher {
@@ -46,26 +54,32 @@ pub struct QueryManager {
     worker_node_manager: WorkerNodeManagerRef,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
+    catalog_reader: CatalogReader,
 }
+
+type QueryManagerRef = Arc<QueryManager>;
 
 impl QueryManager {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
+        catalog_reader: CatalogReader,
     ) -> Self {
         Self {
             worker_node_manager,
             hummock_snapshot_manager,
             compute_client_pool,
+            catalog_reader,
         }
     }
 
     pub async fn schedule(
         &self,
-        _context: ExecutionContextRef,
+        context: ExecutionContextRef,
         query: Query,
-    ) -> SchedulerResult<impl DataChunkStream> {
+        format: bool,
+    ) -> SchedulerResult<QueryResultSet> {
         let query_id = query.query_id().clone();
         let epoch = self
             .hummock_snapshot_manager
@@ -74,24 +88,29 @@ impl QueryManager {
             .committed_epoch;
 
         let query_execution = QueryExecution::new(
+            context,
             query,
             epoch,
             self.worker_node_manager.clone(),
             self.hummock_snapshot_manager.clone(),
             self.compute_client_pool.clone(),
-        );
+            self.catalog_reader.clone(),
+        )
+        .await;
 
-        let query_result_fetcher = match query_execution.start().await {
+        // Create a oneshot channel for QueryResultFetcher to get failed event.
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let query_result_fetcher = match query_execution.start(shutdown_tx).await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager
                     .unpin_snapshot(epoch, &query_id)
-                    .await?;
+                    .await;
                 return Err(e);
             }
         };
 
-        Ok(query_result_fetcher.run())
+        query_result_fetcher.collect_rows(format, shutdown_rx).await
     }
 }
 
@@ -113,7 +132,7 @@ impl QueryResultFetcher {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn run(self) {
+    async fn run_inner(self) {
         debug!(
             "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
             self.task_output_id, self.task_host
@@ -126,6 +145,32 @@ impl QueryResultFetcher {
         while let Some(response) = stream.next().await {
             yield DataChunk::from_protobuf(response?.get_record_batch()?)?;
         }
+    }
+
+    fn run(self) -> BoxedDataChunkStream {
+        Box::pin(self.run_inner())
+    }
+
+    pub async fn collect_rows(
+        self,
+        format: bool,
+        shutdown_rx: Receiver<SchedulerError>,
+    ) -> SchedulerResult<QueryResultSet> {
+        let data_stream = self.run();
+        let mut data_stream = data_stream.take_until(shutdown_rx);
+        let mut rows = vec![];
+        #[for_await]
+        for chunk in &mut data_stream {
+            rows.extend(to_pg_rows(chunk?, format));
+        }
+
+        // Check whether error happen, if yes, returned.
+        let execution_ret = data_stream.take_result();
+        if let Some(ret) = execution_ret {
+            return Err(ret.expect("The shutdown message receiver should not fail"));
+        }
+
+        Ok(rows)
     }
 }
 

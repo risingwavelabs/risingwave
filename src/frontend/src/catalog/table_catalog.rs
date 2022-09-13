@@ -15,15 +15,15 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableDesc;
-use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
+use risingwave_common::catalog::{TableDesc, TableId};
+use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, SchemaId};
-use crate::catalog::TableId;
+use super::{DatabaseId, FragmentId, SchemaId};
 use crate::optimizer::property::FieldOrder;
+use crate::WithOptions;
 
 /// Includes full information about a table.
 ///
@@ -51,7 +51,7 @@ use crate::optimizer::property::FieldOrder;
 ///
 /// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableCatalog {
     pub id: TableId,
 
@@ -81,13 +81,30 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: u32,
 
-    pub properties: HashMap<String, String>,
+    /// Properties of the table. For example, `appendonly` or `retention_seconds`.
+    pub properties: WithOptions,
+
+    /// The fragment id of the `Materialize` operator for this table.
+    pub fragment_id: FragmentId,
+
+    /// An optional column index which is the vnode of each row computed by the table's consistent
+    /// hash distribution
+    pub vnode_col_idx: Option<usize>,
+
+    /// The column indices which are stored in the state store's value with row-encoding. Currently
+    /// is not supported yet and expected to be `[0..columns.len()]`
+    pub value_indices: Vec<usize>,
 }
 
 impl TableCatalog {
     /// Get a reference to the table catalog's table id.
     pub fn id(&self) -> TableId {
         self.id
+    }
+
+    pub fn with_id(mut self, id: TableId) -> Self {
+        self.id = id;
+        self
     }
 
     /// Get the table catalog's associated source id.
@@ -125,7 +142,7 @@ impl TableCatalog {
             appendonly: self.appendonly,
             retention_seconds: table_options
                 .retention_seconds
-                .unwrap_or(TABLE_OPTION_DUMMY_RETAINTION_SECOND),
+                .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
         }
     }
 
@@ -138,7 +155,7 @@ impl TableCatalog {
         self.distribution_key.as_ref()
     }
 
-    pub fn to_state_table_prost(&self) -> ProstTable {
+    pub fn to_internal_table_prost(&self) -> ProstTable {
         use risingwave_common::catalog::{DatabaseId, SchemaId};
         self.to_prost(
             SchemaId::placeholder() as u32,
@@ -168,7 +185,12 @@ impl TableCatalog {
                 .collect_vec(),
             appendonly: self.appendonly,
             owner: self.owner,
-            properties: self.properties.clone(),
+            properties: self.properties.inner().clone(),
+            fragment_id: self.fragment_id,
+            vnode_col_idx: self
+                .vnode_col_idx
+                .map(|i| ProstColumnIndex { index: i as _ }),
+            value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -214,7 +236,10 @@ impl From<ProstTable> for TableCatalog {
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
-            properties: tb.properties,
+            properties: WithOptions::new(tb.properties),
+            fragment_id: tb.fragment_id,
+            vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
+            value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -230,7 +255,7 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -243,6 +268,7 @@ mod tests {
     use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::TableCatalog;
     use crate::optimizer::property::{Direction, FieldOrder};
+    use crate::WithOptions;
 
     #[test]
     fn test_into_table_catalog() {
@@ -292,9 +318,12 @@ mod tests {
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
-                String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                String::from(PROPERTIES_RETENTION_SECOND_KEY),
                 String::from("300"),
             )]),
+            fragment_id: 0,
+            vnode_col_idx: None,
+            value_indices: vec![0],
         }
         .into();
 
@@ -344,10 +373,13 @@ mod tests {
                 distribution_key: vec![],
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-                properties: HashMap::from([(
-                    String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                properties: WithOptions::new(HashMap::from([(
+                    String::from(PROPERTIES_RETENTION_SECOND_KEY),
                     String::from("300")
-                )]),
+                )])),
+                fragment_id: 0,
+                vnode_col_idx: None,
+                value_indices: vec![0],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

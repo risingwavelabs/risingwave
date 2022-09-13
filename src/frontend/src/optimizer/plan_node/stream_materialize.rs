@@ -12,22 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
+use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// The first column id to allocate for a new materialized view.
 ///
@@ -136,7 +137,7 @@ impl StreamMaterialize {
                 c
             })
             .collect_vec();
-
+        let value_indices = (0..columns.len()).collect_vec();
         let mut in_order = FixedBitSet::with_capacity(schema.len());
         let mut order_keys = vec![];
 
@@ -158,13 +159,7 @@ impl StreamMaterialize {
         }
 
         let ctx = input.ctx();
-        let properties: HashMap<_, _> = ctx
-            .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+        let properties = ctx.inner().with_options.internal_table_subset();
 
         let table = TableCatalog {
             id: TableId::placeholder(),
@@ -178,6 +173,10 @@ impl StreamMaterialize {
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
+            // TODO(zehua): replace it with FragmentId::placeholder()
+            fragment_id: FragmentId::MAX - 1,
+            vnode_col_idx: None,
+            value_indices,
         };
 
         Ok(Self { base, input, table })
@@ -243,8 +242,8 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 
 impl_plan_tree_node_for_unary! { StreamMaterialize }
 
-impl ToStreamProst for StreamMaterialize {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamMaterialize {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::Materialize(MaterializeNode {
@@ -257,7 +256,7 @@ impl ToStreamProst for StreamMaterialize {
                 .iter()
                 .map(FieldOrder::to_protobuf)
                 .collect(),
-            table: Some(self.table().to_state_table_prost()),
+            table: Some(self.table().to_internal_table_prost()),
         })
     }
 }

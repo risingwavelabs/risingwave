@@ -100,19 +100,6 @@ where
         .collect()
 }
 
-pub fn can_concat(ssts: &[&SstableInfo]) -> bool {
-    let len = ssts.len();
-    for i in 0..len - 1 {
-        if user_key(&ssts[i].get_key_range().as_ref().unwrap().right).cmp(user_key(
-            &ssts[i + 1].get_key_range().as_ref().unwrap().left,
-        )) != Ordering::Less
-        {
-            return false;
-        }
-    }
-    true
-}
-
 /// Search the SST containing the specified key within a level, using binary search.
 pub(crate) fn search_sst_idx<B>(ssts: &[&SstableInfo], key: &B) -> usize
 where
@@ -271,4 +258,25 @@ impl Drop for MemoryTracker {
     fn drop(&mut self) {
         self.limiter.release_quota(self.quota);
     }
+}
+
+/// Check whether the items in `sub_iter` is a subset of the items in `full_iter`, and meanwhile
+/// preserve the order.
+pub fn check_subset_preserve_order<T: Eq>(
+    sub_iter: impl Iterator<Item = T>,
+    mut full_iter: impl Iterator<Item = T>,
+) -> bool {
+    for sub_iter_item in sub_iter {
+        let mut found = false;
+        for full_iter_item in full_iter.by_ref() {
+            if sub_iter_item == full_iter_item {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return false;
+        }
+    }
+    true
 }

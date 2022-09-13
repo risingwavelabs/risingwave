@@ -247,6 +247,9 @@ pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
     pub checkpoint: bool,
+
+    /// The actors that this barrier has passed locally. Used for debugging only.
+    pub passed_actors: Vec<ActorId>,
 }
 
 impl Barrier {
@@ -279,10 +282,16 @@ impl Barrier {
 
     /// Whether this barrier is to stop the actor with `actor_id`.
     pub fn is_stop_or_update_drop_actor(&self, actor_id: ActorId) -> bool {
+        self.all_stop_actors()
+            .map_or(false, |actors| actors.contains(&actor_id))
+    }
+
+    /// Get all actors that to be stopped (dropped) by this barrier.
+    pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
         match self.mutation.as_deref() {
-            Some(Mutation::Stop(actors)) => actors.contains(&actor_id),
-            Some(Mutation::Update { dropped_actors, .. }) => dropped_actors.contains(&actor_id),
-            _ => false,
+            Some(Mutation::Stop(actors)) => Some(actors),
+            Some(Mutation::Update { dropped_actors, .. }) => Some(dropped_actors),
+            _ => None,
         }
     }
 
@@ -295,6 +304,11 @@ impl Barrier {
                 .flatten()
                 .any(|dispatcher| dispatcher.downstream_actor_id.contains(&actor_id))
         )
+    }
+
+    /// Whether this barrier is for configuration change. Used for source executor initialization.
+    pub fn is_update(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Update { .. }))
     }
 
     /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor
@@ -476,6 +490,7 @@ impl Barrier {
             epoch,
             mutation,
             checkpoint,
+            passed_actors,
             ..
         }: Barrier = self.clone();
         ProstBarrier {
@@ -486,6 +501,7 @@ impl Barrier {
             mutation: mutation.map(|mutation| mutation.to_protobuf()),
             span: vec![],
             checkpoint,
+            passed_actors,
         }
     }
 
@@ -501,6 +517,7 @@ impl Barrier {
             checkpoint: prost.checkpoint,
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
+            passed_actors: prost.get_passed_actors().clone(),
         })
     }
 }
@@ -574,6 +591,7 @@ pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
+#[track_caller]
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
