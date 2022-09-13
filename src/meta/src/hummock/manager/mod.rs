@@ -627,7 +627,7 @@ where
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             let mut versioning_guard = write_lock!(self, versioning).await;
 
-            // need to regain the newest version ynder the protection of a write lock, otherwise the
+            // need to regain the newest version under the protection of a write lock, otherwise the
             // old version may be used to overwrite the new one
             let versioning = versioning_guard.deref_mut();
             let current_version = &mut versioning.current_version;
