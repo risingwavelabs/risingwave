@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
@@ -26,7 +27,7 @@ use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatT
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_source::{AvroParser, ProtobufParser};
 use risingwave_sqlparser::ast::{
-    AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema,
+    AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema, TableConstraint,
 };
 
 use super::create_table::{
@@ -116,6 +117,19 @@ pub async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
+    let have_pk = {
+        let mut have_pk = false;
+        for cons in &stmt.constraints {
+            if let TableConstraint::Unique { is_primary, .. } = cons {
+                if is_primary == &true {
+                    have_pk = true;
+                    break;
+                }
+            }
+        }
+        have_pk
+    };
+
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
@@ -159,14 +173,22 @@ pub async fn handle_create_source(
             columns,
             pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
         },
-        SourceSchema::DebeziumJson => StreamSourceInfo {
-            properties: with_properties.clone(),
-            row_format: RowFormatType::DebeziumJson as i32,
-            row_schema_location: "".to_string(),
-            row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
-            columns,
-            pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
-        },
+        SourceSchema::DebeziumJson => {
+            if !have_pk {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+            StreamSourceInfo {
+                properties: with_properties.clone(),
+                row_format: RowFormatType::DebeziumJson as i32,
+                row_schema_location: "".to_string(),
+                row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
+                columns,
+                pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
+            }
+        }
     };
 
     let session = context.session_ctx.clone();
