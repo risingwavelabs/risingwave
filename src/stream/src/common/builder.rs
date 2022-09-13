@@ -171,7 +171,7 @@ impl StreamChunkBuilder {
             .map(|(builder, datatype)| {
                 std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
             })
-            .try_collect()?;
+            .collect();
         let new_columns = new_arrays
             .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))

@@ -635,16 +635,8 @@ mod tests {
             }
         }
 
-        let col1 = Column::new(
-            I32Array::from_slice(&lhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
-        let col2 = Column::new(
-            I32Array::from_slice(&rhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = Column::new(Arc::new(I32Array::from_slice(&lhs).into()));
+        let col2 = Column::new(Arc::new(I32Array::from_slice(&rhs).into()));
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();

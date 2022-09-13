@@ -90,10 +90,10 @@ impl ValuesExecutor {
                     }
                 }
 
-                let columns = array_builders
+                let columns: Vec<_> = array_builders
                     .into_iter()
-                    .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-                    .try_collect()?;
+                    .map(|b| Column::new(Arc::new(b.finish())))
+                    .collect();
 
                 let chunk = DataChunk::new(columns, chunk_size);
 

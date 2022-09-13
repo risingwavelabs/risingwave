@@ -139,13 +139,9 @@ impl DataChunk {
             }
         }
 
-        let new_arrays = array_builders
+        let new_columns = array_builders
             .into_iter()
             .map(|builder| builder.finish())
-            .collect::<ArrayResult<Vec<_>>>()?;
-
-        let new_columns = new_arrays
-            .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
         Ok(DataChunk::new(new_columns, rows.len()))
@@ -330,7 +326,7 @@ impl DataChunk {
                     for row_idx in start_row_idx..=end_row_idx {
                         array_builder.append_datum_ref(column.array_ref().value_at(row_idx))?;
                     }
-                    builder.append_array(&array_builder.finish()?)
+                    builder.append_array(&array_builder.finish())
                 })?;
             // since `end_row_idx` is inclusive, exclude it for the next round.
             start_row_idx = end_row_idx + 1;
@@ -345,8 +341,8 @@ impl DataChunk {
             if new_chunk_require == 0 {
                 let new_columns: Vec<Column> = array_builders
                     .drain(..)
-                    .map(|builder| builder.finish().map(Into::into))
-                    .try_collect()?;
+                    .map(|builder| builder.finish().into())
+                    .collect();
 
                 array_builders = new_columns
                     .iter()
@@ -618,7 +614,7 @@ impl DataChunkTestExt for DataChunk {
         }
         let columns = array_builders
             .into_iter()
-            .map(|builder| Column::new(Arc::new(builder.finish().unwrap())))
+            .map(|builder| Column::new(Arc::new(builder.finish())))
             .collect();
         let vis = if visibility.iter().all(|b| *b) {
             Vis::Compact(visibility.len())
@@ -651,7 +647,7 @@ impl DataChunkTestExt for DataChunk {
                     builder.append_null().unwrap();
                 }
 
-                Column::new(builder.finish().unwrap().into())
+                Column::new(builder.finish().into())
             })
             .collect();
         let chunk = DataChunk::new(new_cols, Vis::Bitmap(new_vis.finish()));
@@ -685,7 +681,7 @@ mod tests {
                     builder.append(Some(i as i32)).unwrap();
                 }
                 let chunk = DataChunk::new(
-                    vec![Column::new(Arc::new(builder.finish().unwrap().into()))],
+                    vec![Column::new(Arc::new(builder.finish().into()))],
                     chunk_size,
                 );
                 chunks.push(chunk);
@@ -746,7 +742,7 @@ mod tests {
             for _ in 0..length {
                 builder.append(Some(i as i32)).unwrap();
             }
-            let arr = builder.finish().unwrap();
+            let arr = builder.finish();
             columns.push(Column::new(Arc::new(arr.into())))
         }
         let chunk: DataChunk = DataChunk::new(columns, length);
