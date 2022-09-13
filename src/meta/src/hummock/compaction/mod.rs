@@ -27,7 +27,6 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
-use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
