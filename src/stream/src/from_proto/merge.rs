@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_pb::stream_plan::DispatcherType;
 
 use super::*;
 use crate::executor::exchange::input::new_input;
@@ -48,14 +49,20 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             })
             .try_collect()?;
 
-        if inputs.len() == 1 {
+        let single_input = match node.get_upstream_dispatcher_type()? {
+            DispatcherType::Hash | DispatcherType::Broadcast => false,
+            DispatcherType::Simple | DispatcherType::NoShuffle => true,
+            DispatcherType::Unspecified => unreachable!(),
+        };
+
+        if single_input {
             Ok(ReceiverExecutor::new(
                 schema,
                 params.pk_indices,
                 actor_context,
                 params.fragment_id,
                 upstream_fragment_id,
-                inputs.into_iter().next().unwrap(),
+                inputs.into_iter().exactly_one().unwrap(),
                 stream.context.clone(),
                 x_node.operator_id,
                 stream.streaming_metrics.clone(),

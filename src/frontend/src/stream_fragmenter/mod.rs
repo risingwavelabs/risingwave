@@ -239,8 +239,8 @@ fn build_fragment(
                     let is_simple_dispatcher =
                         exchange_node_strategy.get_type()? == DispatcherType::Simple;
 
-                    assert_eq!(child_node.input.len(), 1);
-                    let child_fragment = build_and_add_fragment(state, child_node.input.remove(0))?;
+                    let [input]: [_; 1] = std::mem::take(&mut child_node.input).try_into().unwrap();
+                    let child_fragment = build_and_add_fragment(state, input)?;
                     state.fragment_graph.add_edge(
                         child_fragment.fragment_id,
                         current_fragment.fragment_id,
