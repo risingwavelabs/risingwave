@@ -477,6 +477,23 @@ impl HummockMetaClient for MetaClient {
             .unwrap())
     }
 
+    async fn get_version_deltas(
+        &self,
+        start_id: u64,
+        num_epochs: u32,
+    ) -> Result<HummockVersionDeltas> {
+        let req = GetVersionDeltasRequest {
+            start_id,
+            num_epochs,
+        };
+        Ok(self
+            .inner
+            .get_version_deltas(req)
+            .await?
+            .version_deltas
+            .unwrap())
+    }
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         let req = PinSnapshotRequest {
             context_id: self.worker_id(),
@@ -700,6 +717,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
+            ,{ hummock_client, get_version_deltas, GetVersionDeltasRequest, GetVersionDeltasResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
