@@ -396,6 +396,7 @@ where
             msg.sql_bytes,
             types,
             fields,
+            is_query_sql,
         );
 
         // 4. Insert the statement.
@@ -494,7 +495,7 @@ where
         //  b'S' => Statement
         //  b'P' => Portal
         tracing::trace!(
-            "(extended query)desribe name: {}",
+            "(extended query)describe name: {}",
             cstr_to_str(&msg.name).unwrap()
         );
 
@@ -518,9 +519,13 @@ where
                 .await?;
 
             // 2. Send row description.
-            self.stream
-                .write(&BeMessage::RowDescription(&statement.row_desc()))
-                .await?;
+            if statement.is_query() {
+                self.stream
+                    .write(&BeMessage::RowDescription(&statement.row_desc()))
+                    .await?;
+            } else {
+                self.stream.write(&BeMessage::NoData).await?;
+            }
         } else if msg.kind == b'P' {
             let name = cstr_to_str(&msg.name).unwrap().to_string();
             let portal = if name.is_empty() {
@@ -535,9 +540,13 @@ where
             };
 
             // 3. Send row description.
-            self.stream
-                .write(&BeMessage::RowDescription(&portal.row_desc()))
-                .await?;
+            if portal.is_query() {
+                self.stream
+                    .write(&BeMessage::RowDescription(&portal.row_desc()))
+                    .await?;
+            } else {
+                self.stream.write(&BeMessage::NoData).await?;
+            }
         }
         Ok(())
     }
