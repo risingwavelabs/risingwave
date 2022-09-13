@@ -180,7 +180,7 @@ impl<S: StateStore> StateTable<S> {
                 pk_indices.iter().position(|&i| vnode_col_idx == i)
             });
         let _value_indices = table_catalog
-            .value_idx
+            .value_indices
             .iter()
             .map(|val| *val as usize)
             .collect_vec();

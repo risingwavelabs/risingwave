@@ -176,7 +176,7 @@ impl StreamMaterialize {
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
             vnode_col_idx: None,
-            value_idx: value_indices,
+            value_indices,
         };
 
         Ok(Self { base, input, table })

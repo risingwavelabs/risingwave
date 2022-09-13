@@ -89,7 +89,7 @@ message Table {
   uint32 fragment_id = 17;
   // an optional column index which is the vnode of each row computed by the table's consistent hash distribution
   ColumnIndex vnode_col_idx = 18;
-  repeated int32 value_idx = 19; 
+  repeated int32 value_indices = 19; 
 }
 
 message Schema {

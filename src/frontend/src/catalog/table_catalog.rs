@@ -92,7 +92,7 @@ pub struct TableCatalog {
     pub vnode_col_idx: Option<usize>,
 
     /// The value indices, used to partial encoding.
-    pub value_idx: Vec<usize>,
+    pub value_indices: Vec<usize>,
 }
 
 impl TableCatalog {
@@ -189,7 +189,7 @@ impl TableCatalog {
             vnode_col_idx: self
                 .vnode_col_idx
                 .map(|i| ProstColumnIndex { index: i as _ }),
-            value_idx: self.value_idx.iter().map(|x| *x as _).collect(),
+            value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -238,7 +238,7 @@ impl From<ProstTable> for TableCatalog {
             properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
             vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
-            value_idx: tb.value_idx.iter().map(|x| *x as _).collect(),
+            value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -322,7 +322,7 @@ mod tests {
             )]),
             fragment_id: 0,
             vnode_col_idx: None,
-            value_idx: vec![0],
+            value_indices: vec![0],
         }
         .into();
 
@@ -378,7 +378,7 @@ mod tests {
                 )])),
                 fragment_id: 0,
                 vnode_col_idx: None,
-                value_idx: vec![0],
+                value_indices: vec![0],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

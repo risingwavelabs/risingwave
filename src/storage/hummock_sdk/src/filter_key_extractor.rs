@@ -465,7 +465,7 @@ mod tests {
             )]),
             fragment_id: 0,
             vnode_col_idx: None,
-            value_idx: vec![0],
+            value_indices: vec![0],
         }
     }
 
