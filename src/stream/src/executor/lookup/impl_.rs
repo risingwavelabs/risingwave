@@ -371,7 +371,7 @@ impl<S: StateStore> LookupExecutor<S> {
             let all_data_iter = self
                 .arrangement
                 .state_table
-                .iter_with_pk_prefix(&lookup_row, lookup_epoch)
+                .iter_with_pk_prefix(&lookup_row, lookup_epoch, false)
                 .await?;
             pin_mut!(all_data_iter);
             while let Some(inner) = all_data_iter.next().await {

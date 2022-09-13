@@ -39,7 +39,7 @@ use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
-    serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
+    serialize_pk, serialize_pk_with_vnode, streaming_deserialize, streaming_partial_deserialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -209,6 +209,7 @@ impl<S: StateStore> StateTable<S> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
     ) -> Self {
+        let value_indices = (0..columns.len()).collect_vec();
         Self::new_with_distribution(
             store,
             table_id,
@@ -216,6 +217,27 @@ impl<S: StateStore> StateTable<S> {
             order_types,
             pk_indices,
             Distribution::fallback(),
+            value_indices,
+        )
+    }
+
+    /// Create a state table without distribution, used for unit tests.
+    pub fn new_without_distribution_partial(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        value_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution(
+            store,
+            table_id,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+            value_indices,
         )
     }
 
@@ -231,6 +253,7 @@ impl<S: StateStore> StateTable<S> {
             dist_key_indices,
             vnodes,
         }: Distribution,
+        value_indices: Vec<usize>,
     ) -> Self {
         let keyspace = Keyspace::table_root(store, &table_id);
 
@@ -257,7 +280,7 @@ impl<S: StateStore> StateTable<S> {
                     })
             })
             .collect_vec();
-        let value_indices = (0..table_columns.len()).collect_vec();
+
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -652,7 +675,12 @@ impl<S: StateStore> StateTable<S> {
 impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
-        self.iter_with_pk_prefix(Row::empty(), epoch).await
+        self.iter_with_pk_prefix(Row::empty(), epoch, false).await
+    }
+
+    /// This function scans rows from the relational table.
+    pub async fn iter_partial(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
+        self.iter_with_pk_prefix(Row::empty(), epoch, true).await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
@@ -660,6 +688,7 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
+        is_partial: bool,
     ) -> StorageResult<RowStream<'a, S>> {
         let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
@@ -702,15 +731,19 @@ impl<S: StateStore> StateTable<S> {
                 encoded_key_range_with_vnode,
                 self.get_read_option(epoch),
                 self.data_types.clone(),
+                self.value_indices.clone(),
             )
             .await?
-            .into_stream()
+            .into_stream(is_partial)
         };
 
-        Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
-                .into_stream(),
+        Ok(StateTableRowIter::new(
+            mem_table_iter,
+            storage_iter,
+            self.data_types.clone(),
+            self.value_indices.clone(),
         )
+        .into_stream(is_partial))
     }
 }
 
@@ -722,6 +755,7 @@ struct StateTableRowIter<'a, M, C> {
     _phantom: PhantomData<&'a ()>,
     /// Data type of each column, used for deserializing the row.
     data_types: DataTypes,
+    value_indices: Vec<usize>,
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
@@ -731,12 +765,18 @@ where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
     C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
 {
-    fn new(mem_table_iter: M, storage_iter: C, data_types: DataTypes) -> Self {
+    fn new(
+        mem_table_iter: M,
+        storage_iter: C,
+        data_types: DataTypes,
+        value_indices: Vec<usize>,
+    ) -> Self {
         Self {
             mem_table_iter,
             storage_iter,
             _phantom: PhantomData,
             data_types,
+            value_indices,
         }
     }
 
@@ -744,7 +784,7 @@ where
     /// memory(`mem_table`) with optional pk_bounds. If a record exist in both `shared_storage` and
     /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
     #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
-    async fn into_stream(self) {
+    async fn into_stream(self, is_partial: bool) {
         let storage_iter = self.storage_iter.peekable();
         pin_mut!(storage_iter);
 
@@ -763,8 +803,19 @@ where
                     let (_, row_op) = mem_table_iter.next().unwrap();
                     match row_op {
                         RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
-                            let row = streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                .map_err(err)?;
+                            let row = match is_partial {
+                                true => streaming_partial_deserialize(
+                                    &self.data_types,
+                                    row_bytes.as_ref(),
+                                    &self.value_indices,
+                                )
+                                .map_err(err)?,
+                                false => {
+                                    streaming_deserialize(&self.data_types, row_bytes.as_ref())
+                                        .map_err(err)?
+                                }
+                            };
+
                             yield Cow::Owned(row)
                         }
                         _ => {}
@@ -785,24 +836,52 @@ where
                             let (_, old_row_in_storage) = storage_iter.next().await.unwrap()?;
                             match row_op {
                                 RowOp::Insert(row_bytes) => {
-                                    let row =
-                                        streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                            .map_err(err)?;
+                                    let row = match is_partial {
+                                        true => streaming_partial_deserialize(
+                                            &self.data_types,
+                                            row_bytes.as_ref(),
+                                            &self.value_indices,
+                                        )
+                                        .map_err(err)?,
+                                        false => streaming_deserialize(
+                                            &self.data_types,
+                                            row_bytes.as_ref(),
+                                        )
+                                        .map_err(err)?,
+                                    };
+
                                     yield Cow::Owned(row);
                                 }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update((old_row_bytes, new_row_bytes)) => {
-                                    let old_row = streaming_deserialize(
-                                        &self.data_types,
-                                        old_row_bytes.as_ref(),
-                                    )
-                                    .map_err(err)?;
+                                    let old_row = match is_partial {
+                                        true => streaming_partial_deserialize(
+                                            &self.data_types,
+                                            old_row_bytes.as_ref(),
+                                            &self.value_indices,
+                                        )
+                                        .map_err(err)?,
+                                        false => streaming_deserialize(
+                                            &self.data_types,
+                                            old_row_bytes.as_ref(),
+                                        )
+                                        .map_err(err)?,
+                                    };
 
-                                    let new_row = streaming_deserialize(
-                                        &self.data_types,
-                                        new_row_bytes.as_ref(),
-                                    )
-                                    .map_err(err)?;
+                                    let new_row = match is_partial {
+                                        true => streaming_partial_deserialize(
+                                            &self.data_types,
+                                            new_row_bytes.as_ref(),
+                                            &self.value_indices,
+                                        )
+                                        .map_err(err)?,
+                                        false => streaming_deserialize(
+                                            &self.data_types,
+                                            new_row_bytes.as_ref(),
+                                        )
+                                        .map_err(err)?,
+                                    };
+
                                     debug_assert!(old_row == old_row_in_storage);
 
                                     yield Cow::Owned(new_row);
@@ -815,9 +894,19 @@ where
 
                             match row_op {
                                 RowOp::Insert(row_bytes) => {
-                                    let row =
-                                        streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                            .map_err(err)?;
+                                    let row = match is_partial {
+                                        true => streaming_partial_deserialize(
+                                            &self.data_types,
+                                            row_bytes.as_ref(),
+                                            &self.value_indices,
+                                        )
+                                        .map_err(err)?,
+                                        false => streaming_deserialize(
+                                            &self.data_types,
+                                            row_bytes.as_ref(),
+                                        )
+                                        .map_err(err)?,
+                                    };
 
                                     yield Cow::Owned(row);
                                 }
@@ -843,6 +932,7 @@ struct StorageIterInner<S: StateStore> {
     iter: StripPrefixIterator<S::Iter>,
     /// Data type of each column, used for deserializing the row.
     data_types: DataTypes,
+    value_indices: Vec<usize>,
 }
 
 impl<S: StateStore> StorageIterInner<S> {
@@ -852,6 +942,7 @@ impl<S: StateStore> StorageIterInner<S> {
         raw_key_range: R,
         read_options: ReadOptions,
         data_types: DataTypes,
+        value_indices: Vec<usize>,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
@@ -860,21 +951,34 @@ impl<S: StateStore> StorageIterInner<S> {
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;
-        let iter = Self { iter, data_types };
+        let iter = Self {
+            iter,
+            data_types,
+            value_indices,
+        };
         Ok(iter)
     }
 
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
-    async fn into_stream(mut self) {
+    async fn into_stream(mut self, is_partial: bool) {
         while let Some((key, value)) = self
             .iter
             .next()
             .stack_trace("storage_table_iter_next")
             .await?
         {
-            let row = streaming_deserialize(&self.data_types, value.as_ref()).map_err(err)?;
-            yield (key.to_vec(), row)
+            let row = match is_partial {
+                true => streaming_partial_deserialize(
+                    &self.data_types,
+                    value.as_ref(),
+                    &self.value_indices,
+                )
+                .map_err(err)?,
+                false => streaming_deserialize(&self.data_types, value.as_ref()).map_err(err)?,
+            };
+
+            yield (key.to_vec(), row);
         }
     }
 }
