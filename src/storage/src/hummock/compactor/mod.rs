@@ -39,13 +39,15 @@ use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key::{get_epoch, FullKey};
+use risingwave_hummock_sdk::key::{get_epoch, user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+    CompactTask, CompactTaskProgress, KeyRange as KeyRange_vec, LevelType, SstableInfo,
+    SubscribeCompactTasksResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::compact;
@@ -156,7 +158,6 @@ impl Compactor {
                 sstable_id_manager.remove_watermark_sst_id(tracker_id);
             },
         );
-
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
         let select_table_infos = compact_task
@@ -221,6 +222,7 @@ impl Compactor {
             .await;
         let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
+        generate_splits(&mut compact_task, context.clone()).await;
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -781,4 +783,71 @@ fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionF
     }
 
     multi_filter
+}
+
+async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) {
+    let sstable_infos = compact_task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .collect_vec();
+
+    let compaction_size = compact_task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .map(|table_info| table_info.file_size)
+        .sum::<u64>();
+
+    let sstable_size = (context.options.sstable_size_mb as u64) << 20;
+    if compaction_size > sstable_size {
+        let mut indexes = vec![];
+        // preload the meta and get the smallest key to split sub_compaction
+        for sstable_info in sstable_infos {
+            indexes.extend(
+                context
+                    .sstable_store
+                    .sstable(sstable_info, &mut StoreLocalStatistic::default())
+                    .await
+                    .unwrap()
+                    .value()
+                    .meta
+                    .block_metas
+                    .iter()
+                    .map(|block| {
+                        let data_size = block.len;
+                        let full_key =
+                            FullKey::from_user_key_slice(user_key(&block.smallest_key), u64::MAX)
+                                .into_inner();
+                        (data_size, full_key.to_vec())
+                    })
+                    .collect_vec(),
+            );
+        }
+        // sort by key, as for every data block has the same size;
+        indexes.sort_by(|a, b| VersionedComparator::compare_key(a.1.as_ref(), b.1.as_ref()));
+        let mut splits: Vec<KeyRange_vec> = vec![];
+        splits.push(KeyRange_vec::new(vec![], vec![]));
+        let parallelism = std::cmp::min(
+            indexes.len() as u64,
+            context.options.max_sub_compaction as u64,
+        );
+        let sub_compaction_data_size = compaction_size / parallelism;
+
+        if parallelism > 1 {
+            let mut last_buffer_size = 0;
+            let mut last_key: Vec<u8> = vec![];
+            for (data_size, key) in indexes {
+                if last_buffer_size >= sub_compaction_data_size && !last_key.eq(&key) {
+                    splits.last_mut().unwrap().right = key.clone();
+                    splits.push(KeyRange_vec::new(key.clone(), vec![]));
+                    last_buffer_size = data_size as u64;
+                } else {
+                    last_buffer_size += data_size as u64;
+                }
+                last_key = key;
+            }
+            compact_task.splits = splits;
+        }
+    }
 }
