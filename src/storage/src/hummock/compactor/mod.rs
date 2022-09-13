@@ -851,5 +851,7 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
         } else {
             compact_task.splits = vec![KeyRange_vec::inf()];
         }
+    } else {
+        compact_task.splits = vec![KeyRange_vec::inf()];
     }
 }
