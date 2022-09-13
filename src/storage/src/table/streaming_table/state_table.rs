@@ -421,33 +421,31 @@ impl<S: StateStore> StateTable<S> {
 
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
-    pub fn insert(&mut self, value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, value: Row) {
         let pk = value.by_indices(self.pk_indices());
 
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = value.serialize().map_err(err)?;
+        let value_bytes = value.serialize();
         self.mem_table
             .insert(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
-        Ok(())
     }
 
     /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
-    pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, old_value: Row) {
         let pk = old_value.by_indices(self.pk_indices());
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = old_value.serialize().map_err(err)?;
+        let value_bytes = old_value.serialize();
         self.mem_table
             .delete(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
-        Ok(())
     }
 
     /// Update a row. The old and new value should have the same pk.
-    pub fn update(&mut self, old_value: Row, new_value: Row) -> StorageResult<()> {
+    pub fn update(&mut self, old_value: Row, new_value: Row) {
         let old_pk = old_value.by_indices(self.pk_indices());
         let new_pk = new_value.by_indices(self.pk_indices());
         debug_assert_eq!(old_pk, new_pk);
@@ -458,12 +456,9 @@ impl<S: StateStore> StateTable<S> {
             self.compute_vnode_by_pk(&new_pk),
         );
 
-        let old_value_bytes = old_value.serialize().map_err(err)?;
-        let new_value_bytes = new_value.serialize().map_err(err)?;
         self.mem_table
-            .update(new_key_bytes, old_value_bytes, new_value_bytes)
+            .update(new_key_bytes, old_value.serialize(), new_value.serialize())
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
-        Ok(())
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
