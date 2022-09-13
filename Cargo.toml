@@ -44,9 +44,11 @@ members = [
 
 [profile.dev]
 lto = 'off'
+split-debuginfo = 'unpacked'
 
 [profile.release]
 debug = true
+split-debuginfo = 'unpacked'
 
 [profile.bench]
 opt-level = 3
