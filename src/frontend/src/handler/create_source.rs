@@ -117,18 +117,12 @@ pub async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
-    let have_pk = {
-        let mut have_pk = false;
-        for cons in &stmt.constraints {
-            if let TableConstraint::Unique { is_primary, .. } = cons {
-                if is_primary == &true {
-                    have_pk = true;
-                    break;
-                }
-            }
+    let has_pk = stmt.constraints.iter().any(|cons| {
+        match cons {
+            TableConstraint::Unique { is_primary, .. } => *is_primary,
+            _ => false
         }
-        have_pk
-    };
+    });
 
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
     let (mut columns, pk_column_ids, row_id_index) =
@@ -174,7 +168,7 @@ pub async fn handle_create_source(
             pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
         },
         SourceSchema::DebeziumJson => {
-            if !have_pk {
+            if !has_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with row format debezium."
                         .to_string(),
