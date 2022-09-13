@@ -54,7 +54,7 @@ pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{
     agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_type,
-    least_restrictive, AggFuncSig, CastContext, CastSig, DataTypeName, FuncSign,
+    least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
 };
 pub use utils::*;
 
@@ -460,6 +460,19 @@ impl ExprImpl {
             match function_call.clone().decompose_as_binary() {
                 (_, ExprImpl::InputRef(x), y) if y.is_const() => Some((*x, y)),
                 (_, x, ExprImpl::InputRef(y)) if x.is_const() => Some((*y, x)),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn as_eq_correlated_input_ref(&self) -> Option<(InputRef, CorrelatedInputRef)> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+            function_call.get_expr_type() == ExprType::Equal{
+            match function_call.clone().decompose_as_binary() {
+                (_, ExprImpl::InputRef(x), ExprImpl::CorrelatedInputRef(y)) => Some((*x, *y)),
+                (_, ExprImpl::CorrelatedInputRef(x), ExprImpl::InputRef(y)) => Some((*y, *x)),
                 _ => None,
             }
         } else {

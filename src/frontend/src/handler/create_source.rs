@@ -33,7 +33,6 @@ use super::create_table::{
     bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
 };
 use super::privilege::check_privileges;
-use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
 use crate::handler::privilege::ObjectCheckItem;
@@ -63,7 +62,13 @@ pub(crate) fn make_prost_source(
             )?;
         }
 
-        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &schema_name)?
+            .id();
+        (db_id, schema_id)
     };
 
     Ok(ProstSource {
@@ -111,11 +116,11 @@ pub async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
-    let with_properties = handle_with_properties("create_source", stmt.with_properties.0)?;
-
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
+
+    let with_properties = context.with_options.inner().clone();
 
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
@@ -165,6 +170,11 @@ pub async fn handle_create_source(
     };
 
     let session = context.session_ctx.clone();
+    {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (schema_name, name) = Binder::resolve_table_name(stmt.source_name.clone())?;
+        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+    }
     let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {

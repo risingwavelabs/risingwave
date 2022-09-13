@@ -61,6 +61,8 @@ pub trait CompactionSchedulePolicy: Send + Sync {
     /// Notify the policy of the completion of a compaction task to adjust the next compactor
     /// to schedule.
     fn report_compact_task(&mut self, context_id: HummockContextId, compact_task: &CompactTask);
+
+    fn compactor_num(&self) -> usize;
 }
 
 // This strategy is retained just for reference, it is not used.
@@ -158,6 +160,10 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
     }
 
     fn report_compact_task(&mut self, _context_id: HummockContextId, _compact_task: &CompactTask) {}
+
+    fn compactor_num(&self) -> usize {
+        self.compactors.len()
+    }
 }
 
 /// The score must be linear to the input for easy update.
@@ -316,6 +322,10 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             self.update_compactor_score(context_id, *score, task);
         }
     }
+
+    fn compactor_num(&self) -> usize {
+        self.score_to_compactor.len()
+    }
 }
 
 #[cfg(test)]
@@ -373,6 +383,7 @@ mod tests {
                     key_range: None,
                     file_size: input_file_size,
                     table_ids: vec![],
+                    meta_offset: 0,
                 }],
             }],
             splits: vec![],

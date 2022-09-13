@@ -16,19 +16,20 @@
  */
 
 import { Box, Button, Flex, Text, useToast, VStack } from "@chakra-ui/react"
-import { Dag, dagStratify } from "d3-dag"
 import { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import Link from "next/link"
 import { useRouter } from "next/router"
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
+import { StreamGraph } from "../components/StreamGraph"
 import Title from "../components/Title"
+import { ActorPoint } from "../lib/layout"
 import { Table as RwTable } from "../proto/gen/catalog"
 import { getMaterializedViews } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 
-function buildMvDependencyAsEdges(mvList: RwTable[]): Dag {
+function buildMvDependencyAsEdges(mvList: RwTable[]): ActorPoint[] {
   const edges = []
   for (const mv of reverse(sortBy(mvList, "id"))) {
     if (!mv.name.startsWith("__")) {
@@ -36,10 +37,11 @@ function buildMvDependencyAsEdges(mvList: RwTable[]): Dag {
         id: mv.id.toString(),
         name: mv.name,
         parentIds: mv.dependentRelations.map((r) => r.toString()),
+        order: mv.id,
       })
     }
   }
-  return dagStratify()(edges)
+  return edges
 }
 
 export default function StreamingGraph() {
@@ -67,51 +69,70 @@ export default function StreamingGraph() {
     return () => {}
   }, [toast])
 
+  const mvDependencyCallback = useCallback(() => {
+    if (mvList) {
+      return buildMvDependencyAsEdges(mvList)
+    } else {
+      return undefined
+    }
+  }, [mvList])
+
+  const mvDependency = mvDependencyCallback()
+
   const router = useRouter()
 
   const retVal = (
-    <Flex p={3} height="100vh" flexDirection="column">
+    <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
       <Title>Streaming Graph</Title>
-      <Flex
-        flexDirection="row"
-        height="full"
-        width={SIDEBAR_WIDTH}
-        overflowY="scroll"
-      >
-        <VStack
-          width="xs"
+      <Flex flexDirection="row" height="full">
+        <Flex
+          width={SIDEBAR_WIDTH}
           height="full"
           maxHeight="full"
           mr={3}
           alignItems="flex-start"
-          overflowY="scroll"
+          flexDirection="column"
         >
           <Text fontWeight="semibold" mb={3}>
             All Nodes
           </Text>
-          <VStack width="full" spacing={1}>
-            {mvList?.map((mv) => {
-              const match = router.query.id === mv.id.toString()
-              return (
-                <Link href={`?id=${mv.id}`} key={mv.id}>
-                  <Button
-                    colorScheme={match ? "teal" : "gray"}
-                    color={match ? "teal.600" : "gray.500"}
-                    variant={match ? "outline" : "ghost"}
-                    width="full"
-                    py={0}
-                    height={8}
-                    justifyContent="flex-start"
-                  >
-                    {mv.name}
-                  </Button>
-                </Link>
-              )
-            })}
-          </VStack>
-        </VStack>
-        <Box flex={1} height="full" ml={3}>
+          <Box flex={1} overflowY="scroll">
+            <VStack width="full" spacing={1}>
+              {mvList?.map((mv) => {
+                const match = router.query.id === mv.id.toString()
+                return (
+                  <Link href={`?id=${mv.id}`} key={mv.id}>
+                    <Button
+                      colorScheme={match ? "teal" : "gray"}
+                      color={match ? "teal.600" : "gray.500"}
+                      variant={match ? "outline" : "ghost"}
+                      width="full"
+                      py={0}
+                      height={8}
+                      justifyContent="flex-start"
+                    >
+                      {mv.name}
+                    </Button>
+                  </Link>
+                )
+              })}
+            </VStack>
+          </Box>
+        </Flex>
+        <Box
+          flex={1}
+          height="full"
+          ml={3}
+          overflowX="scroll"
+          overflowY="scroll"
+        >
           <Text fontWeight="semibold">Graph</Text>
+          {mvDependency && (
+            <StreamGraph
+              nodes={mvDependency}
+              selectedId={router.query.id as string}
+            />
+          )}
         </Box>
       </Flex>
     </Flex>

@@ -14,79 +14,141 @@
 
 use std::cmp::Ordering;
 use std::future::Future;
+use std::sync::atomic::AtomicU64;
+use std::sync::{atomic, Arc};
+use std::time::Instant;
 
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::compactor::sstable_store::SstableBlocks;
+use super::sstable_store::BlockStream;
 use crate::hummock::compactor::CompactorSstableStoreRef;
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
-pub struct SstablePrefetchIterator {
-    /// The iterator of the current block.
+/// Iterates over the KV-pairs of an SST while downloading it.
+struct SstableStreamIterator {
+    /// The downloading stream.
+    block_stream: BlockStream,
+
+    /// Iterates over the KV-pairs of the current block.
     block_iter: Option<BlockIterator>,
 
-    /// Current block index.
-    cur_idx: usize,
+    /// The maximum number of remaining blocks that iterator will download and read.
+    remaining_blocks: usize,
 
-    /// Reference to the sst
-    sst: TableHolder,
-
-    blocks: SstableBlocks,
+    /// Counts the time used for IO.
+    stats_ptr: Arc<AtomicU64>,
 }
 
-impl SstablePrefetchIterator {
-    pub fn new(sst: TableHolder, blocks: SstableBlocks) -> Self {
+impl SstableStreamIterator {
+    // We have to handle two internal iterators.
+    //   `block_stream`: iterates over the blocks of the table.
+    //     `block_iter`: iterates over the KV-pairs of the current block.
+    // These iterators work in different ways.
+
+    // BlockIterator works as follows: After new(), we call seek(). That brings us
+    // to the first element. Calling next() then brings us to the second element and does not
+    // return anything.
+
+    // BlockStream follows a different approach. After new(), we do not seek, instead next()
+    // returns the first value.
+
+    /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockStream`].
+    /// The iterator reads at most `max_block_count` from the stream.
+    pub fn new(
+        block_stream: BlockStream,
+        max_block_count: usize,
+        stats: &StoreLocalStatistic,
+    ) -> Self {
         Self {
+            block_stream,
             block_iter: None,
-            cur_idx: 0,
-            sst,
-            blocks,
+            remaining_blocks: max_block_count,
+            stats_ptr: stats.remote_io_time.clone(),
         }
     }
 
-    /// Seeks to a block, and then seeks to the key if `seek_key` is given.
-    fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        while let Some((next_idx, block)) = self.blocks.next() {
-            if next_idx >= idx {
-                let block = BlockHolder::from_owned_block(block);
-                let mut block_iter = BlockIterator::new(block);
-                if let Some(key) = seek_key {
-                    block_iter.seek(key);
-                } else {
-                    block_iter.seek_to_first();
-                }
-                self.block_iter = Some(block_iter);
-                self.cur_idx = idx;
-                return Ok(());
+    /// Initialises the iterator by moving it to the first KV-pair in the stream's first block where
+    /// key >= `seek_key`. If that block does not contain such a KV-pair, the iterator continues to
+    /// the first KV-pair of the next block. If `seek_key` is not given, the iterator will move to
+    /// the very first KV-pair of the stream's first block.
+    pub async fn seek(&mut self, seek_key: Option<&[u8]>) -> HummockResult<()> {
+        // Load first block.
+        self.next_block().await?;
+
+        // We assume that a block always contains at least one KV pair. Subsequently, if
+        // `next_block()` loads a new block (i.e., `block_iter` is not `None`), then `block_iter` is
+        // also valid and pointing on the block's first KV-pair.
+
+        if let (Some(block_iter), Some(seek_key)) = (self.block_iter.as_mut(), seek_key) {
+            block_iter.seek(seek_key);
+            if !block_iter.is_valid() {
+                // `seek_key` is larger than everything in the first block.
+                self.next_block().await?;
             }
         }
-        self.block_iter = None;
+
+        if self.block_iter.is_none() {
+            // End of stream.
+            self.remaining_blocks = 0;
+        }
+
         Ok(())
     }
 
-    pub fn next(&mut self) -> HummockResult<()> {
+    /// Loads a new block, creates a new iterator for it, and stores that iterator in
+    /// `self.block_iter`. The created iterator points to the block's first KV-pair. If the end of
+    /// the stream is reached or `self.remaining_blocks` is zero, then the function sets
+    /// `self.block_iter` to `None`.
+    async fn next_block(&mut self) -> HummockResult<()> {
+        // Check if we want and if we can load the next block.
+        if self.remaining_blocks > 0 && let Some(block) = self.download_next_block().await? {
+            let mut block_iter = BlockIterator::new(block);
+            block_iter.seek_to_first();
+
+            self.remaining_blocks -= 1;
+            self.block_iter = Some(block_iter);
+        } else {
+            self.remaining_blocks = 0;
+            self.block_iter = None;
+        }
+
+        Ok(())
+    }
+
+    /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
+    async fn download_next_block(&mut self) -> HummockResult<Option<BlockHolder>> {
+        let now = Instant::now();
+        let result = self.block_stream.next().await;
+        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+        self.stats_ptr
+            .fetch_add(add as u64, atomic::Ordering::Relaxed);
+
+        result
+    }
+
+    /// Moves to the next KV-pair in the table. Assumes that the current position is valid. Even if
+    /// the next position is invalid, the function returns `Ok(())`.
+    ///
+    /// Do not use `next()` to initialise the iterator (i.e. do not use it to find the first
+    /// KV-pair). Instead, use `seek()`. Afterwards, use `next()` to reach the second KV-pair and
+    /// onwards.
+    pub async fn next(&mut self) -> HummockResult<()> {
+        if !self.is_valid() {
+            return Ok(());
+        }
+
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();
-        if block_iter.is_valid() {
-            Ok(())
-        } else {
-            if let Some((idx, block)) = self.blocks.next() {
-                assert_eq!(idx, self.cur_idx + 1);
-                let mut block_iter = BlockIterator::new(BlockHolder::from_owned_block(block));
-                block_iter.seek_to_first();
-                self.block_iter = Some(block_iter);
-                self.cur_idx += 1;
-            } else {
-                self.block_iter = None;
-            }
-            Ok(())
+        if !block_iter.is_valid() {
+            self.next_block().await?;
         }
+
+        Ok(())
     }
 
     fn key(&self) -> &[u8] {
@@ -99,41 +161,18 @@ impl SstablePrefetchIterator {
     }
 
     fn is_valid(&self) -> bool {
+        // True iff block_iter exists and is valid.
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
-    }
-
-    fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(0, None)
-    }
-
-    fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        let block_idx = self
-            .sst
-            .value()
-            .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                // compare by version comparator
-                // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                // partition point should be `prev(<=)` instead of `<`.
-                let ord = VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
-                ord == Ordering::Less || ord == Ordering::Equal
-            })
-            .saturating_sub(1); // considering the boundary of 0
-        self.seek_idx(block_idx, Some(key))?;
-        if !self.is_valid() {
-            // seek to next block
-            self.seek_idx(block_idx + 1, None)?;
-        }
-        Ok(())
     }
 }
 
+/// Iterates over the KV-pairs of a given list of SSTs. The key-ranges of these SSTs are assumed to
+/// be consecutive and non-overlapping.
 pub struct ConcatSstableIterator {
     key_range: KeyRange,
 
     /// The iterator of the current table.
-    sstable_iter: Option<SstablePrefetchIterator>,
+    sstable_iter: Option<SstableStreamIterator>,
 
     /// Current table index.
     cur_idx: usize,
@@ -165,17 +204,18 @@ impl ConcatSstableIterator {
         }
     }
 
-    /// Seeks to a table, and then seeks to the key if `seek_key` is given.
+    /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
+    /// The function assumes that `seek_key` is at most as large as the maximum key in the SST.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        if idx >= self.tables.len() {
-            self.sstable_iter = None;
-        } else {
-            self.sstable_iter.take();
+        self.sstable_iter.take();
+
+        if idx < self.tables.len() {
             let table = self
                 .sstable_store
-                .sstable(self.tables[idx].id, &mut self.stats)
+                .sstable(&self.tables[idx], &mut self.stats)
                 .await?;
             let block_metas = &table.value().meta.block_metas;
+
             let start_index = if self.key_range.left.is_empty() {
                 0
             } else {
@@ -197,16 +237,22 @@ impl ConcatSstableIterator {
             if end_index <= start_index {
                 return Ok(());
             }
-            let data = self
+
+            let stats_ptr = self.stats.remote_io_time.clone();
+            let now = Instant::now();
+
+            let block_stream = self
                 .sstable_store
-                .scan(table.value(), start_index, end_index, &mut self.stats)
+                .get_stream(table.value(), Some(start_index))
                 .await?;
-            let mut sstable_iter = SstablePrefetchIterator::new(table, data);
-            if let Some(key) = seek_key {
-                sstable_iter.seek(key)?;
-            } else {
-                sstable_iter.rewind()?;
-            }
+
+            // Determine time needed to open stream.
+            let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+            stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
+
+            let mut sstable_iter =
+                SstableStreamIterator::new(block_stream, end_index - start_index, &self.stats);
+            sstable_iter.seek(seek_key).await?;
 
             self.sstable_iter = Some(sstable_iter);
             self.cur_idx = idx;
@@ -225,12 +271,13 @@ impl HummockIterator for ConcatSstableIterator {
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {
             let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
-            sstable_iter.next()?;
 
+            // Does just calling `next()` suffice?
+            sstable_iter.next().await?;
             if sstable_iter.is_valid() {
                 Ok(())
             } else {
-                // seek to next table
+                // No, seek to next table.
                 self.seek_idx(self.cur_idx + 1, None).await?;
                 Ok(())
             }
@@ -253,23 +300,21 @@ impl HummockIterator for ConcatSstableIterator {
         async { self.seek_idx(0, None).await }
     }
 
+    /// Resets the iterator and seeks to the first position where the stored key >= `key`.
     fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
         async {
-            let table_idx = self
-                .tables
-                .partition_point(|table| {
-                    let ord = VersionedComparator::compare_key(
-                        &table.key_range.as_ref().unwrap().left,
-                        key,
-                    );
-                    ord == Ordering::Less || ord == Ordering::Equal
-                })
-                .saturating_sub(1); // considering the boundary of 0
-            self.seek_idx(table_idx, Some(key)).await?;
-            if self.sstable_iter.is_none() && table_idx + 1 < self.tables.len() {
-                self.seek_idx(table_idx + 1, Some(key)).await?;
-            }
-            Ok(())
+            let table_idx = self.tables.partition_point(|table| {
+                // We use the maximum key of an SST for the search. That way, we guarantee that the
+                // resulting SST contains either that key or the next-larger KV-pair. Subsequently,
+                // we avoid calling `seek_idx()` twice if the determined SST does not contain `key`.
+
+                // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
+                // (including its max. key) produce the same search result.
+                let max_sst_key = &table.key_range.as_ref().unwrap().right;
+                VersionedComparator::compare_key(max_sst_key, key) == Ordering::Less
+            });
+
+            self.seek_idx(table_idx, Some(key)).await
         }
     }
 

@@ -145,6 +145,14 @@ pub async fn compute_node_serve(
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
+        assert!(
+            storage
+                .local_version_manager()
+                .get_pinned_version()
+                .is_valid(),
+            "local version should have been initialized by observer_manager"
+        );
+
         extra_info_sources.push(storage.sstable_id_manager());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
@@ -251,6 +259,7 @@ pub async fn compute_node_serve(
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .tcp_nodelay(true)
             .layer(StackTraceMiddlewareLayer::new_optional(
                 opts.enable_async_stack_trace
                     .then_some(grpc_stack_trace_mgr),

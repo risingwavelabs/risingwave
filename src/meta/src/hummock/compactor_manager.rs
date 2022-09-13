@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use fail::fail_point;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -64,6 +65,10 @@ impl Compactor {
     }
 
     pub async fn send_task(&self, task: Task) -> MetaResult<()> {
+        fail_point!("compaction_send_task_fail", |_| Err(anyhow::anyhow!(
+            "compaction_send_task_fail"
+        )
+        .into()));
         self.sender
             .send(Ok(SubscribeCompactTasksResponse { task: Some(task) }))
             .await
@@ -316,5 +321,9 @@ impl CompactorManager {
                 }
             }
         }
+    }
+
+    pub fn compactor_num(&self) -> usize {
+        self.policy.read().compactor_num()
     }
 }

@@ -22,13 +22,14 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
-use risingwave_common::array::Row;
+use itertools::{izip, Itertools};
+use risingwave_common::array::{Op, Row, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
-use risingwave_common::types::VirtualNode;
-use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::types::{DataType, VirtualNode};
+use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
 use risingwave_pb::catalog::Table;
@@ -42,6 +43,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
+use crate::table::streaming_table::mem_table::MemTableError;
 use crate::table::{compute_vnode, DataTypes, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
@@ -57,6 +59,9 @@ pub struct StateTable<S: StateStore> {
 
     /// Used for serializing the primary key.
     pk_serializer: OrderedRowSerializer,
+
+    /// Used for deserializing the primary key. Debug-only for now.
+    pk_deserializer: OrderedRowDeserializer,
 
     /// Datatypes of each column, used for deserializing the row.
     data_types: DataTypes,
@@ -107,7 +112,7 @@ impl<S: StateStore> StateTable<S> {
             .iter()
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
-        let order_types = table_catalog
+        let order_types: Vec<OrderType> = table_catalog
             .order_key
             .iter()
             .map(|col_order| {
@@ -144,7 +149,13 @@ impl<S: StateStore> StateTable<S> {
             .collect_vec();
 
         let keyspace = Keyspace::table_root(store, &table_id);
-        let pk_serializer = OrderedRowSerializer::new(order_types);
+        let pk_serializer = OrderedRowSerializer::new(order_types.clone());
+
+        let pk_data_types = pk_indices
+            .iter()
+            .map(|i| table_columns[*i].data_type.clone())
+            .collect();
+        let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, order_types);
 
         let data_types = table_columns.iter().map(|c| c.data_type.clone()).collect();
 
@@ -171,6 +182,7 @@ impl<S: StateStore> StateTable<S> {
             mem_table: MemTable::new(),
             keyspace,
             pk_serializer,
+            pk_deserializer,
             data_types,
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
@@ -215,7 +227,14 @@ impl<S: StateStore> StateTable<S> {
     ) -> Self {
         let keyspace = Keyspace::table_root(store, &table_id);
 
-        let pk_serializer = OrderedRowSerializer::new(order_types);
+        let pk_serializer = OrderedRowSerializer::new(order_types.clone());
+
+        let pk_data_types = pk_indices
+            .iter()
+            .map(|i| table_columns[*i].data_type.clone())
+            .collect();
+        let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, order_types);
+
         let data_types = table_columns.iter().map(|c| c.data_type.clone()).collect();
         let dist_key_in_pk_indices = dist_key_indices
             .iter()
@@ -235,6 +254,7 @@ impl<S: StateStore> StateTable<S> {
             mem_table: MemTable::new(),
             keyspace,
             pk_serializer,
+            pk_deserializer,
             data_types,
             pk_indices,
             dist_key_indices,
@@ -358,6 +378,38 @@ impl<S: StateStore> StateTable<S> {
 
 // write
 impl<S: StateStore> StateTable<S> {
+    fn pretty_row_op(row_op: &RowOp, data_types: &[DataType]) -> String {
+        match row_op {
+            RowOp::Insert(after) => {
+                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
+                format!("Insert({:?})", &after)
+            }
+            RowOp::Delete(before) => {
+                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
+                format!("Delete({:?})", &before)
+            }
+            RowOp::Update((before, after)) => {
+                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
+                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
+                format!("Update({:?}, {:?})", &before, &after)
+            }
+        }
+    }
+
+    fn handle_mem_table_error(&self, e: MemTableError) {
+        match e {
+            MemTableError::Conflict { key, prev, new } => {
+                let key = self.pk_deserializer.deserialize(&key).unwrap();
+                panic!(
+                    "mem-table operation conflicts! key: {:?}, prev: {}, new: {}",
+                    &key,
+                    Self::pretty_row_op(&prev, self.data_types.as_ref()),
+                    Self::pretty_row_op(&new, self.data_types.as_ref())
+                )
+            }
+        }
+    }
+
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
     pub fn insert(&mut self, value: Row) -> StorageResult<()> {
@@ -366,7 +418,9 @@ impl<S: StateStore> StateTable<S> {
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         let value_bytes = value.serialize().map_err(err)?;
-        self.mem_table.insert(key_bytes, value_bytes);
+        self.mem_table
+            .insert(key_bytes, value_bytes)
+            .unwrap_or_else(|e| self.handle_mem_table_error(e));
         Ok(())
     }
 
@@ -377,7 +431,9 @@ impl<S: StateStore> StateTable<S> {
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         let value_bytes = old_value.serialize().map_err(err)?;
-        self.mem_table.delete(key_bytes, value_bytes);
+        self.mem_table
+            .delete(key_bytes, value_bytes)
+            .unwrap_or_else(|e| self.handle_mem_table_error(e));
         Ok(())
     }
 
@@ -396,8 +452,61 @@ impl<S: StateStore> StateTable<S> {
         let old_value_bytes = old_value.serialize().map_err(err)?;
         let new_value_bytes = new_value.serialize().map_err(err)?;
         self.mem_table
-            .update(new_key_bytes, old_value_bytes, new_value_bytes);
+            .update(new_key_bytes, old_value_bytes, new_value_bytes)
+            .unwrap_or_else(|e| self.handle_mem_table_error(e));
         Ok(())
+    }
+
+    /// Write batch with a `StreamChunk` which should have the same schema with the table.
+    // allow(izip, which use zip instead of zip_eq)
+    #[allow(clippy::disallowed_methods)]
+    pub fn write_chunk(&mut self, chunk: StreamChunk) {
+        let (chunk, op) = chunk.into_parts();
+        let hash_builder = CRC32FastBuilder {};
+
+        let mut vnode_and_pks = vec![vec![]; chunk.capacity()];
+
+        chunk
+            .get_hash_values(&self.dist_key_indices, hash_builder)
+            .unwrap()
+            .into_iter()
+            .zip_eq(vnode_and_pks.iter_mut())
+            .for_each(|(h, vnode_and_pk)| vnode_and_pk.extend(h.to_vnode().to_be_bytes()));
+        let values = chunk.serialize();
+
+        let chunk = chunk.reorder_columns(self.pk_indices());
+        chunk
+            .rows_with_holes()
+            .zip_eq(vnode_and_pks.iter_mut())
+            .for_each(|(r, vnode_and_pk)| {
+                if let Some(r) = r {
+                    self.pk_serializer.serialize_ref(r, vnode_and_pk);
+                }
+            });
+
+        let (_, vis) = chunk.into_parts();
+        match vis {
+            Vis::Bitmap(vis) => {
+                for ((op, key, value), vis) in izip!(op, vnode_and_pks, values).zip_eq(vis.iter()) {
+                    if vis {
+                        match op {
+                            Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
+                            Op::Delete | Op::UpdateDelete => self.mem_table.delete(key, value),
+                        }
+                        .unwrap_or_else(|e| self.handle_mem_table_error(e))
+                    }
+                }
+            }
+            Vis::Compact(_) => {
+                for (op, key, value) in izip!(op, vnode_and_pks, values) {
+                    match op {
+                        Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
+                        Op::Delete | Op::UpdateDelete => self.mem_table.delete(key, value),
+                    }
+                    .unwrap_or_else(|e| self.handle_mem_table_error(e))
+                }
+            }
+        }
     }
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
@@ -407,7 +516,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Write to state store.
-    pub async fn batch_write_rows(
+    async fn batch_write_rows(
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,

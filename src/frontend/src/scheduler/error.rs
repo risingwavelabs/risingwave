@@ -32,8 +32,13 @@ pub enum SchedulerError {
     #[error("Empty workers found")]
     EmptyWorkerNodes,
 
+    /// FIXME: include task error msg in this error.
     #[error("Task fail")]
     TaskExecutionError,
+
+    /// Used when receive cancel request (ctrl-c) from user.
+    #[error("Canceled by user")]
+    QueryCancelError,
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
@@ -42,5 +47,11 @@ pub enum SchedulerError {
 impl From<SchedulerError> for RwError {
     fn from(s: SchedulerError) -> Self {
         ErrorCode::SchedulerError(Box::new(s)).into()
+    }
+}
+
+impl From<RwError> for SchedulerError {
+    fn from(e: RwError) -> Self {
+        Self::Internal(e.into())
     }
 }

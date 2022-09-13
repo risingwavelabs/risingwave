@@ -39,7 +39,6 @@ impl<S: StateStore> TopNExecutor<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
-        total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
@@ -55,7 +54,6 @@ impl<S: StateStore> TopNExecutor<S> {
                 order_pairs,
                 offset_and_limit,
                 pk_indices,
-                total_count,
                 executor_id,
                 key_indices,
                 state_table,
@@ -310,7 +308,6 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
-        total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
@@ -323,8 +320,7 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
 
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
-        let managed_state =
-            ManagedTopNState::<S>::new(total_count, state_table, ordered_row_deserializer);
+        let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
 
         Ok(Self {
             info: ExecutorInfo {
@@ -363,13 +359,12 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
                     self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone(), epoch)?;
+                        .insert(ordered_pk_row.clone(), row.clone())?;
                 }
 
                 Op::Delete | Op::UpdateDelete => {
                     // First remove the row from state store
-                    self.managed_state
-                        .delete(&ordered_pk_row, row.clone(), epoch)?;
+                    self.managed_state.delete(&ordered_pk_row, row.clone())?;
                 }
             }
             self.cache
@@ -385,7 +380,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                 )
                 .await?
         }
-        // compare the those two ranges and emit the differantial result
+
         generate_output(res_rows, res_ops, &self.schema)
     }
 
@@ -618,7 +613,6 @@ mod tests {
                 order_types,
                 (3, 1000),
                 vec![0, 1],
-                0,
                 1,
                 vec![],
                 state_table,
@@ -715,7 +709,6 @@ mod tests {
                 order_types,
                 (0, 4),
                 vec![0, 1],
-                0,
                 1,
                 vec![],
                 state_table,
@@ -823,7 +816,6 @@ mod tests {
                 order_types,
                 (3, 4),
                 vec![0, 1],
-                0,
                 1,
                 vec![],
                 state_table,
@@ -922,7 +914,6 @@ mod tests {
                 order_types,
                 (1, 3),
                 vec![0, 3],
-                0,
                 1,
                 vec![],
                 state_table,
@@ -999,7 +990,6 @@ mod tests {
                 order_types.clone(),
                 (1, 3),
                 vec![0, 3],
-                0,
                 1,
                 vec![],
                 state_table.clone(),
@@ -1041,7 +1031,6 @@ mod tests {
                 order_types.clone(),
                 (1, 3),
                 vec![3],
-                0,
                 1,
                 vec![],
                 state_table,

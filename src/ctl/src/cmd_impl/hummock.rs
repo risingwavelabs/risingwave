@@ -18,6 +18,7 @@ mod list_kv;
 pub use list_kv::*;
 mod sst_dump;
 pub use sst_dump::*;
+pub mod observer;
 mod trigger_full_gc;
 mod trigger_manual_compaction;
 
