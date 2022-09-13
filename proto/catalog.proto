@@ -91,7 +91,7 @@ message Table {
   ColumnIndex vnode_col_idx = 18;
   // The column indices which are stored in the state store's value with row-encoding. 
   // Currently is not supported yet and expected to be `[0..columns.len()]`
-  repeated int32 value_indices = 19; 
+  repeated int32 value_indices = 19;
 }
 
 message Schema {
