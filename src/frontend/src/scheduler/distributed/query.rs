@@ -19,28 +19,20 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::array::DataChunk;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{
-    ExchangeNode, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
-    TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst,
-};
+use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, warn};
-use uuid::Uuid;
 
 use super::{QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
-use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
-use crate::scheduler::plan_fragmenter::{
-    ExecutionPlanNode, Query, StageId, TaskId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID,
-};
+use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
     ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError, SchedulerResult,
@@ -165,10 +157,7 @@ impl QueryExecution {
     /// Note the two shutdown channel sender and receivers are not dual.
     /// One is used for propagate error to `QueryResultFetcher`, one is used for listening on
     /// cancel request (from ctrl-c, cli, ui etc).
-    pub async fn start(
-        &self,
-        // shutdown_tx: Sender<SchedulerError>,
-    ) -> SchedulerResult<QueryResultFetcher> {
+    pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
 
@@ -307,7 +296,6 @@ impl QueryRunner {
             }
         };
 
-        let root_fragment = self.create_plan_fragment();
         let root_stage_result = QueryResultFetcher::new(
             self.epoch,
             self.hummock_snapshot_manager.clone(),
@@ -317,7 +305,6 @@ impl QueryRunner {
                 ..Default::default()
             },
             self.compute_client_pool.clone(),
-            root_fragment,
             chunk_rx,
         );
 
@@ -342,11 +329,7 @@ impl QueryRunner {
 
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
-    async fn handle_cancel_or_failed_stage(
-        mut self,
-        // shutdown_tx: Sender<SchedulerError>,
-        reason: SchedulerError,
-    ) {
+    async fn handle_cancel_or_failed_stage(mut self, reason: SchedulerError) {
         // Consume sender here and send error to root stage.
         let root_stage_sender = mem::take(&mut self.root_stage_sender);
         // It's possible we receive stage failed event message multi times and the
@@ -360,99 +343,15 @@ impl QueryRunner {
                     self.query.query_id
                 );
             }
-        } else {
-            // If root stage has been taken, then use channel to send error to
-            // `QueryResultFetcher`. This may happen if some execution error received
-            // after we have scheduled are events.
-
-            // if shutdown_tx.send(reason).is_err() {
-            //     warn!("Sending error to query result fetcher fail!");
-            // }
         }
+
+        // If root stage has been taken (None), then root stage is responsible for send error to
+        // Query Result Fetcher.
 
         // Stop all running stages.
         for (_stage_id, stage_execution) in self.stage_executions.iter() {
             // The stop is return immediately so no need to spawn tasks.
             stage_execution.stop().await;
-        }
-    }
-
-    fn create_plan_fragment(&self) -> PlanFragment {
-        let root_stage_id = self.query.stage_graph.root_stage_id;
-        let root_stage = self.stage_executions.get(&root_stage_id).unwrap();
-        let plan_node_prost =
-            Self::convert_plan_node(root_stage, &root_stage.stage.root, ROOT_TASK_ID);
-        let exchange_info = root_stage.stage.exchange_info.clone();
-        PlanFragment {
-            root: Some(plan_node_prost),
-            exchange_info: Some(exchange_info),
-        }
-    }
-
-    fn convert_plan_node(
-        stage_execution: &StageExecution,
-        execution_plan_node: &ExecutionPlanNode,
-        task_id: TaskId,
-    ) -> PlanNodeProst {
-        match execution_plan_node.plan_node_type {
-            PlanNodeType::BatchExchange => {
-                // Find the stage this exchange node should fetch from and get all exchange sources.
-                let child_stage = stage_execution
-                    .children
-                    .iter()
-                    .find(|child_stage| {
-                        child_stage.stage.id == execution_plan_node.source_stage_id.unwrap()
-                    })
-                    .unwrap();
-                let exchange_sources = child_stage.all_exchange_sources_for(task_id);
-
-                match &execution_plan_node.node {
-                    NodeBody::Exchange(_exchange_node) => {
-                        PlanNodeProst {
-                            children: vec![],
-                            // TODO: Generate meaningful identify
-                            identity: Uuid::new_v4().to_string(),
-                            node_body: Some(NodeBody::Exchange(ExchangeNode {
-                                sources: exchange_sources,
-                                input_schema: execution_plan_node.schema.clone(),
-                            })),
-                        }
-                    }
-                    NodeBody::MergeSortExchange(sort_merge_exchange_node) => {
-                        PlanNodeProst {
-                            children: vec![],
-                            // TODO: Generate meaningful identify
-                            identity: Uuid::new_v4().to_string(),
-                            node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
-                                exchange: Some(ExchangeNode {
-                                    sources: exchange_sources,
-                                    input_schema: execution_plan_node.schema.clone(),
-                                }),
-                                column_orders: sort_merge_exchange_node.column_orders.clone(),
-                            })),
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            PlanNodeType::BatchSeqScan => {
-                unreachable!("Scan can not in the root fragment");
-            }
-            _ => {
-                let children = execution_plan_node
-                    .children
-                    .iter()
-                    // FIXME:
-                    .map(|e| Self::convert_plan_node(stage_execution, e, task_id))
-                    .collect();
-
-                PlanNodeProst {
-                    children,
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
-                    node_body: Some(execution_plan_node.node.clone()),
-                }
-            }
         }
     }
 }

@@ -99,7 +99,7 @@ struct TaskStatusHolder {
 
 pub struct StageExecution {
     epoch: u64,
-    pub(crate) stage: QueryStageRef,
+    stage: QueryStageRef,
     worker_node_manager: WorkerNodeManagerRef,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     state: Arc<RwLock<StageState>>,
@@ -108,7 +108,7 @@ pub struct StageExecution {
     /// Children stage executions.
     ///
     /// We use `Vec` here since children's size is usually small.
-    pub(crate) children: Vec<Arc<StageExecution>>,
+    children: Vec<Arc<StageExecution>>,
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
 
@@ -411,6 +411,8 @@ impl StageRunner {
         shutdown_rx: oneshot::Receiver<StageMessage>,
     ) -> SchedulerResult<()> {
         let root_stage_id = self.stage.id;
+        // Currently, the dml should never be root fragment, so the partition is None.
+        // And root fragment only contain one task.
         let plan_fragment = self.create_plan_fragment(ROOT_TASK_ID, None);
         let plan_node = plan_fragment.root.unwrap();
         let task_id = TaskIdBatch {
@@ -419,6 +421,7 @@ impl StageRunner {
             task_id: 0,
         };
 
+        // Notify QueryRunner to poll chunk from result_rx.
         let (result_tx, result_rx) = tokio::sync::mpsc::channel(100);
         self.send_event(QueryMessage::Stage(StageEvent::ScheduledRoot(result_rx)))
             .await;
@@ -625,7 +628,7 @@ impl StageRunner {
         Ok(stream_status)
     }
 
-    fn create_plan_fragment(
+    pub fn create_plan_fragment(
         &self,
         task_id: TaskId,
         partition: Option<PartitionInfo>,
