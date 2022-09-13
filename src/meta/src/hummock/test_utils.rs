@@ -298,3 +298,28 @@ where
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
 }
+
+pub async fn add_ssts<S>(
+    epoch: HummockEpoch,
+    hummock_manager: &HummockManager<S>,
+    context_id: HummockContextId,
+) -> Vec<SstableInfo>
+where
+    S: MetaStore,
+{
+    let table_ids = get_sst_ids(hummock_manager, 3).await;
+    let test_tables = generate_test_tables(epoch, table_ids);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager(),
+        &test_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
+    let ssts = to_local_sstable_info(&test_tables);
+    let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
+    hummock_manager
+        .commit_epoch(epoch, ssts, sst_to_worker)
+        .await
+        .unwrap();
+    test_tables
+}

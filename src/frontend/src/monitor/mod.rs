@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#[cfg(all(test, sync_point_integration_test, feature = "sync_point"))]
-mod test_utils;
-#[cfg(all(test, sync_point_integration_test, feature = "sync_point"))]
-mod tests;
+//
+pub mod stats;
+pub use stats::*;

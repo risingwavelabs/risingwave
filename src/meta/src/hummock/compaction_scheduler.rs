@@ -141,7 +141,7 @@ where
                     break;
                 }
             };
-            sync_point::on("BEFORE_SCHEDULE_COMPACTION_TASK").await;
+            sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
             self.pick_and_assign(compaction_group, request_channel.clone())
                 .await;
         }
@@ -285,41 +285,11 @@ mod tests {
 
     use assert_matches::assert_matches;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch};
-    use risingwave_pb::hummock::SstableInfo;
+    use risingwave_hummock_sdk::CompactionGroupId;
 
     use crate::hummock::compaction_scheduler::{CompactionRequestChannel, ScheduleStatus};
-    use crate::hummock::test_utils::{
-        generate_test_tables, get_sst_ids, register_sstable_infos_to_compaction_group,
-        setup_compute_env, to_local_sstable_info,
-    };
-    use crate::hummock::{CompactionScheduler, HummockManager};
-    use crate::storage::MetaStore;
-
-    async fn add_ssts<S>(
-        epoch: HummockEpoch,
-        hummock_manager: &HummockManager<S>,
-        context_id: HummockContextId,
-    ) -> Vec<SstableInfo>
-    where
-        S: MetaStore,
-    {
-        let table_ids = get_sst_ids(hummock_manager, 3).await;
-        let test_tables = generate_test_tables(epoch, table_ids);
-        register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager(),
-            &test_tables,
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
-        let ssts = to_local_sstable_info(&test_tables);
-        let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
-        hummock_manager
-            .commit_epoch(epoch, ssts, sst_to_worker)
-            .await
-            .unwrap();
-        test_tables
-    }
+    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
+    use crate::hummock::CompactionScheduler;
 
     #[tokio::test]
     async fn test_pick_and_assign() {

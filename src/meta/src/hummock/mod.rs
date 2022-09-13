@@ -38,6 +38,7 @@ pub use compaction_scheduler::CompactionScheduler;
 pub use compactor_manager::*;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
+use sync_point::sync_point;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -67,12 +68,13 @@ where
             vacuum_manager.clone(),
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
-        local_notification_receiver(hummock_manager, compactor_manager, notification_manager).await,
+        start_local_notification_receiver(hummock_manager, compactor_manager, notification_manager)
+            .await,
     ]
 }
 
 /// Starts a task to handle meta local notification.
-pub async fn local_notification_receiver<S>(
+pub async fn start_local_notification_receiver<S>(
     hummock_manager: Arc<HummockManager<S>>,
     compactor_manager: CompactorManagerRef,
     notification_manager: NotificationManagerRef,
@@ -108,6 +110,7 @@ where
                                 .await
                                 .expect("retry until success");
                             tracing::info!("Released hummock context {}", worker_node.id);
+                            sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
                         },
                         Some(LocalNotification::CompactionTaskNeedCancel(mut compact_task)) => {
                             compact_task.set_task_status(risingwave_pb::hummock::compact_task::TaskStatus::Canceled);
@@ -123,6 +126,7 @@ where
                                 .await
                                 .expect("retry until success");
                             tracing::info!("Cancelled compaction task {}", compact_task.task_id);
+                            sync_point!("AFTER_CANCEL_COMPACTION_TASK_ASYNC");
                         }
                     }
                 }
@@ -181,7 +185,7 @@ where
             if let Err(err) = vacuum.vacuum_sst_data().await {
                 tracing::warn!("Vacuum SST error {:#?}", err);
             }
-            sync_point::on("AFTER_SCHEDULE_VACUUM").await;
+            sync_point!("AFTER_SCHEDULE_VACUUM");
         }
     });
     (join_handle, shutdown_tx)
@@ -217,4 +221,68 @@ where
         }
     });
     (join_handle, shutdown_tx)
+}
+
+#[cfg(all(test, feature = "sync_point"))]
+mod tests {
+    use std::time::Duration;
+
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_pb::common::WorkerNode;
+    use serial_test::serial;
+
+    use crate::hummock::start_local_notification_receiver;
+    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
+    use crate::manager::LocalNotification;
+
+    #[tokio::test]
+    #[serial("sync_point")]
+    async fn test_local_notification_receiver() {
+        sync_point::reset();
+
+        let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+        let context_id = worker_node.id;
+        let (join_handle, shutdown_sender) = start_local_notification_receiver(
+            hummock_manager.clone(),
+            hummock_manager.compactor_manager_ref_for_test(),
+            env.notification_manager_ref(),
+        )
+        .await;
+
+        // Test cancel compaction task
+        let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
+        let task = hummock_manager
+            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 1);
+        env.notification_manager()
+            .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(task))
+            .await;
+        sync_point::wait_timeout(
+            "AFTER_CANCEL_COMPACTION_TASK_ASYNC",
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+        assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 0);
+
+        // Test release hummock contexts
+        env.notification_manager()
+            .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(WorkerNode {
+                id: context_id,
+                ..Default::default()
+            }))
+            .await;
+        sync_point::wait_timeout(
+            "AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC",
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+
+        shutdown_sender.send(()).unwrap();
+        join_handle.await.unwrap();
+    }
 }
