@@ -13,10 +13,13 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::iter::repeat;
 
 use anyhow::{anyhow, Context};
+use chrono::format::Item;
 use futures::future::BoxFuture;
-use itertools::Itertools;
+use futures::Stream;
+use itertools::{Itertools, repeat_n};
 use risingwave_common::bail;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType};
@@ -33,6 +36,7 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use uuid::Uuid;
+use risingwave_common::buffer::Bitmap;
 
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
@@ -85,14 +89,14 @@ impl RescheduleContext {
                     "could not found Worker for ParallelUint {}",
                     parallel_unit_id
                 )
-                .into()
+                    .into()
             })
     }
 }
 
 impl<S> GlobalStreamManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     async fn build_reschedule_context(
         &self,
@@ -346,18 +350,20 @@ where
                 .cloned()
                 .unwrap_or_default();
 
-            if actors_to_remove.len() != actors_to_create.len() {
-                bail!("length of removed and added parallel units mismatches, only migration is supported for now")
-            }
+            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
-            for (actor_to_remove, actor_to_create) in
-                actors_to_remove.iter().zip_eq(actors_to_create.iter())
-            {
-                // use old actor as sample actor
-                let mut new_actor = ctx.actor_map.get(actor_to_remove.0).cloned().unwrap();
+            assert!(!fragment.actors.is_empty());
 
+            let mut sample_actors: Vec<_> = if actors_to_create.len() == actors_to_remove.len() {
+                actors_to_remove.keys().map(|actor_id| ctx.actor_map.get(actor_id).unwrap()).collect()
+            } else {
+                repeat(fragment.actors.first().unwrap()).take(actors_to_create.len()).collect()
+            };
+
+            for (actor_to_create, sample_actor) in actors_to_create.iter().zip_eq(sample_actors.into_iter()) {
                 let new_actor_id = actor_to_create.0;
                 let new_parallel_unit_id = actor_to_create.1;
+                let mut new_actor = sample_actor.clone();
 
                 let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
                 for upstream_actor_id in &new_actor.upstream_actor_id {
@@ -391,6 +397,47 @@ where
                 new_created_actors.insert(*new_actor_id, new_actor);
             }
         }
+
+        for fragment_id in reschedule.keys() {
+            let actors_to_create = fragment_actors_to_create
+                .get(fragment_id)
+                .cloned()
+                .unwrap_or_default();
+            let actors_to_remove = fragment_actors_to_remove
+                .get(fragment_id)
+                .cloned()
+                .unwrap_or_default();
+
+            if actors_to_remove.len() == actors_to_create.len() {
+                continue;
+            }
+
+            // for (actor_id, _) in &actors_to_remove {
+            //     let actor = ctx.actor_map.get(actor_id).unwrap();
+            //
+            //     if let Some(buffer) = actor.vnode_bitmap.as_ref() {
+            //         let bitmap = Bitmap::from(buffer);
+            //
+            //         println!("hb for actor {}", )
+            //     }
+            //
+            // }
+
+
+            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
+
+            for actor in fragment.actors.iter() {
+                if let Some(buffer) = actor.vnode_bitmap.as_ref() {
+                    let bitmap = Bitmap::from(buffer);
+
+                    println!("hb for actor {} {}", actor.actor_id, bitmap.num_high_bits());
+                }
+            }
+
+        }
+
+
+        todo!();
 
         // todo: update actor vnode mapping when scale in/out
 
@@ -633,7 +680,7 @@ where
                             .iter()
                             .map(|parallel_unit_id| {
                                 if let Some(new_parallel_unit_id) =
-                                    replace_parallel_unit_map.get(parallel_unit_id)
+                                replace_parallel_unit_map.get(parallel_unit_id)
                                 {
                                     parallel_unit_to_actor_after_reschedule[new_parallel_unit_id]
                                 } else {
@@ -664,7 +711,7 @@ where
             }
 
             let downstream_fragment_id = if let Some(downstream_fragment_ids) =
-                ctx.downstream_fragment_id_map.get(&fragment_id)
+            ctx.downstream_fragment_id_map.get(&fragment_id)
             {
                 let downstream_fragment_id = downstream_fragment_ids.iter().exactly_one().unwrap();
                 Some(*downstream_fragment_id as FragmentId)
@@ -791,7 +838,7 @@ where
 
         for upstream_fragment_id in &upstream_fragment_ids {
             if let Some(upstream_actors_to_create) =
-                fragment_actors_to_create.get(upstream_fragment_id)
+            fragment_actors_to_create.get(upstream_fragment_id)
             {
                 new_actor
                     .upstream_actor_id
@@ -806,14 +853,14 @@ where
         ) {
             if let Some(NodeBody::Merge(s)) = stream_node.node_body.as_mut() {
                 if let Some(upstream_actors_to_remove) =
-                    fragment_actors_to_remove.get(&s.upstream_fragment_id)
+                fragment_actors_to_remove.get(&s.upstream_fragment_id)
                 {
                     s.upstream_actor_id
                         .drain_filter(|actor_id| upstream_actors_to_remove.contains_key(actor_id));
                 }
 
                 if let Some(upstream_actors_to_create) =
-                    fragment_actors_to_create.get(&s.upstream_fragment_id)
+                fragment_actors_to_create.get(&s.upstream_fragment_id)
                 {
                     s.upstream_actor_id
                         .extend(upstream_actors_to_create.keys().cloned());
