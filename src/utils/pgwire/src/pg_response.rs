@@ -60,6 +60,7 @@ pub enum StatementType {
     OTHER,
     // EMPTY is used when query statement is empty (e.g. ";").
     EMPTY,
+    BEGIN,
 }
 
 impl std::fmt::Display for StatementType {
