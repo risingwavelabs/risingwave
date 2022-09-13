@@ -165,3 +165,42 @@
                 BatchScan { table: t1, columns: [], distribution: SomeShard }
           BatchExchange { order: [], dist: Single }
             BatchScan { table: t2, columns: [], distribution: SomeShard }
+- sql: |
+    SELECT n.nspname as "Schema",
+    c.relname as "Name",
+    CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' WHEN 'i' THEN 'index' WHEN 'S' THEN 'sequence' WHEN 's' THEN 'special' WHEN 't' THEN 'TOAST table' WHEN 'f' THEN 'foreign table' WHEN 'p' THEN 'partitioned table' WHEN 'I' THEN 'partitioned index' END as "Type",
+    pg_catalog.pg_get_userbyid(c.relowner) as "Owner"
+    FROM pg_catalog.pg_class c
+    LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('r','p','v','m','S','f','')
+    AND n.nspname <> 'pg_catalog'
+    AND n.nspname !~ '^pg_toast'
+    AND n.nspname <> 'information_schema'
+    AND pg_catalog.pg_table_is_visible(c.oid)
+    ORDER BY 1,2;
+  logical_plan: |
+    LogicalProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar), pg_user.name] }
+      LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+        LogicalFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
+          LogicalJoin { type: LeftOuter, on: (pg_namespace.oid = pg_class.relnamespace), output: all }
+            LogicalScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind] }
+            LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
+        LogicalProject { exprs: [pg_user.name] }
+          LogicalFilter { predicate: (CorrelatedInputRef { index: 3, correlated_id: 1 } = pg_user.usesysid) }
+            LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
+  batch_plan: |
+    BatchExchange { order: [pg_namespace.nspname ASC, pg_class.relname ASC], dist: Single }
+      BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar), pg_user.name] }
+        BatchSort { order: [pg_namespace.nspname ASC, pg_class.relname ASC] }
+          BatchHashJoin { type: LeftOuter, predicate: pg_class.relowner = pg_user.usesysid, output: [pg_class.relname, pg_class.relkind, pg_namespace.nspname, pg_user.name] }
+            BatchExchange { order: [], dist: HashShard(pg_class.relowner) }
+              BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = pg_namespace.oid, output: [pg_class.relname, pg_class.relowner, pg_class.relkind, pg_namespace.nspname] }
+                BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+                  BatchFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) }
+                    BatchScan { table: pg_class, columns: [pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind], distribution: Single }
+                BatchExchange { order: [], dist: HashShard(pg_namespace.oid) }
+                  BatchFilter { predicate: (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
+                    BatchScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname], distribution: Single }
+            BatchExchange { order: [], dist: HashShard(pg_user.usesysid) }
+              BatchProject { exprs: [pg_user.name, pg_user.usesysid] }
+                BatchScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name], distribution: Single }

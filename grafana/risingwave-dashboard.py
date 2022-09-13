@@ -93,7 +93,12 @@ class Panels:
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=0,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
-
+    
+    def timeseries_query_per_sec(self, title, targets, legendCols=["max"]):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="Qps", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
+    
     def timeseries_bytes_per_sec(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="Bps", fillOpacity=10,
@@ -658,6 +663,30 @@ def section_batch_exchange(outer_panels):
                 panels.target(
                     "batch_exchange_recv_row_number", "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}"
                 ),
+            ]),
+        ]),
+    ]
+
+def frontend(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed("Frontend", [
+            panels.timeseries_query_per_sec("Query Per second in Loacl Execution Mode", [
+                panels.target(
+                    "rate(frontend_query_counter_local_execution[$__rate_interval])",""
+                ),
+            ]),
+            panels.timeseries_latency("Query Latency in Local Execution Mode", [
+                panels.target(
+                    "histogram_quantile(0.5, sum(rate(frontend_latency_local_execution_bucket[$__rate_interval])) by (le, job, instance))", "p50 - {{job}} @ {{instance}}"
+                ),
+                panels.target(
+                    "histogram_quantile(0.9, sum(rate(frontend_latency_local_execution_bucket[$__rate_interval])) by (le, job, instance))", "p90 - {{job}} @ {{instance}}"
+                ),
+                panels.target(
+                    "histogram_quantile(0.95, sum(rate(frontend_latency_local_execution_bucket[$__rate_interval])) by (le, job, instance))", "p99 - {{job}} @ {{instance}}"
+                ),
+
             ]),
         ]),
     ]
@@ -1402,5 +1431,6 @@ dashboard = Dashboard(
         *section_grpc_meta_stream_manager(panels),
         *section_grpc_meta_hummock_manager(panels),
         *section_grpc_hummock_meta_client(panels),
+        *frontend(panels),
     ],
 ).auto_panel_ids()
