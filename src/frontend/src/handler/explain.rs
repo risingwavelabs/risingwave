@@ -95,12 +95,10 @@ pub(super) fn handle_explain(
                 session.config().get_query_mode()
             };
             let logical = planner.plan(bound)?;
-            let plan = match query_mode {
+            match query_mode {
                 QueryMode::Local => logical.gen_batch_local_plan()?,
                 QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
-            };
-
-            plan
+            }
         }
     };
 
