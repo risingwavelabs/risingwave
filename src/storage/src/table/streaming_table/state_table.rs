@@ -96,6 +96,8 @@ pub struct StateTable<S: StateStore> {
     /// an optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution
     pub vnode_col_idx_in_pk: Option<usize>,
+
+    _value_indices: Vec<usize>,
 }
 
 /// init Statetable
@@ -177,7 +179,11 @@ impl<S: StateStore> StateTable<S> {
                 let vnode_col_idx = vnode_col_idx.index as usize;
                 pk_indices.iter().position(|&i| vnode_col_idx == i)
             });
-
+        let _value_indices = table_catalog
+            .value_idx
+            .iter()
+            .map(|val| *val as usize)
+            .collect_vec();
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -191,6 +197,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
             disable_sanity_check: false,
             vnode_col_idx_in_pk,
+            _value_indices,
         }
     }
 
@@ -250,6 +257,7 @@ impl<S: StateStore> StateTable<S> {
                     })
             })
             .collect_vec();
+        let _value_indices = (0..table_columns.len()).collect_vec();
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -263,6 +271,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: Default::default(),
             disable_sanity_check: false,
             vnode_col_idx_in_pk: None,
+            _value_indices,
         }
     }
 
