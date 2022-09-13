@@ -33,6 +33,7 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
     - [Planner tests](#planner-tests)
     - [End-to-end tests](#end-to-end-tests)
     - [End-to-end tests on CI](#end-to-end-tests-on-ci)
+    - [DocSlt tests](#docslt-tests)
   - [Miscellaneous checks](#miscellaneous-checks)
   - [Update Grafana dashboard](#update-grafana-dashboard)
   - [Add new files](#add-new-files)
@@ -344,6 +345,29 @@ Basically, CI is using the following two configurations to run the full e2e test
 ```
 
 You can adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
+
+### DocSlt tests
+
+As introduced in #5117, DocSlt tool allows you to write SQL examples in sqllogictest syntax in Rust doc comments. After adding or modifying any such SQL examples, you should run the following command to generate e2e tests from them.
+
+```shell
+./risedev docslt # for all default packages
+# or
+./risedev docslt -p risingwave_expr # for only modified package
+```
+
+Then commit the changes happened in `e2e_test/generated`.
+
+You can also run the generated e2e tests to ensure all the tests can pass with the following command.
+
+```shell
+# run all generated e2e tests
+./risedev slt-generated -p 4566 -d dev
+# or, run only some of them
+./risedev slt -p 4566 -d dev './e2e_test/generated/docslt/risingwave_expr/**/*.slt'
+```
+
+All of these generated e2e tests will be run on CI as well.
 
 ## Miscellaneous checks
 
