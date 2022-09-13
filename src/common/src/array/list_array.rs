@@ -713,13 +713,17 @@ mod tests {
             let val1 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
             let val2 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
             let list1 = ListValue::new(vec![Some(val1.into()), Some(val2.into())]);
-            builder.append(Some(ListRef::ValueRef { val: &list1 })).unwrap();
+            builder
+                .append(Some(ListRef::ValueRef { val: &list1 }))
+                .unwrap();
 
             let val3 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
             let val4 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
             let list2 = ListValue::new(vec![Some(val3.into()), Some(val4.into())]);
 
-            builder.append(Some(ListRef::ValueRef { val: &list2 })).unwrap();
+            builder
+                .append(Some(ListRef::ValueRef { val: &list2 }))
+                .unwrap();
 
             assert!(builder.pop().is_some());
 
@@ -728,7 +732,11 @@ mod tests {
 
             let val = arr.value_at(0).unwrap();
 
-            let datums = val.values_ref().into_iter().map(ToOwnedDatum::to_owned_datum).collect_vec();
+            let datums = val
+                .values_ref()
+                .into_iter()
+                .map(ToOwnedDatum::to_owned_datum)
+                .collect_vec();
             assert_eq!(datums, list1.values.to_vec());
         }
     }
