@@ -1,10 +1,10 @@
 # DO NOT MODIFY THIS FILE
-# This SLT file is generated from `src/expr/src/vector_op/agg/functions.rs`.
+# This file is generated from `src/expr/src/vector_op/agg/functions.rs` at 2022-09-13 12:32:49.640589.
 
 statement ok
 set RW_IMPLICIT_FLUSH to true;
 
-# ==== `count` @ L155 ====
+# ==== `count` @ L154 ====
 
 statement ok
 create table t(v1 int);

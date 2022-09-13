@@ -191,11 +191,12 @@ fn generate_slt_files(package_name: &str) -> Result<()> {
             slt_file,
             "\
             # DO NOT MODIFY THIS FILE\n\
-            # This SLT file is generated from `{}`.\n\
+            # This file is generated from `{}` at {}.\n\
             \n\
             statement ok\n\
             set RW_IMPLICIT_FLUSH to true;\n",
-            filename
+            filename,
+            chrono::Utc::now()
         )?;
         let blocks = &slt_blocks_per_file[filename];
         for block in blocks.iter() {

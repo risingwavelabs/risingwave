@@ -1,5 +1,5 @@
 # DO NOT MODIFY THIS FILE
-# This SLT file is generated from `src/expr/src/expr/expr_array_concat.rs`.
+# This file is generated from `src/expr/src/expr/expr_array_concat.rs` at 2022-09-13 12:32:49.640728.
 
 statement ok
 set RW_IMPLICIT_FLUSH to true;
