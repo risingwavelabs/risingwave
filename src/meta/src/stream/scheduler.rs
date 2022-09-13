@@ -288,7 +288,7 @@ mod test {
     async fn test_schedule() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_manager =
-            Arc::new(ClusterManager::new_for_test(env.clone(), Duration::from_secs(3600)).await?);
+            Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
 
         let node_count = 4;
         let fake_parallelism = 4;
