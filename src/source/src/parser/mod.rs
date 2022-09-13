@@ -93,7 +93,7 @@ trait OpAction {
 
     const DEFAULT_OUTPUT: Self::Output;
 
-    fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output) -> Result<()>;
+    fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output);
 
     fn rollback(builder: &mut ArrayBuilderImpl);
 
@@ -108,8 +108,8 @@ impl OpAction for OpActionInsert {
     const DEFAULT_OUTPUT: Self::Output = None;
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: Datum) -> Result<()> {
-        builder.append_datum(&output).map_err(Into::into)
+    fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
+        builder.append_datum(&output).unwrap()
     }
 
     #[inline(always)]
@@ -131,8 +131,8 @@ impl OpAction for OpActionDelete {
     const DEFAULT_OUTPUT: Self::Output = None;
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: Datum) -> Result<()> {
-        builder.append_datum(&output).map_err(Into::into)
+    fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
+        builder.append_datum(&output).unwrap()
     }
 
     #[inline(always)]
@@ -154,11 +154,9 @@ impl OpAction for OpActionUpdate {
     const DEFAULT_OUTPUT: Self::Output = (None, None);
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) -> Result<()> {
-        builder.append_datum(&output.0)?;
-        builder.append_datum(&output.1)?;
-
-        Ok(())
+    fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) {
+        builder.append_datum(&output.0).unwrap();
+        builder.append_datum(&output.1).unwrap();
     }
 
     #[inline(always)]
@@ -192,9 +190,9 @@ impl SourceStreamChunkRowWriter<'_> {
                 let output = if desc.skip_parse {
                     A::DEFAULT_OUTPUT
                 } else {
-                    f(&desc)?
+                    f(desc)?
                 };
-                A::apply(builder, output)?;
+                A::apply(builder, output);
                 appended_idx = idx + 1;
 
                 Ok(())
@@ -233,7 +231,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// # Arguments
     ///
     /// * `self`: Ownership is consumed so only one record can be written.
-    /// * `f`: A closure that produced two [`Datum`]s as old and new value by corresponding
+    /// * `f`: A failable closure that produced two [`Datum`]s as old and new value by corresponding
     ///   [`SourceColumnDesc`].
     pub fn update(
         self,
