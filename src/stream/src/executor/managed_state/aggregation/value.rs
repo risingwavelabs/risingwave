@@ -175,9 +175,7 @@ mod tests {
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
-                &[&I64Array::from_slice(&[Some(0), Some(1), Some(2), None])
-                    .unwrap()
-                    .into()],
+                &[&I64Array::from_slice(&[Some(0), Some(1), Some(2), None]).into()],
             )
             .unwrap();
         assert!(managed_state.is_dirty());
@@ -240,11 +238,7 @@ mod tests {
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
-                &[
-                    &I64Array::from_slice(&[Some(-1), Some(0), Some(2), Some(1), None])
-                        .unwrap()
-                        .into(),
-                ],
+                &[&I64Array::from_slice(&[Some(-1), Some(0), Some(2), Some(1), None]).into()],
             )
             .unwrap();
         assert!(managed_state.is_dirty());
