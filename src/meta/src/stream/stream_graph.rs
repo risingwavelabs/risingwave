@@ -33,7 +33,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::CreateMaterializedViewContext;
-use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use crate::manager::{DatabaseId, IdCategory, IdGeneratorManagerRef, SchemaId};
 use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::MetaResult;
@@ -773,23 +773,40 @@ impl ActorGraphBuilder {
 
     pub fn fill_mview_id(&mut self, table: &mut Table) {
         // Fill in the correct mview id for stream node.
-        fn fill_mview_id(stream_node: &mut StreamNode, mview_id: u32) -> usize {
+        struct FillIdContext {
+            database_id: DatabaseId,
+            schema_id: SchemaId,
+            table_id: TableId,
+            fragment_id: FragmentId,
+        }
+        fn fill_mview_id_inner(stream_node: &mut StreamNode, ctx: &FillIdContext) -> usize {
             let mut mview_count = 0;
             if let NodeBody::Materialize(materialize_node) = stream_node.node_body.as_mut().unwrap()
             {
-                materialize_node.table_id = mview_id;
-                materialize_node.table.as_mut().unwrap().id = mview_id;
+                materialize_node.table_id = ctx.table_id.table_id;
+                materialize_node.table.as_mut().unwrap().id = ctx.table_id.table_id;
+                materialize_node.table.as_mut().unwrap().database_id = ctx.database_id;
+                materialize_node.table.as_mut().unwrap().schema_id = ctx.schema_id;
+                materialize_node.table.as_mut().unwrap().fragment_id = ctx.fragment_id;
                 mview_count += 1;
             }
             for input in &mut stream_node.input {
-                mview_count += fill_mview_id(input, mview_id);
+                mview_count += fill_mview_id_inner(input, ctx);
             }
             mview_count
         }
 
         let mut mview_count = 0;
         for fragment in self.fragment_graph.fragments_mut().values_mut() {
-            let delta = fill_mview_id(fragment.node.as_mut().unwrap(), table.id);
+            let delta = fill_mview_id_inner(
+                fragment.node.as_mut().unwrap(),
+                &FillIdContext {
+                    database_id: table.database_id,
+                    schema_id: table.schema_id,
+                    table_id: table.id.into(),
+                    fragment_id: fragment.fragment_id,
+                },
+            );
             mview_count += delta;
             if delta != 0 {
                 table.fragment_id = fragment.fragment_id
