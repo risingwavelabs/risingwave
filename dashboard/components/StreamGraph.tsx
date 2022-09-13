@@ -15,60 +15,162 @@
  *
  */
 
+import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
-import { useEffect, useRef } from "react"
-import { layout } from "../lib/layout"
-import { ActorBox } from "./FragmentGraph"
+import { useCallback, useEffect, useRef } from "react"
+import {
+  ActorPoint,
+  ActorPointPosition,
+  flipLayoutPoint,
+  generatePointLinks,
+} from "../lib/layout"
 
-export function StreamGraph() {
+function boundBox(
+  actorPosition: ActorPointPosition[],
+  nodeRadius: number
+): {
+  width: number
+  height: number
+} {
+  let width = 0
+  let height = 0
+  for (const { x, y, data } of actorPosition) {
+    width = Math.max(width, x + nodeRadius)
+    height = Math.max(height, y + nodeRadius)
+  }
+  return { width, height }
+}
+
+const layerMargin = 50
+const rowMargin = 200
+const nodeRadius = 10
+const layoutMargin = 100
+
+export function StreamGraph({
+  nodes,
+  selectedId,
+}: {
+  nodes: ActorPoint[]
+  selectedId?: string
+}) {
   const svgRef = useRef<any>()
 
-  let data = new Array<ActorBox>()
-  const appendData = (
-    id: string,
-    width: number,
-    height: number,
-    parentIds: string[]
-  ) => {
-    data.push({ id: id, name: id, order: 0, width, height, parentIds })
-  }
-  appendData("1", 200, 100, [])
-  appendData("2", 200, 100, ["1"])
-  appendData("3", 150, 100, ["1"])
-  appendData("4", 200, 150, ["2"])
-  appendData("5", 200, 100, ["3", "4"])
-  appendData("6", 200, 100, ["2", "4"])
+  const layoutMapCallback = useCallback(() => {
+    const layoutMap = flipLayoutPoint(
+      nodes,
+      layerMargin,
+      rowMargin,
+      nodeRadius
+    ).map(({ x, y, ...data }) => ({
+      x: x + layoutMargin,
+      y: y + layoutMargin,
+      ...data,
+    }))
+    const links = generatePointLinks(layoutMap)
+    const { width, height } = boundBox(layoutMap, nodeRadius)
+    return {
+      layoutMap,
+      links,
+      width: width + rowMargin + layoutMargin * 2,
+      height: height + layerMargin + layoutMargin * 2,
+    }
+  }, [nodes])
 
-  let layoutMap = layout(data, 50, 100)
+  const { layoutMap, width, height, links } = layoutMapCallback()
 
   useEffect(() => {
     const svgNode = svgRef.current
     const svgSelection = d3.select(svgNode)
-    const g = svgSelection.select(".box")
-    let marginTop = 50
-    for (let item of layoutMap) {
-      let ab = item[0],
-        x = item[1][0],
-        y = item[1][1]
-      g.append("rect")
-        .attr("x", x)
-        .attr("y", y + marginTop)
-        .attr("width", ab.width)
-        .attr("height", ab.height)
-        .attr("fill", "gray")
-      g.append("text")
-        .attr("x", x)
-        .attr("y", y + marginTop)
+
+    const curveStyle = d3.curveMonotoneY
+
+    const line = d3
+      .line<{ x: number; y: number }>()
+      .curve(curveStyle)
+      .x(({ x }) => x)
+      .y(({ y }) => y)
+
+    const edgeSelection = svgSelection
+      .select(".edges")
+      .selectAll(".edge")
+      .data(links)
+
+    const isSelected = (id: string) => id === selectedId
+
+    const applyEdge = (sel: any) =>
+      sel
+        .attr("d", ({ points }: any) => line(points))
+        .attr("fill", "none")
+        .attr("stroke-width", 1)
+        .attr("stroke-width", (d: any) =>
+          isSelected(d.source) || isSelected(d.target) ? 2 : 1
+        )
+        .attr("opacity", (d: any) =>
+          isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
+        )
+        .attr("stroke", (d: any) =>
+          isSelected(d.source) || isSelected(d.target)
+            ? theme.colors.teal["500"]
+            : theme.colors.gray["300"]
+        )
+
+    const createEdge = (sel: any) =>
+      sel.append("path").attr("class", "edge").call(applyEdge)
+    edgeSelection.exit().remove()
+    edgeSelection.enter().call(createEdge)
+    edgeSelection.call(applyEdge)
+
+    const applyNode = (g: any) => {
+      g.attr(
+        "transform",
+        ({ x, y }: ActorPointPosition) => `translate(${x},${y})`
+      )
+
+      let circle = g.select("circle")
+      if (circle.empty()) {
+        circle = g.append("circle")
+      }
+
+      circle
+        .attr("r", nodeRadius)
+        .style("cursor", "pointer")
+        .attr("fill", ({ id }: ActorPointPosition) =>
+          isSelected(id) ? theme.colors.teal["500"] : theme.colors.gray["500"]
+        )
+
+      let text = g.select("text")
+      if (text.empty()) {
+        text = g.append("text")
+      }
+
+      text
         .attr("fill", "black")
-        .text(ab.id)
+        .text(({ data: { name } }: ActorPointPosition) => name)
+        .attr("font-family", "inherit")
+        .attr("text-anchor", "middle")
+        .attr("dy", nodeRadius * 2)
+        .attr("fill", "black")
+        .attr("font-size", 12)
+        .attr("transform", "rotate(-8)")
+
+      return g
     }
-    console.log(layoutMap)
-  }, [layoutMap])
+
+    const createNode = (sel: any) =>
+      sel.append("g").attr("class", "node").call(applyNode)
+
+    const g = svgSelection.select(".boxes")
+    const nodeSelection = g.selectAll(".node").data(layoutMap)
+    nodeSelection.enter().call(createNode)
+    nodeSelection.call(applyNode)
+    nodeSelection.exit().remove()
+  }, [layoutMap, links, selectedId])
 
   return (
     <>
-      <svg ref={svgRef} width="800px" height="800px">
-        <g className="box" />
+      <svg ref={svgRef} width={`${width}px`} height={`${height}px`}>
+        <g className="edges" />
+        <g className="boxes" />
       </svg>
     </>
   )

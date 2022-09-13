@@ -1,0 +1,51 @@
+# Create a table
+statement ok
+create table test_explain_table (v int);
+
+# Create again should fail
+statement error
+create table test_explain_table (v int);
+
+# Explain should not check name duplicate
+statement ok
+explain create table test_explain_table (v int);
+
+
+
+# Create materialized view on it 
+statement ok
+create materialized view mv as select v from test_explain_table order by v limit 10;
+
+# Create again should fail
+statement error
+create materialized view mv as select v from test_explain_table order by v limit 10;
+
+# Explain should not check name duplicate
+statement ok
+explain create materialized view mv as select v from test_explain_table order by v limit 10;
+
+
+
+# Create an index
+statement ok
+create index idx_test on test_explain_table (v);
+
+# Create again should fail
+statement error
+create index idx_test on test_explain_table (v);
+
+# Explain should not check name duplicate
+statement ok
+explain create index idx_test on test_explain_table (v);
+
+
+
+# Drop everything
+statement ok
+drop materialized view mv;
+
+statement ok
+drop index idx_test;
+
+statement ok
+drop table test_explain_table;
