@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
+use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::{stream_node, StreamFragmentGraph, StreamNode};
 
 pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> Result<String> {
@@ -29,15 +31,14 @@ pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> Re
 /// A formatter to display the final stream plan graph, used for `explain (distsql) create
 /// materialized view ...`
 struct StreamGraphFormatter {
-    is_verbose: bool,
-    tables: Vec<ProstTable>,
+    /// exchange's operator_id -> edge
+    edges: HashMap<u64, StreamFragmentEdge>,
 }
 
 impl StreamGraphFormatter {
-    fn new(is_verbose: bool) -> Self {
+    fn new(_is_verbose: bool) -> Self {
         StreamGraphFormatter {
-            is_verbose,
-            tables: vec![],
+            edges: HashMap::default(),
         }
     }
 
@@ -46,6 +47,11 @@ impl StreamGraphFormatter {
         graph: &StreamFragmentGraph,
         f: &mut impl std::fmt::Write,
     ) -> std::fmt::Result {
+        self.edges.clear();
+        for edge in graph.edges.iter() {
+            self.edges.insert(edge.link_id, edge.clone());
+        }
+
         for (_, fragment) in graph.fragments.iter().sorted_by_key(|(id, _)| **id) {
             self.explain_fragment(fragment, f)?;
         }
@@ -69,8 +75,23 @@ impl StreamGraphFormatter {
         f: &mut impl std::fmt::Write,
     ) -> std::fmt::Result {
         let one_line_explain = match node.get_node_body().unwrap() {
-            stream_node::NodeBody::Exchange(exchange) => {
-                format!("exchange {:?}", exchange)
+            stream_node::NodeBody::Exchange(_) => {
+                let edge = self.edges.get(&node.operator_id).unwrap();
+                let upstream_fragment_id = edge.upstream_id;
+                let dist = edge.dispatch_strategy.as_ref().unwrap();
+                format!(
+                    "StreamExchange {} from {}",
+                    match dist.r#type() {
+                        risingwave_pb::stream_plan::DispatcherType::Unspecified => unreachable!(),
+                        risingwave_pb::stream_plan::DispatcherType::Hash =>
+                            format!("hash({:?})", dist.column_indices),
+                        risingwave_pb::stream_plan::DispatcherType::Broadcast => unreachable!(),
+                        risingwave_pb::stream_plan::DispatcherType::Simple => "simple".to_string(),
+                        risingwave_pb::stream_plan::DispatcherType::NoShuffle =>
+                            "no_shuffle".to_string(),
+                    },
+                    upstream_fragment_id
+                )
             }
             _ => node.identity.clone(),
         };
