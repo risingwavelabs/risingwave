@@ -24,7 +24,6 @@ use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::{PlanFragment, TaskOutputId};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tracing::debug;
 
@@ -48,7 +47,8 @@ pub struct QueryResultFetcher {
     compute_client_pool: ComputeClientPoolRef,
 
     root_fragment: PlanFragment,
-    shutdown_tx: Option<oneshot::Sender<SchedulerError>>,
+
+    chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
 }
 
 /// Manages execution of distributed batch queries.
@@ -102,8 +102,7 @@ impl QueryManager {
         .await;
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let query_result_fetcher = match query_execution.start(shutdown_tx).await {
+        let query_result_fetcher = match query_execution.start().await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager
@@ -113,9 +112,7 @@ impl QueryManager {
             }
         };
 
-        query_result_fetcher
-            .collect_rows(context, query_id, format, shutdown_rx)
-            .await
+        query_result_fetcher.collect_rows_from_channel(format).await
     }
 }
 
@@ -127,7 +124,7 @@ impl QueryResultFetcher {
         task_host: HostAddress,
         compute_client_pool: ComputeClientPoolRef,
         root_fragment: PlanFragment,
-        shutdown_tx: Option<oneshot::Sender<SchedulerError>>,
+        chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
     ) -> Self {
         Self {
             epoch,
@@ -136,7 +133,7 @@ impl QueryResultFetcher {
             task_host,
             compute_client_pool,
             root_fragment,
-            shutdown_tx,
+            chunk_rx,
         }
     }
 
@@ -213,6 +210,15 @@ impl QueryResultFetcher {
         query_id: QueryId,
     ) -> BoxedDataChunkStream {
         Box::pin(self.run_local_inner(execution_context, query_id))
+    }
+
+    async fn collect_rows_from_channel(mut self, format: bool) -> SchedulerResult<QueryResultSet> {
+        let mut result_sets = vec![];
+        while let Some(chunk_inner) = self.chunk_rx.recv().await {
+            let chunk = chunk_inner?;
+            result_sets.extend(to_pg_rows(chunk, format));
+        }
+        Ok(result_sets)
     }
 }
 
