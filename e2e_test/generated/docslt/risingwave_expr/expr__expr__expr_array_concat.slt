@@ -1,5 +1,5 @@
 # DO NOT MODIFY THIS FILE
-# This file is generated from `src/expr/src/expr/expr_array_concat.rs` at 2022-09-13 12:32:49.640728.
+# This file is generated from `src/expr/src/expr/expr_array_concat.rs` at 2022-09-13 13:05:08.119180 UTC.
 
 statement ok
 set RW_IMPLICIT_FLUSH to true;
