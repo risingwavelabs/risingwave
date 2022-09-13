@@ -348,7 +348,7 @@ You can adjust the environment variable to enable some specific code to make all
 
 ### DocSlt tests
 
-As introduced in #5117, DocSlt tool allows you to write SQL examples in sqllogictest syntax in Rust doc comments. After adding or modifying any such SQL examples, you should run the following command to generate e2e tests from them.
+As introduced in [#5117](https://github.com/risingwavelabs/risingwave/issues/5117), DocSlt tool allows you to write SQL examples in sqllogictest syntax in Rust doc comments. After adding or modifying any such SQL examples, you should run the following command to generate e2e tests from them.
 
 ```shell
 ./risedev docslt # for all default packages
