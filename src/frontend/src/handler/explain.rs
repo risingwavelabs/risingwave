@@ -27,6 +27,7 @@ use super::create_sink::gen_sink_plan;
 use super::create_table::gen_create_table_plan;
 use crate::binder::Binder;
 use crate::handler::util::force_local_mode;
+use crate::optimizer::plan_node::Convention;
 use crate::planner::Planner;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::session::OptimizerContext;
@@ -56,29 +57,23 @@ pub(super) fn handle_explain(
     // bind, plan, optimize, and serialize here
     let mut planner = Planner::new(context.into());
     // we need to know if the plan is streaming or batch plan,
-    let (plan, is_streaming) = match stmt {
+    let plan = match stmt {
         Statement::CreateView {
             or_replace: false,
             materialized: true,
             query,
             name,
             ..
-        } => (
-            gen_create_mv_plan(&session, planner.ctx(), query, name)?.0,
-            true,
-        ),
+        } => gen_create_mv_plan(&session, planner.ctx(), query, name)?.0,
 
-        Statement::CreateSink { stmt } => (gen_sink_plan(&session, planner.ctx(), stmt)?.0, true),
+        Statement::CreateSink { stmt } => gen_sink_plan(&session, planner.ctx(), stmt)?.0,
 
         Statement::CreateTable {
             name,
             columns,
             constraints,
             ..
-        } => (
-            gen_create_table_plan(&session, planner.ctx(), name, columns, constraints)?.0,
-            true,
-        ),
+        } => gen_create_table_plan(&session, planner.ctx(), name, columns, constraints)?.0,
 
         Statement::CreateIndex {
             name,
@@ -86,10 +81,7 @@ pub(super) fn handle_explain(
             columns,
             include,
             ..
-        } => (
-            gen_create_index_plan(&session, planner.ctx(), name, table_name, columns, include)?.0,
-            true,
-        ),
+        } => gen_create_index_plan(&session, planner.ctx(), name, table_name, columns, include)?.0,
 
         stmt => {
             let bound = {
@@ -110,7 +102,7 @@ pub(super) fn handle_explain(
 
             if options.explain_type == ExplainType::DistSQL {}
 
-            (plan, false)
+            plan
         }
     };
 
@@ -130,26 +122,30 @@ pub(super) fn handle_explain(
     };
 
     if options.explain_type == ExplainType::DistSQL {
-        if is_streaming {
-            let graph = build_graph(plan);
-            rows.extend(
-                explain_stream_graph(&graph, explain_verbose)?
-                    .lines()
-                    .map(|s| Row::new(vec![Some(s.to_string().into())])),
-            );
-        } else {
-            let plan_fragmenter = BatchPlanFragmenter::new(
-                session.env().worker_node_manager_ref(),
-                session.env().catalog_reader().clone(),
-            );
-            let query = plan_fragmenter.split(plan)?;
-            let stage_graph_json = serde_json::to_string_pretty(&query.stage_graph).unwrap();
-            rows.extend(
-                vec![stage_graph_json]
-                    .iter()
-                    .flat_map(|s| s.lines())
-                    .map(|s| Row::new(vec![Some(s.to_string().into())])),
-            );
+        match plan.convention() {
+            Convention::Logical => unreachable!(),
+            Convention::Batch => {
+                let plan_fragmenter = BatchPlanFragmenter::new(
+                    session.env().worker_node_manager_ref(),
+                    session.env().catalog_reader().clone(),
+                );
+                let query = plan_fragmenter.split(plan)?;
+                let stage_graph_json = serde_json::to_string_pretty(&query.stage_graph).unwrap();
+                rows.extend(
+                    vec![stage_graph_json]
+                        .iter()
+                        .flat_map(|s| s.lines())
+                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                );
+            }
+            Convention::Stream => {
+                let graph = build_graph(plan);
+                rows.extend(
+                    explain_stream_graph(&graph, explain_verbose)?
+                        .lines()
+                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                );
+            }
         }
     } else {
         // if explain trace is open, the plan has been in the rows

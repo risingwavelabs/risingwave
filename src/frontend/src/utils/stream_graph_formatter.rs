@@ -87,7 +87,7 @@ impl StreamGraphFormatter {
                         risingwave_pb::stream_plan::DispatcherType::Broadcast => unreachable!(),
                         risingwave_pb::stream_plan::DispatcherType::Simple => "Single".to_string(),
                         risingwave_pb::stream_plan::DispatcherType::NoShuffle =>
-                            "No_shuffle".to_string(),
+                            "NoShuffle".to_string(),
                     },
                     upstream_fragment_id
                 )
