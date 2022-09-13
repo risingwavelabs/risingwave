@@ -64,7 +64,7 @@ cargo make ci-kill
 
 echo "--- e2e, ci-3cn-1fe, generated"
 cargo make ci-start ci-3cn-1fe
-timeout 30s sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/generated/**/*.slt'
+sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/generated/**/*.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill
