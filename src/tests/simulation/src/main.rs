@@ -199,7 +199,7 @@ async fn main() {
                 ]);
                 risingwave_compute::start(opts).await
             });
-        if args.kill_compute || args.kill_meta {
+        if args.kill_compute {
             builder = builder.restart_on_panic();
         }
         builder.build();
