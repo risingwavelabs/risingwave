@@ -480,7 +480,7 @@ impl<S: StateStore> StateTable<S> {
         let pk = old_value.by_indices(self.pk_indices());
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = old_value.serialize();
+        let value_bytes = old_value.partial_serialize(&self.value_indices);
         self.mem_table
             .delete(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -499,7 +499,11 @@ impl<S: StateStore> StateTable<S> {
         );
 
         self.mem_table
-            .update(new_key_bytes, old_value.serialize(), new_value.serialize())
+            .update(
+                new_key_bytes,
+                old_value.partial_serialize(&self.value_indices),
+                new_value.partial_serialize(&self.value_indices),
+            )
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 

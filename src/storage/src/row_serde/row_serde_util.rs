@@ -75,3 +75,22 @@ pub fn streaming_deserialize(data_types: &[DataType], mut row: impl Buf) -> Resu
 
     Ok(Row(values))
 }
+
+/// used for streaming table partial deserialize
+pub fn streaming_partial_deserialize(
+    data_types: &[DataType],
+    mut row: impl Buf,
+    value_indices: &[usize],
+) -> Result<Row> {
+    // value encoding
+    let mut values = Vec::with_capacity(value_indices.len());
+    let mut value_data_types = vec![];
+    for value_idx in value_indices {
+        value_data_types.push(data_types[*value_idx].clone());
+    }
+    for ty in value_data_types {
+        values.push(deserialize_datum(&mut row, &ty)?);
+    }
+
+    Ok(Row(values))
+}
