@@ -100,8 +100,6 @@ pub(super) fn handle_explain(
                 QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
             };
 
-            if options.explain_type == ExplainType::DistSQL {}
-
             plan
         }
     };

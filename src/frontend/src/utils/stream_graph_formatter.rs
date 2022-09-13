@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
-use risingwave_pb::stream_plan::{stream_node, StreamFragmentGraph, StreamNode};
+use risingwave_pb::stream_plan::{stream_node, DispatcherType, StreamFragmentGraph, StreamNode};
 
 pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> Result<String> {
     let mut output = String::new();
@@ -81,13 +81,11 @@ impl StreamGraphFormatter {
                 format!(
                     "StreamExchange {} from {}",
                     match dist.r#type() {
-                        risingwave_pb::stream_plan::DispatcherType::Unspecified => unreachable!(),
-                        risingwave_pb::stream_plan::DispatcherType::Hash =>
-                            format!("Hash({:?})", dist.column_indices),
-                        risingwave_pb::stream_plan::DispatcherType::Broadcast => unreachable!(),
-                        risingwave_pb::stream_plan::DispatcherType::Simple => "Single".to_string(),
-                        risingwave_pb::stream_plan::DispatcherType::NoShuffle =>
-                            "NoShuffle".to_string(),
+                        DispatcherType::Unspecified => unreachable!(),
+                        DispatcherType::Hash => format!("Hash({:?})", dist.column_indices),
+                        DispatcherType::Broadcast => "Broadcast".to_string(),
+                        DispatcherType::Simple => "Single".to_string(),
+                        DispatcherType::NoShuffle => "NoShuffle".to_string(),
                     },
                     upstream_fragment_id
                 )
