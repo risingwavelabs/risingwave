@@ -235,10 +235,10 @@ fn build_fragment(
                 // Exchange node indicates a new child fragment.
                 NodeBody::Exchange(exchange_node) => {
                     let exchange_node_strategy = exchange_node.get_strategy()?.clone();
-
                     let is_simple_dispatcher =
                         exchange_node_strategy.get_type()? == DispatcherType::Simple;
 
+                    // Exchange node should have only one input.
                     let [input]: [_; 1] = std::mem::take(&mut child_node.input).try_into().unwrap();
                     let child_fragment = build_and_add_fragment(state, input)?;
                     state.fragment_graph.add_edge(

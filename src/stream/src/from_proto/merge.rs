@@ -49,13 +49,18 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             })
             .try_collect()?;
 
-        let single_input = match node.get_upstream_dispatcher_type()? {
-            DispatcherType::Hash | DispatcherType::Broadcast => false,
-            DispatcherType::Simple | DispatcherType::NoShuffle => true,
+        // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
+        // scale to multiple upstreams.
+        let always_single_input = match node.get_upstream_dispatcher_type()? {
             DispatcherType::Unspecified => unreachable!(),
+            DispatcherType::Hash | DispatcherType::Broadcast => false,
+            // There could be arbitrary number of upstreams with simple dispatcher.
+            DispatcherType::Simple => false,
+            // There should be always only one upstream with no-shuffle dispatcher.
+            DispatcherType::NoShuffle => true,
         };
 
-        if single_input {
+        if always_single_input {
             Ok(ReceiverExecutor::new(
                 schema,
                 params.pk_indices,

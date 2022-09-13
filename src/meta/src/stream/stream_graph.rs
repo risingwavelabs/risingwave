@@ -878,7 +878,9 @@ impl ActorGraphBuilder {
                             FragmentDistributionType::Hash
                         } as i32,
                         actors,
+                        // Will be filled in `Scheduler::schedule` later.
                         vnode_mapping: None,
+                        // Will be filled in `record_internal_state_tables` later.
                         state_table_ids: vec![],
                     },
                 )
