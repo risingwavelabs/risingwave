@@ -177,7 +177,6 @@ impl CompactorManager {
         &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
-        println!("next_udle");
         let policy = self.policy.read();
         policy.next_idle_compactor(compactor_assigned_task_num)
     }
