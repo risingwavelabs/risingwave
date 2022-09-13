@@ -74,6 +74,7 @@ where
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
+        self.hummock_manager.pin_snapshot(req.worker_id).await?;
         let host_address = req.get_host()?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -134,6 +135,11 @@ where
                     ..Default::default()
                 }
             }
+
+            WorkerType::RiseCtl => MetaSnapshot {
+                hummock_version: Some(hummock_manager_guard.current_version.clone()),
+                ..Default::default()
+            },
 
             _ => unreachable!(),
         };

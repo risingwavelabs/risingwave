@@ -86,11 +86,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
         // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
             .limiter
-            .require_memory(
-                (self.options.capacity
-                    + self.options.block_capacity
-                    + self.options.estimate_bloom_filter_capacity) as u64,
-            )
+            .require_memory((self.options.capacity + self.options.block_capacity) as u64)
             .await
             .unwrap();
         let timer = Instant::now();
@@ -552,8 +548,8 @@ impl Compactor {
             }
 
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
-            // If there is no keys whose epoch is equal than `watermark`, keep the latest key which
-            // satisfies `epoch` < `watermark`
+            // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
+            // key which satisfies `epoch` < `watermark`
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
@@ -661,44 +657,43 @@ impl Compactor {
         let mut upload_join_handles = vec![];
 
         for SplitTableOutput {
-            bloom_filter_size,
             sst_info,
             upload_join_handle,
         } in split_table_outputs
         {
-            // Bloom filter occuppy per thousand keys.
-            self.context
-                .filter_key_extractor_manager
-                .update_bloom_filter_avg_size(sst_info.file_size as usize, bloom_filter_size);
             let sst_size = sst_info.file_size;
             ssts.push(sst_info);
 
             let tracker_cloned = task_progress_tracker.clone();
-            upload_join_handles.push(upload_join_handle.and_then(|_| async move {
-                if let Some(tracker) = tracker_cloned {
-                    tracker.inc_ssts_uploaded();
-                }
-                Ok(())
-            }));
-
-            if self.context.is_share_buffer_compact {
-                self.context
-                    .stats
-                    .shared_buffer_to_sstable_size
-                    .observe(sst_size as _);
-            } else {
-                self.context.stats.compaction_upload_sst_counts.inc();
-            }
+            let context_cloned = self.context.clone();
+            upload_join_handles.push(
+                upload_join_handle
+                    .map_err(HummockError::sstable_upload_error)
+                    .and_then(move |upload_result| async move {
+                        upload_result?;
+                        if let Some(tracker) = tracker_cloned {
+                            tracker.inc_ssts_uploaded();
+                        }
+                        if context_cloned.is_share_buffer_compact {
+                            context_cloned
+                                .stats
+                                .shared_buffer_to_sstable_size
+                                .observe(sst_size as _);
+                        } else {
+                            context_cloned.stats.compaction_upload_sst_counts.inc();
+                        }
+                        Ok(())
+                    }),
+            );
         }
 
-        try_join_all(upload_join_handles)
-            .await
-            .map_err(|e| HummockError::other(format!("fail to upload sst data: {:?}", e)))?;
-
+        // Check if there are any failed uploads. Report all of those SSTs.
+        try_join_all(upload_join_handles).await?;
         self.context
             .stats
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
+
         Ok(ssts)
     }
 

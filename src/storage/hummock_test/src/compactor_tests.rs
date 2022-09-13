@@ -229,7 +229,7 @@ mod tests {
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
-        let output_table_id = version
+        let output_table = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .l0
             .as_ref()
@@ -240,13 +240,13 @@ mod tests {
             .table_infos
             .first()
             .unwrap()
-            .id;
+            .clone();
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, Payload::PinnedVersion(version));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
         let table = storage
             .sstable_store()
-            .sstable(output_table_id, &mut StoreLocalStatistic::default())
+            .sstable(&output_table, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
 
@@ -339,18 +339,17 @@ mod tests {
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
-        let output_table_id = version
+        let output_table = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .levels
             .last()
             .unwrap()
             .table_infos
             .first()
-            .unwrap()
-            .id;
+            .unwrap();
         let table = storage
             .sstable_store()
-            .sstable(output_table_id, &mut StoreLocalStatistic::default())
+            .sstable(output_table, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
         let target_table_size = storage.options().sstable_size_mb * (1 << 20);
@@ -365,7 +364,7 @@ mod tests {
         // 5. storage get back the correct kv after compaction
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, Payload::PinnedVersion(version));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
         let get_val = storage
             .get(
                 &key,
@@ -623,17 +622,17 @@ mod tests {
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
-        let mut table_ids_from_version = vec![];
+        let mut tables_from_version = vec![];
         version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
-            table_ids_from_version.extend(level.table_infos.iter().map(|table| table.id));
+            tables_from_version.extend(level.table_infos.iter().cloned());
             true
         });
 
         let mut key_count = 0;
-        for table_id in table_ids_from_version {
+        for table in tables_from_version {
             key_count += storage
                 .sstable_store()
-                .sstable(table_id, &mut StoreLocalStatistic::default())
+                .sstable(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
                 .value()
@@ -653,7 +652,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, Payload::PinnedVersion(version));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -784,17 +783,17 @@ mod tests {
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
-        let mut table_ids_from_version = vec![];
+        let mut tables_from_version = vec![];
         version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
-            table_ids_from_version.extend(level.table_infos.iter().map(|table| table.id));
+            tables_from_version.extend(level.table_infos.iter().cloned());
             true
         });
 
         let mut key_count = 0;
-        for table_id in table_ids_from_version {
+        for table in tables_from_version {
             key_count += storage
                 .sstable_store()
-                .sstable(table_id, &mut StoreLocalStatistic::default())
+                .sstable(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
                 .value()
@@ -815,7 +814,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, Payload::PinnedVersion(version));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -943,19 +942,18 @@ mod tests {
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
-        let table_ids_from_version: Vec<_> = version
+        let tables_from_version: Vec<_> = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .levels
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .map(|table_info| table_info.id)
             .collect::<Vec<_>>();
 
         let mut key_count = 0;
-        for table_id in table_ids_from_version {
+        for table in tables_from_version {
             key_count += storage
                 .sstable_store()
-                .sstable(table_id, &mut StoreLocalStatistic::default())
+                .sstable(table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
                 .value()
@@ -976,7 +974,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, Payload::PinnedVersion(version));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);

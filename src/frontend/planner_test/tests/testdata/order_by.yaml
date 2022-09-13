@@ -23,8 +23,8 @@
     select v1, v1+1 from t order by v1;
   batch_plan: |
     BatchExchange { order: [t.v1 ASC], dist: Single }
-      BatchSort { order: [t.v1 ASC] }
-        BatchProject { exprs: [t.v1, (t.v1 + 1:Int32)] }
+      BatchProject { exprs: [t.v1, (t.v1 + 1:Int32)] }
+        BatchSort { order: [t.v1 ASC] }
           BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -196,3 +196,13 @@
     BatchExchange { order: [mv.v ASC], dist: Single }
       BatchSort { order: [mv.v ASC] }
         BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+- sql: |
+    CREATE TABLE test (a INTEGER, b INTEGER);
+    SELECT b % 2 AS f, SUM(a) FROM test GROUP BY b % 2 ORDER BY f;
+  batch_plan: |
+    BatchExchange { order: [(test.b % 2:Int32) ASC], dist: Single }
+      BatchSortAgg { group_key: [(test.b % 2:Int32)], aggs: [sum(test.a)] }
+        BatchExchange { order: [(test.b % 2:Int32) ASC], dist: HashShard((test.b % 2:Int32)) }
+          BatchSort { order: [(test.b % 2:Int32) ASC] }
+            BatchProject { exprs: [(test.b % 2:Int32), test.a] }
+              BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }

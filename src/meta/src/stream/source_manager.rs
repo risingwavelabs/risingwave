@@ -35,6 +35,7 @@ use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
 };
 use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::SourceChangeSplitMutation;
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
@@ -48,7 +49,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 use tokio_retry::strategy::FixedInterval;
 
-use crate::barrier::{BarrierManagerRef, Command};
+use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId,
@@ -68,7 +69,7 @@ pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
-    barrier_manager: BarrierManagerRef<S>,
+    barrier_scheduler: BarrierScheduler<S>,
     compaction_group_manager: CompactionGroupManagerRef<S>,
     core: Arc<Mutex<SourceManagerCore<S>>>,
 }
@@ -345,8 +346,9 @@ pub(crate) fn fetch_source_fragments(
 ) {
     for fragment in table_fragments.fragments() {
         for actor in &fragment.actors {
-            if let Some(source_id) =
-                TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+            if let Some(source_id) = TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
+                .filter(|s| s.source_type() == SourceType::Source)
+                .map(|s| s.source_id)
             {
                 source_fragments
                     .entry(source_id)
@@ -416,7 +418,7 @@ where
     pub async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        barrier_scheduler: BarrierScheduler<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
@@ -454,7 +456,7 @@ where
             env,
             cluster_manager,
             catalog_manager,
-            barrier_manager,
+            barrier_scheduler,
             compaction_group_manager,
             core,
         })
@@ -693,6 +695,11 @@ where
         Ok(())
     }
 
+    pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
+        let core = self.core.lock().await;
+        core.actor_splits.clone()
+    }
+
     async fn tick(&self) -> MetaResult<()> {
         let diff = {
             let mut core_guard = self.core.lock().await;
@@ -701,23 +708,13 @@ where
 
         if !diff.is_empty() {
             let command = Command::Plain(Some(Mutation::Splits(SourceChangeSplitMutation {
-                actor_splits: diff
-                    .iter()
-                    .map(|(&actor_id, splits)| {
-                        (
-                            actor_id,
-                            ConnectorSplits {
-                                splits: splits.iter().map(ConnectorSplit::from).collect(),
-                            },
-                        )
-                    })
-                    .collect(),
+                actor_splits: build_actor_splits(&diff),
             })));
             tracing::debug!("pushing down mutation {:#?}", command);
 
             tokio_retry::Retry::spawn(FixedInterval::new(Self::SOURCE_RETRY_INTERVAL), || async {
                 let command = command.clone();
-                self.barrier_manager.run_command(command).await
+                self.barrier_scheduler.run_command(command).await
             })
             .await
             .expect("source manager barrier push down failed");
@@ -757,4 +754,19 @@ where
     pub async fn get_actor_splits(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
         self.core.lock().await.get_actor_splits()
     }
+}
+
+pub fn build_actor_splits(
+    diff: &HashMap<ActorId, Vec<SplitImpl>>,
+) -> HashMap<u32, ConnectorSplits> {
+    diff.iter()
+        .map(|(&actor_id, splits)| {
+            (
+                actor_id,
+                ConnectorSplits {
+                    splits: splits.iter().map(ConnectorSplit::from).collect(),
+                },
+            )
+        })
+        .collect()
 }
