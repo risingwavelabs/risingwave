@@ -164,16 +164,13 @@ impl StreamChunkBuilder {
 
     pub fn take(&mut self) -> ArrayResult<Option<StreamChunk>> {
         self.size = 0;
-        let new_arrays: Vec<ArrayImpl> = self
+        let new_columns = self
             .column_builders
             .iter_mut()
             .zip_eq(&self.data_types)
             .map(|(builder, datatype)| {
                 std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
             })
-            .collect();
-        let new_columns = new_arrays
-            .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
 
