@@ -222,7 +222,7 @@ where
     (join_handle, shutdown_tx)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sync_point"))]
 mod tests {
     use std::time::Duration;
 
@@ -234,9 +234,7 @@ mod tests {
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::manager::LocalNotification;
 
-    #[cfg(feature = "sync_point")]
     #[tokio::test]
-    // TODO: should support sync_point thread isolation so that we can remove serial.
     #[serial("sync_point")]
     async fn test_local_notification_receiver() {
         sync_point::reset();
