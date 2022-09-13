@@ -12,7 +12,7 @@ create materialized source s1 (v1 int, v2 float) with (
 ) row format json;
 
 # Wait enough time to ensure Datagen connector generate data
-sleep 2s
+sleep 3s
 
 # Will only generate 10 records since `fields.v1.end` is 10
 query II rowsort
@@ -43,7 +43,7 @@ create materialized source s1 (v1 int)  with (
 ) row format json;
 
 # Wait enough time to ensure Datagen connector generate data
-sleep 2s
+sleep 3s
 
 query I
 select v1 from s1 order by v1 limit 10;
