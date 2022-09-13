@@ -39,8 +39,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     pin_version_response, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
-    HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta,
-    LevelType, OverlappingLevel, ValidationTask,
+    HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    HummockVersionDeltas, Level, LevelDelta, LevelType, OverlappingLevel, ValidationTask,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -1309,6 +1309,28 @@ where
     #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
         read_lock!(self, versioning).await.current_version.clone()
+    }
+
+    /// Get version deltas from meta store
+    pub async fn get_version_deltas(
+        &self,
+        start_id: u64,
+        num_epochs: u32,
+    ) -> Result<HummockVersionDeltas> {
+        let ordered_version_deltas: BTreeMap<_, _> =
+            HummockVersionDelta::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .map(|version_delta| (version_delta.id, version_delta))
+                .collect();
+
+        let version_deltas = ordered_version_deltas
+            .into_iter()
+            .filter(|(id, _)| *id >= start_id)
+            .map(|(_, v)| v)
+            .take(num_epochs as _)
+            .collect();
+        Ok(HummockVersionDeltas { version_deltas })
     }
 
     #[named]
