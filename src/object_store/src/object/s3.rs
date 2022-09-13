@@ -97,7 +97,7 @@ impl S3StreamingUploader {
 
     fn upload_next_part(&mut self, data: Vec<Bytes>, len: usize) {
         debug_assert_eq!(data.iter().map(Bytes::len).sum::<usize>(), len);
-        println!("{}", len);
+
         let part_id = self.next_part_id;
         self.next_part_id += 1;
         let client_cloned = self.client.clone();
