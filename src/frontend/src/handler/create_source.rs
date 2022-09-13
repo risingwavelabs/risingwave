@@ -117,11 +117,9 @@ pub async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
-    let has_pk = stmt.constraints.iter().any(|cons| {
-        match cons {
-            TableConstraint::Unique { is_primary, .. } => *is_primary,
-            _ => false
-        }
+    let has_pk = stmt.constraints.iter().any(|cons| match cons {
+        TableConstraint::Unique { is_primary, .. } => *is_primary,
+        _ => false,
     });
 
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
