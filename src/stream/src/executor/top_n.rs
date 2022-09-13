@@ -380,7 +380,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                 )
                 .await?
         }
-        // compare the those two ranges and emit the differantial result
+
         generate_output(res_rows, res_ops, &self.schema)
     }
 
