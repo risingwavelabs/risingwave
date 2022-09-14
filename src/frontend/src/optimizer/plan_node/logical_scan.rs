@@ -545,7 +545,7 @@ impl LogicalScan {
             .satisfies(
                 &self
                     .o2i_col_mapping()
-                    .rewrite_provided_order(required_order),
+                    .rewrite_required_order(required_order),
             )
         })?;
 
