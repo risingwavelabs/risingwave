@@ -45,6 +45,9 @@ create materialized source s1 (v1 int)  with (
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
 
+statement ok
+flush;
+
 query I
 select v1 from s1 order by v1 limit 10;
 ----
