@@ -98,6 +98,63 @@ mod batched_iter {
             }
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use rand::Rng;
+
+        use super::*;
+
+        #[test]
+        fn test_iter_chaos() {
+            let key_range = 1..=10000;
+            let map: BTreeMap<i32, Arc<str>> = key_range
+                .clone()
+                .map(|k| (k, k.to_string().into()))
+                .collect();
+            let map = Arc::new(RwLock::new(map));
+
+            let rand_bound = || {
+                let key = rand::thread_rng().gen_range(key_range.clone());
+                match rand::thread_rng().gen_range(1..=5) {
+                    1 | 2 => Bound::Included(key),
+                    3 | 4 => Bound::Excluded(key),
+                    _ => Bound::Unbounded,
+                }
+            };
+
+            for _ in 0..1000 {
+                let range = loop {
+                    let range = (rand_bound(), rand_bound());
+                    let (start, end) = (range.start_bound(), range.end_bound());
+
+                    // Filter out invalid ranges. Code migrated from `BTreeMap::range`.
+                    match (start, end) {
+                        (Bound::Excluded(s), Bound::Excluded(e)) if s == e => {
+                            continue;
+                        }
+                        (
+                            Bound::Included(s) | Bound::Excluded(s),
+                            Bound::Included(e) | Bound::Excluded(e),
+                        ) if s > e => {
+                            continue;
+                        }
+                        _ => break range,
+                    }
+                };
+
+                let v1 = Iter::new(map.clone(), range).collect_vec();
+                let v2 = map
+                    .read()
+                    .range(range)
+                    .map(|(&k, v)| (k, v.clone()))
+                    .collect_vec();
+
+                // Items iterated from the batched iterator should be the same as normal iterator.
+                assert_eq!(v1, v2);
+            }
+        }
+    }
 }
 
 type KeyWithEpoch = (Bytes, Reverse<u64>);
