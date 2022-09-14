@@ -274,7 +274,7 @@ mod tests {
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        let output = builder.finish()?;
+        let output = builder.finish();
         let actual = output.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         let expected = "aaa,bbb,ccc,ddd";
@@ -295,7 +295,7 @@ mod tests {
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        let output = builder.finish()?;
+        let output = builder.finish();
         let actual = output.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         let expected = "aaa_cccddd";
@@ -324,7 +324,7 @@ mod tests {
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        let output = builder.finish()?;
+        let output = builder.finish();
         let actual = output.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         let expected = "ccc_bbb_ddd_aaa";

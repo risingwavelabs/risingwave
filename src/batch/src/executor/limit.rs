@@ -144,7 +144,7 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
+        let array = Arc::new(PrimitiveArray::from_slice(vec).into());
         Ok(Column::new(array))
     }
 
@@ -286,8 +286,7 @@ mod tests {
                 .map(Some)
                 .collect_vec()
                 .as_slice(),
-        )
-        .unwrap();
+        );
 
         let col1 = Column::new(Arc::new(visible_array.into()));
         let schema = Schema {
