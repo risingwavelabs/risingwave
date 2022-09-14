@@ -239,7 +239,7 @@ if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
             let res = least_restrictive(*left_ele_type_deref, right_type.clone()); // maybe I can align types directly here? 
             let return_type = match res {
                 Ok(dt) => Some(dt.clone()), 
-                Err(err ) => None, 
+                Err(err) => None, 
             }; 
             
             Ok(Some(return_type.ok_or_else(|| {
@@ -248,20 +248,28 @@ if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
         }
         ExprType::ArrayPrepend => {
             ensure_arity!("array_prepend", | inputs | == 2);
-            let left_type = inputs[0].return_type();
-            let right_type = inputs[1].return_type();
-            let return_type = match (&left_type, &right_type) {
-                (DataType::List { .. }, DataType::List { .. }) => None,
+            let right_type = inputs[1].return_type(); // I need the left element type 
+            let right_ele_type_opt = match(&right_type) {
                 (
-                    _, // non-array
                     DataType::List {
-                        datatype: right_elem_type,
-                    },
-                ) if left_type == **right_elem_type => Some(right_type.clone()), // also change
-                // with align_types
-                // here
-                _ => None,
+                        datatype: right_et 
+                    }
+                ) => Some(right_et),
+                _ => None
             };
+            // handle error 
+            let right_ele_type = right_ele_type_opt.ok_or_else(|| {
+                ErrorCode::BindError(format!("Second element needs to be of type array, but is {}", right_type))
+            })?; 
+            let right_ele_type_deref = right_ele_type.clone();
+
+            let left_type = inputs[0].return_type();
+            // TODO: remove the clone here
+            let res = least_restrictive(*right_ele_type_deref, left_type.clone()); // maybe I can align types directly here? 
+            let return_type = match res {
+                Ok(dt) => Some(dt.clone()), 
+                Err(err) => None, 
+            }; 
             Ok(Some(return_type.ok_or_else(|| {
                 ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type))
             })?))
