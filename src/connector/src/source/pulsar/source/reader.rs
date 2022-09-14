@@ -34,7 +34,7 @@ pub struct PulsarSplitReader {
     split: PulsarSplit,
 }
 
-// {ledger_id}:{entry_id}:{partition}:{batch_index}
+/// {ledger_id}:{entry_id}:{partition}:{batch_index}
 fn parse_message_id(id: &str) -> Result<MessageIdData> {
     let splits = id.split(':').collect_vec();
 
