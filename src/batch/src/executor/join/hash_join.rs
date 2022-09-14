@@ -1759,8 +1759,8 @@ mod tests {
             let columns = self
                 .array_builders
                 .into_iter()
-                .map(|array_builder| array_builder.finish().map(|arr| Column::new(Arc::new(arr))))
-                .try_collect()?;
+                .map(|b| Column::new(Arc::new(b.finish())))
+                .collect();
 
             Ok(DataChunk::new(columns, self.array_len))
         }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_pb::stream_plan::DispatcherType;
 
 use super::*;
 use crate::executor::exchange::input::new_input;
@@ -48,14 +49,25 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             })
             .try_collect()?;
 
-        if inputs.len() == 1 {
+        // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
+        // scale to multiple upstreams.
+        let always_single_input = match node.get_upstream_dispatcher_type()? {
+            DispatcherType::Unspecified => unreachable!(),
+            DispatcherType::Hash | DispatcherType::Broadcast => false,
+            // There could be arbitrary number of upstreams with simple dispatcher.
+            DispatcherType::Simple => false,
+            // There should be always only one upstream with no-shuffle dispatcher.
+            DispatcherType::NoShuffle => true,
+        };
+
+        if always_single_input {
             Ok(ReceiverExecutor::new(
                 schema,
                 params.pk_indices,
                 actor_context,
                 params.fragment_id,
                 upstream_fragment_id,
-                inputs.into_iter().next().unwrap(),
+                inputs.into_iter().exactly_one().unwrap(),
                 stream.context.clone(),
                 x_node.operator_id,
                 stream.streaming_metrics.clone(),
