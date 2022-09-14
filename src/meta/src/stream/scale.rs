@@ -136,36 +136,36 @@ pub(crate) fn rebalance_actor_vnode(
                 continue;
             }
 
-            v.push_back(Balance {
+            let mut balance = Balance {
                 actor_id: actor.actor_id as ActorId,
                 balance: (bitmap.num_high_bits() as i32) - expected,
                 builder: bitmap_builder,
-            });
+            };
+
+            if remain > 0 {
+                balance.balance -= 1;
+                remain -= 1;
+            }
+
+            if balance.balance != 0 {
+                v.push_back(balance);
+            }
         }
     }
 
     for (actor_id, _) in actors_to_create {
-        v.push_back(Balance {
+        let mut balance = Balance {
             actor_id: *actor_id as ActorId,
             balance: expected * -1,
             builder: BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT),
-        })
-    }
+        };
 
-    if remain != 0 {
-        for b in v.iter_mut() {
-            if actors_to_remove.contains_key(&b.actor_id) {
-                continue;
-            }
-
-            b.balance -= 1;
+        if remain > 0 {
+            balance.balance -= 1;
             remain -= 1;
-            if remain == 0 {
-                break;
-            }
         }
 
-        assert_eq!(remain, 0);
+        v.push_back(balance)
     }
 
     let mut result = HashMap::with_capacity(target_actor_count);
@@ -190,8 +190,6 @@ pub(crate) fn rebalance_actor_vnode(
 
         let n = min(abs(src.balance), abs(dst.balance));
 
-
-
         let mut vnodes = vec![];
 
         let mut moved = 0;
@@ -209,7 +207,6 @@ pub(crate) fn rebalance_actor_vnode(
                 }
             }
         }
-
 
         println!(
             "moving {} vnodes from {} to {}, {:?}",
@@ -234,7 +231,7 @@ pub(crate) fn rebalance_actor_vnode(
         }
     }
 
-    assert_eq!(result.len(), target_actor_count);
+    // assert_eq!(result.len(), target_actor_count);
 }
 
 impl<S> GlobalStreamManager<S>
