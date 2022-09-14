@@ -80,6 +80,7 @@ where
         }
     }
 
+    #[allow(clippy::uninit_vec)]
     pub fn append(&mut self, key: K, value: &V) {
         let offset = self.buffer.len();
         let len = value.encoded_len();
