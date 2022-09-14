@@ -123,7 +123,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
         let degree_state_table_l =
             StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()));
-
         let state_table_r =
             StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone()));
         let degree_state_table_r =

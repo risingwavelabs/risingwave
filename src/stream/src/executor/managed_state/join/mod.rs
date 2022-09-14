@@ -394,15 +394,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let table_iter_fut = self
             .state
             .table
-            .iter_with_pk_prefix(&key, self.current_epoch, false);
+            .iter_with_pk_prefix(&key, self.current_epoch);
 
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let degree_table_iter_fut =
-                self.degree_state
-                    .table
-                    .iter_with_pk_prefix(&key, self.current_epoch, false);
+            let degree_table_iter_fut = self
+                .degree_state
+                .table
+                .iter_with_pk_prefix(&key, self.current_epoch);
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;

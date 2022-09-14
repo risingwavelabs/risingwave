@@ -590,10 +590,7 @@ async fn test_state_table_iter_with_prefix() {
     ]));
     let epoch = u64::MAX;
     let pk_prefix = Row(vec![Some(1_i32.into())]);
-    let iter = state
-        .iter_with_pk_prefix(&pk_prefix, epoch, false)
-        .await
-        .unwrap();
+    let iter = state.iter_with_pk_prefix(&pk_prefix, epoch).await.unwrap();
     pin_mut!(iter);
 
     // this row exists in both mem_table and cell_based_table
@@ -695,35 +692,35 @@ async fn test_state_table_iter_partial() {
     );
     let epoch: u64 = 0;
 
-    state.partial_insert(Row(vec![
+    state.insert(Row(vec![
         Some(1_i32.into()),
         Some(11_i32.into()),
         Some(111_i32.into()),
     ]));
-    state.partial_insert(Row(vec![
+    state.insert(Row(vec![
         Some(2_i32.into()),
         Some(22_i32.into()),
         Some(222_i32.into()),
     ]));
-    state.partial_delete(Row(vec![
+    state.delete(Row(vec![
         Some(2_i32.into()),
         Some(22_i32.into()),
         Some(222_i32.into()),
     ]));
 
-    state.partial_insert(Row(vec![
+    state.insert(Row(vec![
         Some(3_i32.into()),
         Some(33_i32.into()),
         Some(3333_i32.into()),
     ]));
 
-    state.partial_insert(Row(vec![
+    state.insert(Row(vec![
         Some(6_i32.into()),
         Some(66_i32.into()),
         Some(666_i32.into()),
     ]));
 
-    state.partial_insert(Row(vec![
+    state.insert(Row(vec![
         Some(9_i32.into()),
         Some(99_i32.into()),
         Some(999_i32.into()),
@@ -752,35 +749,35 @@ async fn test_state_table_iter_partial() {
     // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
     // cell_based_table
 
-    state.partial_delete(Row(vec![
+    state.delete(Row(vec![
         Some(1_i32.into()),
         Some(11_i32.into()),
         Some(111_i32.into()),
     ]));
-    state.partial_insert(Row(vec![
+    state.insert(Row(vec![
         Some(3_i32.into()),
         Some(33_i32.into()),
         Some(333_i32.into()),
     ]));
 
-    state.partial_insert(Row(vec![
+    state.insert(Row(vec![
         Some(4_i32.into()),
         Some(44_i32.into()),
         Some(444_i32.into()),
     ]));
 
-    state.partial_insert(Row(vec![
+    state.insert(Row(vec![
         Some(5_i32.into()),
         Some(55_i32.into()),
         Some(555_i32.into()),
     ]));
-    state.partial_insert(Row(vec![
+    state.insert(Row(vec![
         Some(7_i32.into()),
         Some(77_i32.into()),
         Some(777_i32.into()),
     ]));
 
-    state.partial_insert(Row(vec![
+    state.insert(Row(vec![
         Some(8_i32.into()),
         Some(88_i32.into()),
         Some(888_i32.into()),
