@@ -587,7 +587,7 @@ mod tests {
                             ]),
                         }))
                         .unwrap();
-                    struct_builder.finish().unwrap().into()
+                    struct_builder.finish().into()
                 })),
                 Column::new(Arc::new({
                     list_builder.append(None).unwrap();
@@ -607,7 +607,7 @@ mod tests {
                         }))
                         .unwrap();
                     list_builder.append(None).unwrap();
-                    list_builder.finish().unwrap().into()
+                    list_builder.finish().into()
                 })),
             ],
             5,
@@ -672,7 +672,7 @@ mod tests {
                             ]),
                         }))
                         .unwrap();
-                    struct_builder.finish().unwrap().into()
+                    struct_builder.finish().into()
                 })),
                 Column::new(Arc::new({
                     list_builder.append(None).unwrap();
@@ -692,7 +692,7 @@ mod tests {
                         .unwrap();
                     list_builder.append(None).unwrap();
                     list_builder.append(None).unwrap();
-                    list_builder.finish().unwrap().into()
+                    list_builder.finish().into()
                 })),
             ],
             5,

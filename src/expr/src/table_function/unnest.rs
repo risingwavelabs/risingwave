@@ -33,7 +33,7 @@ impl Unnest {
         list.flatten()
             .iter()
             .try_for_each(|d| builder.append_datum_ref(*d))?;
-        Ok(Arc::new(builder.finish()?))
+        Ok(Arc::new(builder.finish()))
     }
 }
 

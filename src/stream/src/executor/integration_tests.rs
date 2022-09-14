@@ -205,9 +205,7 @@ async fn test_merger_sum_aggr() {
             let chunk = StreamChunk::new(
                 vec![op; i],
                 vec![Column::new(Arc::new(
-                    I64Array::from_slice(vec![Some(1); i].as_slice())
-                        .unwrap()
-                        .into(),
+                    I64Array::from_slice(vec![Some(1); i].as_slice()).into(),
                 ))],
                 None,
             );

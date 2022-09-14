@@ -114,13 +114,9 @@ impl StreamChunk {
             }
         }
 
-        let new_arrays = array_builders
+        let new_columns = array_builders
             .into_iter()
             .map(|builder| builder.finish())
-            .collect::<ArrayResult<Vec<_>>>()?;
-
-        let new_columns = new_arrays
-            .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
         Ok(StreamChunk::new(ops, new_columns, None))
@@ -412,7 +408,7 @@ impl StreamChunkTestExt for StreamChunk {
         }
         let columns = array_builders
             .into_iter()
-            .map(|builder| Column::new(Arc::new(builder.finish().unwrap())))
+            .map(|builder| Column::new(Arc::new(builder.finish())))
             .collect();
         let visibility = if visibility.iter().all(|b| *b) {
             None
