@@ -262,6 +262,7 @@ async fn bench(
     join_all([handle_r, handle_w]).await;
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn read(
     id: usize,
     bs: usize,
@@ -278,10 +279,7 @@ async fn read(
     let start = Instant::now();
 
     let sst = id as u32;
-    let mut limiter = match rate {
-        Some(rate) => Some(RateLimiter::new(rate)),
-        None => None,
-    };
+    let mut limiter = rate.map(RateLimiter::new);
 
     loop {
         match stop.try_recv() {
@@ -325,6 +323,7 @@ async fn read(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn write(
     id: usize,
     bs: usize,
@@ -338,10 +337,7 @@ async fn write(
     let start = Instant::now();
 
     let sst = id as u32;
-    let mut limiter = match rate {
-        Some(rate) => Some(RateLimiter::new(rate)),
-        None => None,
-    };
+    let mut limiter = rate.map(RateLimiter::new);
 
     loop {
         match stop.try_recv() {
