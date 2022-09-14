@@ -470,8 +470,14 @@ impl<S> GlobalStreamManager<S>
                 actors_to_create.insert(id, *created_parallel_unit_id);
             }
 
-            fragment_actors_to_remove.insert(*fragment_id as FragmentId, actors_to_remove);
-            fragment_actors_to_create.insert(*fragment_id as FragmentId, actors_to_create);
+
+            if !actors_to_remove.is_empty() {
+                fragment_actors_to_remove.insert(*fragment_id as FragmentId, actors_to_remove);
+            }
+
+            if !actors_to_create.is_empty() {
+                fragment_actors_to_create.insert(*fragment_id as FragmentId, actors_to_create);
+            }
         }
 
         let fragment_actors_to_remove = fragment_actors_to_remove;
@@ -504,6 +510,9 @@ impl<S> GlobalStreamManager<S>
                     .take(actors_to_create.len())
                     .collect()
             };
+
+
+            println!("actors to create {:?}", actors_to_create);
 
             for (actor_to_create, sample_actor) in
             actors_to_create.iter().zip_eq(sample_actors.into_iter())
@@ -570,12 +579,16 @@ impl<S> GlobalStreamManager<S>
             updated_bitmap.extend(actor_vnode);
         }
 
+        println!("update actors {:?}", updated_bitmap.keys().cloned().collect_vec());
+
         // After modification, for newly created `Actor` s, both upstream and downstream actor ids
         // have been modified
         let mut actor_infos_to_broadcast = BTreeMap::new();
         let mut node_actors_to_create: HashMap<WorkerId, Vec<_>> = HashMap::new();
         let mut broadcast_worker_ids = HashSet::new();
+
         for actors_to_create in fragment_actors_to_create.values() {
+            println!("1111 {:?}", actors_to_create);
             for (new_actor_id, new_parallel_unit_id) in actors_to_create {
                 let new_actor = new_created_actors.get(new_actor_id).unwrap();
                 for upstream_actor_id in &new_actor.upstream_actor_id {
@@ -645,7 +658,12 @@ impl<S> GlobalStreamManager<S>
             }
         }
 
+        println!("broad {:?}", broadcast_worker_ids);
+        println!("node to create {:?}", node_actors_to_create.keys().cloned().collect_vec());
+        println!("actor info {:?}", actor_infos_to_broadcast);
+
         for worker_id in &broadcast_worker_ids {
+            println!("22222");
             let node = ctx.worker_nodes.get(worker_id).unwrap();
             let client = self.client_pool.get(node).await?;
 
@@ -660,6 +678,7 @@ impl<S> GlobalStreamManager<S>
         }
 
         for (node_id, stream_actors) in &node_actors_to_create {
+            println!("33333");
             let node = ctx.worker_nodes.get(node_id).unwrap();
             let client = self.client_pool.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
@@ -673,6 +692,7 @@ impl<S> GlobalStreamManager<S>
         }
 
         for (node_id, hanging_channels) in worker_hanging_channels {
+            println!("4444");
             let node = ctx.worker_nodes.get(&node_id).unwrap();
 
             let client = self.client_pool.get(node).await?;
@@ -689,6 +709,7 @@ impl<S> GlobalStreamManager<S>
         }
 
         for (node_id, stream_actors) in node_actors_to_create {
+            println!("55555");
             let node = ctx.worker_nodes.get(&node_id).unwrap();
             let client = self.client_pool.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
@@ -839,7 +860,14 @@ impl<S> GlobalStreamManager<S>
 
                             println!("vnode_mapping {:?}", vnode_mapping);
 
-                            let (original_indices, data) = compress_data(&vnode_mapping);
+                            let actor_mapping = vnode_mapping
+                                .iter()
+                                .map(|parallel_unit_id| {
+                                    parallel_unit_to_actor_after_reschedule[parallel_unit_id]
+                                })
+                                .collect_vec();
+
+                            let (original_indices, data) = compress_data(&actor_mapping);
 
                             Some(ActorMapping {
                                 original_indices,
@@ -890,7 +918,7 @@ impl<S> GlobalStreamManager<S>
                 downstream_fragment_id,
             };
 
-            println!("{:#?}", reschedule1);
+            println!("frag id {} {:#?}", fragment_id, reschedule1);
 
             reschedule_fragment.insert(
                 fragment_id,
@@ -941,7 +969,6 @@ impl<S> GlobalStreamManager<S>
         }));
 
         tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
-
 
         println!("before send");
         self.barrier_scheduler
