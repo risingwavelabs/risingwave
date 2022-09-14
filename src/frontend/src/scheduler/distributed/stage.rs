@@ -21,8 +21,12 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
+use futures_async_stream::for_await;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
+use risingwave_batch::executor::ExecutorBuilder;
+use risingwave_batch::task::TaskId as TaskIdBatch;
+use risingwave_common::array::DataChunk;
 use risingwave_common::types::VnodeMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::select_all;
@@ -36,7 +40,7 @@ use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::task_service::{AbortTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tonic::Streaming;
 use tracing::{error, warn};
@@ -48,11 +52,11 @@ use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::distributed::QueryMessage;
 use crate::scheduler::plan_fragmenter::{
-    ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId,
+    ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId, ROOT_TASK_ID,
 };
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::SchedulerError::RpcError;
-use crate::scheduler::{SchedulerError, SchedulerResult};
+use crate::scheduler::SchedulerError::{RpcError, TaskExecutionError};
+use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
@@ -72,6 +76,7 @@ enum StageMessage {
 #[derive(Debug)]
 pub enum StageEvent {
     Scheduled(StageId),
+    ScheduledRoot(Receiver<SchedulerResult<DataChunk>>),
     /// Stage failed.
     Failed {
         id: StageId,
@@ -106,6 +111,9 @@ pub struct StageExecution {
     children: Vec<Arc<StageExecution>>,
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
+
+    /// Execution context ref
+    ctx: ExecutionContextRef,
 }
 
 struct StageRunner {
@@ -119,6 +127,8 @@ struct StageRunner {
     children: Vec<Arc<StageExecution>>,
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
+
+    ctx: ExecutionContextRef,
 }
 
 impl TaskStatusHolder {
@@ -139,6 +149,7 @@ impl TaskStatusHolder {
 }
 
 impl StageExecution {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         epoch: u64,
         stage: QueryStageRef,
@@ -147,6 +158,7 @@ impl StageExecution {
         children: Vec<Arc<StageExecution>>,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
+        ctx: ExecutionContextRef,
     ) -> Self {
         let tasks = (0..stage.parallelism)
             .into_iter()
@@ -163,6 +175,7 @@ impl StageExecution {
             children,
             compute_client_pool,
             catalog_reader,
+            ctx,
         }
     }
 
@@ -181,6 +194,7 @@ impl StageExecution {
                     state: self.state.clone(),
                     compute_client_pool: self.compute_client_pool.clone(),
                     catalog_reader: self.catalog_reader.clone(),
+                    ctx: self.ctx.clone(),
                 };
 
                 // The channel used for shutdown signal messaging.
@@ -231,7 +245,7 @@ impl StageExecution {
     ///
     /// When this method is called, all tasks should have been scheduled, and their `worker_node`
     /// should have been set.
-    fn all_exchange_sources_for(&self, output_id: u32) -> Vec<ExchangeSource> {
+    pub fn all_exchange_sources_for(&self, output_id: u32) -> Vec<ExchangeSource> {
         self.tasks
             .iter()
             .map(|(task_id, status_holder)| {
@@ -256,12 +270,11 @@ impl StageExecution {
 
 impl StageRunner {
     async fn run(mut self, shutdown_rx: oneshot::Receiver<StageMessage>) {
-        if let Err(e) = self.schedule_tasks(shutdown_rx).await {
+        if let Err(e) = self.schedule_tasks_for_all(shutdown_rx).await {
             error!(
                 "Stage {:?}-{:?} failed to schedule tasks, error: {:?}",
                 self.stage.query_id, self.stage.id, e
             );
-            // TODO: We should cancel all scheduled tasks
             self.send_event(QueryMessage::Stage(Failed {
                 id: self.stage.id,
                 reason: e,
@@ -389,6 +402,81 @@ impl StageRunner {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    async fn schedule_tasks_for_root(
+        &mut self,
+        shutdown_rx: oneshot::Receiver<StageMessage>,
+    ) -> SchedulerResult<()> {
+        let root_stage_id = self.stage.id;
+        // Currently, the dml should never be root fragment, so the partition is None.
+        // And root fragment only contain one task.
+        let plan_fragment = self.create_plan_fragment(ROOT_TASK_ID, None);
+        let plan_node = plan_fragment.root.unwrap();
+        let task_id = TaskIdBatch {
+            query_id: self.stage.query_id.id.clone(),
+            stage_id: root_stage_id,
+            task_id: 0,
+        };
+
+        // Notify QueryRunner to poll chunk from result_rx.
+        let (result_tx, result_rx) = tokio::sync::mpsc::channel(100);
+        self.send_event(QueryMessage::Stage(StageEvent::ScheduledRoot(result_rx)))
+            .await;
+
+        let executor = ExecutorBuilder::new(
+            &plan_node,
+            &task_id,
+            self.ctx.to_batch_task_context(),
+            self.epoch,
+        );
+
+        let executor = executor.build().await?;
+        let chunk_stream = executor.execute();
+        let mut terminated_chunk_stream = chunk_stream.take_until(shutdown_rx);
+        #[for_await]
+        for chunk in &mut terminated_chunk_stream {
+            let is_err = chunk.is_err();
+            result_tx
+                .send(chunk.map_err(|e| e.into()))
+                .await
+                .expect("The receiver should always existed! ");
+
+            // if errors, send failed message to QueryResultFetcher.
+            if is_err {
+                return Err(SchedulerError::TaskExecutionError);
+            }
+        }
+
+        // TODO: Fill in the Execution Message.
+        if let Some(err) = terminated_chunk_stream.take_result() {
+            let stage_message = err.expect("Sender should always existed!");
+
+            // Terminated by other tasks execution error, so no need to return error here.
+            match stage_message {
+                StageMessage::Stop => {
+                    // Tell Query Result Fetcher to stop polling.
+                    if let Err(_e) = result_tx.send(Err(TaskExecutionError)).await {
+                        warn!("Send task execution failed");
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn schedule_tasks_for_all(
+        &mut self,
+        shutdown_rx: oneshot::Receiver<StageMessage>,
+    ) -> SchedulerResult<()> {
+        // If root, we execute it locally.
+        if self.stage.id != 0 {
+            self.schedule_tasks(shutdown_rx).await?;
+        } else {
+            self.schedule_tasks_for_root(shutdown_rx).await?;
         }
         Ok(())
     }
@@ -538,7 +626,7 @@ impl StageRunner {
         Ok(stream_status)
     }
 
-    fn create_plan_fragment(
+    pub fn create_plan_fragment(
         &self,
         task_id: TaskId,
         partition: Option<PartitionInfo>,
