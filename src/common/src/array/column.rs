@@ -72,7 +72,7 @@ impl Column {
                 let mut builder = array.create_builder(cardinality)?;
                 // TODO: use a more efficient way to generate `null_column`.
                 (0..cardinality).try_for_each(|_i| builder.append_null())?;
-                Ok::<Column, ArrayError>(Column::new(Arc::new(builder.finish()?)))
+                Ok::<Column, ArrayError>(Column::new(Arc::new(builder.finish())))
             })
             .try_collect()?;
         for (i, subset) in column_subsets.into_iter().enumerate() {
@@ -84,7 +84,7 @@ impl Column {
             let flags = Column::from(PrimitiveArray::<i64>::from_slice(&vec![
                 Some(i as i64);
                 cardinality
-            ])?);
+            ]));
             new_columns.push(flags);
             yield new_columns;
         }
@@ -132,7 +132,7 @@ mod tests {
                 builder.append(None).unwrap();
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &I32Array = new_col.array_ref().as_int32();
@@ -157,7 +157,7 @@ mod tests {
                 _ => builder.append(None).unwrap(),
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &BoolArray = new_col.array_ref().into();
@@ -180,7 +180,7 @@ mod tests {
                 builder.append(None).unwrap();
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         let arr: &Utf8Array = new_col.array_ref().as_utf8();
         arr.iter().enumerate().for_each(|(i, x)| {
@@ -204,7 +204,7 @@ mod tests {
                 builder.append(None).unwrap();
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &DecimalArray = new_col.array_ref().as_decimal();
@@ -231,7 +231,7 @@ mod tests {
                 builder.append(None).unwrap();
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &NaiveDateArray = new_col.array_ref().as_naivedate();
@@ -261,7 +261,7 @@ mod tests {
                 builder.append(None).unwrap();
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &NaiveTimeArray = new_col.array_ref().as_naivetime();
@@ -293,7 +293,7 @@ mod tests {
                 builder.append(None).unwrap();
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &NaiveDateTimeArray = new_col.array_ref().as_naivedatetime();

@@ -334,7 +334,7 @@ impl Expression for ArrayConcatExpression {
                 builder.append_datum(&self.evaluate(left, right))?;
             }
         }
-        Ok(Arc::new(builder.finish()?))
+        Ok(Arc::new(builder.finish()))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

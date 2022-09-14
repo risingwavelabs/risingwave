@@ -76,7 +76,7 @@ where
             cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
         }
 
-        Ok(Arc::new(builder.finish()?.into()))
+        Ok(Arc::new(builder.finish().into()))
     }
 }
 
