@@ -59,6 +59,7 @@ buildkite-agent artifact upload risingwave-"$profile"
 buildkite-agent artifact upload risedev-dev-"$profile"
 buildkite-agent artifact upload risingwave_regress_test-"$profile"
 buildkite-agent artifact upload ./sqlsmith-"$profile"
+buildkite-agent artifact upload e2e_test/generated
 
 echo "--- upload misc"
 cp src/source/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
