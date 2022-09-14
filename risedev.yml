@@ -9,8 +9,8 @@ risedev:
     # - use: minio
 
     # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
-    - use: aws-s3
-      bucket: zhidong-s3-bench
+    # - use: aws-s3
+    #   bucket: some-bucket
 
     # if you want to enable etcd backend, uncomment the following lines.
     # - use: etcd
@@ -18,19 +18,16 @@ risedev:
 
     - use: meta-node
       enable-dashboard-v2: false
-      unsafe-disable-recovery: false
-      listen-address: 0.0.0.0
+      unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-    - use: compactor
-      port: 6660
-      exporter-port: 1260
+    # - use: compactor
+
     # If you want to enable metrics, uncomment those two lines.
-    - use: prometheus
-    - use: grafana
-      address: 0.0.0.0
+    # - use: prometheus
+    # - use: grafana
 
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
