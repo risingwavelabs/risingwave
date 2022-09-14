@@ -19,7 +19,7 @@ use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeName};
 
-use super::{align_types, cast_ok_base, CastContext};
+use super::{align_types, cast_ok_base, CastContext, least_restrictive};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
@@ -184,7 +184,6 @@ fn infer_type_for_special(
                     },
                 ) => {
                     // common_type = align_types(array(left_type, right_type))
-                    
                     // How do I write this in a rust way? Look up how to do proper rust-like nested error handling
                     let res = align_types(inputs.iter_mut()); 
                     if res.is_ok() {
@@ -218,21 +217,34 @@ if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
         // guess: we match by function type. User selected diff function operator
         // user can use array_cat, but this is in the end the same as append or prepend
         ExprType::ArrayAppend => {
+            // works, gives the correct type, but I guess there is no casting? 
             ensure_arity!("array_append", | inputs | == 2);
-            let left_type = inputs[0].return_type();
-            let right_type = inputs[1].return_type();
-            let return_type = match (&left_type, &right_type) {
-                (DataType::List { .. }, DataType::List { .. }) => None,
+            let left_type = inputs[0].return_type(); // I need the left element type 
+            let left_ele_type_opt = match(&left_type) {
                 (
                     DataType::List {
-                        datatype: left_elem_type,
-                    },
-                    _, // non-array
-                ) if **left_elem_type == right_type => Some(left_type.clone()), /* also use align_types here */
-                _ => None,
+                        datatype: left_et 
+                    }
+                ) => Some(left_et),
+                _ => None
             };
+            // handle error 
+            let left_ele_type = left_ele_type_opt.ok_or_else(|| {
+                ErrorCode::BindError(format!("First element needs to be of type array, but is {}", left_type))
+            })?; 
+            let left_ele_type_deref = left_ele_type.clone();
+
+            let right_type = inputs[1].return_type();
+            // TODO: remove the clone here
+            let res = least_restrictive(*left_ele_type_deref, right_type.clone()); // maybe I can align types directly here? 
+            let return_type = match res {
+                Ok(dt) => Some(dt.clone()), 
+                Err(err ) => None, 
+            }; 
+            
+            panic!("return_type: {:?}", return_type.unwrap().clone()); 
             Ok(Some(return_type.ok_or_else(|| {
-                ErrorCode::BindError(format!("Cannot append {} to {}", right_type, left_type))
+                ErrorCode::BindError(format!("Cannot append {} to {}.", right_type, left_type))
             })?))
         }
         ExprType::ArrayPrepend => {
