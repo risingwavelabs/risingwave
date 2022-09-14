@@ -150,8 +150,9 @@ impl MergeExecutor {
                                 .try_collect()
                                 .map_err(|e| anyhow!("failed to create upstream receivers: {e}"))?;
 
-                            // Poll the first barrier from the new upstreams. It must be the same as the
-                            // one we polled from original upstreams.
+                            // Poll the first barrier from the new upstreams. It must be the same as
+                            // the one we polled from original
+                            // upstreams.
                             let mut select_new =
                                 SelectReceivers::new(self.actor_context.id, new_upstreams);
                             let new_barrier = expect_first_barrier(&mut select_new).await?;
@@ -359,8 +360,8 @@ mod tests {
                     Barrier::new_test_barrier(1000)
                         .with_mutation(Mutation::Stop(HashSet::default())),
                 ))
-                    .await
-                    .unwrap();
+                .await
+                .unwrap();
             });
             handles.push(handle);
         }
@@ -432,8 +433,8 @@ mod tests {
             233,
             metrics.clone(),
         )
-            .boxed()
-            .execute();
+        .boxed()
+        .execute();
 
         pin_mut!(merge);
 
@@ -521,8 +522,8 @@ mod tests {
                     ),
                 }),
             }))
-                .await
-                .unwrap();
+            .await
+            .unwrap();
             // send barrier
             let barrier = Barrier::new_test_barrier(12345);
             tx.send(Ok(GetStreamResponse {
@@ -534,8 +535,8 @@ mod tests {
                     ),
                 }),
             }))
-                .await
-                .unwrap();
+            .await
+            .unwrap();
             Ok(Response::new(ReceiverStream::new(rx)))
         }
     }

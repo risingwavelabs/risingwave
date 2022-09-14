@@ -344,7 +344,6 @@ where
                 tracing::trace!("update mutation: {mutation:#?}");
                 println!("update mutation: {mutation:#?}");
 
-
                 Some(mutation)
             }
         };

@@ -20,7 +20,6 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
-
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -42,7 +41,7 @@ pub struct FragmentManagerCore {
 
 impl FragmentManagerCore {
     /// List all fragment vnode mapping info.
-    pub fn all_fragment_mappings(&self) -> impl Iterator<Item=ParallelUnitMapping> + '_ {
+    pub fn all_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
         self.table_fragments.values().flat_map(|table_fragments| {
             table_fragments.fragments.values().map(|fragment| {
                 let parallel_unit_mapping = fragment
@@ -99,8 +98,8 @@ pub struct BuildGraphInfo {
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
 
 impl<S: MetaStore> FragmentManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let table_fragments = try_match_expand!(
@@ -387,7 +386,7 @@ impl<S: MetaStore> FragmentManager<S>
                         if let Some(ref old_parallel_unit) = status.parallel_unit {
                             flag = true;
                             if let Entry::Vacant(e) =
-                            parallel_unit_migrate_map.entry(old_parallel_unit.id)
+                                parallel_unit_migrate_map.entry(old_parallel_unit.id)
                             {
                                 let new_parallel_unit =
                                     pu_map.get_mut(new_node_id).unwrap().pop().unwrap();
@@ -622,7 +621,7 @@ impl<S: MetaStore> FragmentManager<S>
                             HashMap::with_capacity(fragment.actors.len());
                         for actor in &fragment.actors {
                             if let Some(actor_status) =
-                            table_fragment.actor_status.get(&actor.actor_id)
+                                table_fragment.actor_status.get(&actor.actor_id)
                             {
                                 if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
                                     actor_to_parallel_unit.insert(
@@ -645,7 +644,9 @@ impl<S: MetaStore> FragmentManager<S>
 
                             let parallel_unit_data = data
                                 .iter()
-                                .map(|actor_id| *actor_to_parallel_unit.get(actor_id).unwrap() as ParallelUnitId)
+                                .map(|actor_id| {
+                                    *actor_to_parallel_unit.get(actor_id).unwrap() as ParallelUnitId
+                                })
                                 .collect_vec();
 
                             *vnode_mapping = ParallelUnitMapping {

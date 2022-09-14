@@ -1184,11 +1184,11 @@ mod tests {
 
         let vnode_bitmaps = vnode_mapping_to_bitmaps(build_vnode_mapping(&parallel_units));
 
-        info.into_iter()
+        info.iter()
             .map(|(actor_id, parallel_unit_id)| StreamActor {
                 actor_id: *actor_id,
                 vnode_bitmap: vnode_bitmaps
-                    .get(&parallel_unit_id)
+                    .get(parallel_unit_id)
                     .map(|bitmap| bitmap.to_protobuf()),
                 ..Default::default()
             })
