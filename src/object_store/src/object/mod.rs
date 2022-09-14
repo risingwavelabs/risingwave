@@ -417,18 +417,20 @@ impl MonitoredStreamingUploader {
 impl MonitoredStreamingUploader {
     pub fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         let operation_type = "streaming_upload_write_bytes";
+        let data_len = data.len();
         self.object_store_metrics
             .write_bytes
             .inc_by(data.len() as u64);
         self.object_store_metrics
             .operation_size
-            .with_label_values(&[operation_type]);
+            .with_label_values(&[operation_type])
+            .observe(data_len as f64);
         let _timer = self
             .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type, operation_type])
             .start_timer();
-        self.operation_size += data.len();
+        self.operation_size += data_len;
 
         let ret = self.inner.write_bytes(data);
 
