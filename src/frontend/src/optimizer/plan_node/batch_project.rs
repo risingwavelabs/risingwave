@@ -24,7 +24,6 @@ use super::{
 };
 use crate::expr::Expr;
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::Order;
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows
@@ -49,15 +48,6 @@ impl BatchProject {
         BatchProject { base, logical }
     }
 
-    pub fn new_with_order(logical: LogicalProject, order: Order) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let distribution = logical
-            .i2o_col_mapping()
-            .rewrite_provided_distribution(logical.input().distribution());
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), distribution, order);
-        BatchProject { base, logical }
-    }
-
     pub fn as_logical(&self) -> &LogicalProject {
         &self.logical
     }
@@ -75,10 +65,7 @@ impl PlanTreeNodeUnary for BatchProject {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new_with_order(
-            self.logical.clone_with_input(input),
-            self.base.order.clone(),
-        )
+        Self::new(self.logical.clone_with_input(input))
     }
 }
 
