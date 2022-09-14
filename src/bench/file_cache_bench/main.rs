@@ -16,6 +16,7 @@
 mod analyze;
 #[cfg(target_os = "linux")]
 mod bench;
+mod rate;
 #[cfg(target_os = "linux")]
 mod utils;
 

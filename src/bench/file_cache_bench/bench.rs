@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Buf, BufMut};
 use clap::Parser;
+use futures::future::join_all;
 use itertools::Itertools;
 use prometheus::Registry;
 use rand::{Rng, SeedableRng};
@@ -27,31 +28,33 @@ use risingwave_storage::hummock::{TieredCacheKey, TieredCacheValue};
 use tokio::sync::oneshot;
 
 use crate::analyze::{analyze, monitor, Hook, Metrics};
+use crate::rate::RateLimiter;
 use crate::utils::{dev_stat_path, iostat};
 
 #[derive(Parser, Debug, Clone)]
 struct Args {
     #[clap(short, long)]
     path: String,
-    /// (mb)
+    /// (MiB)
     #[clap(long, default_value = "1024")]
     capacity: usize,
-    /// (mb)
+    /// (MiB)
     #[clap(long, default_value = "128")]
     total_buffer_capacity: usize,
-    /// (mb)
+    /// (MiB)
     #[clap(long, default_value = "512")]
     cache_file_fallocate_unit: usize,
-    /// (mb)
+    /// (MiB)
     #[clap(long, default_value = "16")]
     cache_meta_fallocate_unit: usize,
 
-    /// (kb)
+    /// (KiB)
     #[clap(long, default_value = "1024")]
     bs: usize,
     #[clap(long, default_value = "8")]
     concurrency: usize,
-    #[clap(long, default_value = "600")] // 600s
+    /// (s)
+    #[clap(long, default_value = "600")]
     time: u64,
     #[clap(long, default_value = "1")]
     read: usize,
@@ -59,10 +62,14 @@ struct Args {
     write: usize,
     #[clap(long, default_value = "10000")]
     look_up_range: u32,
-    #[clap(long, default_value = "0")] // 0ms
-    loop_min_interval: u64,
-
-    #[clap(long, default_value = "1")] // (s)
+    /// (MiB/s), 0 for inf.
+    #[clap(long, default_value = "0")]
+    r_rate: f64,
+    /// (MiB/s), 0 for inf.
+    #[clap(long, default_value = "0")]
+    w_rate: f64,
+    /// (s)
+    #[clap(long, default_value = "1")]
     report_interval: u64,
 }
 
@@ -175,7 +182,7 @@ pub async fn run() {
 
     // TODO: Remove this after graceful shutdown is done.
     // Waiting for the inflight flush io to pervent files from being closed.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -205,19 +212,78 @@ async fn bench(
     cache: FileCache<Index, CacheValue>,
     time: u64,
     metrics: Metrics,
-    mut stop: oneshot::Receiver<()>,
+    stop: oneshot::Receiver<()>,
 ) {
-    let start = Instant::now();
+    let bs = args.bs * 1024;
+    let w_rate = if args.w_rate == 0.0 {
+        None
+    } else {
+        Some(args.w_rate * 1024.0 * 1024.0)
+    };
+    let r_rate = if args.r_rate == 0.0 {
+        None
+    } else {
+        Some(args.r_rate * 1024.0 * 1024.0)
+    };
 
+    let index = Arc::new(AtomicU32::new(0));
+
+    let (w_stop_tx, w_stop_rx) = oneshot::channel();
+    let (r_stop_tx, r_stop_rx) = oneshot::channel();
+
+    let handle_w = tokio::spawn(write(
+        id,
+        bs,
+        w_rate,
+        index.clone(),
+        cache.clone(),
+        time,
+        metrics.clone(),
+        w_stop_rx,
+    ));
+    let handle_r = tokio::spawn(read(
+        id,
+        bs,
+        r_rate,
+        index,
+        cache,
+        time,
+        metrics,
+        r_stop_rx,
+        args.look_up_range,
+    ));
+    tokio::spawn(async move {
+        if let Ok(()) = stop.await {
+            let _ = w_stop_tx.send(());
+            let _ = r_stop_tx.send(());
+        }
+    });
+
+    join_all([handle_r, handle_w]).await;
+}
+
+async fn read(
+    id: usize,
+    bs: usize,
+    rate: Option<f64>,
+    index: Arc<AtomicU32>,
+    cache: FileCache<Index, CacheValue>,
+    time: u64,
+    metrics: Metrics,
+    mut stop: oneshot::Receiver<()>,
+    look_up_range: u32,
+) {
     let mut rng = rand::rngs::StdRng::seed_from_u64(0);
 
+    let start = Instant::now();
+
     let sst = id as u32;
-    let mut idx = 0;
-    let bs = args.bs * 1024;
+    let mut limiter = match rate {
+        Some(rate) => Some(RateLimiter::new(rate)),
+        None => None,
+    };
 
     loop {
-        let loop_start = Instant::now();
-
         match stop.try_recv() {
             Err(oneshot::error::TryRecvError::Empty) => {}
             _ => return,
@@ -226,56 +292,84 @@ async fn bench(
             return;
         }
 
-        for _ in 0..args.write {
-            idx += 1;
-            let key = Index { sst, idx };
-            let value = CacheValue(vec![b'x'; bs]);
+        let idx = index.load(Ordering::Relaxed);
+        let key = Index {
+            sst,
+            idx: rng.gen_range(std::cmp::max(idx, look_up_range + 1) - look_up_range..=idx),
+        };
 
-            let start = Instant::now();
-            cache.insert(key, value).unwrap();
+        if let Some(limiter) = &mut limiter && let Some(wait) = limiter.consume(bs as f64) {
+            tokio::time::sleep(wait).await;
+        }
+
+        let start = Instant::now();
+        let hit = cache.get(&key).await.unwrap().is_some();
+        let lat = start.elapsed().as_micros() as u64;
+        if hit {
             metrics
-                .insert_lats
+                .get_hit_lats
                 .write()
-                .record(start.elapsed().as_micros() as u64)
+                .record(lat)
                 .expect("record out of range");
-            metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
-            metrics.insert_bytes.fetch_add(bs, Ordering::Relaxed);
-        }
-        for _ in 0..args.read {
-            let key = Index {
-                sst,
-                idx: rng.gen_range(
-                    std::cmp::max(idx, args.look_up_range + 1) - args.look_up_range..=idx,
-                ),
-            };
-
-            let start = Instant::now();
-            let hit = cache.get(&key).await.unwrap().is_some();
-            let lat = start.elapsed().as_micros() as u64;
-            if hit {
-                metrics
-                    .get_hit_lats
-                    .write()
-                    .record(lat)
-                    .expect("record out of range");
-            } else {
-                metrics
-                    .get_miss_lats
-                    .write()
-                    .record(lat)
-                    .expect("record out of range");
-                metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
-            }
-            metrics.get_ios.fetch_add(1, Ordering::Relaxed);
-        }
-
-        if args.loop_min_interval == 0 {
-            tokio::task::yield_now().await;
         } else {
-            let elapsed = loop_start.elapsed().as_millis() as u64;
-            if elapsed < args.loop_min_interval {
-                tokio::time::sleep(Duration::from_millis(args.loop_min_interval - elapsed)).await;
-            }
+            metrics
+                .get_miss_lats
+                .write()
+                .record(lat)
+                .expect("record out of range");
+            metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
         }
+        metrics.get_ios.fetch_add(1, Ordering::Relaxed);
+
+        tokio::task::consume_budget().await;
+    }
+}
+
+async fn write(
+    id: usize,
+    bs: usize,
+    rate: Option<f64>,
+    index: Arc<AtomicU32>,
+    cache: FileCache<Index, CacheValue>,
+    time: u64,
+    metrics: Metrics,
+    mut stop: oneshot::Receiver<()>,
+) {
+    let start = Instant::now();
+
+    let sst = id as u32;
+    let mut limiter = match rate {
+        Some(rate) => Some(RateLimiter::new(rate)),
+        None => None,
+    };
+
+    loop {
+        match stop.try_recv() {
+            Err(oneshot::error::TryRecvError::Empty) => {}
+            _ => return,
+        }
+        if start.elapsed().as_secs() >= time {
+            return;
+        }
+
+        let idx = index.fetch_add(1, Ordering::Relaxed);
+        let key = Index { sst, idx };
+        let value = CacheValue(vec![b'x'; bs]);
+
+        if let Some(limiter) = &mut limiter && let Some(wait) = limiter.consume(bs as f64) {
+            tokio::time::sleep(wait).await;
+        }
+
+        let start = Instant::now();
+        cache.insert(key, value).unwrap();
+        metrics
+            .insert_lats
+            .write()
+            .record(start.elapsed().as_micros() as u64)
+            .expect("record out of range");
+        metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
+        metrics.insert_bytes.fetch_add(bs, Ordering::Relaxed);
+
+        tokio::task::consume_budget().await;
     }
 }
