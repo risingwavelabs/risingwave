@@ -77,11 +77,11 @@ impl Binder {
     fn bind_concat_op(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
         let func_type = match (left.return_type(), right.return_type()) {
             // array concatenation
-            (DataType::List { .. }, DataType::List { .. }) => ExprType::ArrayCat,
-            (DataType::List { .. }, _) => ExprType::ArrayAppend,
-            (_, DataType::List { .. }) => ExprType::ArrayPrepend,
+            (DataType::List { .. }, DataType::List { .. }) => ExprType::ArrayCat, // [][]
+            (DataType::List { .. }, _) => ExprType::ArrayAppend, // [], 1
+            (_, DataType::List { .. }) => ExprType::ArrayPrepend, // 1, [] 
             // string concatenation
-            (DataType::Varchar, _) | (_, DataType::Varchar) => ExprType::ConcatOp,
+            (DataType::Varchar, _) | (_, DataType::Varchar) => ExprType::ConcatOp, // str anything
             // invalid
             (left_type, right_type) => {
                 return Err(ErrorCode::BindError(format!(

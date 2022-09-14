@@ -59,7 +59,8 @@ pub async fn handle(
         session.clone(),
         Arc::from(sql),
         WithOptions::try_from(&stmt)?,
-    );
+    ); 
+    // panic!("{:}", sql); // just show that this is the og input string
     match stmt {
         Statement::Explain {
             statement,
@@ -158,7 +159,7 @@ pub async fn handle(
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_query(context, stmt, format).await,
+        | Statement::Update { .. } => query::handle_query(context, stmt, format).await, // for select go here
         Statement::CreateView {
             materialized: true,
             or_replace: false,

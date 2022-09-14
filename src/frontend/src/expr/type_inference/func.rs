@@ -184,6 +184,8 @@ fn infer_type_for_special(
                         datatype: right_elem_type,
                     },
                 ) => {
+                    // common_type = align_types(array(left_type, right_type))
+                    
                     if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
                         Some(left_type.clone()) // success
                     } else if left_type == **right_elem_type {
@@ -204,8 +206,8 @@ fn infer_type_for_special(
 
                                     //  QueryError: Scheduler error: Expr error: Array error: Invalid datum type
                                     DataType::List {
-                                        datatype: { Box::new(DataType::Decimal) },
-                                    },
+                                        datatype: { Box::new(DataType::Decimal) }, // use align_types? 
+                                    }, 
                                 )
                             })
                             .try_collect()?;
@@ -239,7 +241,7 @@ fn infer_type_for_special(
                         datatype: left_elem_type,
                     },
                     _, // non-array
-                ) if **left_elem_type == right_type => Some(left_type.clone()),
+                ) if **left_elem_type == right_type => Some(left_type.clone()), // also use align_types here
                 _ => None,
             };
             Ok(Some(return_type.ok_or_else(|| {
@@ -257,7 +259,7 @@ fn infer_type_for_special(
                     DataType::List {
                         datatype: right_elem_type,
                     },
-                ) if left_type == **right_elem_type => Some(right_type.clone()),
+                ) if left_type == **right_elem_type => Some(right_type.clone()), // also change with align_types here 
                 _ => None,
             };
             Ok(Some(return_type.ok_or_else(|| {
