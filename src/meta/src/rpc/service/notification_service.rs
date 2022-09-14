@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use itertools::Itertools;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -85,17 +83,17 @@ where
         let creating_tables = catalog_guard.database.list_creating_tables();
         let users = catalog_guard.user.list_users();
 
-        let fragment_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.fragment_id));
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
-        let parallel_unit_mappings = fragment_guard
-            .all_fragment_mappings()
-            .filter(|mapping| fragment_ids.contains(&mapping.fragment_id))
-            .collect_vec();
+        let parallel_unit_mappings = fragment_guard.all_fragment_mappings().collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
-        self.hummock_manager
-            .pin_version(req.get_worker_id())
-            .await?;
+        // We should only pin for workers that will unpin.
+        if worker_type == WorkerType::ComputeNode || worker_type == WorkerType::RiseCtl {
+            self.hummock_manager
+                .pin_version(req.get_worker_id())
+                .await?;
+        }
+
         let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;

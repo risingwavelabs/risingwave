@@ -45,7 +45,14 @@ impl FrontendService {
         cmd.arg("--host")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--client-address")
-            .arg(format!("{}:{}", config.address, config.port));
+            .arg(format!("{}:{}", config.address, config.port))
+            .arg("--prometheus-listener-addr")
+            .arg(format!(
+                "{}:{}",
+                config.listen_address, config.exporter_port
+            ))
+            .arg("--metrics-level")
+            .arg("1");
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         match provide_meta_node.len() {

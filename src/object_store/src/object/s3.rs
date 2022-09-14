@@ -38,8 +38,10 @@ type PartId = i32;
 
 /// MinIO and S3 share the same minimum part ID and part size.
 const MIN_PART_ID: PartId = 1;
-const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
-
+/// The minimum number of bytes that is buffered before they are uploaded as a part.
+/// Its value must be greater than the minimum part size of 5MiB.
+///
+/// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html>
 const S3_PART_SIZE: usize = 16 * 1024 * 1024;
 // TODO: we should do some benchmark to determine the proper part size for MinIO
 const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
@@ -47,6 +49,7 @@ const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
 const S3_NUM_PREFIXES: u32 = 256;
 
 /// S3 multipart upload handle.
+///
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
 pub struct S3StreamingUploader {
     client: Client,
@@ -60,21 +63,11 @@ pub struct S3StreamingUploader {
     next_part_id: PartId,
     /// Join handles for part uploads.
     join_handles: Vec<JoinHandle<ObjectResult<(PartId, UploadPartOutput)>>>,
-    /// Buffer for bytes.
-    ///
-    /// We prefer `Vec` over other data structures for better memory usage
-    /// and spatial locality, which is important because we tend to remove multiple
-    /// consecutive elements from `buf` at a time.
-    ///
-    /// Moreover, we preserve at least `MIN_PART_SIZE` of data in the buffer when uploading a part
-    /// due to the minimum part size limitation of S3.
+    /// Buffer for data. It will store at least `part_size` bytes of data before wrapping itself
+    /// into a stream and upload to object store as a part.
     buf: Vec<Bytes>,
     /// Length of the data that have not been uploaded to S3.
     not_uploaded_len: usize,
-    /// Length of the data that exceeds the current part to be uploaded in the buffer.
-    next_part_len: usize,
-    /// The data included in the next part are `buf[..part_end]`.
-    part_end: usize,
     /// To record metrics for uploading part.
     metrics: Arc<ObjectStoreMetrics>,
 }
@@ -98,14 +91,17 @@ impl S3StreamingUploader {
             join_handles: Default::default(),
             buf: Default::default(),
             not_uploaded_len: 0,
-            next_part_len: 0,
-            part_end: 0,
             metrics,
         }
     }
 
-    fn upload_next_part(&mut self, data: Vec<Bytes>, len: usize) {
-        debug_assert_eq!(data.iter().map(Bytes::len).sum::<usize>(), len);
+    fn upload_next_part(&mut self) {
+        let data = self.buf.drain(..).collect_vec();
+        let len = self.not_uploaded_len;
+        debug_assert_eq!(
+            data.iter().map(|b| b.len()).sum::<usize>(),
+            self.not_uploaded_len
+        );
 
         let part_id = self.next_part_id;
         self.next_part_id += 1;
@@ -140,10 +136,9 @@ impl S3StreamingUploader {
     }
 
     async fn flush_and_complete(&mut self) -> ObjectResult<()> {
-        self.upload_next_part(
-            Vec::from_iter(self.buf.iter().cloned()),
-            self.not_uploaded_len,
-        );
+        if !self.buf.is_empty() {
+            self.upload_next_part();
+        }
 
         // If any part fails to upload, abort the upload.
         let join_handles = self.join_handles.drain(..).collect_vec();
@@ -215,22 +210,10 @@ impl StreamingUploader for S3StreamingUploader {
         self.not_uploaded_len += data_len;
         self.buf.push(data);
 
-        if self.not_uploaded_len > self.part_size {
-            if self.part_end == 0 {
-                // Mark current slice of buffer to be the next part to be uploaded.
-                self.part_end = self.buf.len();
-            } else {
-                // `data` should be uploaded in the next part.
-                self.next_part_len += data_len;
-            }
-        }
-        if self.next_part_len >= MIN_PART_SIZE {
-            // Take a 16MiB part and upload it. `Bytes` performs shallow clone.
-            let part = self.buf.drain(..self.part_end).collect();
-            self.upload_next_part(part, self.not_uploaded_len - self.next_part_len);
-            self.not_uploaded_len = self.next_part_len;
-            self.part_end = 0;
-            self.next_part_len = 0;
+        if self.not_uploaded_len >= self.part_size {
+            // Take a 16MiB part and upload it.
+            self.upload_next_part();
+            self.not_uploaded_len = 0;
         }
         Ok(())
     }
@@ -242,24 +225,12 @@ impl StreamingUploader for S3StreamingUploader {
         fail_point!("s3_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("s3 finish streaming upload error")
         ));
-        // Fallback to `PUT`.
-        if self.join_handles.is_empty() {
+        if self.join_handles.is_empty() && self.buf.is_empty() {
             self.abort().await?;
-            return if self.buf.is_empty() {
-                Err(ObjectError::internal("upload empty object"))
-            } else {
-                self.client
-                    .put_object()
-                    .bucket(&self.bucket)
-                    .key(&self.key)
-                    .body(get_upload_body(self.buf))
-                    .content_length(self.not_uploaded_len as i64)
-                    .send()
-                    .await?;
-                Ok(())
-            };
+            return Err(ObjectError::internal("upload empty object"));
         }
         if let Err(e) = self.flush_and_complete().await {
+            tracing::warn!("Failed to upload object {}: {:?}", self.key, e);
             self.abort().await?;
             return Err(e);
         }
@@ -267,7 +238,7 @@ impl StreamingUploader for S3StreamingUploader {
     }
 
     fn get_memory_usage(&self) -> u64 {
-        (self.part_size + MIN_PART_SIZE) as u64
+        self.part_size as u64
     }
 }
 

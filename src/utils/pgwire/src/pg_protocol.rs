@@ -318,11 +318,11 @@ where
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         tracing::trace!("(extended query)parse query: {}", sql);
         // 1. Create the types description.
-        let type_ids = msg.type_ids;
-        let mut types: Vec<TypeOid> = Vec::with_capacity(type_ids.len());
-        for x in type_ids {
-            types.push(TypeOid::as_type(x).map_err(|e| PsqlError::ParseError(Box::new(e)))?);
-        }
+        let types = msg
+            .type_ids
+            .iter()
+            .map(|x| TypeOid::as_type(*x).map_err(|e| PsqlError::ParseError(Box::new(e))))
+            .collect::<PsqlResult<Vec<TypeOid>>>()?;
 
         // Flag indicate whether statement is a query statement.
         let is_query_sql = {
@@ -335,7 +335,7 @@ where
         };
 
         // 2. Create the row description.
-        let rows: Vec<PgFieldDescriptor> = if is_query_sql {
+        let fields: Vec<PgFieldDescriptor> = if is_query_sql {
             if types.is_empty() {
                 let session = self.session.clone().unwrap();
                 session
@@ -395,7 +395,7 @@ where
             cstr_to_str(&msg.statement_name).unwrap().to_string(),
             msg.sql_bytes,
             types,
-            rows,
+            fields,
         );
 
         // 4. Insert the statement.
@@ -435,8 +435,7 @@ where
                 &msg.params,
                 msg.result_format_code,
             )
-            .await
-            .map_err(|_| PsqlError::BindError("Failed to instance statement".into()))?;
+            .await?;
 
         // 3. Insert the Portal.
         if portal_name.is_empty() {
@@ -492,7 +491,6 @@ where
     }
 
     async fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
-        // m.kind indicates the Describe type:
         //  b'S' => Statement
         //  b'P' => Portal
         assert!(msg.kind == b'S' || msg.kind == b'P');

@@ -199,7 +199,7 @@ mod tests {
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        let output = builder.finish()?;
+        let output = builder.finish();
         let actual = output.into_list();
         let actual = actual
             .iter()
@@ -239,7 +239,7 @@ mod tests {
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        let output = builder.finish()?;
+        let output = builder.finish();
         let actual = output.into_list();
         let actual = actual
             .iter()

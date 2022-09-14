@@ -72,12 +72,13 @@ impl<S: StateStore> RangeCache<S> {
             let entry = self.cache.entry(k).or_insert_with(HashSet::new);
             entry.insert(v.clone());
         }
-        self.state_table.insert(v)?;
+        self.state_table.insert(v);
         Ok(())
     }
 
     /// Delete a row and corresponding scalar value key from cache (if within range) and
     /// `StateTable`.
+    // FIXME: panic instead of returning Err
     pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if self.range.contains(k) {
             let contains_element = self
@@ -92,7 +93,7 @@ impl<S: StateStore> RangeCache<S> {
                 )));
             };
         }
-        self.state_table.delete(v)?;
+        self.state_table.delete(v);
         Ok(())
     }
 

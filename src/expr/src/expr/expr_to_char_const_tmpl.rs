@@ -54,7 +54,7 @@ impl Expression for ExprToCharConstTmpl {
             }
         }
 
-        Ok(Arc::new((output.finish()?).into()))
+        Ok(Arc::new(output.finish().into()))
     }
 
     fn eval_row(&self, input: &risingwave_common::array::Row) -> crate::Result<Datum> {

@@ -2377,13 +2377,13 @@ impl Parser {
                         match explain_type {
                             Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                             Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                             _ => unreachable!("{}", keyword),
                         }
                     }
                     Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                     Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                     _ => unreachable!("{}", keyword),
                 }
             }
@@ -3290,7 +3290,7 @@ impl Parser {
 
     pub fn parse_begin(&mut self) -> Result<Statement, ParserError> {
         let _ = self.parse_one_of_keywords(&[Keyword::TRANSACTION, Keyword::WORK]);
-        Ok(Statement::StartTransaction {
+        Ok(Statement::BEGIN {
             modes: self.parse_transaction_modes()?,
         })
     }

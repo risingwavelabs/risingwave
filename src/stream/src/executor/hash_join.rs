@@ -849,11 +849,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         // Since join key contains pk and pk is unique, there should be only
                         // one row if matched
                         let [row]: [_; 1] = append_only_matched_rows.try_into().unwrap();
-                        side_match.ht.delete(key, row)?;
+                        side_match.ht.delete(key, row);
                     } else if need_update_side_update_degree(T, SIDE) {
-                        side_update.ht.insert(key, JoinRow::new(value, degree))?;
+                        side_update.ht.insert(key, JoinRow::new(value, degree));
                     } else {
-                        side_update.ht.insert_row(key, value)?;
+                        side_update.ht.insert_row(key, value);
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -897,9 +897,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         yield Message::Chunk(chunk);
                     }
                     if need_update_side_update_degree(T, SIDE) {
-                        side_update.ht.delete(key, JoinRow::new(value, degree))?;
+                        side_update.ht.delete(key, JoinRow::new(value, degree));
                     } else {
-                        side_update.ht.delete_row(key, value)?;
+                        side_update.ht.delete_row(key, value);
                     };
                 }
             }
