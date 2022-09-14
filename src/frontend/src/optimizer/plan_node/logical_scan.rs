@@ -508,13 +508,17 @@ impl LogicalScan {
         }
     }
 
-    fn i2o_col_mapping_inner(&self) -> ColIndexMapping {
+    fn i2o_col_mapping(&self) -> ColIndexMapping {
         let input_len = self.table_desc.columns.len();
         let mut map = vec![None; input_len];
         for (i, key) in self.output_col_idx.iter().enumerate() {
             map[i] = Some(*key);
         }
         ColIndexMapping::new(map)
+    }
+
+    fn o2i_col_mapping(&self) -> ColIndexMapping {
+        self.i2o_col_mapping().inverse()
     }
 
     // For every index, check if the order of the index satisfies the required_order
@@ -540,7 +544,7 @@ impl LogicalScan {
             }
             .satisfies(
                 &self
-                    .i2o_col_mapping_inner()
+                    .o2i_col_mapping()
                     .rewrite_provided_order(required_order),
             )
         })?;
@@ -602,23 +606,10 @@ impl LogicalScan {
                 JoinType::Inner,
                 on,
             );
-            let batch_lookup_join = join.to_batch_lookup_join().unwrap();
-            let batch_proj = BatchProject::new_with_order(
-                LogicalProject::new(
-                    batch_lookup_join.into(),
-                    self.required_col_idx()
-                        .iter()
-                        .map(|r_q| {
-                            ExprImpl::InputRef(Box::new(InputRef::new(
-                                index.index_table.columns().len() + r_q,
-                                self.table_desc.columns.get(*r_q).unwrap().data_type.clone(),
-                            )))
-                        })
-                        .collect_vec(),
-                ),
-                required_order.clone(),
-            );
-            return Some(Ok(batch_proj.into()));
+            let batch_lookup_join = join
+                .to_batch_lookup_join_with_order(required_order)
+                .unwrap();
+            Some(Ok(batch_lookup_join))
         }
     }
 }

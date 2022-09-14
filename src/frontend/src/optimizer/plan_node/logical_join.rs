@@ -547,6 +547,7 @@ impl LogicalJoin {
         &self,
         logical_join: LogicalJoin,
         mut predicate: EqJoinPredicate,
+        order: &Order,
     ) -> Option<PlanRef> {
         if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
             tracing::warn!(
@@ -600,7 +601,16 @@ impl LogicalJoin {
             .and(logical_scan.predicate().clone().rewrite_expr(&mut rewriter));
         *predicate.other_cond_mut() = new_other;
 
-        Some(BatchLookupJoin::new(logical_join, predicate, table_desc, output_column_ids).into())
+        Some(
+            BatchLookupJoin::new_with_order(
+                logical_join,
+                predicate,
+                table_desc,
+                output_column_ids,
+                order,
+            )
+            .into(),
+        )
     }
 
     pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
@@ -832,7 +842,7 @@ impl PredicatePushdown for LogicalJoin {
 }
 
 impl LogicalJoin {
-    pub fn to_batch_lookup_join(&self) -> Result<PlanRef> {
+    pub fn to_batch_lookup_join_with_order(&self, order: &Order) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left.schema().len(),
             self.right.schema().len(),
@@ -844,8 +854,12 @@ impl LogicalJoin {
         let logical_join = self.clone_with_left_right(left, right);
 
         Ok(self
-            .convert_to_lookup_join(logical_join, predicate)
+            .convert_to_lookup_join(logical_join, predicate, order)
             .expect("Fail to convert to lookup join"))
+    }
+
+    pub fn to_batch_lookup_join(&self) -> Result<PlanRef> {
+        self.to_batch_lookup_join_with_order(&Order::any())
     }
 }
 
@@ -865,9 +879,11 @@ impl ToBatch for LogicalJoin {
 
         if predicate.has_eq() {
             if config.get_batch_enable_lookup_join() {
-                if let Some(lookup_join) =
-                    self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
-                {
+                if let Some(lookup_join) = self.convert_to_lookup_join(
+                    logical_join.clone(),
+                    predicate.clone(),
+                    &self.base.order,
+                ) {
                     return Ok(lookup_join);
                 }
             }

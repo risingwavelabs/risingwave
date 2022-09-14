@@ -51,9 +51,25 @@ impl BatchLookupJoin {
         right_table_desc: TableDesc,
         right_output_column_ids: Vec<ColumnId>,
     ) -> Self {
+        Self::new_with_order(
+            logical,
+            eq_join_predicate,
+            right_table_desc,
+            right_output_column_ids,
+            &Order::any(),
+        )
+    }
+
+    pub fn new_with_order(
+        logical: LogicalJoin,
+        eq_join_predicate: EqJoinPredicate,
+        right_table_desc: TableDesc,
+        right_output_column_ids: Vec<ColumnId>,
+        order: &Order,
+    ) -> Self {
         let ctx = logical.base.ctx.clone();
         let dist = Self::derive_dist(logical.left().distribution());
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, order.clone());
         Self {
             base,
             logical,
@@ -126,12 +142,13 @@ impl PlanTreeNodeUnary for BatchLookupJoin {
 
     // Only change left side
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
+        Self::new_with_order(
             self.logical
                 .clone_with_left_right(input, self.logical.right()),
             self.eq_join_predicate.clone(),
             self.right_table_desc.clone(),
             self.right_output_column_ids.clone(),
+            &self.base.order,
         )
     }
 }
