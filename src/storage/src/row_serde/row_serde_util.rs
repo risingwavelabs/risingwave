@@ -20,7 +20,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
-use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
 use risingwave_common::util::value_encoding::deserialize_datum;
 
 use super::ColumnDescMapping;
@@ -38,6 +38,16 @@ pub fn serialize_pk_with_vnode(
 ) -> Vec<u8> {
     let pk_bytes = serialize_pk(pk, serializer);
     [&vnode.to_be_bytes(), pk_bytes.as_slice()].concat()
+}
+
+// NOTE: Only for debug purpose now
+pub fn deserialize_pk_with_vnode(
+    key: &[u8],
+    deserializer: &OrderedRowDeserializer,
+) -> Result<(VirtualNode, Row)> {
+    let vnode = VirtualNode::from_be_bytes(key[0..VIRTUAL_NODE_SIZE].try_into().unwrap());
+    let pk = deserializer.deserialize(&key[VIRTUAL_NODE_SIZE..])?;
+    Ok((vnode, pk))
 }
 
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {

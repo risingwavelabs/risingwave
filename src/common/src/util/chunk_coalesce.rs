@@ -255,7 +255,7 @@ impl DataChunkBuilder {
         let columns = new_array_builders.into_iter().try_fold(
             Vec::with_capacity(self.data_types.len()),
             |mut vec, array_builder| -> ArrayResult<Vec<Column>> {
-                let array = array_builder.finish()?;
+                let array = array_builder.finish();
                 let column = Column::new(Arc::new(array));
                 vec.push(column);
                 Ok(vec)
@@ -450,7 +450,7 @@ mod tests {
                 .append_datum(&Some(ScalarImpl::Int32(v)))
                 .is_ok())
         }
-        let left_arrays = vec![left_array_builder.finish().unwrap()];
+        let left_arrays = vec![left_array_builder.finish()];
 
         let mut right_array_builder = DataType::Int64.create_array_builder(5);
         for v in [5, 4, 3, 2, 1] {
@@ -458,7 +458,7 @@ mod tests {
                 .append_datum(&Some(ScalarImpl::Int64(v)))
                 .is_ok())
         }
-        let right_arrays = vec![right_array_builder.finish().unwrap()];
+        let right_arrays = vec![right_array_builder.finish()];
 
         let mut output_chunks = Vec::new();
 
