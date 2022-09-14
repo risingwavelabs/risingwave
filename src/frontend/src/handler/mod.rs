@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
+use pgwire::pg_response::StatementType::{ABORT, BEGIN, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
@@ -202,11 +202,16 @@ pub async fn handle(
         // TODO: Track issues #2595 #2541
         Statement::StartTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
             START_TRANSACTION,
-            "Ignored temporarily.See detail in issue#2541".to_string(),
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        // BEGIN is similar to START TRANSACTION.
+        Statement::BEGIN { .. } => Ok(PgResponse::empty_result_with_notice(
+            BEGIN,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         Statement::Abort { .. } => Ok(PgResponse::empty_result_with_notice(
             ABORT,
-            "Ignored temporarily.See detail in issue#2541".to_string(),
+            "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         _ => {
             Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())

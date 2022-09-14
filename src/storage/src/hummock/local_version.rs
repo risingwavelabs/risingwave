@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::{Deref, RangeBounds};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
@@ -39,7 +39,6 @@ pub struct LocalVersion {
     shared_buffer: BTreeMap<HummockEpoch, SharedBuffer>,
     pinned_version: PinnedVersion,
     local_related_version: PinnedVersion,
-    pub version_ids_in_use: BTreeSet<HummockVersionId>,
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
     /// We need to save data in reverse order of epoch,
@@ -49,6 +48,12 @@ pub struct LocalVersion {
     max_sync_epoch: HummockEpoch,
     /// The max readable epoch, and epochs smaller than it will not be written again.
     sealed_epoch: HummockEpoch,
+}
+
+#[derive(Debug, Clone)]
+pub enum PinVersionAction {
+    Pin(HummockVersionId),
+    Unpin(HummockVersionId),
 }
 
 #[derive(Debug, Clone)]
@@ -103,19 +108,16 @@ impl SyncUncommittedData {
 impl LocalVersion {
     pub fn new(
         version: HummockVersion,
-        unpin_worker_tx: UnboundedSender<HummockVersionId>,
+        pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
-        let mut version_ids_in_use = BTreeSet::new();
-        version_ids_in_use.insert(version.id);
         let local_related_version = version.clone();
-        let pinned_version = PinnedVersion::new(version, unpin_worker_tx);
+        let pinned_version = PinnedVersion::new(version, pinned_version_manager_tx);
         let local_related_version =
             pinned_version.new_local_related_pin_version(local_related_version);
         Self {
             shared_buffer: BTreeMap::default(),
             pinned_version,
             local_related_version,
-            version_ids_in_use,
             sync_uncommitted_data: Default::default(),
             max_sync_epoch: 0,
             sealed_epoch: 0,
@@ -134,14 +136,24 @@ impl LocalVersion {
         &self.pinned_version
     }
 
-    pub fn swap_max_sync_epoch(&mut self, epoch: HummockEpoch) -> Option<HummockEpoch> {
-        if self.max_sync_epoch > epoch {
+    /// Advance the `max_sync_epoch` to at least `new_epoch`.
+    ///
+    /// Return `Some(prev max_sync_epoch)` if `new_epoch > max_sync_epoch`
+    /// Return `None` if `new_epoch <= max_sync_epoch`
+    pub fn advance_max_sync_epoch(&mut self, new_epoch: HummockEpoch) -> Option<HummockEpoch> {
+        if self.max_sync_epoch >= new_epoch {
             None
         } else {
             let last_epoch = self.max_sync_epoch;
-            self.max_sync_epoch = epoch;
+            self.max_sync_epoch = new_epoch;
             Some(last_epoch)
         }
+    }
+
+    pub fn get_min_shared_buffer_epoch(&self) -> Option<HummockEpoch> {
+        self.shared_buffer
+            .first_key_value()
+            .map(|(&epoch, _)| epoch)
     }
 
     pub fn get_max_sync_epoch(&self) -> HummockEpoch {
@@ -218,10 +230,10 @@ impl LocalVersion {
         self.shared_buffer.iter()
     }
 
-    pub fn iter_mut_shared_buffer(
+    pub fn iter_mut_unsynced_shared_buffer(
         &mut self,
     ) -> impl Iterator<Item = (&HummockEpoch, &mut SharedBuffer)> {
-        self.shared_buffer.iter_mut()
+        self.shared_buffer.range_mut(self.max_sync_epoch + 1..)
     }
 
     pub fn new_shared_buffer(
@@ -247,8 +259,6 @@ impl LocalVersion {
                 .iter()
                 .all(|(epoch, _)| *epoch > new_pinned_version.max_committed_epoch));
         }
-
-        self.version_ids_in_use.insert(new_pinned_version.id);
 
         let new_pinned_version = self.pinned_version.new_pin_version(new_pinned_version);
 
@@ -480,12 +490,38 @@ impl LocalVersion {
 
 struct PinnedVersionGuard {
     version_id: HummockVersionId,
-    unpin_worker_tx: UnboundedSender<HummockVersionId>,
+    pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
+}
+
+impl PinnedVersionGuard {
+    /// Creates a new `PinnedVersionGuard` and send a pin request to `pinned_version_worker`.
+    fn new(
+        version_id: HummockVersionId,
+        pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
+    ) -> Self {
+        if pinned_version_manager_tx
+            .send(PinVersionAction::Pin(version_id))
+            .is_err()
+        {
+            tracing::warn!("failed to send req pin version id{}", version_id);
+        }
+
+        Self {
+            version_id,
+            pinned_version_manager_tx,
+        }
+    }
 }
 
 impl Drop for PinnedVersionGuard {
     fn drop(&mut self) {
-        self.unpin_worker_tx.send(self.version_id).ok();
+        if self
+            .pinned_version_manager_tx
+            .send(PinVersionAction::Unpin(self.version_id))
+            .is_err()
+        {
+            tracing::warn!("failed to send req unpin version id:{}", self.version_id);
+        }
     }
 }
 
@@ -496,14 +532,18 @@ pub struct PinnedVersion {
 }
 
 impl PinnedVersion {
-    fn new(version: HummockVersion, unpin_worker_tx: UnboundedSender<HummockVersionId>) -> Self {
+    fn new(
+        version: HummockVersion,
+        pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
+    ) -> Self {
         let version_id = version.id;
+
         PinnedVersion {
             version: Arc::new(version),
-            guard: Arc::new(PinnedVersionGuard {
+            guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
-                unpin_worker_tx,
-            }),
+                pinned_version_manager_tx,
+            )),
         }
     }
 
@@ -517,10 +557,10 @@ impl PinnedVersion {
         let version_id = version.id;
         PinnedVersion {
             version: Arc::new(version),
-            guard: Arc::new(PinnedVersionGuard {
+            guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
-                unpin_worker_tx: self.guard.unpin_worker_tx.clone(),
-            }),
+                self.guard.pinned_version_manager_tx.clone(),
+            )),
         }
     }
 

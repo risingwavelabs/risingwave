@@ -373,9 +373,19 @@ message TriggerFullGCResponse {
   common.Status status = 1;
 }
 
+message GetVersionDeltasRequest {
+  uint64 start_id = 1;
+  uint32 num_epochs = 2;
+}
+
+message GetVersionDeltasResponse {
+  HummockVersionDeltas version_deltas = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
+  rpc GetVersionDeltas(GetVersionDeltasRequest) returns (GetVersionDeltasResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);

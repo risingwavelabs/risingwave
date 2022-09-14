@@ -47,13 +47,13 @@ macro_rules! gen_eval {
                             }
                             $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                         }
-                        output_array.finish()?.into()
+                        output_array.finish().into()
                     }
                     None => {
                         for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
                             $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                         }
-                        output_array.finish()?.into()
+                        output_array.finish().into()
                     }
                 }))
             }
@@ -178,7 +178,7 @@ macro_rules! eval_bytes_row {
         if let ($(Some($arg), )*) = ($($arg, )*) {
             let writer = Utf8ArrayBuilder::new(1).writer();
             let guard = ($self.func)($($arg, )* writer)?;
-            let array = guard.into_inner().finish()?;
+            let array = guard.into_inner().finish();
             array.into_single_value() // take the single value from the array
         } else {
             None

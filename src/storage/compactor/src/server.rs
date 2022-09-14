@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::config::load_config;
+use risingwave_common::monitor::node::report_node_process;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -66,6 +67,7 @@ pub async fn compactor_serve(
     // Boot compactor
     let registry = prometheus::Registry::new();
     monitor_process(&registry).unwrap();
+    report_node_process(&registry).unwrap();
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
