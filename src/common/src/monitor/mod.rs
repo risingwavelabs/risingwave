@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod my_stats;
+pub mod node;
 pub mod process_linux;
 pub mod rwlock;
 

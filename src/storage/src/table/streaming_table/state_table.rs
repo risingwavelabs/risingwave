@@ -39,7 +39,7 @@ use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
-    serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
+    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -436,9 +436,11 @@ impl<S: StateStore> StateTable<S> {
     fn handle_mem_table_error(&self, e: MemTableError) {
         match e {
             MemTableError::Conflict { key, prev, new } => {
-                let key = self.pk_deserializer.deserialize(&key).unwrap();
+                let (vnode, key) = deserialize_pk_with_vnode(&key, &self.pk_deserializer).unwrap();
                 panic!(
-                    "mem-table operation conflicts! key: {:?}, prev: {}, new: {}",
+                    "mem-table operation conflicts! table_id: {}, vnode: {}, key: {:?}, prev: {}, new: {}",
+                    self.keyspace.table_id(),
+                    vnode,
                     &key,
                     Self::pretty_row_op(&prev, self.data_types.as_ref(),),
                     Self::pretty_row_op(&new, self.data_types.as_ref(),),

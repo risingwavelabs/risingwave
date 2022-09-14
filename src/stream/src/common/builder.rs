@@ -16,9 +16,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    ArrayBuilderImpl, ArrayImpl, ArrayResult, Op, Row, RowRef, StreamChunk,
-};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayResult, Op, Row, RowRef, StreamChunk};
 use risingwave_common::types::DataType;
 
 /// Build a array and it's corresponding operations.
@@ -164,16 +162,13 @@ impl StreamChunkBuilder {
 
     pub fn take(&mut self) -> ArrayResult<Option<StreamChunk>> {
         self.size = 0;
-        let new_arrays: Vec<ArrayImpl> = self
+        let new_columns = self
             .column_builders
             .iter_mut()
             .zip_eq(&self.data_types)
             .map(|(builder, datatype)| {
                 std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
             })
-            .try_collect()?;
-        let new_columns = new_arrays
-            .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
 
