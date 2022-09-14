@@ -203,7 +203,7 @@ impl LocalVersion {
         assert!(is_checkpoint, "current seal_epoch must be a checkpoint");
         self.sealed_epoch = self.sealed_epoch.max(epoch);
         if self.advance_max_sync_epoch(epoch).is_none() {
-            tracing::info!("trivial advance max sync epoch: {}", epoch);
+            tracing::trace!("trivial advance max sync epoch: {}", epoch);
         }
     }
 
