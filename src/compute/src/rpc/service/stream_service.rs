@@ -22,7 +22,7 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::{Barrier, Epoch, Mutation};
+use risingwave_stream::executor::{Barrier, Epoch, Mutation, INVALID_EPOCH};
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
@@ -168,11 +168,14 @@ impl StreamService for StreamServiceImpl {
             .await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
-        let synced_sstables = self
-            .mgr
-            .await_sync_epoch(req.prev_epoch)
-            .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
-            .await?;
+        let synced_sstables = if req.prev_epoch != INVALID_EPOCH {
+            self.mgr
+                .await_sync_epoch(req.prev_epoch)
+                .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
+                .await?
+        } else {
+            Vec::new()
+        };
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
