@@ -15,12 +15,14 @@
 use std::cmp::min;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
-use std::ops::{BitAnd, Not};
+use std::ops::{BitAnd, Index, IndexMut, Not};
+
 use anyhow::{anyhow, Context};
 use chrono::format::Item;
+use fail::remove;
 use futures::future::BoxFuture;
 use futures::Stream;
-use itertools::{repeat_n, Itertools, equal};
+use itertools::{equal, repeat_n, Itertools};
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -94,6 +96,145 @@ impl RescheduleContext {
                     .into()
             })
     }
+}
+
+pub(crate) fn rebalance_actor_vnode(
+    actors: &[StreamActor],
+    actors_to_remove: &BTreeMap<ActorId, ParallelUnitId>,
+    actors_to_create: &BTreeMap<ActorId, ParallelUnitId>,
+) {
+    assert!(actors.len() > actors_to_remove.len());
+    let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
+    assert_ne!(target_actor_count, 0);
+
+    struct Balance {
+        actor_id: ActorId,
+        balance: i32,
+        builder: BitmapBuilder,
+    }
+
+    let expected = (VIRTUAL_NODE_COUNT as f64 / target_actor_count as f64) as i32;
+    let mut remain = VIRTUAL_NODE_COUNT - expected as usize * target_actor_count;
+
+    println!("target is {}", expected);
+
+    let mut v = VecDeque::with_capacity(actors_to_create.len() + actors.len());
+
+    for actor in actors {
+        if let Some(buffer) = actor.vnode_bitmap.as_ref() {
+            let bitmap = Bitmap::from(buffer);
+            let mut bitmap_builder = BitmapBuilder::default();
+            bitmap_builder.append_bitmap(&bitmap);
+
+            if actors_to_remove.contains_key(&actor.actor_id) {
+                v.push_front(Balance {
+                    actor_id: actor.actor_id as ActorId,
+                    balance: bitmap.num_high_bits() as i32,
+                    builder: bitmap_builder,
+                });
+
+                continue;
+            }
+
+            v.push_back(Balance {
+                actor_id: actor.actor_id as ActorId,
+                balance: (bitmap.num_high_bits() as i32) - expected,
+                builder: bitmap_builder,
+            });
+        }
+    }
+
+    for (actor_id, _) in actors_to_create {
+        v.push_back(Balance {
+            actor_id: *actor_id as ActorId,
+            balance: expected * -1,
+            builder: BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT),
+        })
+    }
+
+    if remain != 0 {
+        for b in v.iter_mut() {
+            if actors_to_remove.contains_key(&b.actor_id) {
+                continue;
+            }
+
+            b.balance -= 1;
+            remain -= 1;
+            if remain == 0 {
+                break;
+            }
+        }
+
+        assert_eq!(remain, 0);
+    }
+
+    let mut result = HashMap::with_capacity(target_actor_count);
+
+    while !v.is_empty() {
+        for b in &v {
+            println!(
+                "actor {} has {}, R[{}] C[{}]",
+                b.actor_id,
+                b.balance,
+                actors_to_remove.contains_key(&b.actor_id),
+                actors_to_create.contains_key(&b.actor_id)
+            );
+        }
+
+        println!("--------");
+
+        assert!(v.len() >= 2);
+
+        let mut src = v.pop_front().unwrap();
+        let mut dst = v.pop_back().unwrap();
+
+        let n = min(abs(src.balance), abs(dst.balance));
+
+
+
+        let mut vnodes = vec![];
+
+        let mut moved = 0;
+        for idx in (0..VIRTUAL_NODE_COUNT).rev() {
+            if src.builder.is_set(idx) {
+                src.builder.set(idx, false);
+                assert!(!dst.builder.is_set(idx));
+                dst.builder.set(idx, true);
+
+                vnodes.push(idx);
+
+                moved += 1;
+                if moved >= n {
+                    break;
+                }
+            }
+        }
+
+
+        println!(
+            "moving {} vnodes from {} to {}, {:?}",
+            n, src.actor_id, dst.actor_id, vnodes,
+        );
+
+        src.balance -= n;
+        dst.balance += n;
+
+        if src.balance != 0 {
+            v.push_front(src);
+        } else {
+            if !actors_to_remove.contains_key(&src.actor_id) {
+                result.insert(src.actor_id, src.builder.finish());
+            }
+        }
+
+        if dst.balance != 0 {
+            v.push_back(dst);
+        } else {
+            result.insert(dst.actor_id, dst.builder.finish());
+        }
+    }
+
+    assert_eq!(result.len(), target_actor_count);
 }
 
 impl<S> GlobalStreamManager<S>
@@ -277,104 +418,6 @@ impl<S> GlobalStreamManager<S>
         Ok(())
     }
 
-    fn rebalance_actor_vnode(
-        fragment: &Fragment,
-        actors_to_remove: &BTreeMap<ActorId, ParallelUnitId>,
-        actors_to_create: &BTreeMap<ActorId, ParallelUnitId>,
-    ) {
-        let mut actors = fragment.actors.clone();
-        assert!(actors.len() > actors_to_remove.len());
-        let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
-        assert_ne!(target_actor_count, 0);
-
-        // fixme
-        let expected = (VIRTUAL_NODE_COUNT as f64 / target_actor_count as f64) as i32;
-
-        let mut v = VecDeque::with_capacity(actors_to_create.len() + actors.len());
-
-        for actor in actors {
-            if let Some(buffer) = actor.vnode_bitmap.as_ref() {
-                let bitmap = Bitmap::from(buffer);
-                if actors_to_remove.contains_key(&actor.actor_id) {
-                    v.push_front((actor.actor_id as ActorId, bitmap.num_high_bits() as i32, bitmap));
-                } else {
-                    v.push_back((actor.actor_id as ActorId, (bitmap.num_high_bits() as i32) - expected, bitmap));
-                }
-            }
-        }
-
-        for (actor_id, _) in actors_to_create {
-            let bitmap = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT).finish();
-            v.push_back((*actor_id as ActorId, expected * -1, bitmap))
-        }
-
-        let mut v = v.into_iter().collect_vec();
-
-        let mut src_idx = 0: usize;
-        let mut dst_idx = v.len() - 1;
-
-
-        let mut src_offset = 0;
-        let mut dst_offset = 0;
-
-        while src_idx < dst_idx {
-            let (_, src_balance, src_bitmap) = &mut v[src_idx];
-            let (_, dst_balance, dst_bitmap) = &mut v[dst_idx];
-
-            let n = min(abs(src_balance), abs(dst_balance));
-            // moving n vnodes
-
-            //let src_next = src_bitmap.next_set_bit(src_offset).unwrap();
-
-            for _ in 0..n {
-                src_offset = src_bitmap.next_set_bit(src_offset).unwrap();
-            }
-
-
-            if src_balance == 0 {
-                src_idx += 1;
-
-                let mask = BitmapBuilder::zeroed(src_offset).append_bitmap(&Bitmap::all_high_bits(VIRTUAL_NODE_COUNT - src_offset)).finish();
-                src_bitmap.bitand(&mask)
-            }
-
-            if dst_balance == 0 {
-                dst_idx -= 1;
-            }
-        }
-
-
-        // while !src_iter.eq(&dst_iter) {
-        //
-        // }
-        //
-        // equal(src_iter, dst_iter)
-
-        // let removed_actors = actors.drain_filter(|actor| actors_to_remove.contains_key(&actor.actor_id));
-        //
-        // let mut v = Vec::with_capacity(actors_to_create.len() + actors.len());
-        //
-        // let mut total_balance = 0;
-        //
-        // for removed_actor in removed_actors {
-        //     if let Some(buffer) = removed_actor.vnode_bitmap.as_ref() {
-        //         let bitmap = risingwave_common::buffer::Bitmap::from(buffer);
-        //         let balance = bitmap.num_high_bits().as_i32();
-        //         total_balance += balance;
-        //         v.push((removed_actor.actor_id as ActorId, balance, bitmap));
-        //     }
-        // }
-        //
-        // for actor in actors {
-        //     if let Some(buffer) = actor.vnode_bitmap.as_ref() {
-        //         let bitmap = risingwave_common::buffer::Bitmap::from(buffer);
-        //         let balance = bitmap.num_high_bits().as_i32() - expected;
-        //         total_balance += balance;
-        //         v.push((actor.actor_id as ActorId, balance, bitmap));
-        //     }
-        // }
-    }
-
     async fn reschedule_actors_impl(
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
@@ -505,43 +548,22 @@ impl<S> GlobalStreamManager<S>
             }
         }
 
-        // for fragment_id in reschedule.keys() {
-        //     let actors_to_create = fragment_actors_to_create
-        //         .get(fragment_id)
-        //         .cloned()
-        //         .unwrap_or_default();
-        //     let actors_to_remove = fragment_actors_to_remove
-        //         .get(fragment_id)
-        //         .cloned()
-        //         .unwrap_or_default();
-        //
-        //     if actors_to_remove.len() == actors_to_create.len() {
-        //         continue;
-        //     }
-        //
-        //     let fragment = ctx.fragment_map.get(fragment_id).unwrap();
-        //
-        //     assert_ne!(fragment.actors.len(), 1);
-        //
-        //     // let actors = fragment.actors.iter().drain_filter(|x| {
-        //     //
-        //     // })
-        //
-        //     //       let mut actors = fragment.actors.clone();
-        //
-        //     // let
-        //
-        //     // for actor in fragment.actors.iter() {
-        //     //     if let Some(buffer) = actor.vnode_bitmap.as_ref() {
-        //     //         let bitmap = Bitmap::from(buffer);
-        //     //
-        //     //         bitmap.
-        //     //         println!("hb for actor {} {}/{}", actor.actor_id, bitmap.num_high_bits(),
-        //     // bitmap.len());     }
-        //     // }
-        // }
-        //
-        // todo!();
+        for fragment_id in reschedule.keys() {
+            let actors_to_create = fragment_actors_to_create
+                .get(fragment_id)
+                .cloned()
+                .unwrap_or_default();
+            let actors_to_remove = fragment_actors_to_remove
+                .get(fragment_id)
+                .cloned()
+                .unwrap_or_default();
+
+            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
+
+            rebalance_actor_vnode(&fragment.actors, &actors_to_remove, &actors_to_create);
+        }
+
+        todo!();
 
         // todo: update actor vnode mapping when scale in/out
 
@@ -1059,8 +1081,15 @@ impl<S> GlobalStreamManager<S>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn test_rebalance_plan() {}
+    // pub(crate) fn rebalance_actor_vnode(
+    //         actors: &[StreamActor],
+    //         actors_to_remove: &BTreeMap<ActorId, ParallelUnitId>,
+    //         actors_to_create: &BTreeMap<ActorId, ParallelUnitId>,
+    //     ) {
+    // use crate::stream::rebalance_actor_vnode;
+    //
+    // #[test]
+    // fn test_rebalance_plan() {
+    //     rebalance_actor_vnode()
+    // }
 }
