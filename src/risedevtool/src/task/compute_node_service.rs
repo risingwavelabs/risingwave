@@ -105,10 +105,8 @@ impl ComputeNodeService {
         };
 
         if provide_compute_node.len() > 1 && !is_shared_backend {
-            println!("warning!");
-            // return Err(anyhow!(
-            //     "should use a shared backend (e.g. MinIO) for multiple compute-node
-            // configuration. Consider adding `use: minio` in risedev config." ));
+            // Using a non-shared backend with multiple compute nodes will be problematic for state
+            // sharing like scaling. For normal end-to-end tests, this is acceptable.
         }
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();

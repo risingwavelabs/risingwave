@@ -18,7 +18,7 @@ use anyhow::{anyhow, Result};
 
 use crate::{AwsS3Config, MetaNodeConfig, MinioConfig};
 
-/// Add a meta node to the parameters
+/// Add a meta node to the parameters.
 pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) -> Result<()> {
     match provide_meta_node {
         [] => {

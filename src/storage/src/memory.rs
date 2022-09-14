@@ -25,23 +25,23 @@ use lazy_static::lazy_static;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 use crate::hummock::local_version_manager::SyncResult;
-use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
-mod batch_iter {
+mod batched_iter {
     use itertools::Itertools;
 
     use super::*;
 
+    /// A utility struct for iterating over a range of keys in a locked `BTreeMap`, which will batch
+    /// some records to make a trade-off between the copying overhead and the times of acquiring
+    /// the lock. Users should handle MVCC by themselves.
     pub struct Iter<K, V> {
         inner: Arc<RwLock<BTreeMap<K, V>>>,
-
         range: (Bound<K>, Bound<K>),
-
         current: std::vec::IntoIter<(K, V)>,
     }
 
@@ -62,6 +62,7 @@ mod batch_iter {
     {
         const BATCH_SIZE: usize = 256;
 
+        /// Get the next batch of records and fill the `current` buffer.
         fn refill(&mut self) {
             assert!(self.current.is_empty());
 
@@ -104,15 +105,12 @@ type KeyWithEpoch = (Bytes, Reverse<u64>);
 /// An in-memory state store
 ///
 /// The in-memory state store is a [`BTreeMap`], which maps (key, epoch) to value. It never does GC,
-/// so the memory usage will be high. At the same time, every time we create a new iterator on
-/// `BTreeMap`, it will fully clone the map, so as to act as a snapshot. Therefore, in-memory state
-/// store should never be used in production.
+/// so the memory usage will be high. Therefore, in-memory state store should never be used in
+/// production.
 #[derive(Clone, Default)]
 pub struct MemoryStateStore {
-    /// Stores (key, epoch) -> user value. We currently don't consider value meta here.
+    /// Stores (key, epoch) -> user value.
     inner: Arc<RwLock<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
-    /// current largest committed epoch,
-    epoch: Option<u64>,
 }
 
 fn to_bytes_range<R, B>(range: R) -> (Bound<KeyWithEpoch>, Bound<KeyWithEpoch>)
@@ -143,25 +141,6 @@ impl MemoryStateStore {
             static ref STORE: MemoryStateStore = MemoryStateStore::new();
         }
         STORE.clone()
-    }
-
-    pub fn commit_epoch(&mut self, epoch: u64) -> StorageResult<()> {
-        match self.epoch {
-            None => {
-                self.epoch = Some(epoch);
-                Ok(())
-            }
-            Some(current_epoch) => {
-                if current_epoch > epoch {
-                    Err(StorageError::Hummock(HummockError::expired_epoch(
-                        current_epoch,
-                        epoch,
-                    )))
-                } else {
-                    Ok(())
-                }
-            }
-        }
     }
 }
 
@@ -269,7 +248,7 @@ impl StateStore for MemoryStateStore {
     {
         async move {
             Ok(MemoryStateStoreIter::new(
-                batch_iter::Iter::new(self.inner.clone(), to_bytes_range(key_range)),
+                batched_iter::Iter::new(self.inner.clone(), to_bytes_range(key_range)),
                 read_options.epoch,
             ))
         }
@@ -312,7 +291,7 @@ impl StateStore for MemoryStateStore {
 }
 
 pub struct MemoryStateStoreIter {
-    inner: Fuse<batch_iter::Iter<KeyWithEpoch, Option<Bytes>>>,
+    inner: Fuse<batched_iter::Iter<KeyWithEpoch, Option<Bytes>>>,
 
     epoch: u64,
 
@@ -320,7 +299,7 @@ pub struct MemoryStateStoreIter {
 }
 
 impl MemoryStateStoreIter {
-    pub fn new(inner: batch_iter::Iter<KeyWithEpoch, Option<Bytes>>, epoch: u64) -> Self {
+    pub fn new(inner: batched_iter::Iter<KeyWithEpoch, Option<Bytes>>, epoch: u64) -> Self {
         Self {
             inner: inner.fuse(),
             epoch,
@@ -332,8 +311,7 @@ impl MemoryStateStoreIter {
 impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
 
-    type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
+    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
