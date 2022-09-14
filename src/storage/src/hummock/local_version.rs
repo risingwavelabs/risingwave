@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::mem::swap;
 use std::ops::{Deref, RangeBounds};
 use std::sync::atomic::AtomicUsize;
