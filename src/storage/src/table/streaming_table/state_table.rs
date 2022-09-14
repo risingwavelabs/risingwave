@@ -224,7 +224,7 @@ impl<S: StateStore> StateTable<S> {
         )
     }
 
-    /// Create a state table without distribution, used for unit tests.
+    /// Create a state table with given value_indices, used for unit tests.
     pub fn new_without_distribution_partial(
         store: S,
         table_id: TableId,
