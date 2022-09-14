@@ -43,7 +43,10 @@ impl FragmentManagerCore {
     pub fn all_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
         self.table_fragments.values().flat_map(|table_fragments| {
             table_fragments.fragments.values().map(|fragment| {
-                let parallel_unit_mapping = fragment.vnode_mapping.as_ref().unwrap();
+                let parallel_unit_mapping = fragment
+                    .vnode_mapping
+                    .as_ref()
+                    .expect("no data distribution found");
                 ParallelUnitMapping {
                     fragment_id: fragment.fragment_id,
                     original_indices: parallel_unit_mapping.original_indices.clone(),

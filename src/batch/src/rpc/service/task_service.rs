@@ -134,7 +134,6 @@ impl TaskService for BatchServiceImpl {
             // therefore we would only have one data output.
             output_id: 0,
         };
-
         let mut output = task.get_task_output(&pb_task_output_id).map_err(|e| {
             error!(
                 "failed to get task output of Task {:?} in local execution mode",

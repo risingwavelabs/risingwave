@@ -220,3 +220,26 @@
             StreamExchange { dist: HashShard(TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)) }
               StreamProject { exprs: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id, TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)] }
                 StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+- sql: |
+    /* Deduplication */
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY x ORDER BY y) rank from t)
+    where rank = 1
+  logical_plan: |
+    LogicalProject { exprs: [t.x, t.y] }
+      LogicalFilter { predicate: (ROW_NUMBER = 1:Int32) }
+        LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
+          LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.y ASC NULLS LAST) }
+            LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [t.x, t.y] }
+      LogicalTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }
+        LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  stream_plan: |
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
+      StreamExchange { dist: HashShard(t._row_id) }
+        StreamProject { exprs: [t.x, t.y, t._row_id] }
+          StreamGroupTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }
+            StreamExchange { dist: HashShard(t.x) }
+              StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }

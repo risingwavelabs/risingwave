@@ -20,6 +20,7 @@ use etcd_client::{Client as EtcdClient, ConnectOptions};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::bail;
+use risingwave_common::monitor::node::report_node_process;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -311,7 +312,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
-    monitor_process(meta_metrics.registry()).unwrap();
+    let registry = meta_metrics.registry();
+    monitor_process(registry).unwrap();
+    report_node_process(registry).unwrap();
     let compactor_manager = Arc::new(
         hummock::CompactorManager::new_with_meta(env.clone(), max_heartbeat_interval.as_secs())
             .await
@@ -319,7 +322,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
 
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), max_heartbeat_interval, meta_metrics.clone())
+        ClusterManager::new(env.clone(), max_heartbeat_interval)
             .await
             .unwrap(),
     );
