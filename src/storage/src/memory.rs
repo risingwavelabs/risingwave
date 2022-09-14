@@ -228,7 +228,14 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
+    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
+        async move {
+            self.seal_epoch(epoch, true);
+            self.await_sync_epoch(epoch).await
+        }
+    }
+
+    fn await_sync_epoch(&self, _epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
         async move {
             // memory backend doesn't support push to S3, so this is a no-op
             Ok(SyncResult {
@@ -238,7 +245,7 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn seal_epoch(&self, _epoch: u64) {}
+    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move { Ok(()) }
