@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
-use risingwave_common::util::compress::decompress_data;
+
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -645,7 +645,7 @@ impl<S: MetaStore> FragmentManager<S>
 
                             let parallel_unit_data = data
                                 .iter()
-                                .map(|actor_id| actor_to_parallel_unit.get(actor_id).unwrap().clone() as ParallelUnitId)
+                                .map(|actor_id| *actor_to_parallel_unit.get(actor_id).unwrap() as ParallelUnitId)
                                 .collect_vec();
 
                             *vnode_mapping = ParallelUnitMapping {

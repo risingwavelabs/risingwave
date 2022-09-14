@@ -16,17 +16,14 @@ use std::cmp::min;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
 
-
 use anyhow::{anyhow, Context};
-
-
 use futures::future::BoxFuture;
-
-use itertools::{Itertools};
+use itertools::Itertools;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+use risingwave_common::util::compress::{compress_data, decompress_data};
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
@@ -41,7 +38,6 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use uuid::Uuid;
-use risingwave_common::util::compress::{compress_data, decompress_data};
 
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
@@ -94,7 +90,7 @@ impl RescheduleContext {
                     "could not found Worker for ParallelUint {}",
                     parallel_unit_id
                 )
-                    .into()
+                .into()
             })
     }
 }
@@ -235,8 +231,8 @@ pub(crate) fn rebalance_actor_vnode(
 }
 
 impl<S> GlobalStreamManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     async fn build_reschedule_context(
         &self,
@@ -470,7 +466,6 @@ impl<S> GlobalStreamManager<S>
                 actors_to_create.insert(id, *created_parallel_unit_id);
             }
 
-
             if !actors_to_remove.is_empty() {
                 fragment_actors_to_remove.insert(*fragment_id as FragmentId, actors_to_remove);
             }
@@ -511,11 +506,8 @@ impl<S> GlobalStreamManager<S>
                     .collect()
             };
 
-
-            println!("actors to create {:?}", actors_to_create);
-
             for (actor_to_create, sample_actor) in
-            actors_to_create.iter().zip_eq(sample_actors.into_iter())
+                actors_to_create.iter().zip_eq(sample_actors.into_iter())
             {
                 let new_actor_id = actor_to_create.0;
                 let new_parallel_unit_id = actor_to_create.1;
@@ -567,8 +559,8 @@ impl<S> GlobalStreamManager<S>
 
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
-            let actor_vnode = rebalance_actor_vnode(&fragment.actors, &actors_to_remove, &actors_to_create);
-
+            let actor_vnode =
+                rebalance_actor_vnode(&fragment.actors, &actors_to_remove, &actors_to_create);
 
             for (actor_id, actor) in &mut new_created_actors {
                 if let Some(bitmap) = actor_vnode.get(actor_id) {
@@ -579,8 +571,6 @@ impl<S> GlobalStreamManager<S>
             updated_bitmap.extend(actor_vnode);
         }
 
-        println!("update actors {:?}", updated_bitmap.keys().cloned().collect_vec());
-
         // After modification, for newly created `Actor` s, both upstream and downstream actor ids
         // have been modified
         let mut actor_infos_to_broadcast = BTreeMap::new();
@@ -588,7 +578,6 @@ impl<S> GlobalStreamManager<S>
         let mut broadcast_worker_ids = HashSet::new();
 
         for actors_to_create in fragment_actors_to_create.values() {
-            println!("1111 {:?}", actors_to_create);
             for (new_actor_id, new_parallel_unit_id) in actors_to_create {
                 let new_actor = new_created_actors.get(new_actor_id).unwrap();
                 for upstream_actor_id in &new_actor.upstream_actor_id {
@@ -658,12 +647,7 @@ impl<S> GlobalStreamManager<S>
             }
         }
 
-        println!("broad {:?}", broadcast_worker_ids);
-        println!("node to create {:?}", node_actors_to_create.keys().cloned().collect_vec());
-        println!("actor info {:?}", actor_infos_to_broadcast);
-
         for worker_id in &broadcast_worker_ids {
-            println!("22222");
             let node = ctx.worker_nodes.get(worker_id).unwrap();
             let client = self.client_pool.get(node).await?;
 
@@ -678,7 +662,6 @@ impl<S> GlobalStreamManager<S>
         }
 
         for (node_id, stream_actors) in &node_actors_to_create {
-            println!("33333");
             let node = ctx.worker_nodes.get(node_id).unwrap();
             let client = self.client_pool.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
@@ -692,9 +675,7 @@ impl<S> GlobalStreamManager<S>
         }
 
         for (node_id, hanging_channels) in worker_hanging_channels {
-            println!("4444");
             let node = ctx.worker_nodes.get(&node_id).unwrap();
-
             let client = self.client_pool.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
 
@@ -709,7 +690,6 @@ impl<S> GlobalStreamManager<S>
         }
 
         for (node_id, stream_actors) in node_actors_to_create {
-            println!("55555");
             let node = ctx.worker_nodes.get(&node_id).unwrap();
             let client = self.client_pool.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
@@ -785,17 +765,15 @@ impl<S> GlobalStreamManager<S>
                 .into_keys()
                 .collect();
 
-            let actors_after_reschedule = fragment_actors_after_reschedule
-                .get(&fragment_id)
-                .unwrap();
+            let actors_after_reschedule =
+                fragment_actors_after_reschedule.get(&fragment_id).unwrap();
 
-            let parallel_unit_to_actor_after_reschedule: BTreeMap<_, _> =
-                actors_after_reschedule
-                    .iter()
-                    .map(|(actor_id, parallel_unit_id)| {
-                        (*parallel_unit_id as ParallelUnitId, *actor_id as ActorId)
-                    })
-                    .collect();
+            let parallel_unit_to_actor_after_reschedule: BTreeMap<_, _> = actors_after_reschedule
+                .iter()
+                .map(|(actor_id, parallel_unit_id)| {
+                    (*parallel_unit_id as ParallelUnitId, *actor_id as ActorId)
+                })
+                .collect();
             assert!(!parallel_unit_to_actor_after_reschedule.is_empty());
 
             let fragment = ctx.fragment_map.get(&fragment_id).unwrap();
@@ -831,9 +809,10 @@ impl<S> GlobalStreamManager<S>
                                 .iter()
                                 .map(|parallel_unit_id| {
                                     if let Some(new_parallel_unit_id) =
-                                    replace_parallel_unit_map.get(parallel_unit_id)
+                                        replace_parallel_unit_map.get(parallel_unit_id)
                                     {
-                                        parallel_unit_to_actor_after_reschedule[new_parallel_unit_id]
+                                        parallel_unit_to_actor_after_reschedule
+                                            [new_parallel_unit_id]
                                     } else {
                                         parallel_unit_to_actor_after_reschedule[parallel_unit_id]
                                     }
@@ -845,16 +824,27 @@ impl<S> GlobalStreamManager<S>
                                 data,
                             })
                         } else {
-                            let mut vnode_mapping: Vec<ParallelUnitId> = decompress_data(&original_indices, &data);
+                            let mut vnode_mapping: Vec<ParallelUnitId> =
+                                decompress_data(&original_indices, &data);
 
                             for (actor_id, parallel_unit_id) in actors_after_reschedule {
                                 if let Some(bitmap) = updated_bitmap.get(actor_id) {
-                                    println!("bitmap found for actor {}, bits {}", actor_id, bitmap.num_high_bits());
-                                    for idx in 0..VIRTUAL_NODE_COUNT {
+                                    println!(
+                                        "bitmap found for actor {}, bits {}",
+                                        actor_id,
+                                        bitmap.num_high_bits()
+                                    );
+                                    for (idx, x) in vnode_mapping.iter_mut().enumerate() {
                                         if bitmap.is_set(idx).unwrap() {
-                                            vnode_mapping[idx] = *parallel_unit_id;
+                                            *x = *parallel_unit_id;
                                         }
                                     }
+                                    // cargo clippy
+                                    // for idx in 0..VIRTUAL_NODE_COUNT {
+                                    //     if bitmap.is_set(idx).unwrap() {
+                                    //         vnode_mapping[idx] = *parallel_unit_id;
+                                    //     }
+                                    // }
                                 }
                             }
 
@@ -892,7 +882,7 @@ impl<S> GlobalStreamManager<S>
             }
 
             let downstream_fragment_id = if let Some(downstream_fragment_ids) =
-            ctx.downstream_fragment_id_map.get(&fragment_id)
+                ctx.downstream_fragment_id_map.get(&fragment_id)
             {
                 let downstream_fragment_id = downstream_fragment_ids.iter().exactly_one().unwrap();
                 Some(*downstream_fragment_id as FragmentId)
@@ -900,10 +890,15 @@ impl<S> GlobalStreamManager<S>
                 None
             };
 
-            let vnode_bitmap_updates = fragment.actors.iter().flat_map(|actor| {
-                updated_bitmap.remove(&actor.actor_id).map(|bitmap| (actor.actor_id, bitmap))
-            }).collect();
-
+            let vnode_bitmap_updates = fragment
+                .actors
+                .iter()
+                .flat_map(|actor| {
+                    updated_bitmap
+                        .remove(&actor.actor_id)
+                        .map(|bitmap| (actor.actor_id, bitmap))
+                })
+                .collect();
 
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();
@@ -920,13 +915,10 @@ impl<S> GlobalStreamManager<S>
 
             println!("frag id {} {:#?}", fragment_id, reschedule1);
 
-            reschedule_fragment.insert(
-                fragment_id,
-                reschedule1,
-            );
+            reschedule_fragment.insert(fragment_id, reschedule1);
         }
 
-        //assert!(updated_bitmap.is_empty());
+        // assert!(updated_bitmap.is_empty());
 
         let mut fragment_created_actors = HashMap::new();
         for (fragment_id, actors_to_create) in &fragment_actors_to_create {
@@ -970,7 +962,6 @@ impl<S> GlobalStreamManager<S>
 
         tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
 
-        println!("before send");
         self.barrier_scheduler
             .run_multiple_commands(vec![
                 Command::Plain(Some(Mutation::Pause(PauseMutation {}))),
@@ -979,7 +970,6 @@ impl<S> GlobalStreamManager<S>
             ])
             .await?;
 
-        println!("after send");
         Ok(())
     }
 
@@ -1033,7 +1023,7 @@ impl<S> GlobalStreamManager<S>
 
         for upstream_fragment_id in &upstream_fragment_ids {
             if let Some(upstream_actors_to_create) =
-            fragment_actors_to_create.get(upstream_fragment_id)
+                fragment_actors_to_create.get(upstream_fragment_id)
             {
                 new_actor
                     .upstream_actor_id
@@ -1048,14 +1038,14 @@ impl<S> GlobalStreamManager<S>
         ) {
             if let Some(NodeBody::Merge(s)) = stream_node.node_body.as_mut() {
                 if let Some(upstream_actors_to_remove) =
-                fragment_actors_to_remove.get(&s.upstream_fragment_id)
+                    fragment_actors_to_remove.get(&s.upstream_fragment_id)
                 {
                     s.upstream_actor_id
                         .drain_filter(|actor_id| upstream_actors_to_remove.contains_key(actor_id));
                 }
 
                 if let Some(upstream_actors_to_create) =
-                fragment_actors_to_create.get(&s.upstream_fragment_id)
+                    fragment_actors_to_create.get(&s.upstream_fragment_id)
                 {
                     s.upstream_actor_id
                         .extend(upstream_actors_to_create.keys().cloned());
