@@ -81,6 +81,19 @@ steps:
     timeout_in_minutes: 12
     retry: *auto-retry
 
+  - label: "end-to-end test (parallel, in-memory)"
+    command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
+    depends_on: "build"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 12
+    retry: *auto-retry
+
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     depends_on: "build"
