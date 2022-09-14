@@ -7,6 +7,14 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], distribution: UpstreamHashShard(idx1.a, idx1.b) }
 - sql: |
+    /* Use index if it provides required order */
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(a, b) include(c);
+    select * from t1 order by a, b
+  batch_plan: |
+    BatchExchange { order: [idx1.a ASC, idx1.b ASC], dist: Single }
+      BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], distribution: UpstreamHashShard(idx1.a, idx1.b) }
+- sql: |
     create table t1 (a int, b numeric, c bigint);
     create index idx1 on t1(a, b) include(c);
     select * from t1 where a = 1 or a = 2
@@ -451,12 +459,12 @@
     select * from t1 where a > 1 or c > 1 or b > 1
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND (((idx1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)), output: [t1.a, t1.b, t1.c, t1.p] }
-        BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
+      BatchFilter { predicate: (((t1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)) }
+        BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
   batch_local_plan: |
-    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND (((idx1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)), output: [t1.a, t1.b, t1.c, t1.p] }
-      BatchExchange { order: [], dist: Single }
-        BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: (((t1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)) }
+        BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint, p int);
     create index idx1 on t1(a);
@@ -466,12 +474,12 @@
     select * from t1 where a between 1 and 8 or b between 1 and 8 or c between 1 and 8;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND ((((idx1.a >= 1:Int32) AND (idx1.a <= 8:Int32)) OR ((t1.b >= 1:Int32) AND (t1.b <= 8:Int32))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))), output: [t1.a, t1.b, t1.c, t1.p] }
-        BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
+      BatchFilter { predicate: ((((t1.a >= 1:Int32) AND (t1.a <= 8:Int32)) OR ((t1.b >= 1:Int32) AND (t1.b <= 8:Int32))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))) }
+        BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
   batch_local_plan: |
-    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND ((((idx1.a >= 1:Int32) AND (idx1.a <= 8:Int32)) OR ((t1.b >= 1:Int32) AND (t1.b <= 8:Int32))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))), output: [t1.a, t1.b, t1.c, t1.p] }
-      BatchExchange { order: [], dist: Single }
-        BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: ((((t1.a >= 1:Int32) AND (t1.a <= 8:Int32)) OR ((t1.b >= 1:Int32) AND (t1.b <= 8:Int32))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))) }
+        BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint, p int);
     create index idx1 on t1(a);
@@ -481,9 +489,38 @@
     select * from t1 where a > 1 and b > 1
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND (t1.b > 1:Int32), output: [t1.a, t1.b, t1.c, t1.p] }
-        BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a > Int32(1)], distribution: SomeShard }
+      BatchFilter { predicate: (t1.a > 1:Int32) AND (t1.b > 1:Int32) }
+        BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
   batch_local_plan: |
-    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND (t1.b > 1:Int32), output: [t1.a, t1.b, t1.c, t1.p] }
-      BatchExchange { order: [], dist: Single }
-        BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a > Int32(1)], distribution: SomeShard }
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: (t1.a > 1:Int32) AND (t1.b > 1:Int32) }
+        BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
+- sql: |
+    CREATE TABLE lineitem (
+            l_orderkey BIGINT,
+            l_partkey INTEGER,
+            l_suppkey INTEGER,
+            l_linenumber INTEGER,
+            l_quantity NUMERIC,
+            l_extendedprice NUMERIC,
+            l_discount NUMERIC,
+            l_tax NUMERIC,
+            l_returnflag VARCHAR,
+            l_linestatus VARCHAR,
+            l_shipdate DATE,
+            l_commitdate DATE,
+            l_receiptdate DATE,
+            l_shipinstruct VARCHAR,
+            l_shipmode VARCHAR,
+            l_comment VARCHAR
+    );
+    create index non_covered_index on lineitem(l_orderkey);
+    create index covered_index on lineitem(l_orderkey) include(l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment);
+    /* it should choose covered_index */
+    select * from lineitem where l_orderkey = 1
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: covered_index, columns: [covered_index.l_orderkey, covered_index.l_partkey, covered_index.l_suppkey, covered_index.l_linenumber, covered_index.l_quantity, covered_index.l_extendedprice, covered_index.l_discount, covered_index.l_tax, covered_index.l_returnflag, covered_index.l_linestatus, covered_index.l_shipdate, covered_index.l_commitdate, covered_index.l_receiptdate, covered_index.l_shipinstruct, covered_index.l_shipmode, covered_index.l_comment], scan_ranges: [covered_index.l_orderkey = Int64(1)], distribution: UpstreamHashShard(covered_index.l_orderkey) }
+  batch_local_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: covered_index, columns: [covered_index.l_orderkey, covered_index.l_partkey, covered_index.l_suppkey, covered_index.l_linenumber, covered_index.l_quantity, covered_index.l_extendedprice, covered_index.l_discount, covered_index.l_tax, covered_index.l_returnflag, covered_index.l_linestatus, covered_index.l_shipdate, covered_index.l_commitdate, covered_index.l_receiptdate, covered_index.l_shipinstruct, covered_index.l_shipmode, covered_index.l_comment], scan_ranges: [covered_index.l_orderkey = Int64(1)], distribution: UpstreamHashShard(covered_index.l_orderkey) }

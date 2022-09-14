@@ -28,7 +28,7 @@ use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
 use crate::monitor::SourceMetrics;
-use crate::table_v2::TableSourceV2;
+use crate::table::TableSource;
 use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
@@ -200,7 +200,7 @@ impl SourceManager for MemSourceManager {
         );
 
         let source_columns = columns.iter().map(SourceColumnDesc::from).collect();
-        let source = SourceImpl::TableV2(TableSourceV2::new(columns));
+        let source = SourceImpl::Table(TableSource::new(columns));
 
         // Table sources do not need columns and format
         let desc = SourceDesc {
@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_table_source_v2() -> Result<()> {
+    async fn test_table_source() -> Result<()> {
         let table_id = TableId::default();
 
         let schema = Schema {

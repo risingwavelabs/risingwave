@@ -1,14 +1,18 @@
 include ../nexmark/create_tables.slt.part
 
+# First, create materialized views with empty data
 include ./nexmark/create_views.slt.part
 
+# Then, insert the data into the tables
 include ../nexmark/insert_person.slt.part
 include ../nexmark/insert_auction.slt.part
 include ../nexmark/insert_bid.slt.part
 
+# Ensure that the upstream data is fully consumed
 statement ok
 flush;
 
+# Test each query
 include ./nexmark/q0.slt.part
 include ./nexmark/q1.slt.part
 include ./nexmark/q2.slt.part

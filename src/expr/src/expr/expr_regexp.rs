@@ -139,7 +139,7 @@ impl Expression for RegexpMatchExpression {
             }
         }
 
-        Ok(Arc::new((output.finish()?).into()))
+        Ok(Arc::new(output.finish().into()))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

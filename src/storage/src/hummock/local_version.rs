@@ -136,14 +136,24 @@ impl LocalVersion {
         &self.pinned_version
     }
 
-    pub fn swap_max_sync_epoch(&mut self, epoch: HummockEpoch) -> Option<HummockEpoch> {
-        if self.max_sync_epoch > epoch {
+    /// Advance the `max_sync_epoch` to at least `new_epoch`.
+    ///
+    /// Return `Some(prev max_sync_epoch)` if `new_epoch > max_sync_epoch`
+    /// Return `None` if `new_epoch <= max_sync_epoch`
+    pub fn advance_max_sync_epoch(&mut self, new_epoch: HummockEpoch) -> Option<HummockEpoch> {
+        if self.max_sync_epoch >= new_epoch {
             None
         } else {
             let last_epoch = self.max_sync_epoch;
-            self.max_sync_epoch = epoch;
+            self.max_sync_epoch = new_epoch;
             Some(last_epoch)
         }
+    }
+
+    pub fn get_min_shared_buffer_epoch(&self) -> Option<HummockEpoch> {
+        self.shared_buffer
+            .first_key_value()
+            .map(|(&epoch, _)| epoch)
     }
 
     pub fn get_max_sync_epoch(&self) -> HummockEpoch {
@@ -220,10 +230,10 @@ impl LocalVersion {
         self.shared_buffer.iter()
     }
 
-    pub fn iter_mut_shared_buffer(
+    pub fn iter_mut_unsynced_shared_buffer(
         &mut self,
     ) -> impl Iterator<Item = (&HummockEpoch, &mut SharedBuffer)> {
-        self.shared_buffer.iter_mut()
+        self.shared_buffer.range_mut(self.max_sync_epoch + 1..)
     }
 
     pub fn new_shared_buffer(

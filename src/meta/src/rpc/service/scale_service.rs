@@ -140,6 +140,7 @@ where
         }))
     }
 
+    #[cfg_attr(coverage, no_coverage)]
     async fn reschedule(
         &self,
         request: Request<RescheduleRequest>,

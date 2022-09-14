@@ -90,7 +90,7 @@ impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table_v2().expect("not table source");
+        let source = source_desc.source.as_table().expect("not table source");
 
         let schema = self.child.schema().clone();
         let mut notifiers = Vec::new();
@@ -122,10 +122,7 @@ impl UpdateExecutor {
                     builder.append_datum_ref(datum_ref)?;
                 }
             }
-            let columns = builders
-                .into_iter()
-                .map(|b| b.finish().map(|a| a.into()))
-                .try_collect()?;
+            let columns = builders.into_iter().map(|b| b.finish().into()).collect();
 
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -154,7 +151,7 @@ impl UpdateExecutor {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_updated as i64))?;
 
-            let array = array_builder.finish()?;
+            let array = array_builder.finish();
             let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
             yield ret_chunk
@@ -260,7 +257,7 @@ mod tests {
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
-        let source = source_desc.source.as_table_v2().unwrap();
+        let source = source_desc.source.as_table().unwrap();
         let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
 
         // Update
