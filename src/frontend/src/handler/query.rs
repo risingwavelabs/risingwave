@@ -153,6 +153,12 @@ async fn local_execute(
 ) -> Result<(QueryResultSet, Vec<PgFieldDescriptor>)> {
     let session = context.session_ctx.clone();
 
+    let timer = session
+        .env()
+        .frontend_metrics
+        .latency_local_execution
+        .start_timer();
+
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, pg_descs) = {
         let root = Planner::new(context.into()).plan(stmt)?;
@@ -179,7 +185,17 @@ async fn local_execute(
 
     // TODO: Passing sql here
     let execution = LocalQueryExecution::new(query, front_env.clone(), "", session.auth_context());
-    Ok((execution.collect_rows(format).await?, pg_descs))
+    let rsp = Ok((execution.collect_rows(format).await?, pg_descs));
+
+    // Collect metrics
+    timer.observe_duration();
+    session
+        .env()
+        .frontend_metrics
+        .query_counter_local_execution
+        .inc();
+
+    rsp
 }
 
 async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {

@@ -81,7 +81,7 @@ impl Expression for InExpression {
                 output_array.append(None)?;
             }
         }
-        Ok(Arc::new(output_array.finish()?.into()))
+        Ok(Arc::new(output_array.finish().into()))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

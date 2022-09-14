@@ -43,16 +43,16 @@ host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 
 echo "--- e2e, ci-3cn-3fe, streaming"
 cargo make ci-start ci-3cn-3fe
-# Please make sure the regression is expected before increasing the timeout.
-timeout 6m sqllogictest ${host_args} -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
+
+sqllogictest ${host_args} -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- e2e, ci-3cn-3fe, batch"
 cargo make ci-start ci-3cn-3fe
-timeout 2m sqllogictest ${host_args} -d dev  './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
-timeout 2m sqllogictest ${host_args} -d dev  './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-batch-${profile}"
+sqllogictest ${host_args} -d dev  './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
+sqllogictest ${host_args} -d dev  './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-batch-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill

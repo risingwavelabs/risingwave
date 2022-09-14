@@ -48,7 +48,7 @@ pub use chrono_wrapper::{
 pub use decimal::Decimal;
 pub use interval::*;
 use itertools::Itertools;
-pub use ops::CheckedAdd;
+pub use ops::{CheckedAdd, IsNegative};
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 use postgres_types::{ToSql, Type};

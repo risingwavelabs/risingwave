@@ -318,11 +318,11 @@ where
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         tracing::trace!("(extended query)parse query: {}", sql);
         // 1. Create the types description.
-        let type_ids = msg.type_ids;
-        let mut types: Vec<TypeOid> = Vec::with_capacity(type_ids.len());
-        for x in type_ids {
-            types.push(TypeOid::as_type(x).map_err(|e| PsqlError::ParseError(Box::new(e)))?);
-        }
+        let types = msg
+            .type_ids
+            .iter()
+            .map(|x| TypeOid::as_type(*x).map_err(|e| PsqlError::ParseError(Box::new(e))))
+            .collect::<PsqlResult<Vec<TypeOid>>>()?;
 
         // Flag indicate whether statement is a query statement.
         let is_query_sql = {
@@ -335,7 +335,7 @@ where
         };
 
         // 2. Create the row description.
-        let rows: Vec<PgFieldDescriptor> = if is_query_sql {
+        let fields: Vec<PgFieldDescriptor> = if is_query_sql {
             if types.is_empty() {
                 let session = self.session.clone().unwrap();
                 session
@@ -395,7 +395,7 @@ where
             cstr_to_str(&msg.statement_name).unwrap().to_string(),
             msg.sql_bytes,
             types,
-            rows,
+            fields,
         );
 
         // 4. Insert the statement.

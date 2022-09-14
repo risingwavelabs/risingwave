@@ -2,8 +2,8 @@ include ../nexmark/create_sources.slt.part
 
 # Note: It will take a very long time to create all of the NexMark materialized views,
 # so we just create Q5 and Q7 here
-include ./nexmark/views/q7.slt.part
-include ./nexmark/views/q5.slt.part
+include ../streaming/nexmark/views/q7.slt.part
+include ../streaming/nexmark/views/q5.slt.part
 
 sleep 10s
 
