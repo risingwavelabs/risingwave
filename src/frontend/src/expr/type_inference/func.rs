@@ -242,7 +242,6 @@ if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
                 Err(err ) => None, 
             }; 
             
-            panic!("return_type: {:?}", return_type.unwrap().clone()); 
             Ok(Some(return_type.ok_or_else(|| {
                 ErrorCode::BindError(format!("Cannot append {} to {}.", right_type, left_type))
             })?))
