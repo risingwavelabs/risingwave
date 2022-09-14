@@ -183,11 +183,11 @@ impl ProjectSetExecutor {
 
                     let mut columns = Vec::with_capacity(self.select_list.len() + 1);
                     let projected_row_id: ArrayRef =
-                        Arc::new(projected_row_id_builder.finish()?.into());
+                        Arc::new(projected_row_id_builder.finish().into());
                     let cardinality = projected_row_id.len();
                     columns.push(Column::new(projected_row_id));
                     for builder in builders {
-                        columns.push(Column::new(Arc::new(builder.finish()?)))
+                        columns.push(Column::new(Arc::new(builder.finish())))
                     }
 
                     let chunk = DataChunk::new(columns, cardinality);

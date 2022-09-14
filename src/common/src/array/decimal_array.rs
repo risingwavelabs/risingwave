@@ -32,10 +32,10 @@ pub struct DecimalArray {
 }
 
 impl DecimalArray {
-    pub fn from_slice(data: &[Option<Decimal>]) -> ArrayResult<Self> {
+    pub fn from_slice(data: &[Option<Decimal>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i)?;
+            builder.append(*i).unwrap();
         }
         builder.finish()
     }
@@ -172,11 +172,11 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Ok(())
     }
 
-    fn finish(self) -> ArrayResult<DecimalArray> {
-        Ok(DecimalArray {
+    fn finish(self) -> DecimalArray {
+        DecimalArray {
             bitmap: self.bitmap.finish(),
             data: self.data,
-        })
+        }
     }
 }
 
@@ -196,7 +196,7 @@ mod tests {
         for i in &v {
             builder.append(*i).unwrap();
         }
-        let a = builder.finish().unwrap();
+        let a = builder.finish();
         let res = v.iter().zip_eq(a.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
@@ -210,7 +210,7 @@ mod tests {
             Some(Decimal::from_str("4.04").unwrap()),
         ];
 
-        let array = DecimalArray::from_slice(&input).unwrap();
+        let array = DecimalArray::from_slice(&input);
         let buffers = array.to_protobuf().values;
 
         assert_eq!(buffers.len(), 2);
@@ -287,7 +287,7 @@ mod tests {
                 for i in v {
                     builder.append(*i).unwrap();
                 }
-                builder.finish().unwrap()
+                builder.finish()
             })
             .collect_vec();
 
