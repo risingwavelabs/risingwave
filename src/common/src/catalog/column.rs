@@ -20,8 +20,8 @@ use crate::error::ErrorCode;
 use crate::types::DataType;
 use crate::util::sort_util::OrderType;
 
-/// Column ID is the unique identifier of a column in a table. Different from table ID,
-/// column ID is not globally unique.
+/// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
+/// not globally unique.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ColumnId(i32);
 
