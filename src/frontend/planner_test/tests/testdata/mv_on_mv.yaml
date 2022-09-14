@@ -44,10 +44,9 @@
   sql: |
     select mv1.v as v from mv as mv1, mv as mv2 where mv1.v = mv2.v;
   stream_plan: |
-    StreamMaterialize { columns: [v, mv.t._row_id(hidden), mv.t._row_id#1(hidden)], pk_columns: [mv.t._row_id, mv.t._row_id#1] }
-      StreamExchange { dist: HashShard(mv.t._row_id, mv.t._row_id) }
-        StreamHashJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v, mv.t._row_id, mv.t._row_id] }
-          StreamExchange { dist: HashShard(mv.v) }
-            StreamTableScan { table: mv, columns: [mv.v, mv.t._row_id], pk: [mv.t._row_id], distribution: Single }
-          StreamExchange { dist: HashShard(mv.v) }
-            StreamTableScan { table: mv, columns: [mv.v, mv.t._row_id], pk: [mv.t._row_id], distribution: Single }
+    StreamMaterialize { columns: [v, mv.t._row_id(hidden), mv.t._row_id#1(hidden)], pk_columns: [] }
+      StreamHashJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v, mv.t._row_id, mv.t._row_id] }
+        StreamExchange { dist: HashShard(mv.v) }
+          StreamTableScan { table: mv, columns: [mv.v, mv.t._row_id], pk: [mv.t._row_id], distribution: Single }
+        StreamExchange { dist: HashShard(mv.v) }
+          StreamTableScan { table: mv, columns: [mv.v, mv.t._row_id], pk: [mv.t._row_id], distribution: Single }

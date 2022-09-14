@@ -18,11 +18,10 @@
         BatchExchange { order: [], dist: HashShard(b.k1) }
           BatchScan { table: b, columns: [b.k1, b.v], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), bk1.b._row_id(hidden)], pk_columns: [ak1.a._row_id, bk1.b._row_id] }
-      StreamExchange { dist: HashShard(ak1.a._row_id, bk1.b._row_id) }
-        StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, bk1.b._row_id] }
-          StreamIndexScan { index: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: HashShard(ak1.k1) }
-          StreamIndexScan { index: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], distribution: HashShard(bk1.k1) }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), bk1.b._row_id(hidden)], pk_columns: [] }
+      StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, bk1.b._row_id] }
+        StreamIndexScan { index: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: HashShard(ak1.k1) }
+        StreamIndexScan { index: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], distribution: HashShard(bk1.k1) }
 - id: Ak1_join_B_onk1
   before:
   - create_tables
@@ -35,13 +34,12 @@
         BatchExchange { order: [], dist: HashShard(b.k1) }
           BatchScan { table: b, columns: [b.k1, b.v], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), b._row_id(hidden)], pk_columns: [ak1.a._row_id, b._row_id] }
-      StreamExchange { dist: HashShard(ak1.a._row_id, b._row_id) }
-        StreamHashJoin { type: Inner, predicate: ak1.k1 = b.k1, output: [ak1.v, b.v, ak1.a._row_id, b._row_id] }
-          StreamExchange { dist: HashShard(ak1.k1) }
-            StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
-          StreamExchange { dist: HashShard(b.k1) }
-            StreamTableScan { table: b, columns: [b.k1, b.v, b._row_id], pk: [b._row_id], distribution: UpstreamHashShard(b._row_id) }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), b._row_id(hidden)], pk_columns: [] }
+      StreamHashJoin { type: Inner, predicate: ak1.k1 = b.k1, output: [ak1.v, b.v, ak1.a._row_id, b._row_id] }
+        StreamExchange { dist: HashShard(ak1.k1) }
+          StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
+        StreamExchange { dist: HashShard(b.k1) }
+          StreamTableScan { table: b, columns: [b.k1, b.v, b._row_id], pk: [b._row_id], distribution: UpstreamHashShard(b._row_id) }
 - id: A_join_Bk1_onk1
   before:
   - create_tables
@@ -54,13 +52,12 @@
         BatchExchange { order: [], dist: HashShard(bk1.k1) }
           BatchScan { table: bk1, columns: [bk1.k1, bk1.v], distribution: UpstreamHashShard(bk1.k1) }
   stream_plan: |
-    StreamMaterialize { columns: [v, bv, a._row_id(hidden), bk1.b._row_id(hidden)], pk_columns: [a._row_id, bk1.b._row_id] }
-      StreamExchange { dist: HashShard(a._row_id, bk1.b._row_id) }
-        StreamHashJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v, a._row_id, bk1.b._row_id] }
-          StreamExchange { dist: HashShard(a.k1) }
-            StreamTableScan { table: a, columns: [a.k1, a.v, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
-          StreamExchange { dist: HashShard(bk1.k1) }
-            StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], distribution: UpstreamHashShard(bk1.k1) }
+    StreamMaterialize { columns: [v, bv, a._row_id(hidden), bk1.b._row_id(hidden)], pk_columns: [] }
+      StreamHashJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v, a._row_id, bk1.b._row_id] }
+        StreamExchange { dist: HashShard(a.k1) }
+          StreamTableScan { table: a, columns: [a.k1, a.v, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
+        StreamExchange { dist: HashShard(bk1.k1) }
+          StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], distribution: UpstreamHashShard(bk1.k1) }
 - id: Ak1_join_Bk1_onk1
   before:
   - create_tables
@@ -73,13 +70,12 @@
         BatchExchange { order: [], dist: HashShard(bk1.k1) }
           BatchScan { table: bk1, columns: [bk1.k1, bk1.v], distribution: UpstreamHashShard(bk1.k1) }
   stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), bk1.b._row_id(hidden)], pk_columns: [ak1.a._row_id, bk1.b._row_id] }
-      StreamExchange { dist: HashShard(ak1.a._row_id, bk1.b._row_id) }
-        StreamHashJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, bk1.b._row_id] }
-          StreamExchange { dist: HashShard(ak1.k1) }
-            StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
-          StreamExchange { dist: HashShard(bk1.k1) }
-            StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], distribution: UpstreamHashShard(bk1.k1) }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), bk1.b._row_id(hidden)], pk_columns: [] }
+      StreamHashJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, bk1.b._row_id] }
+        StreamExchange { dist: HashShard(ak1.k1) }
+          StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
+        StreamExchange { dist: HashShard(bk1.k1) }
+          StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], distribution: UpstreamHashShard(bk1.k1) }
 - id: aggk1_from_A
   before:
   - create_tables
@@ -327,15 +323,14 @@
             BatchExchange { order: [], dist: HashShard(a.k1) }
               BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), a.k1(hidden)], pk_columns: [ak1.a._row_id, a.k1] }
-      StreamExchange { dist: HashShard(ak1.a._row_id, a.k1) }
-        StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, a.k1] }
-          StreamExchange { dist: HashShard(ak1.k1) }
-            StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
-          StreamProject { exprs: [count, a.k1] }
-            StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
-              StreamExchange { dist: HashShard(a.k1) }
-                StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), a.k1(hidden)], pk_columns: [] }
+      StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, a.k1] }
+        StreamExchange { dist: HashShard(ak1.k1) }
+          StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
+        StreamProject { exprs: [count, a.k1] }
+          StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+            StreamExchange { dist: HashShard(a.k1) }
+              StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
 - id: aggk1_join_Ak1_onk1
   before:
   - create_tables
@@ -357,7 +352,7 @@
         BatchExchange { order: [], dist: HashShard(ak1.k1) }
           BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
   stream_plan: |
-    StreamMaterialize { columns: [v, bv, a.k1(hidden), ak1.a._row_id(hidden)], pk_columns: [a.k1, ak1.a._row_id] }
+    StreamMaterialize { columns: [v, bv, a.k1(hidden), ak1.a._row_id(hidden)], pk_columns: [] }
       StreamHashJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count, a.k1, ak1.a._row_id] }
         StreamProject { exprs: [count, a.k1] }
           StreamHashAgg { group_key: [a.k1], aggs: [count, count] }

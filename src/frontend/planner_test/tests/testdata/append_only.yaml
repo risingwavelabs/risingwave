@@ -13,13 +13,12 @@
     create table t2 (v1 int, v3 int) with (appendonly = true);
     select t1.v1 as id, v2, v3 from t1 join t2 on t1.v1=t2.v1;
   stream_plan: |
-    StreamMaterialize { columns: [id, v2, v3, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id] }
-      StreamExchange { dist: HashShard(t1._row_id, t2._row_id) }
-        StreamAppendOnlyHashJoin { type: Inner, predicate: t1.v1 = t2.v1, append_only: true, output: [t1.v1, t1.v2, t2.v3, t1._row_id, t2._row_id] }
-          StreamExchange { dist: HashShard(t1.v1) }
-            StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
-          StreamExchange { dist: HashShard(t2.v1) }
-            StreamTableScan { table: t2, columns: [t2.v1, t2.v3, t2._row_id], pk: [t2._row_id], distribution: UpstreamHashShard(t2._row_id) }
+    StreamMaterialize { columns: [id, v2, v3, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [] }
+      StreamAppendOnlyHashJoin { type: Inner, predicate: t1.v1 = t2.v1, append_only: true, output: [t1.v1, t1.v2, t2.v3, t1._row_id, t2._row_id] }
+        StreamExchange { dist: HashShard(t1.v1) }
+          StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
+        StreamExchange { dist: HashShard(t2.v1) }
+          StreamTableScan { table: t2, columns: [t2.v1, t2.v3, t2._row_id], pk: [t2._row_id], distribution: UpstreamHashShard(t2._row_id) }
 - sql: |
     create table t1 (v1 int, v2 int) with (appendonly = true);
     select v1 from t1 order by v1 limit 3 offset 3;
