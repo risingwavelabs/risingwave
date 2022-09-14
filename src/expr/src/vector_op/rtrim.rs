@@ -41,7 +41,7 @@ mod tests {
             let builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
             let guard = rtrim(s, writer)?;
-            let array = guard.into_inner().finish().unwrap();
+            let array = guard.into_inner().finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

@@ -255,6 +255,19 @@ def section_compaction(outer_panels):
                     "sum(rate(state_store_write_build_l0_bytes[$__rate_interval]))by (job,instance)", "flush - {{job}} @ {{instance}}"
                 ),
             ]),
+            panels.timeseries_bytes("Compaction Write Bytes", [
+                panels.target(
+                    "sum(storage_level_compact_write) by (job)", "write - {{job}}"
+                ),
+                panels.target(
+                    "sum(state_store_write_build_l0_bytes) by (job)", "flush - {{job}}"
+                ),
+            ]),
+            panels.timeseries_percentage("Compaction Write Amplification", [
+                panels.target(
+                    "sum(storage_level_compact_write) / sum(state_store_write_build_l0_bytes)", "write amplification"
+                ),
+            ]),            
             panels.timeseries_count("Compacting SST Count", [
                 panels.target(
                     "storage_level_compact_cnt", "L{{level_index}}"
@@ -865,7 +878,7 @@ def section_hummock(panels):
                 "sum(rate(state_store_iter_scan_key_counts[$__rate_interval])) by (instance, type)", "iter keys flow - {{type}} @ {{instance}} "
             ),
         ]),
-        panels.timeseries_percentage(" Filter-Cache Hit Rate", [
+        panels.timeseries_percentage("Filter-Cache Hit Rate", [
             panels.target(
                 "(sum(rate(state_store_bloom_filter_true_negative_counts[$__rate_interval])) by (job,instance)) / (sum(rate(state_bloom_filter_check_counts[$__rate_interval])) by (job,instance))", "bloom filter hit rate - {{job}} @ {{instance}}"
             ),

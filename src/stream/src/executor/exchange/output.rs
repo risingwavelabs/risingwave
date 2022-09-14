@@ -14,10 +14,12 @@
 
 use std::fmt::Debug;
 
+use anyhow::anyhow;
 use async_stack_trace::{SpanValue, StackTrace};
 use async_trait::async_trait;
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::error::Result;
 use risingwave_common::util::addr::is_local_address;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::Sender;
 
 use crate::executor::Message;
@@ -75,7 +77,14 @@ impl Output for LocalOutput {
             .send(message)
             .stack_trace(self.span.clone())
             .await
-            .map_err(|_| internal_error("failed to send"))
+            .map_err(|SendError(message)| {
+                anyhow!(
+                    "failed to send message to actor {}: {:#?}",
+                    self.actor_id,
+                    message
+                )
+                .into()
+            })
     }
 
     fn actor_id(&self) -> ActorId {
@@ -126,7 +135,14 @@ impl Output for RemoteOutput {
             .send(message)
             .stack_trace(self.span.clone())
             .await
-            .map_err(|_| internal_error("failed to send"))
+            .map_err(|SendError(message)| {
+                anyhow!(
+                    "failed to send message to actor {}: {:#?}",
+                    self.actor_id,
+                    message
+                )
+                .into()
+            })
     }
 
     fn actor_id(&self) -> ActorId {

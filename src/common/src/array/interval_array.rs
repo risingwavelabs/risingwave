@@ -32,14 +32,13 @@ mod tests {
             let v = IntervalUnit::from_ymd(1, 0, 0);
             array_builder.append(Some(v)).unwrap();
         }
-        let ret_arr = array_builder.finish().unwrap();
+        let ret_arr = array_builder.finish();
         for v in ret_arr.iter().flatten() {
             assert_eq!(v.get_years(), 1);
             assert_eq!(v.get_months(), 12);
             assert_eq!(v.get_days(), 0);
         }
-        let ret_arr =
-            IntervalArray::from_slice(&[Some(IntervalUnit::from_ymd(1, 0, 0)), None]).unwrap();
+        let ret_arr = IntervalArray::from_slice(&[Some(IntervalUnit::from_ymd(1, 0, 0)), None]);
         let v = ret_arr.value_at(0).unwrap();
         assert_eq!(v.get_years(), 1);
         assert_eq!(v.get_months(), 12);
