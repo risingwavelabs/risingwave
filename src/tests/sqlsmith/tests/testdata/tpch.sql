@@ -1,5 +1,5 @@
 CREATE TABLE supplier (
-    s_suppkey  INTEGER,
+    s_suppkey INTEGER,
     s_name VARCHAR,
     s_address VARCHAR,
     s_nationkey INTEGER,
