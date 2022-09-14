@@ -97,12 +97,28 @@ impl RescheduleContext {
 
 pub(crate) fn rebalance_actor_vnode(
     actors: &[StreamActor],
-    actors_to_remove: &BTreeMap<ActorId, ParallelUnitId>,
-    actors_to_create: &BTreeMap<ActorId, ParallelUnitId>,
+    actors_to_remove: &BTreeSet<ActorId>,
+    actors_to_create: &BTreeSet<ActorId>,
 ) -> HashMap<ActorId, Bitmap> {
     assert!(actors.len() > actors_to_remove.len());
     let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
     assert_ne!(target_actor_count, 0);
+
+    if actors_to_remove.len() == actors_to_create.len() {
+        let map: HashMap<_, _> = actors_to_remove
+            .iter()
+            .zip_eq(actors_to_create.iter())
+            .map(|(src, dst)| (*src, *dst))
+            .collect();
+        return actors
+            .iter()
+            .filter(|actor| map.contains_key(&actor.actor_id))
+            .map(|actor| {
+                let bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
+                (*map.get(&actor.actor_id).unwrap(), bitmap)
+            })
+            .collect();
+    }
 
     struct Balance {
         actor_id: ActorId,
@@ -123,7 +139,7 @@ pub(crate) fn rebalance_actor_vnode(
             let mut bitmap_builder = BitmapBuilder::default();
             bitmap_builder.append_bitmap(&bitmap);
 
-            if actors_to_remove.contains_key(&actor.actor_id) {
+            if actors_to_remove.contains(&actor.actor_id) {
                 v.push_front(Balance {
                     actor_id: actor.actor_id as ActorId,
                     balance: bitmap.num_high_bits() as i32,
@@ -150,7 +166,7 @@ pub(crate) fn rebalance_actor_vnode(
         }
     }
 
-    for actor_id in actors_to_create.keys() {
+    for actor_id in actors_to_create {
         let mut balance = Balance {
             actor_id: *actor_id as ActorId,
             balance: -expected,
@@ -173,8 +189,8 @@ pub(crate) fn rebalance_actor_vnode(
                 "actor {} has {}, R[{}] C[{}]",
                 b.actor_id,
                 b.balance,
-                actors_to_remove.contains_key(&b.actor_id),
-                actors_to_create.contains_key(&b.actor_id)
+                actors_to_remove.contains(&b.actor_id),
+                actors_to_create.contains(&b.actor_id)
             );
         }
 
@@ -215,7 +231,7 @@ pub(crate) fn rebalance_actor_vnode(
 
         if src.balance != 0 {
             v.push_front(src);
-        } else if !actors_to_remove.contains_key(&src.actor_id) {
+        } else if !actors_to_remove.contains(&src.actor_id) {
             result.insert(src.actor_id, src.builder.finish());
         }
 
@@ -227,7 +243,6 @@ pub(crate) fn rebalance_actor_vnode(
     }
 
     result
-    // assert_eq!(result.len(), target_actor_count);
 }
 
 impl<S> GlobalStreamManager<S>
@@ -550,12 +565,18 @@ where
         for fragment_id in reschedule.keys() {
             let actors_to_create = fragment_actors_to_create
                 .get(fragment_id)
-                .cloned()
+                .map(|map| map.keys().cloned().collect())
                 .unwrap_or_default();
+
             let actors_to_remove = fragment_actors_to_remove
                 .get(fragment_id)
-                .cloned()
+                .map(|map| map.keys().cloned().collect())
                 .unwrap_or_default();
+
+            // let actors_to_remove = fragment_actors_to_remove
+            //     .get(fragment_id)
+            //     .cloned()
+            //     .unwrap_or_default();
 
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
@@ -1140,15 +1161,158 @@ where
 
 #[cfg(test)]
 mod tests {
-    // pub(crate) fn rebalance_actor_vnode(
-    //         actors: &[StreamActor],
-    //         actors_to_remove: &BTreeMap<ActorId, ParallelUnitId>,
-    //         actors_to_create: &BTreeMap<ActorId, ParallelUnitId>,
-    //     ) {
-    // use crate::stream::rebalance_actor_vnode;
-    //
-    // #[test]
-    // fn test_rebalance_plan() {
-    //     rebalance_actor_vnode()
-    // }
+    use std::collections::{BTreeSet, HashMap};
+
+    use itertools::Itertools;
+    use maplit::btreeset;
+    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+    use risingwave_pb::common::ParallelUnit;
+    use risingwave_pb::stream_plan::StreamActor;
+
+    use crate::model::ActorId;
+    use crate::stream::{build_vnode_mapping, rebalance_actor_vnode, vnode_mapping_to_bitmaps};
+
+    fn build_fake_actors(info: &[(ActorId, ParallelUnitId)]) -> Vec<StreamActor> {
+        let parallel_units = info
+            .iter()
+            .map(|(_, parallel_unit_id)| ParallelUnit {
+                id: *parallel_unit_id,
+                ..Default::default()
+            })
+            .collect_vec();
+
+        let vnode_bitmaps = vnode_mapping_to_bitmaps(build_vnode_mapping(&parallel_units));
+
+        info.into_iter()
+            .map(|(actor_id, parallel_unit_id)| StreamActor {
+                actor_id: *actor_id,
+                vnode_bitmap: vnode_bitmaps
+                    .get(&parallel_unit_id)
+                    .map(|bitmap| bitmap.to_protobuf()),
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    fn check_affinity_for_scale_in(bitmap: &Bitmap, actor: &StreamActor) {
+        let prev_bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
+
+        for idx in 0..VIRTUAL_NODE_COUNT {
+            if prev_bitmap.is_set(idx).unwrap() {
+                assert!(bitmap.is_set(idx).unwrap());
+            }
+        }
+    }
+
+    fn check_bitmaps(bitmaps: &HashMap<ActorId, Bitmap>) -> bool {
+        let mut target = (0..VIRTUAL_NODE_COUNT).map(|_| false).collect_vec();
+
+        for bitmap in bitmaps.values() {
+            for (idx, pos) in target.iter_mut().enumerate() {
+                if bitmap.is_set(idx).unwrap() {
+                    // *pos should be false
+                    assert!(!*pos);
+                    *pos = true;
+                }
+            }
+        }
+
+        if !target.iter().all(|b| *b) {
+            return false;
+        }
+
+        let vnodes = bitmaps.values().map(|bitmap| bitmap.num_high_bits());
+        let (min, max) = vnodes.minmax().into_option().unwrap();
+
+        (max - min) <= 1
+    }
+
+    #[test]
+    fn test_rebalance_empty() {
+        let parallel_units = (0..5).map(|i| (100 + i, i)).collect_vec();
+        let actors = build_fake_actors(&parallel_units);
+
+        // empty input
+        let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &BTreeSet::new());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_rebalance_scale_in() {
+        let parallel_units = (0..5).map(|i| (100 + i, i)).collect_vec();
+        let actors = build_fake_actors(&parallel_units);
+
+        // remove 1
+        let actors_to_remove = btreeset! {100};
+        let result = rebalance_actor_vnode(&actors, &actors_to_remove, &BTreeSet::new());
+        assert_eq!(result.len(), parallel_units.len() - actors_to_remove.len());
+        assert!(check_bitmaps(&result));
+        check_affinity_for_scale_in(result.get(&(101 as ActorId)).unwrap(), &actors[1]);
+
+        // remove 2
+        let actors_to_remove = btreeset! {100,101};
+        let result = rebalance_actor_vnode(&actors, &actors_to_remove, &BTreeSet::new());
+        assert_eq!(result.len(), parallel_units.len() - actors_to_remove.len());
+        assert!(check_bitmaps(&result));
+        check_affinity_for_scale_in(result.get(&(102 as ActorId)).unwrap(), &actors[2]);
+    }
+
+    #[test]
+    fn test_rebalance_scale_out() {
+        let parallel_units = (0..5).map(|i| (100 + i, i)).collect_vec();
+        let actors = build_fake_actors(&parallel_units);
+
+        // add 1
+        let actors_to_add = btreeset! {105};
+        let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &actors_to_add);
+        assert_eq!(result.len(), parallel_units.len() + actors_to_add.len());
+        assert!(check_bitmaps(&result));
+
+        // add 2
+        let actors_to_add = btreeset! {105,106};
+        let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &actors_to_add);
+        assert_eq!(result.len(), parallel_units.len() + actors_to_add.len());
+        assert!(check_bitmaps(&result));
+    }
+
+    #[test]
+    fn test_rebalance_migration() {
+        let parallel_units = (0..5).map(|i| (100 + i, i)).collect_vec();
+        let actors = build_fake_actors(&parallel_units);
+
+        let actors_to_remove = btreeset! {100};
+        let actors_to_add = btreeset! {105};
+        let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
+
+        assert_eq!(result.len(), actors_to_add.len());
+    }
+
+    #[test]
+    fn test_rebalance_remove_add() {
+        let parallel_units = (0..5).map(|i| (100 + i, i)).collect_vec();
+        let actors = build_fake_actors(&parallel_units);
+
+        let actors_to_remove = btreeset! {100};
+        let actors_to_add = btreeset! {105, 106};
+        let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
+
+        assert_eq!(
+            result.len(),
+            actors.len() - actors_to_remove.len() + actors_to_add.len()
+        );
+        assert!(check_bitmaps(&result));
+
+        let actors_to_remove = btreeset! {100, 101};
+        let actors_to_add = btreeset! {105};
+        let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
+
+        assert_eq!(
+            result.len(),
+            actors.len() - actors_to_remove.len() + actors_to_add.len()
+        );
+        assert!(check_bitmaps(&result));
+
+        check_affinity_for_scale_in(result.get(&(102 as ActorId)).unwrap(), &actors[2]);
+    }
 }

@@ -19,8 +19,8 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::types::{VnodeMapping, VIRTUAL_NODE_COUNT};
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::types::{ParallelUnitId, VnodeMapping, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -219,20 +219,7 @@ impl Scheduler {
             // Build vnode mapping according to the parallel units.
             let vnode_mapping = self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
 
-            let mut vnode_bitmaps = HashMap::new();
-            vnode_mapping
-                .iter()
-                .enumerate()
-                .for_each(|(vnode, parallel_unit)| {
-                    vnode_bitmaps
-                        .entry(*parallel_unit)
-                        .or_insert_with(|| BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT))
-                        .set(vnode, true);
-                });
-            let vnode_bitmaps = vnode_bitmaps
-                .into_iter()
-                .map(|(u, b)| (u, b.finish()))
-                .collect::<HashMap<_, _>>();
+            let vnode_bitmaps = vnode_mapping_to_bitmaps(vnode_mapping);
 
             // Record actor locations and set vnodes into the actors.
             for (actor, parallel_unit) in fragment.actors.iter_mut().zip_eq(parallel_units) {
@@ -263,7 +250,7 @@ impl Scheduler {
         fragment: &mut Fragment,
         parallel_units: &[ParallelUnit],
     ) -> MetaResult<VnodeMapping> {
-        let vnode_mapping = Self::build_vnode_mapping(parallel_units);
+        let vnode_mapping = build_vnode_mapping(parallel_units);
         let (original_indices, data) = compress_data(&vnode_mapping);
         fragment.vnode_mapping = Some(ParallelUnitMapping {
             original_indices,
@@ -273,31 +260,51 @@ impl Scheduler {
 
         Ok(vnode_mapping)
     }
+}
 
-    /// Build a vnode mapping according to parallel units where the fragment is scheduled.
-    /// For example, if `parallel_units` is `[0, 1, 2]`, and the total vnode count is 10, we'll
-    /// generate mapping like `[0, 0, 0, 0, 1, 1, 1, 2, 2, 2]`.
-    fn build_vnode_mapping(parallel_units: &[ParallelUnit]) -> VnodeMapping {
-        let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
-
-        let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
-        let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
-        let mut init_bound = 0;
-
-        parallel_units.iter().for_each(|parallel_unit| {
-            let vnode_count = if one_more_count > 0 {
-                one_more_count -= 1;
-                hash_shard_size + 1
-            } else {
-                hash_shard_size
-            };
-            let parallel_unit_id = parallel_unit.id;
-            init_bound += vnode_count;
-            vnode_mapping.resize(init_bound, parallel_unit_id);
+pub(crate) fn vnode_mapping_to_bitmaps(
+    vnode_mapping: VnodeMapping,
+) -> HashMap<ParallelUnitId, Bitmap> {
+    let mut vnode_bitmaps = HashMap::new();
+    vnode_mapping
+        .iter()
+        .enumerate()
+        .for_each(|(vnode, parallel_unit)| {
+            vnode_bitmaps
+                .entry(*parallel_unit)
+                .or_insert_with(|| BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT))
+                .set(vnode, true);
         });
+    let vnode_bitmaps = vnode_bitmaps
+        .into_iter()
+        .map(|(u, b)| (u, b.finish()))
+        .collect::<HashMap<_, _>>();
+    vnode_bitmaps
+}
 
-        vnode_mapping
-    }
+/// Build a vnode mapping according to parallel units where the fragment is scheduled.
+/// For example, if `parallel_units` is `[0, 1, 2]`, and the total vnode count is 10, we'll
+/// generate mapping like `[0, 0, 0, 0, 1, 1, 1, 2, 2, 2]`.
+pub(crate) fn build_vnode_mapping(parallel_units: &[ParallelUnit]) -> VnodeMapping {
+    let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
+
+    let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
+    let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
+    let mut init_bound = 0;
+
+    parallel_units.iter().for_each(|parallel_unit| {
+        let vnode_count = if one_more_count > 0 {
+            one_more_count -= 1;
+            hash_shard_size + 1
+        } else {
+            hash_shard_size
+        };
+        let parallel_unit_id = parallel_unit.id;
+        init_bound += vnode_count;
+        vnode_mapping.resize(init_bound, parallel_unit_id);
+    });
+
+    vnode_mapping
 }
 
 #[cfg(test)]
