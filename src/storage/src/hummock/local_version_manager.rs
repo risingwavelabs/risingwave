@@ -528,7 +528,8 @@ impl LocalVersionManager {
         let uncommitted_ssts = self
             .run_sync_upload_task(task_payload, new_sync_epoch)
             .await?;
-        tracing::info!(
+        // TODO: may change it to `info` when we don't sync at every epoch
+        tracing::trace!(
             "sync epoch {} finished. Task size {}",
             new_sync_epoch,
             sync_size
