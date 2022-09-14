@@ -134,9 +134,10 @@ mod tests {
 
         for row_ref in data_chunk.rows() {
             let row: Row = row_ref.into();
+            let value_indices = (0..row.0.len()).collect_vec();
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
             // Pk is only a `i64` here, so encoding method does not matter.
-            let pk = Row(pk).serialize();
+            let pk = Row(pk).serialize(&value_indices);
             let join_row = JoinRow { row, degree: 0 };
             managed_state.insert(pk, join_row.encode());
         }

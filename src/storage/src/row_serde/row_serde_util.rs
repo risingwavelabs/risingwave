@@ -56,7 +56,7 @@ pub fn batch_deserialize(
     column_mapping: Arc<ColumnDescMapping>,
     value: impl AsRef<[u8]>,
 ) -> Result<Row> {
-    let mut origin_row = batch_deserialize_inner(&column_mapping.all_data_types, value.as_ref())?;
+    let mut origin_row = streaming_deserialize(&column_mapping.all_data_types, value.as_ref())?;
 
     let mut output_row = Vec::with_capacity(column_mapping.output_index.len());
     for col_idx in &column_mapping.output_index {
@@ -66,29 +66,10 @@ pub fn batch_deserialize(
 }
 
 /// used for streaming table deserialize
-pub fn batch_deserialize_inner(data_types: &[DataType], mut row: impl Buf) -> Result<Row> {
+pub fn streaming_deserialize(data_types: &[DataType], mut row: impl Buf) -> Result<Row> {
     // value encoding
     let mut values = Vec::with_capacity(data_types.len());
     for ty in data_types {
-        values.push(deserialize_datum(&mut row, ty)?);
-    }
-
-    Ok(Row(values))
-}
-
-/// used for streaming table partial deserialize
-pub fn streaming_deserialize(
-    data_types: &[DataType],
-    mut row: impl Buf,
-    value_indices: &[usize],
-) -> Result<Row> {
-    // value encoding
-    let mut values = Vec::with_capacity(value_indices.len());
-    let mut value_data_types = vec![];
-    for value_idx in value_indices {
-        value_data_types.push(&data_types[*value_idx]);
-    }
-    for ty in value_data_types {
         values.push(deserialize_datum(&mut row, ty)?);
     }
 
