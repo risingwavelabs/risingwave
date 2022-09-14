@@ -227,6 +227,7 @@ impl CompactorManager {
             .assign_compact_task(context_id, compact_task)
     }
 
+    // Report the completion of a compaction task to adjust the compaction schedule policy.
     pub fn report_compact_task(&self, context_id: HummockContextId, compact_task: &CompactTask) {
         self.policy
             .write()

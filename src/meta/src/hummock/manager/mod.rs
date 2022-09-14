@@ -930,10 +930,6 @@ where
             }
         }
         compact_status.report_compact_task(compact_task);
-        if let Some(context_id) = context_id {
-            self.compactor_manager
-                .report_compact_task(context_id, compact_task);
-        }
         let task_status = compact_task.task_status();
         debug_assert!(
             task_status != TaskStatus::Pending,
@@ -981,12 +977,16 @@ where
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
 
-        // A task heartbeat is removed IFF we report the task status of a task and it still has a
-        // valid assignment, OR we remove the node context from our list of nodes, in which
-        // case the associated heartbeats are forcefully purged.
         if let Some(context_id) = assignee_context_id {
+            // A task heartbeat is removed IFF we report the task status of a task and it still has
+            // a valid assignment, OR we remove the node context from our list of nodes,
+            // in which case the associated heartbeats are forcefully purged.
             self.compactor_manager
                 .remove_task_heartbeat(context_id, compact_task.task_id);
+            // Also, if the task is already assigned, we need to update the compaction schedule
+            // policy.
+            self.compactor_manager
+                .report_compact_task(context_id, compact_task);
         }
 
         // Update compaaction task count.
