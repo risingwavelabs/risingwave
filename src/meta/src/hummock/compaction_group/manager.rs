@@ -356,6 +356,11 @@ impl CompactionGroupManagerInner {
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
             compaction_group.member_table_ids.remove(table_id);
             compaction_group.table_id_to_options.remove(table_id);
+            if compaction_group_id > StaticCompactionGroupId::END as CompactionGroupId
+                && compaction_group.member_table_ids.is_empty()
+            {
+                compaction_groups.remove(compaction_group_id);
+            }
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
