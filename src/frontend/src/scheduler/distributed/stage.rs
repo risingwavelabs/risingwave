@@ -442,7 +442,7 @@ impl StageRunner {
             result_tx
                 .send(chunk.map_err(|e| e.into()))
                 .await
-                .expect("The receiver should always existed!");
+                .expect("The receiver should always existed! ");
 
             // if errors, send failed message to QueryResultFetcher.
             if is_err {
@@ -453,16 +453,14 @@ impl StageRunner {
         // TODO: Fill in the Execution Message.
         if let Some(err) = terminated_chunk_stream.take_result() {
             let stage_message = err.expect("Sender should always existed!");
-            // assert!(err.expect("Sender should always existed!"));
 
             // Terminated by other tasks execution error, so no need to return error here.
             match stage_message {
                 StageMessage::Stop => {
                     // Tell Query Result Fetcher to stop polling.
-                    result_tx
-                        .send(Err(TaskExecutionError))
-                        .await
-                        .expect("The receiver should always existed!");
+                    if let Err(_e) = result_tx.send(Err(TaskExecutionError)).await {
+                        warn!("Send task execution failed");
+                    }
                 }
             }
         }
