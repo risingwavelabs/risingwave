@@ -37,7 +37,7 @@ pub trait InfallibleExpression: Expression {
                     array_builder.append_null().unwrap();
                 }
             }
-            Arc::new(array_builder.finish().unwrap())
+            Arc::new(array_builder.finish())
         })
     }
 

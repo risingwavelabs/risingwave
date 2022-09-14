@@ -13,9 +13,15 @@ jobs:
       pull-requests: write
 
     steps:
-    - uses: actions/stale@v4
+    - uses: actions/stale@v5
       with:
-        repo-token: ${{ secrets.WUTAO_PAT }}
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        stale-issue-message: >
+          This issue has been open for 60 days with no activity.
+          Could you please update the status? Feel free to continue discussion or close as not planned.
+        stale-pr-message: >
+          This PR has been open for 60 days with no activity.
+          Could you please update the status? Feel free to ping a reviewer if you are waiting for review.
         stale-issue-label: 'no-issue-activity'
         stale-pr-label: 'no-pr-activity'
         days-before-close: -1

@@ -165,11 +165,11 @@ impl SortAggExecutor {
                 left_capacity -= 1;
                 if left_capacity == 0 {
                     // output chunk reaches its limit size, yield it
-                    let columns = group_builders
+                    let columns: Vec<_> = group_builders
                         .into_iter()
                         .chain(agg_builders)
-                        .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
-                        .collect::<Result<Vec<_>>>()?;
+                        .map(|b| Column::new(Arc::new(b.finish())))
+                        .collect();
 
                     let output = DataChunk::new(columns, self.output_size_limit);
                     yield output;
@@ -207,11 +207,11 @@ impl SortAggExecutor {
         Self::output_sorted_groupers(&mut self.sorted_groupers, &mut group_builders)?;
         Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
 
-        let columns = group_builders
+        let columns: Vec<_> = group_builders
             .into_iter()
             .chain(agg_builders)
-            .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
-            .collect::<Result<Vec<_>>>()?;
+            .map(|b| Column::new(Arc::new(b.finish())))
+            .collect();
 
         let output = DataChunk::new(columns, self.output_size_limit - left_capacity + 1);
 
