@@ -110,9 +110,14 @@ impl StateStoreImpl {
 
             let options = FileCacheOptions {
                 dir: file_cache_dir.to_string(),
-                capacity: config.file_cache.capacity,
-                total_buffer_capacity: config.file_cache.total_buffer_capacity,
-                cache_file_fallocate_unit: config.file_cache.cache_file_fallocate_unit,
+                capacity: config.file_cache.capacity_mb * 1024 * 1024,
+                total_buffer_capacity: config.file_cache.total_buffer_capacity_mb * 1024 * 1024,
+                cache_file_fallocate_unit: config.file_cache.cache_file_fallocate_unit_mb
+                    * 1024
+                    * 1024,
+                cache_meta_fallocate_unit: config.file_cache.cache_meta_fallocate_unit_mb
+                    * 1024
+                    * 1024,
                 flush_buffer_hooks: vec![],
             };
             let metrics = Arc::new(tiered_cache_metrics_builder.file());
