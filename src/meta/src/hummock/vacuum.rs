@@ -24,17 +24,20 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 
+use super::CompactorManagerRef;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::{CompactorManager, HummockManagerRef};
+use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::MetaResult;
+
+pub type VacuumManagerRef<S> = Arc<VacuumManager<S>>;
 
 pub struct VacuumManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
     /// Use the CompactorManager to dispatch VacuumTask.
-    compactor_manager: Arc<CompactorManager>,
+    compactor_manager: CompactorManagerRef,
     /// SST ids which have been dispatched to vacuum nodes but are not replied yet.
     pending_sst_ids: parking_lot::RwLock<HashSet<HummockSstableId>>,
 }
@@ -46,7 +49,7 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: Arc<CompactorManager>,
+        compactor_manager: CompactorManagerRef,
     ) -> Self {
         Self {
             env,
@@ -191,11 +194,7 @@ where
             "run full GC with sst_retention_time = {} secs",
             sst_retention_time.as_secs()
         );
-        let compactor = match self
-            .compactor_manager
-            .next_idle_compactor(&self.hummock_manager)
-            .await
-        {
+        let compactor = match self.compactor_manager.next_compactor() {
             None => {
                 tracing::warn!("Try full GC but no available idle worker.");
                 return Ok(false);
@@ -328,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_vacuum() {
         let (env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
-        let compactor_manager = Arc::new(CompactorManager::new(1));
+        let compactor_manager = Arc::new(CompactorManager::new_for_test());
         let vacuum = Arc::new(VacuumManager::new(env, hummock_manager, compactor_manager));
         let (join_handle, shutdown_sender) =
             start_vacuum_scheduler(vacuum, Duration::from_secs(60));
@@ -340,13 +339,12 @@ mod tests {
     async fn test_vacuum() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
-        let compactor_manager = Arc::new(CompactorManager::new(1));
+        let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         let vacuum = Arc::new(VacuumManager::new(
             env,
             hummock_manager.clone(),
             compactor_manager.clone(),
         ));
-
         assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -364,7 +362,7 @@ mod tests {
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
         );
-        let _receiver = compactor_manager.add_compactor(0, u64::MAX);
+        let _receiver = compactor_manager.add_compactor(context_id, u64::MAX);
         // SST deletion is scheduled.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -403,7 +401,7 @@ mod tests {
     async fn test_full_gc() {
         let (mut env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
-        let compactor_manager = Arc::new(CompactorManager::new(1));
+        let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         // Use smaller spin interval to accelerate test.
         env.opts = Arc::new(MetaOpts {
             collect_gc_watermark_spin_interval_sec: 1,
@@ -423,7 +421,7 @@ mod tests {
             .await
             .unwrap());
 
-        let mut receiver = compactor_manager.add_compactor(0, u64::MAX);
+        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX);
 
         assert!(vacuum
             .start_full_gc(Duration::from_secs(
