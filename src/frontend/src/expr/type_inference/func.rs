@@ -174,7 +174,6 @@ fn infer_type_for_special(
             let right_type = inputs[1].return_type();
             // return_type is left_type or right_type if types match. Else None
             // If it is None, it will throw the error
-            let mut err_msg_debug: String = String::from("");
             let return_type = match (&left_type, &right_type) {
                 (
                     DataType::List {
@@ -186,50 +185,37 @@ fn infer_type_for_special(
                 ) => {
                     // common_type = align_types(array(left_type, right_type))
                     
-                    if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
-                        Some(left_type.clone()) // success
-                    } else if left_type == **right_elem_type {
-                        Some(right_type.clone()) // success
-                    } else if left_elem_type.is_numeric() && right_elem_type.is_numeric() {
-                        // maybe introduce a multi match version where we can cast the types?
-                        // How does DataType work?
-                        // what is our base type here?
-                        // is not numeric, because it is a list
-                        err_msg_debug = String::from("both numeric"); // selects this branch :)
-                        let inputs_owned = std::mem::take(inputs);
-                        *inputs = inputs_owned
-                            .into_iter()
-                            .map(|input| {
-                                input.cast_explicit(
-                                    // cannot cast type "integer[]" to "numeric" in Explicit
-                                    // DataType::Decimal
-
-                                    //  QueryError: Scheduler error: Expr error: Array error: Invalid datum type
-                                    DataType::List {
-                                        datatype: { Box::new(DataType::Decimal) }, // use align_types? 
-                                    }, 
-                                )
-                            })
-                            .try_collect()?;
-
-                        Some(DataType::Decimal)
-                    } else {
-                        err_msg_debug = String::from("first none");
+                    let res = align_types(inputs.iter_mut()); 
+                    if res.is_ok() {
+                        Some(res.unwrap())
+                    }else {
                         None
                     }
+
+/*
+if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
+    Some(left_type.clone()) // success
+} else if left_type == **right_elem_type {
+    Some(right_type.clone()) // success
+} else {
+    None
+}
+*/
                 }
                 _ => {
-                    err_msg_debug = String::from("second none");
                     None
                 } // fail, did not even match
             };
             Ok(Some(return_type.ok_or_else(|| {
                 ErrorCode::BindError(format!(
-                    "Cannot concatenate {} and {}. {}",
-                    left_type, right_type, err_msg_debug
+                    "Cannot concatenate {} and {}.",
+                    left_type, right_type
                 ))
             })?))
         }
+        // why do we have array append, prepend again here?
+        // guess: we match by function type. User selected diff function operator
+        // user can use array_cat, but this is in the end the same as append or prepend
         ExprType::ArrayAppend => {
             ensure_arity!("array_append", | inputs | == 2);
             let left_type = inputs[0].return_type();
@@ -241,7 +227,7 @@ fn infer_type_for_special(
                         datatype: left_elem_type,
                     },
                     _, // non-array
-                ) if **left_elem_type == right_type => Some(left_type.clone()), // also use align_types here
+                ) if **left_elem_type == right_type => Some(left_type.clone()), /* also use align_types here */
                 _ => None,
             };
             Ok(Some(return_type.ok_or_else(|| {
@@ -259,7 +245,9 @@ fn infer_type_for_special(
                     DataType::List {
                         datatype: right_elem_type,
                     },
-                ) if left_type == **right_elem_type => Some(right_type.clone()), // also change with align_types here 
+                ) if left_type == **right_elem_type => Some(right_type.clone()), // also change
+                // with align_types
+                // here
                 _ => None,
             };
             Ok(Some(return_type.ok_or_else(|| {
