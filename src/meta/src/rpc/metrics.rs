@@ -146,7 +146,7 @@ impl MetaMetrics {
         let compact_frequency = register_int_counter_vec_with_registry!(
             "storage_level_compact_frequency",
             "num of compactions from each level to next level",
-            &["group", "result"],
+            &["compactor", "group", "result"],
             registry
         )
         .unwrap();
