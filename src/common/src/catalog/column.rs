@@ -68,13 +68,6 @@ pub struct ColumnDesc {
     pub type_name: String,
 }
 
-// Deprecated. To be removed.
-#[derive(Clone, Debug, PartialEq)]
-pub struct OrderedColumnDesc {
-    pub column_desc: ColumnDesc,
-    pub order: OrderType,
-}
-
 impl ColumnDesc {
     pub fn unnamed(column_id: ColumnId, data_type: DataType) -> ColumnDesc {
         ColumnDesc {
