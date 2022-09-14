@@ -74,10 +74,11 @@ where
         .unwrap()
         .unwrap();
     compact_task.target_level = 6;
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
+    assert_eq!(compactor.context_id(), context_id);
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager(),
@@ -223,7 +224,7 @@ pub async fn setup_compute_env_with_config(
 ) {
     let env = MetaSrvEnv::for_test().await;
     let cluster_manager = Arc::new(
-        ClusterManager::new_for_test(env.clone(), Duration::from_secs(1))
+        ClusterManager::new(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );
@@ -234,11 +235,7 @@ pub async fn setup_compute_env_with_config(
             .unwrap(),
     );
 
-    let compactor_manager = Arc::new(
-        CompactorManager::new_with_meta(env.clone(), 1)
-            .await
-            .unwrap(),
-    );
+    let compactor_manager = Arc::new(CompactorManager::new_for_test());
 
     let hummock_manager = Arc::new(
         HummockManager::new(
@@ -300,4 +297,29 @@ where
     hummock_manager_ref
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
+}
+
+pub async fn add_ssts<S>(
+    epoch: HummockEpoch,
+    hummock_manager: &HummockManager<S>,
+    context_id: HummockContextId,
+) -> Vec<SstableInfo>
+where
+    S: MetaStore,
+{
+    let table_ids = get_sst_ids(hummock_manager, 3).await;
+    let test_tables = generate_test_tables(epoch, table_ids);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager(),
+        &test_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
+    let ssts = to_local_sstable_info(&test_tables);
+    let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
+    hummock_manager
+        .commit_epoch(epoch, ssts, sst_to_worker)
+        .await
+        .unwrap();
+    test_tables
 }

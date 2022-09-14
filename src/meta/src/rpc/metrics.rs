@@ -62,9 +62,6 @@ pub struct MetaMetrics {
     pub hummock_manager_real_process_time: HistogramVec,
 
     pub time_after_last_observation: AtomicU64,
-
-    /// The number of nodes with `Running` state.
-    pub node_num: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -178,14 +175,6 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let node_num = register_int_gauge_vec_with_registry!(
-            "node_num",
-            "number of running nodes in the cluster",
-            &["node_type"],
-            registry,
-        )
-        .unwrap();
-
         Self {
             registry,
 
@@ -206,8 +195,6 @@ impl MetaMetrics {
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
-
-            node_num,
         }
     }
 

@@ -164,6 +164,7 @@ pub struct StoreOptions {
     pub capacity: usize,
     pub buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
+    pub cache_meta_fallocate_unit: usize,
 
     pub metrics: FileCacheMetricsRef,
 }
@@ -217,7 +218,10 @@ where
             fallocate_unit: options.cache_file_fallocate_unit,
         };
 
-        let mf = MetaFile::open(PathBuf::from(&options.dir).join(META_FILE_FILENAME))?;
+        let mf = MetaFile::open(
+            PathBuf::from(&options.dir).join(META_FILE_FILENAME),
+            options.cache_meta_fallocate_unit,
+        )?;
 
         let cf = CacheFile::open(
             PathBuf::from(&options.dir).join(CACHE_FILE_FILENAME),

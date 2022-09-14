@@ -134,7 +134,7 @@ impl LocalSimpleAggExecutor {
                             .into_iter()
                             .map(|builder| {
                                 Ok::<_, StreamExecutorError>(Column::new(Arc::new(
-                                    builder.finish()?,
+                                    builder.finish(),
                                 )))
                             })
                             .try_collect()?;

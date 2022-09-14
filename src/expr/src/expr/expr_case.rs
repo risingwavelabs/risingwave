@@ -99,7 +99,7 @@ impl Expression for CaseExpression {
                 output_array.append_null()?;
             }
         }
-        let output_array = output_array.finish()?.into();
+        let output_array = output_array.finish().into();
         Ok(output_array)
     }
 

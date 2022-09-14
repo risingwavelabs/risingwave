@@ -137,7 +137,7 @@ pub(crate) fn generate_output(
         let columns = schema
             .create_array_builders(0)
             .into_iter()
-            .map(|x| Column::new(Arc::new(x.finish().unwrap())))
+            .map(|x| Column::new(Arc::new(x.finish())))
             .collect_vec();
         Ok(StreamChunk::new(vec![], columns, None))
     }

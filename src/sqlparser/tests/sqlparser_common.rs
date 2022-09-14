@@ -1807,7 +1807,7 @@ fn parse_explain_analyze_with_simple_select() {
         ExplainOptions {
             trace: true,
             verbose: true,
-            explain_type: ExplainType::DistSQL,
+            explain_type: ExplainType::DistSql,
         },
     );
     run_explain_analyze(
@@ -1816,7 +1816,7 @@ fn parse_explain_analyze_with_simple_select() {
         ExplainOptions {
             trace: false,
             verbose: true,
-            explain_type: ExplainType::DistSQL,
+            explain_type: ExplainType::DistSql,
         },
     );
     run_explain_analyze(
@@ -1825,7 +1825,7 @@ fn parse_explain_analyze_with_simple_select() {
         ExplainOptions {
             trace: false,
             verbose: true,
-            explain_type: ExplainType::DistSQL,
+            explain_type: ExplainType::DistSql,
         },
     );
 }
@@ -2691,11 +2691,11 @@ fn parse_derived_tables() {
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
-    let sql = "SELECT * FROM (((SELECT 1)))";
+    let sql = "SELECT * FROM (SELECT 1)";
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
-    let sql = "SELECT * FROM t NATURAL JOIN (((SELECT 1)))";
+    let sql = "SELECT * FROM t NATURAL JOIN (SELECT 1)";
     let _ = verified_only_select(sql);
     // TODO: add assertions
 

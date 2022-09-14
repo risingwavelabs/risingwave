@@ -121,3 +121,17 @@ where
 pub async fn wait_timeout(sync_point: SyncPoint, dur: Duration) -> Result<(), Error> {
     SyncFacility::get().wait(sync_point, dur, false).await
 }
+
+#[macro_export]
+#[cfg(feature = "sync_point")]
+macro_rules! sync_point {
+    ($name:expr) => {{
+        sync_point::on($name).await;
+    }};
+}
+
+#[macro_export]
+#[cfg(not(feature = "sync_point"))]
+macro_rules! sync_point {
+    ($name:expr) => {{}};
+}
