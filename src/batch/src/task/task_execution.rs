@@ -412,6 +412,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             // Stop task execution.
             if sender.send(0).is_err() {
                 warn!("The task has already died before this request, so the abort did no-op")
+            } else {
+                info!("Abort task {:?} done", self.task_id);
             }
         };
     }
