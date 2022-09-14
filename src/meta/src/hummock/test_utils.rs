@@ -68,6 +68,17 @@ where
     // Current state: {v0: [], v1: [test_tables]}
 
     // Simulate a compaction and increase version by 1.
+    let mut temp_compactor = false;
+    if hummock_manager
+        .compactor_manager_ref_for_test()
+        .compactor_num()
+        == 0
+    {
+        hummock_manager
+            .compactor_manager_ref_for_test()
+            .add_compactor(context_id, u64::MAX);
+        temp_compactor = true;
+    }
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
@@ -78,7 +89,9 @@ where
         .assign_compaction_task(&compact_task)
         .await
         .unwrap();
-    assert_eq!(compactor.context_id(), context_id);
+    if temp_compactor {
+        assert_eq!(compactor.context_id(), context_id);
+    }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager(),
@@ -92,6 +105,11 @@ where
         .report_compact_task(context_id, &compact_task)
         .await
         .unwrap();
+    if temp_compactor {
+        hummock_manager
+            .compactor_manager_ref_for_test()
+            .remove_compactor(context_id);
+    }
     // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, test_tables to_delete]}
 
     // Increase version by 1.

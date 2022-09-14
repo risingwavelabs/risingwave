@@ -24,6 +24,7 @@ use parking_lot::Mutex;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, SstIdRange};
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use risingwave_rpc_client::{ExtraInfoSource, HummockMetaClient};
+use sync_point::sync_point;
 use tokio::sync::Notify;
 
 use crate::hummock::{HummockError, HummockResult};
@@ -93,11 +94,14 @@ impl SstableIdManager {
             };
             if !to_fetch {
                 // Wait for previous fetch
+                sync_point!("MAP_NEXT_SST_ID.AS_FOLLOWER");
                 notify.notified().await;
                 notify.notify_one();
                 continue;
             }
             // Fetch new ids.
+            sync_point!("MAP_NEXT_SST_ID.AS_LEADER");
+            sync_point!("MAP_NEXT_SST_ID.BEFORE_FETCH");
             let new_sst_ids = match self
                 .hummock_meta_client
                 .get_new_sst_ids(self.remote_fetch_number)
@@ -110,6 +114,8 @@ impl SstableIdManager {
                     return Err(err);
                 }
             };
+            sync_point!("MAP_NEXT_SST_ID.AFTER_FETCH");
+            sync_point!("MAP_NEXT_SST_ID.BEFORE_FILL_CACHE");
             let err = {
                 let mut guard = self.available_sst_ids.lock();
                 let available_sst_ids = guard.deref_mut();
