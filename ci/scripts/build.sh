@@ -41,9 +41,6 @@ cargo build \
     -p risingwave_sqlsmith \
     --features static-link --profile "$profile"
 
-echo "--- Extract DocSlt end-to-end tests"
-cargo run --bin risedev-docslt
-
 echo "--- Compress RisingWave debug info"
 objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave
 
@@ -59,7 +56,6 @@ buildkite-agent artifact upload risingwave-"$profile"
 buildkite-agent artifact upload risedev-dev-"$profile"
 buildkite-agent artifact upload risingwave_regress_test-"$profile"
 buildkite-agent artifact upload ./sqlsmith-"$profile"
-buildkite-agent artifact upload "e2e_test/generated/**/*"
 
 echo "--- upload misc"
 cp src/source/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc

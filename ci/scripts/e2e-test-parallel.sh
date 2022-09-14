@@ -25,6 +25,7 @@ echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-"$profile" target/debug/
 buildkite-agent artifact download risedev-dev-"$profile" target/debug/
+buildkite-agent artifact download "e2e_test/generated/*" ./
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
