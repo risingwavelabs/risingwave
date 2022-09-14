@@ -129,7 +129,9 @@ where
                 fd,
                 0,
             )? as *mut u8;
-            madvise(ptr as *mut c_void, size, MmapAdvise::MADV_WILLNEED)?;
+            if let Err(e) = madvise(ptr as *mut c_void, size, MmapAdvise::MADV_WILLNEED) {
+                tracing::error!("madvise fail: {:?}", e);
+            }
             let buffer = ManuallyDrop::new(Vec::from_raw_parts(ptr, size, size));
             (ptr, buffer)
         };
@@ -258,7 +260,9 @@ where
                 MRemapFlags::MREMAP_MAYMOVE,
                 None,
             )? as *mut u8;
-            madvise(ptr as *mut c_void, new_size, MmapAdvise::MADV_WILLNEED)?;
+            if let Err(e) = madvise(ptr as *mut c_void, new_size, MmapAdvise::MADV_WILLNEED) {
+                tracing::error!("madvise fail: {:?}", e);
+            }
             let buffer = ManuallyDrop::new(Vec::from_raw_parts(ptr, new_size, new_size));
             (ptr, buffer)
         };
