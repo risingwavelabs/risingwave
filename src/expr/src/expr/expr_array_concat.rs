@@ -24,7 +24,7 @@ use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Ex
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug, Copy, Clone)]
-enum Operation {
+enum Operation { // 5 combinations
     ConcatArray,
     AppendArray,
     PrependArray,
@@ -95,7 +95,7 @@ impl ArrayConcatExpression {
                 )
                 .into(),
             ),
-            _ => { // We are not here! We get "ERROR:  QueryError: Bind error: Cannot concatenate integer[] and numeric[]"
+            _ => {
                 panic!("the operands must be two arrays with the same data type.");
             }
         }
