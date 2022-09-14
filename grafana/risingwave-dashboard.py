@@ -369,6 +369,11 @@ def section_object_storage(outer_panels):
                     "histogram_quantile(0.80, sum(rate(object_store_operation_bytes_bucket[$__rate_interval])) by (le, type))", "{{type}} p80"
                 ),
             ]),
+            panels.timeseries_count("Operation Failure Count", [
+                panels.target(
+                    "sum(object_store_failure_count) by (instance, type)", "{{type}} - {{job}} @ {{instance}}"
+                )
+            ]),
             panels.timeseries_dollar("Estimated S3 Cost (Realtime)", [
                 panels.target(
                     "sum(object_store_read_bytes) * 0.01 / 1000 / 1000 / 1000", "(Cross Region) Data Transfer Cost",
