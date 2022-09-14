@@ -216,54 +216,43 @@ where
             compact_task_to_string(&compact_task)
         );
 
-        // 2. Select a compactor.
+        // 2. Assign the compaction task to a compactor.
         let compactor = match self
-            .compactor_manager
-            .next_idle_compactor(&self.hummock_manager)
-            .await
-        {
-            None => {
-                let current_compactor_tasks =
-                    self.hummock_manager.list_assigned_tasks_number().await;
-                tracing::warn!("No idle compactor available. The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
-                return ScheduleStatus::NoAvailableCompactor(compact_task);
-            }
-            Some(compactor) => compactor,
-        };
-
-        // 3. Assign the compaction task.
-        match self
             .hummock_manager
-            .assign_compaction_task(&compact_task, compactor.context_id())
+            .assign_compaction_task(&compact_task)
             .await
         {
-            Ok(_) => {
+            Ok(compactor) => {
                 tracing::trace!(
                     "Assigned compaction task. {}",
                     compact_task_to_string(&compact_task)
                 );
+                compactor
             }
             Err(err) => {
-                tracing::warn!(
-                    "Failed to assign compaction task to compactor {}: {:#?}",
-                    compactor.context_id(),
-                    err
-                );
+                tracing::warn!("Failed to assign compaction task to compactor: {:#?}", err);
                 match err {
-                    Error::InvalidContext(_) => {
-                        self.compactor_manager
-                            .remove_compactor(compactor.context_id());
+                    Error::NoIdleCompactor => {
+                        let current_compactor_tasks =
+                            self.hummock_manager.list_assigned_tasks_number().await;
+                        tracing::warn!("The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
+                        return ScheduleStatus::NoAvailableCompactor(compact_task);
                     }
                     Error::CompactionTaskAlreadyAssigned(_, _) => {
                         panic!("Compaction scheduler is the only tokio task that can assign task.");
                     }
-                    _ => {}
+                    Error::InvalidContext(context_id) | Error::CompactorUnreachable(context_id) => {
+                        self.compactor_manager.remove_compactor(context_id);
+                        return ScheduleStatus::AssignFailure(compact_task);
+                    }
+                    _ => {
+                        return ScheduleStatus::AssignFailure(compact_task);
+                    }
                 }
-                return ScheduleStatus::AssignFailure(compact_task);
             }
-        }
+        };
 
-        // 4. Send the compaction task.
+        // 3. Send the compaction task.
         if let Err(e) = compactor
             .send_task(Task::CompactTask(compact_task.clone()))
             .await
@@ -277,7 +266,7 @@ where
             return ScheduleStatus::SendFailure(compact_task);
         }
 
-        // 5. Reschedule it with best effort, in case there are more tasks.
+        // 4. Reschedule it with best effort, in case there are more tasks.
         if let Err(e) = request_channel.try_send(compaction_group) {
             tracing::error!(
                 "Failed to reschedule compaction group {} after sending new task {}. {:#?}",
@@ -300,13 +289,13 @@ mod tests {
 
     use crate::hummock::compaction_scheduler::{CompactionRequestChannel, ScheduleStatus};
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
-    use crate::hummock::{CompactionScheduler, CompactorManager};
+    use crate::hummock::CompactionScheduler;
 
     #[tokio::test]
     async fn test_pick_and_assign() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
-        let compactor_manager = Arc::new(CompactorManager::new(1));
+        let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         let compaction_scheduler =
             CompactionScheduler::new(env, hummock_manager.clone(), compactor_manager.clone());
 
@@ -410,7 +399,7 @@ mod tests {
     async fn test_failpoints() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
-        let compactor_manager = Arc::new(CompactorManager::new(1));
+        let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         let compaction_scheduler =
             CompactionScheduler::new(env, hummock_manager.clone(), compactor_manager.clone());
 
