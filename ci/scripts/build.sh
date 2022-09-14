@@ -41,6 +41,9 @@ cargo build \
     -p risingwave_sqlsmith \
     --features static-link --profile "$profile"
 
+echo "--- Extract DocSlt end-to-end tests"
+cargo make docslt
+
 echo "--- Compress RisingWave debug info"
 objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave
 
