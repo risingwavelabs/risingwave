@@ -348,26 +348,21 @@ You can adjust the environment variable to enable some specific code to make all
 
 ### DocSlt tests
 
-As introduced in [#5117](https://github.com/risingwavelabs/risingwave/issues/5117), DocSlt tool allows you to write SQL examples in sqllogictest syntax in Rust doc comments. After adding or modifying any such SQL examples, you should run the following command to generate e2e tests from them.
+As introduced in [#5117](https://github.com/risingwavelabs/risingwave/issues/5117), DocSlt tool allows you to write SQL examples in sqllogictest syntax in Rust doc comments. After adding or modifying any such SQL examples, you should run the following commands to generate and run e2e tests for them.
 
 ```shell
-./risedev docslt # for all default packages
-# or
-./risedev docslt -p risingwave_expr # for only modified package
-```
+# generate e2e tests from doc comments for all default packages
+./risedev docslt
+# or, generate for only modified package
+./risedev docslt -p risingwave_expr
 
-Then commit the changes happened in `e2e_test/generated`.
-
-You can also run the generated e2e tests to ensure all the tests can pass with the following command.
-
-```shell
 # run all generated e2e tests
 ./risedev slt-generated -p 4566 -d dev
 # or, run only some of them
 ./risedev slt -p 4566 -d dev './e2e_test/generated/docslt/risingwave_expr/**/*.slt'
 ```
 
-All of these generated e2e tests will be run on CI as well.
+These will be run on CI as well.
 
 ## Miscellaneous checks
 
