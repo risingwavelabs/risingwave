@@ -1168,15 +1168,7 @@ impl ToStream for LogicalJoin {
                     .map(|i| i + left_len),
             )
             .unique();
-        dbg!(eq_predicate.right_eq_indexes());
-        dbg!(eq_predicate.clone());
-
         // XXX(st1page) over
-        dbg!(left_len);
-        dbg!(left.schema());
-        dbg!(right_len);
-        dbg!(right.schema());
-        dbg!(join.output_indices.clone());
 
         let mut new_output_indices = join.output_indices.clone();
         if !join.is_right_join() {
@@ -1186,7 +1178,6 @@ impl ToStream for LogicalJoin {
             new_output_indices.extend(right_to_add);
         }
 
-        dbg!(new_output_indices.clone());
         let join_with_pk = join.clone_with_output_indices(new_output_indices);
         // the added columns is at the end, so it will not change the exists column index
         Ok((join_with_pk.into(), out_col_change))
