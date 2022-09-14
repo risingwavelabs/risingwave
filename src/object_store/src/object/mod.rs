@@ -386,10 +386,10 @@ fn try_update_failure_metric<T>(
 ///   - `streaming_upload_write_bytes`: The number of bytes written for each call to `write_bytes`.
 ///   - `streaming_upload`: Same as `write_bytes`.
 /// - `operation_latency`:
-///   - `start_streaming_upload`: The time spent creating the uploader.
+///   - `streaming_upload_start`: The time spent creating the uploader.
 ///   - `streaming_upload_write_bytes`: The time spent on each call to `write_bytes`.
 ///   - `streaming_upload_finish`: The time spent calling `finish`.
-/// - `failure_count`: `start_streaming_upload`, `streaming_upload_write_bytes`,
+/// - `failure_count`: `streaming_upload_start`, `streaming_upload_write_bytes`,
 ///   `streaming_upload_finish`
 pub struct MonitoredStreamingUploader {
     inner: BoxedStreamingUploader,
@@ -518,7 +518,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        let operation_type = "start_streaming_upload";
+        let operation_type = "streaming_upload_start";
         let media_type = self.media_type();
         let _timer = self
             .object_store_metrics
