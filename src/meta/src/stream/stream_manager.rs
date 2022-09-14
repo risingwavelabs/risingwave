@@ -939,6 +939,7 @@ mod tests {
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
+
             // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
             // heartbeat thread here, so it doesn't matter.
             let compactor_manager = Arc::new(
