@@ -120,6 +120,35 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
+        // XXX(st1page): add join keys in the pk_indices a work around before we really have stream
+        // key.
+        pk_indices.and_then(|pk_indices| {
+            let left_len = left.schema().len();
+            let right_len = right.schema().len();
+            let eq_predicate = EqJoinPredicate::create(left_len, right_len, on.clone());
+
+            let l2i = Self::l2i_col_mapping_inner(left_len, right_len, join_type);
+            let r2i = Self::r2i_col_mapping_inner(left_len, right_len, join_type);
+            let out_col_num = Self::out_column_num(left_len, right_len, join_type);
+            let i2o = ColIndexMapping::with_remaining_columns(&output_indices, out_col_num);
+
+            for (lk, rk) in eq_predicate.eq_indexes() {
+                if let Some(lk) = l2i.try_map(lk) {
+                    let out_k = i2o.try_map(lk)?;
+                    if !pk_indices.contains(out_key) {
+                        pk_indices.push(out_key);
+                    }
+                }
+                if let Some(rk) = r2i.try_map(rk) {
+                    let out_k = i2o.try_map(rk)?;
+                    if !pk_indices.contains(out_key) {
+                        pk_indices.push(out_key);
+                    }
+                }
+            }
+            Some(pk_indices)
+        });
+
         let functional_dependency = Self::derive_fd(
             left.schema().len(),
             right.schema().len(),
