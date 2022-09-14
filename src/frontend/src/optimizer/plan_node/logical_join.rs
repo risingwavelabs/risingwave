@@ -148,7 +148,7 @@ impl LogicalJoin {
             }
             Some(pk_indices)
         });
-
+        // XXX(st1page) over
         let functional_dependency = Self::derive_fd(
             left.schema().len(),
             right.schema().len(),
@@ -158,13 +158,20 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
-        let pk_indices = match pk_indices {
-            Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
-                functional_dependency.minimize_key(&pk_indices)
-            }
-            _ => pk_indices.unwrap_or_default(),
-        };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        // XXX(st1page): add join keys in the pk_indices a work around before we really have stream
+        // key.
+        // let pk_indices = match pk_indices {
+        //     Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
+        //         functional_dependency.minimize_key(&pk_indices)
+        //     }
+        //     _ => pk_indices.unwrap_or_default(),
+        // };
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
         LogicalJoin {
             base,
             left,
@@ -1139,14 +1146,47 @@ impl ToStream for LogicalJoin {
             .filter(|i| r2i.try_map(*i) == None)
             .map(|i| i + left_len);
 
+        // XXX(st1page): add join keys in the pk_indices a work around before we really have stream
+        // key.
+        let right_len = right.schema().len();
+        let eq_predicate = EqJoinPredicate::create(left_len, right_len, join.on.clone());
+
+        let left_to_add = left_to_add
+            .chain(
+                eq_predicate
+                    .left_eq_indexes()
+                    .into_iter()
+                    .filter(|i| l2i.try_map(*i) == None),
+            )
+            .unique();
+        let right_to_add = right_to_add
+            .chain(
+                eq_predicate
+                    .right_eq_indexes()
+                    .into_iter()
+                    .filter(|i| r2i.try_map(*i) == None)
+                    .map(|i| i + left_len),
+            )
+            .unique();
+        dbg!(eq_predicate.right_eq_indexes());
+        dbg!(eq_predicate.clone());
+
+        // XXX(st1page) over
+        dbg!(left_len);
+        dbg!(left.schema());
+        dbg!(right_len);
+        dbg!(right.schema());
+        dbg!(join.output_indices.clone());
+
         let mut new_output_indices = join.output_indices.clone();
-        if !self.is_right_join() {
+        if !join.is_right_join() {
             new_output_indices.extend(left_to_add);
         }
-        if !self.is_left_join() {
+        if !join.is_left_join() {
             new_output_indices.extend(right_to_add);
         }
 
+        dbg!(new_output_indices.clone());
         let join_with_pk = join.clone_with_output_indices(new_output_indices);
         // the added columns is at the end, so it will not change the exists column index
         Ok((join_with_pk.into(), out_col_change))
