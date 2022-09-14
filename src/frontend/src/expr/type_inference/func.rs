@@ -236,7 +236,7 @@ if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
 
             let right_type = inputs[1].return_type();
             // TODO: remove the clone here
-            let res = least_restrictive(*left_ele_type_deref, right_type.clone()); // maybe I can align types directly here? 
+            let res = least_restrictive(*left_ele_type_deref, right_type.clone());
             let return_type = match res {
                 Ok(dt) => Some(dt.clone()), 
                 Err(err) => None, 
@@ -248,7 +248,7 @@ if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
         }
         ExprType::ArrayPrepend => {
             ensure_arity!("array_prepend", | inputs | == 2);
-            let right_type = inputs[1].return_type(); // I need the left element type 
+            let right_type = inputs[1].return_type();
             let right_ele_type_opt = match(&right_type) {
                 (
                     DataType::List {
@@ -265,9 +265,9 @@ if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
 
             let left_type = inputs[0].return_type();
             // TODO: remove the clone here
-            let res = least_restrictive(*right_ele_type_deref, left_type.clone()); // maybe I can align types directly here? 
+            let res = least_restrictive(*right_ele_type_deref, left_type.clone());
             let return_type = match res {
-                Ok(dt) => Some(dt.clone()), 
+                Ok(dt) => Some(dt.clone()), // Do I need clone here?
                 Err(err) => None, 
             }; 
             Ok(Some(return_type.ok_or_else(|| {
