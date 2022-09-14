@@ -380,7 +380,6 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
-      enable-committed-sst-sanity-check: true
     - use: compute-node
       port: 5687
       exporter-port: 1222
@@ -429,6 +428,7 @@ risedev:
     - use: frontend
     - use: compactor
     - use: redis
+
 
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"

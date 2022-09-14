@@ -106,7 +106,8 @@ impl ComputeNodeService {
 
         if provide_compute_node.len() > 1 && !is_shared_backend {
             // Using a non-shared backend with multiple compute nodes will be problematic for state
-            // sharing like scaling. For normal end-to-end tests, this is acceptable.
+            // sharing like scaling. For distributed end-to-end tests with in-memory state store,
+            // this is acceptable.
         }
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();

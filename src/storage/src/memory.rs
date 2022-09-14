@@ -38,7 +38,10 @@ mod batched_iter {
 
     /// A utility struct for iterating over a range of keys in a locked `BTreeMap`, which will batch
     /// some records to make a trade-off between the copying overhead and the times of acquiring
-    /// the lock. Users should handle MVCC by themselves.
+    /// the lock.
+    ///
+    /// Therefore, it's not guaranteed that we're iterating over a consistent snapshot of the map.
+    /// Users should handle MVCC by themselves.
     pub struct Iter<K, V> {
         inner: Arc<RwLock<BTreeMap<K, V>>>,
         range: (Bound<K>, Bound<K>),
