@@ -15,18 +15,18 @@
 use std::cmp::min;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
-use std::ops::{BitAnd, Index, IndexMut, Not};
+
 
 use anyhow::{anyhow, Context};
-use chrono::format::Item;
-use fail::remove;
+
+
 use futures::future::BoxFuture;
-use futures::Stream;
-use itertools::{equal, repeat_n, Itertools};
+
+use itertools::{Itertools};
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT, VNODE_BITS};
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
@@ -41,6 +41,7 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use uuid::Uuid;
+use risingwave_common::util::compress::{compress_data, decompress_data};
 
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
@@ -102,7 +103,7 @@ pub(crate) fn rebalance_actor_vnode(
     actors: &[StreamActor],
     actors_to_remove: &BTreeMap<ActorId, ParallelUnitId>,
     actors_to_create: &BTreeMap<ActorId, ParallelUnitId>,
-) {
+) -> HashMap<ActorId, Bitmap> {
     assert!(actors.len() > actors_to_remove.len());
     let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
     assert_ne!(target_actor_count, 0);
@@ -153,10 +154,10 @@ pub(crate) fn rebalance_actor_vnode(
         }
     }
 
-    for (actor_id, _) in actors_to_create {
+    for actor_id in actors_to_create.keys() {
         let mut balance = Balance {
             actor_id: *actor_id as ActorId,
-            balance: expected * -1,
+            balance: -expected,
             builder: BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT),
         };
 
@@ -218,10 +219,8 @@ pub(crate) fn rebalance_actor_vnode(
 
         if src.balance != 0 {
             v.push_front(src);
-        } else {
-            if !actors_to_remove.contains_key(&src.actor_id) {
-                result.insert(src.actor_id, src.builder.finish());
-            }
+        } else if !actors_to_remove.contains_key(&src.actor_id) {
+            result.insert(src.actor_id, src.builder.finish());
         }
 
         if dst.balance != 0 {
@@ -231,6 +230,7 @@ pub(crate) fn rebalance_actor_vnode(
         }
     }
 
+    result
     // assert_eq!(result.len(), target_actor_count);
 }
 
@@ -494,7 +494,7 @@ impl<S> GlobalStreamManager<S>
 
             assert!(!fragment.actors.is_empty());
 
-            let mut sample_actors: Vec<_> = if actors_to_create.len() == actors_to_remove.len() {
+            let sample_actors: Vec<_> = if actors_to_create.len() == actors_to_remove.len() {
                 actors_to_remove
                     .keys()
                     .map(|actor_id| ctx.actor_map.get(actor_id).unwrap())
@@ -545,6 +545,7 @@ impl<S> GlobalStreamManager<S>
             }
         }
 
+        let mut updated_bitmap = HashMap::new();
         for fragment_id in reschedule.keys() {
             let actors_to_create = fragment_actors_to_create
                 .get(fragment_id)
@@ -557,12 +558,17 @@ impl<S> GlobalStreamManager<S>
 
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
-            rebalance_actor_vnode(&fragment.actors, &actors_to_remove, &actors_to_create);
+            let actor_vnode = rebalance_actor_vnode(&fragment.actors, &actors_to_remove, &actors_to_create);
+
+
+            for (actor_id, actor) in &mut new_created_actors {
+                if let Some(bitmap) = actor_vnode.get(actor_id) {
+                    actor.vnode_bitmap = Some(bitmap.to_protobuf())
+                }
+            }
+
+            updated_bitmap.extend(actor_vnode);
         }
-
-        todo!();
-
-        // todo: update actor vnode mapping when scale in/out
 
         // After modification, for newly created `Actor` s, both upstream and downstream actor ids
         // have been modified
@@ -745,14 +751,6 @@ impl<S> GlobalStreamManager<S>
             },
         ) in reschedule
         {
-            assert_eq!(added_parallel_units.len(), removed_parallel_units.len());
-
-            let replace_parallel_unit_map: BTreeMap<_, _> = removed_parallel_units
-                .clone()
-                .into_iter()
-                .zip_eq(added_parallel_units.clone())
-                .collect();
-
             let actors_to_create = fragment_actors_to_create
                 .get(&fragment_id)
                 .cloned()
@@ -766,10 +764,12 @@ impl<S> GlobalStreamManager<S>
                 .into_keys()
                 .collect();
 
+            let actors_after_reschedule = fragment_actors_after_reschedule
+                .get(&fragment_id)
+                .unwrap();
+
             let parallel_unit_to_actor_after_reschedule: BTreeMap<_, _> =
-                fragment_actors_after_reschedule
-                    .get(&fragment_id)
-                    .unwrap()
+                actors_after_reschedule
                     .iter()
                     .map(|(actor_id, parallel_unit_id)| {
                         (*parallel_unit_id as ParallelUnitId, *actor_id as ActorId)
@@ -799,23 +799,50 @@ impl<S> GlobalStreamManager<S>
                             ..
                         } = downstream_vnode_mapping;
 
-                        let data = data
-                            .iter()
-                            .map(|parallel_unit_id| {
-                                if let Some(new_parallel_unit_id) =
-                                replace_parallel_unit_map.get(parallel_unit_id)
-                                {
-                                    parallel_unit_to_actor_after_reschedule[new_parallel_unit_id]
-                                } else {
-                                    parallel_unit_to_actor_after_reschedule[parallel_unit_id]
-                                }
-                            })
-                            .collect_vec();
+                        if added_parallel_units.len() == removed_parallel_units.len() {
+                            let replace_parallel_unit_map: BTreeMap<_, _> = removed_parallel_units
+                                .clone()
+                                .into_iter()
+                                .zip_eq(added_parallel_units.clone())
+                                .collect();
 
-                        Some(ActorMapping {
-                            original_indices: original_indices.clone(),
-                            data,
-                        })
+                            let data = data
+                                .iter()
+                                .map(|parallel_unit_id| {
+                                    if let Some(new_parallel_unit_id) =
+                                    replace_parallel_unit_map.get(parallel_unit_id)
+                                    {
+                                        parallel_unit_to_actor_after_reschedule[new_parallel_unit_id]
+                                    } else {
+                                        parallel_unit_to_actor_after_reschedule[parallel_unit_id]
+                                    }
+                                })
+                                .collect_vec();
+
+                            Some(ActorMapping {
+                                original_indices: original_indices.clone(),
+                                data,
+                            })
+                        } else {
+                            let mut vnode_mapping: Vec<ParallelUnitId> = decompress_data(&original_indices, &data);
+
+                            for (actor_id, parallel_unit_id) in actors_after_reschedule {
+                                if let Some(bitmap) = updated_bitmap.get(actor_id) {
+                                    let mut idx = 0;
+                                    while let Some(next) = bitmap.next_set_bit(idx) {
+                                        vnode_mapping[next] = *parallel_unit_id;
+                                        idx = next;
+                                    }
+                                }
+                            }
+
+                            let (original_indices, data) = compress_data(&vnode_mapping);
+
+                            Some(ActorMapping {
+                                original_indices,
+                                data,
+                            })
+                        }
                     }
                 }
                 FragmentDistributionType::Single => None,
@@ -842,6 +869,11 @@ impl<S> GlobalStreamManager<S>
                 None
             };
 
+            let vnode_bitmap_updates = fragment.actors.iter().flat_map(|actor| {
+                updated_bitmap.remove(&actor.actor_id).map(|bitmap| (actor.actor_id, bitmap))
+            }).collect();
+
+
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();
             reschedule_fragment.insert(
@@ -851,13 +883,15 @@ impl<S> GlobalStreamManager<S>
                     removed_actors: actors_to_remove,
                     added_parallel_units,
                     removed_parallel_units,
-                    vnode_bitmap_updates: Default::default(),
+                    vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
                     downstream_fragment_id,
                 },
             );
         }
+
+        //assert!(updated_bitmap.is_empty());
 
         let mut fragment_created_actors = HashMap::new();
         for (fragment_id, actors_to_create) in &fragment_actors_to_create {
