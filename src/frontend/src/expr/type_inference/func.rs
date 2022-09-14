@@ -185,13 +185,14 @@ fn infer_type_for_special(
                 ) => {
                     // common_type = align_types(array(left_type, right_type))
                     
+                    // How do I write this in a rust way? Look up how to do proper rust-like nested error handling
                     let res = align_types(inputs.iter_mut()); 
                     if res.is_ok() {
                         Some(res.unwrap())
                     }else {
                         None
                     }
-
+// TODO clean this up 
 /*
 if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
     Some(left_type.clone()) // success
