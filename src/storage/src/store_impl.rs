@@ -53,6 +53,12 @@ impl StateStoreImpl {
     pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
         Self::MemoryStateStore(MemoryStateStore::shared().monitored(state_store_metrics))
     }
+
+    pub fn for_test() -> Self {
+        StateStoreImpl::MemoryStateStore(
+            MemoryStateStore::new().monitored(Arc::new(StateStoreMetrics::unused())),
+        )
+    }
 }
 
 impl Debug for StateStoreImpl {

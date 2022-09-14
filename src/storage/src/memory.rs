@@ -239,7 +239,6 @@ impl StateStore for MemoryStateStore {
         async move {
             // memory backend doesn't support push to S3, so this is a no-op
             Ok(SyncResult {
-                sync_succeed: true,
                 ..Default::default()
             })
         }

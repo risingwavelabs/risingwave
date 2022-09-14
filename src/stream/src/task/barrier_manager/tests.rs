@@ -21,7 +21,7 @@ use super::*;
 
 #[tokio::test]
 async fn test_managed_barrier_collection() -> Result<()> {
-    let mut manager = LocalBarrierManager::new();
+    let mut manager = LocalBarrierManager::new(StateStoreImpl::for_test());
     assert!(!manager.is_local_mode());
 
     let register_sender = |actor_id: u32| {
@@ -68,7 +68,7 @@ async fn test_managed_barrier_collection() -> Result<()> {
 
 #[tokio::test]
 async fn test_managed_barrier_collection_before_send_request() -> Result<()> {
-    let mut manager = LocalBarrierManager::new();
+    let mut manager = LocalBarrierManager::new(StateStoreImpl::for_test());
     assert!(!manager.is_local_mode());
 
     let register_sender = |actor_id: u32| {

@@ -148,11 +148,10 @@ async fn test_update_pinned_version() {
         ]
     );
 
-    let result = local_version_manager
+    let _ = local_version_manager
         .sync_shared_buffer(epochs[0])
         .await
         .unwrap();
-    assert!(result.sync_succeed);
 
     // Update version for epochs[0]
     let version = HummockVersion {
@@ -170,11 +169,10 @@ async fn test_update_pinned_version() {
         )
     );
 
-    let result = local_version_manager
+    let _ = local_version_manager
         .sync_shared_buffer(epochs[1])
         .await
         .unwrap();
-    assert!(result.sync_succeed);
 
     // Update version for epochs[1]
     let version = HummockVersion {
@@ -187,11 +185,10 @@ async fn test_update_pinned_version() {
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
 
-    let result = local_version_manager
+    let _ = local_version_manager
         .sync_shared_buffer(epochs[2])
         .await
         .unwrap();
-    assert!(result.sync_succeed);
     // Update version for epochs[2]
     let version = HummockVersion {
         id: initial_version_id + 3,
@@ -258,10 +255,7 @@ async fn test_update_uncommitted_ssts() {
     {
         let payload = {
             let mut local_version_guard = local_version_manager.local_version().write();
-            let prev_max_sync_epoch = local_version_guard
-                .advance_max_sync_epoch(epochs[0])
-                .unwrap();
-            assert_eq!(max_commit_epoch, prev_max_sync_epoch);
+            local_version_guard.advance_max_sync_epoch(epochs[0]);
             let (payload, task_size) = local_version_guard.start_syncing(epochs[0]);
             {
                 assert_eq!(1, payload.len());
@@ -300,10 +294,7 @@ async fn test_update_uncommitted_ssts() {
     {
         let payload = {
             let mut local_version_guard = local_version_manager.local_version().write();
-            let prev_max_sync_epoch = local_version_guard
-                .advance_max_sync_epoch(epochs[1])
-                .unwrap();
-            assert_eq!(epochs[0], prev_max_sync_epoch);
+            local_version_guard.advance_max_sync_epoch(epochs[1]);
             let (payload, task_size) = local_version_guard.start_syncing(epochs[1]);
             {
                 assert_eq!(1, payload.len());
@@ -472,12 +463,10 @@ async fn test_sst_gc_watermark() {
     );
 
     for epoch in epochs.iter() {
-        local_version_manager.seal_epoch(*epoch, true);
-        let result = local_version_manager
+        let _ = local_version_manager
             .sync_shared_buffer(*epoch)
             .await
             .unwrap();
-        assert!(result.sync_succeed);
 
         // Global watermark determined by epoch 0.
         assert_eq!(

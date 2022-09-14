@@ -1096,11 +1096,13 @@ async fn test_multiple_epoch_sync() {
         }
     };
     test_get().await;
-    let sync_result3 = hummock_storage.sync(epoch3).await.unwrap();
     let sync_result2 = hummock_storage.sync(epoch2).await.unwrap();
-    assert!(!sync_result2.sync_succeed);
-    assert!(sync_result3.sync_succeed);
+    let sync_result3 = hummock_storage.sync(epoch3).await.unwrap();
     test_get().await;
+    meta_client
+        .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
+        .await
+        .unwrap();
     meta_client
         .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
         .await

@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter::once;
 
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
+use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 
 use super::progress::ChainState;
@@ -50,14 +51,17 @@ pub(super) struct ManagedBarrierState {
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, ChainState>>,
+
+    state_store: StateStoreImpl,
 }
 
 impl ManagedBarrierState {
     /// Create a barrier manager state. This will be called only once.
-    pub(super) fn new() -> Self {
+    pub(super) fn new(state_store: StateStoreImpl) -> Self {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
             create_mview_progress: Default::default(),
+            state_store,
         }
     }
 
@@ -97,6 +101,12 @@ impl ManagedBarrierState {
                         },
                     })
                     .collect();
+
+                dispatch_state_store!(&self.state_store, state_store, {
+                    // TODO: set `is_checkpoint` according to whether the barrier is a checkpoint
+                    // barrier
+                    state_store.seal_epoch(curr_epoch, true);
+                });
 
                 match inner {
                     ManagedBarrierStateInner::Issued {
@@ -202,6 +212,7 @@ impl ManagedBarrierState {
 mod tests {
     use std::collections::HashSet;
 
+    use risingwave_storage::StateStoreImpl;
     use tokio::sync::oneshot;
 
     use crate::executor::Barrier;
@@ -209,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_state_add_actor() {
-        let mut managed_barrier_state = ManagedBarrierState::new();
+        let mut managed_barrier_state = ManagedBarrierState::new(StateStoreImpl::for_test());
         let barrier1 = Barrier::new_test_barrier(1);
         let barrier2 = Barrier::new_test_barrier(2);
         let barrier3 = Barrier::new_test_barrier(3);
@@ -250,7 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_state_stop_actor() {
-        let mut managed_barrier_state = ManagedBarrierState::new();
+        let mut managed_barrier_state = ManagedBarrierState::new(StateStoreImpl::for_test());
         let barrier1 = Barrier::new_test_barrier(1);
         let barrier2 = Barrier::new_test_barrier(2);
         let barrier3 = Barrier::new_test_barrier(3);
@@ -294,7 +305,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_state_issued_after_collect() {
-        let mut managed_barrier_state = ManagedBarrierState::new();
+        let mut managed_barrier_state = ManagedBarrierState::new(StateStoreImpl::for_test());
         let barrier1 = Barrier::new_test_barrier(1);
         let barrier2 = Barrier::new_test_barrier(2);
         let barrier3 = Barrier::new_test_barrier(3);
