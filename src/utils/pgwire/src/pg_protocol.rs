@@ -524,6 +524,8 @@ where
                     .write(&BeMessage::RowDescription(&statement.row_desc()))
                     .await?;
             } else {
+                // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
+                // return NoData message if the statement is not a query.
                 self.stream.write(&BeMessage::NoData).await?;
             }
         } else if msg.kind == b'P' {
@@ -545,6 +547,8 @@ where
                     .write(&BeMessage::RowDescription(&portal.row_desc()))
                     .await?;
             } else {
+                // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
+                // return NoData message if the statement is not a query.
                 self.stream.write(&BeMessage::NoData).await?;
             }
         }

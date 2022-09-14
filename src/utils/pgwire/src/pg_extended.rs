@@ -189,6 +189,8 @@ impl PgStatement {
         })
     }
 
+    /// We define the statement start with ("select","values","show","with","describe") is query
+    /// statement. Because these statement will return a result set.
     pub fn is_query(&self) -> bool {
         self.is_query
     }
@@ -267,6 +269,8 @@ impl PgPortal {
         ))
     }
 
+    /// We define the statement start with ("select","values","show","with","describe") is query
+    /// statement. Because these statement will return a result set.
     pub fn is_query(&self) -> bool {
         self.is_query
     }
