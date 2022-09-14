@@ -139,7 +139,7 @@ pub trait HashKey:
         self.deserialize_to_builders(&mut builders)?;
         builders
             .into_iter()
-            .map(|builder| Ok::<_, ArrayError>(builder.finish()?.value_at(0).to_owned_datum()))
+            .map(|builder| Ok::<_, ArrayError>(builder.finish().value_at(0).to_owned_datum()))
             .try_collect()
             .map(Row)
     }
@@ -793,7 +793,7 @@ mod tests {
 
         let result_arrays = array_builders
             .into_iter()
-            .map(|array_builder| array_builder.finish().unwrap())
+            .map(|array_builder| array_builder.finish())
             .collect::<Vec<ArrayImpl>>();
 
         for (ret_idx, col_idx) in column_indexes.iter().enumerate() {
@@ -894,7 +894,7 @@ mod tests {
         keys.into_iter()
             .for_each(|k| k.deserialize_to_builders(&mut array_builders[..]).unwrap());
 
-        let array = array_builders.pop().unwrap().finish().unwrap();
+        let array = array_builders.pop().unwrap().finish();
         let i32_vec = array
             .iter()
             .map(|opt| opt.map(|s| s.into_int32()))

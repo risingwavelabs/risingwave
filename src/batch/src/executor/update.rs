@@ -122,10 +122,7 @@ impl UpdateExecutor {
                     builder.append_datum_ref(datum_ref)?;
                 }
             }
-            let columns = builders
-                .into_iter()
-                .map(|b| b.finish().map(|a| a.into()))
-                .try_collect()?;
+            let columns = builders.into_iter().map(|b| b.finish().into()).collect();
 
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -154,7 +151,7 @@ impl UpdateExecutor {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_updated as i64))?;
 
-            let array = array_builder.finish()?;
+            let array = array_builder.finish();
             let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
             yield ret_chunk

@@ -47,6 +47,14 @@ pub trait Input: MessageStream {
 
 pub type BoxedInput = Pin<Box<dyn Input>>;
 
+impl std::fmt::Debug for dyn Input {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Input")
+            .field("actor_id", &self.actor_id())
+            .finish_non_exhaustive()
+    }
+}
+
 /// `LocalInput` receives data from a local channel.
 #[pin_project]
 pub struct LocalInput {

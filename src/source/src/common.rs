@@ -39,11 +39,10 @@ pub(crate) trait SourceChunkBuilder {
                 .try_for_each(|(datum, builder)| builder.append_datum(datum))?
         }
 
-        builders
+        Ok(builders
             .into_iter()
-            .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-            .try_collect()
-            .map_err(Into::into)
+            .map(|builder| Column::new(Arc::new(builder.finish())))
+            .collect())
     }
 
     fn build_datachunk(column_desc: &[SourceColumnDesc], rows: &[Vec<Datum>]) -> Result<DataChunk> {
