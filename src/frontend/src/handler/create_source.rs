@@ -27,7 +27,7 @@ use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatT
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_source::{AvroParser, ProtobufParser};
 use risingwave_sqlparser::ast::{
-    AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema, TableConstraint,
+    AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema,
 };
 
 use super::create_table::{
