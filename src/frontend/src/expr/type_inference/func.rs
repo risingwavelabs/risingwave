@@ -26,6 +26,20 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 /// is not supported on backend.
 pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<DataType> {
     if let Some(res) = infer_type_for_special(func_type, inputs).transpose() {
+        // cast to res here? 
+        let res_type = res.clone().unwrap();
+
+        let inputs_owned = std::mem::take(inputs);
+        *inputs = inputs_owned
+            .into_iter()
+            .map(|expr| {
+                if expr.return_type() != res_type.clone() { // && expr.return_type().is_numeric() { // how do I handle the case if the array needs to be mapped?
+                    return expr.cast_implicit(res_type.clone());
+                }
+                Ok(expr)
+            })
+            .try_collect()?;
+
         return res;
     }
 
@@ -238,7 +252,7 @@ if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
             // TODO: remove the clone here
             let res = least_restrictive(*left_ele_type_deref, right_type.clone());
             let return_type = match res {
-                Ok(dt) => Some(dt.clone()), 
+                Ok(dt) => Some(dt.clone()),
                 Err(err) => None, 
             }; 
             
