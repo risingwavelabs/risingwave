@@ -521,6 +521,7 @@ where
                 tracker.update(progress);
             }
             state.in_flight_prev_epoch = new_epoch;
+            // We can let process crash down because it just started.
             state
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
@@ -585,10 +586,18 @@ where
                 new_epoch,
                 prev_epoch
             );
-            state
+            // Note that `update_inflight_prev_epoch` only updates the inflight prev epoch to meta
+            // store and not affect the main barrier command workflow.
+            let _ = state
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
-                .unwrap();
+                .inspect_err(|err| {
+                    tracing::warn!(
+                        "Failed to update inflight prev epoch to meta store: {}, err: {:?}",
+                        state.in_flight_prev_epoch,
+                        err
+                    )
+                });
 
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
@@ -796,10 +805,16 @@ where
                 tracker.update(progress);
             }
             state.in_flight_prev_epoch = new_epoch;
-            state
+            let _ = state
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
-                .unwrap();
+                .inspect_err(|err| {
+                    tracing::warn!(
+                        "Failed to update inflight prev epoch to meta store: {}, err: {:?}",
+                        state.in_flight_prev_epoch,
+                        err
+                    )
+                });
         } else {
             panic!("failed to execute barrier: {:?}", err);
         }

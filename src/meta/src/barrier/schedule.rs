@@ -213,7 +213,7 @@ impl ScheduledBarriers {
         rx.changed().await.unwrap();
     }
 
-    /// Clear all queueed scheduled barriers, and notify their subscribers with failed as aborted.
+    /// Clear all queued scheduled barriers, and notify their subscribers with failed as aborted.
     pub(super) async fn abort(&self) {
         let mut queue = self.inner.queue.write().await;
         while let Some((_, notifiers)) = queue.pop_front() {
