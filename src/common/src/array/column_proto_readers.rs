@@ -59,7 +59,7 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
             builder.append(None)?;
         }
     }
-    let arr = builder.finish()?;
+    let arr = builder.finish();
     Ok(arr.into())
 }
 
@@ -136,7 +136,7 @@ macro_rules! read_one_value_array {
                         builder.append(None)?;
                     }
                 }
-                let arr = builder.finish()?;
+                let arr = builder.finish();
                 Ok(arr.into())
             }
             )*
@@ -199,6 +199,6 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
             builder.append(None)?;
         }
     }
-    let arr = builder.finish()?;
+    let arr = builder.finish();
     Ok(arr.into())
 }

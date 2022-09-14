@@ -37,6 +37,7 @@ pub use compaction_scheduler::CompactionScheduler;
 pub use compactor_manager::*;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
+use sync_point::sync_point;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -66,12 +67,13 @@ where
             vacuum_manager.clone(),
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
-        local_notification_receiver(hummock_manager, compactor_manager, notification_manager).await,
+        start_local_notification_receiver(hummock_manager, compactor_manager, notification_manager)
+            .await,
     ]
 }
 
 /// Starts a task to handle meta local notification.
-pub async fn local_notification_receiver<S>(
+pub async fn start_local_notification_receiver<S>(
     hummock_manager: Arc<HummockManager<S>>,
     compactor_manager: Arc<CompactorManager>,
     notification_manager: NotificationManagerRef,
@@ -107,6 +109,7 @@ where
                                 .await
                                 .expect("retry until success");
                             tracing::info!("Released hummock context {}", worker_node.id);
+                            sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
                         },
                         Some(LocalNotification::CompactionTaskNeedCancel(mut compact_task)) => {
                             compact_task.set_task_status(risingwave_pb::hummock::compact_task::TaskStatus::Canceled);
@@ -122,6 +125,7 @@ where
                                 .await
                                 .expect("retry until success");
                             tracing::info!("Cancelled compaction task {}", compact_task.task_id);
+                            sync_point!("AFTER_CANCEL_COMPACTION_TASK_ASYNC");
                         }
                     }
                 }
@@ -180,7 +184,7 @@ where
             if let Err(err) = vacuum.vacuum_sst_data().await {
                 tracing::warn!("Vacuum SST error {:#?}", err);
             }
-            sync_point::on("AFTER_SCHEDULE_VACUUM").await;
+            sync_point!("AFTER_SCHEDULE_VACUUM");
         }
     });
     (join_handle, shutdown_tx)

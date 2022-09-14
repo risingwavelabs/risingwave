@@ -223,7 +223,7 @@ pub async fn setup_compute_env_with_config(
 ) {
     let env = MetaSrvEnv::for_test().await;
     let cluster_manager = Arc::new(
-        ClusterManager::new_for_test(env.clone(), Duration::from_secs(1))
+        ClusterManager::new(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );
@@ -300,4 +300,29 @@ where
     hummock_manager_ref
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
+}
+
+pub async fn add_ssts<S>(
+    epoch: HummockEpoch,
+    hummock_manager: &HummockManager<S>,
+    context_id: HummockContextId,
+) -> Vec<SstableInfo>
+where
+    S: MetaStore,
+{
+    let table_ids = get_sst_ids(hummock_manager, 3).await;
+    let test_tables = generate_test_tables(epoch, table_ids);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager(),
+        &test_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
+    let ssts = to_local_sstable_info(&test_tables);
+    let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
+    hummock_manager
+        .commit_epoch(epoch, ssts, sst_to_worker)
+        .await
+        .unwrap();
+    test_tables
 }

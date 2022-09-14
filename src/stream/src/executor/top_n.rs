@@ -359,12 +359,12 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
                     self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone())?;
+                        .insert(ordered_pk_row.clone(), row.clone());
                 }
 
                 Op::Delete | Op::UpdateDelete => {
                     // First remove the row from state store
-                    self.managed_state.delete(&ordered_pk_row, row.clone())?;
+                    self.managed_state.delete(&ordered_pk_row, row.clone());
                 }
             }
             self.cache
@@ -380,7 +380,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                 )
                 .await?
         }
-        // compare the those two ranges and emit the differantial result
+
         generate_output(res_rows, res_ops, &self.schema)
     }
 
