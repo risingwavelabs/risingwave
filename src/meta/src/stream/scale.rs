@@ -828,13 +828,16 @@ impl<S> GlobalStreamManager<S>
 
                             for (actor_id, parallel_unit_id) in actors_after_reschedule {
                                 if let Some(bitmap) = updated_bitmap.get(actor_id) {
-                                    let mut idx = 0;
-                                    while let Some(next) = bitmap.next_set_bit(idx) {
-                                        vnode_mapping[next] = *parallel_unit_id;
-                                        idx = next;
+                                    println!("bitmap found for actor {}, bits {}", actor_id, bitmap.num_high_bits());
+                                    for idx in 0..VIRTUAL_NODE_COUNT {
+                                        if bitmap.is_set(idx).unwrap() {
+                                            vnode_mapping[idx] = *parallel_unit_id;
+                                        }
                                     }
                                 }
                             }
+
+                            println!("vnode_mapping {:?}", vnode_mapping);
 
                             let (original_indices, data) = compress_data(&vnode_mapping);
 
@@ -876,18 +879,22 @@ impl<S> GlobalStreamManager<S>
 
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();
+            let reschedule1 = Reschedule {
+                added_actors: actors_to_create,
+                removed_actors: actors_to_remove,
+                added_parallel_units,
+                removed_parallel_units,
+                vnode_bitmap_updates,
+                upstream_fragment_dispatcher_ids,
+                upstream_dispatcher_mapping,
+                downstream_fragment_id,
+            };
+
+            println!("{:#?}", reschedule1);
+
             reschedule_fragment.insert(
                 fragment_id,
-                Reschedule {
-                    added_actors: actors_to_create,
-                    removed_actors: actors_to_remove,
-                    added_parallel_units,
-                    removed_parallel_units,
-                    vnode_bitmap_updates,
-                    upstream_fragment_dispatcher_ids,
-                    upstream_dispatcher_mapping,
-                    downstream_fragment_id,
-                },
+                reschedule1,
             );
         }
 
@@ -935,6 +942,8 @@ impl<S> GlobalStreamManager<S>
 
         tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
 
+
+        println!("before send");
         self.barrier_scheduler
             .run_multiple_commands(vec![
                 Command::Plain(Some(Mutation::Pause(PauseMutation {}))),
@@ -942,6 +951,8 @@ impl<S> GlobalStreamManager<S>
                 Command::Plain(Some(Mutation::Resume(ResumeMutation {}))),
             ])
             .await?;
+
+        println!("after send");
         Ok(())
     }
 
