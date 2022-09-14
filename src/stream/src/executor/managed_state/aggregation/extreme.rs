@@ -207,7 +207,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                     {
                         self.cache.insert(cache_key, cache_data);
                     }
-                    state_table.insert(state_row)?;
+                    state_table.insert(state_row);
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -218,7 +218,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                             self.cache_synced = false;
                         }
                     }
-                    state_table.delete(state_row)?;
+                    state_table.delete(state_row);
                     self.total_count -= 1;
                 }
             }

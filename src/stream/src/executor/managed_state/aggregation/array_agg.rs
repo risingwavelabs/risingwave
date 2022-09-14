@@ -144,13 +144,13 @@ impl<S: StateStore> ManagedArrayAggState<S> {
                     if self.cache_synced {
                         self.cache.insert(cache_key, cache_data);
                     }
-                    state_table.insert(state_row)?;
+                    state_table.insert(state_row);
                 }
                 Delete | UpdateDelete => {
                     if self.cache_synced {
                         self.cache.remove(cache_key);
                     }
-                    state_table.delete(state_row)?;
+                    state_table.delete(state_row);
                 }
             }
         }
