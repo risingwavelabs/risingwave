@@ -157,9 +157,7 @@ mod tests {
 
         // Use builder to obtain a single (List) column DataChunk
         let chunk = DataChunk::new(
-            vec![Column::new(Arc::new(ArrayImpl::from(
-                builder.finish().unwrap(),
-            )))],
+            vec![Column::new(Arc::new(ArrayImpl::from(builder.finish())))],
             4,
         );
 

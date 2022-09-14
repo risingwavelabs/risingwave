@@ -18,7 +18,6 @@ use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use crate::catalog::Field;
 use crate::error::ErrorCode;
 use crate::types::DataType;
-use crate::util::sort_util::OrderType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID,
 /// column ID is not globally unique.
@@ -66,13 +65,6 @@ pub struct ColumnDesc {
     pub name: String, // for debugging
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
-}
-
-// Deprecated. To be removed.
-#[derive(Clone, Debug, PartialEq)]
-pub struct OrderedColumnDesc {
-    pub column_desc: ColumnDesc,
-    pub order: OrderType,
 }
 
 impl ColumnDesc {
