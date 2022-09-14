@@ -13,4 +13,4 @@
 // limitations under the License.
 
 #[cfg(all(test, feature = "sync_point"))]
-mod sync_point_tests;
+mod tests;
