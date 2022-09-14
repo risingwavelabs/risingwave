@@ -1,5 +1,11 @@
 disallowed-methods = [
     { path = "std::iter::Iterator::zip", reason = "Please use Itertools::zip_eq instead." },
     { path = "risingwave_expr::expr::Expression::eval", reason = "Please use InfallibleExpression::eval_infallible instead." },
-    { path = "risingwave_expr::expr::Expression::eval_row", reason = "Please use InfallibleExpression::eval_row_infallible instead." }
+    { path = "risingwave_expr::expr::Expression::eval_row", reason = "Please use InfallibleExpression::eval_row_infallible instead." },
+]
+
+disallowed-types = [
+    { path = "risingwave_common::error::ErrorCode", reason = "Please use per-crate error type instead." },
+    { path = "risingwave_common::error::RwError", reason = "Please use per-crate error type instead." },
+    { path = "risingwave_common::error::Result", reason = "Please use per-crate error type instead." },
 ]
