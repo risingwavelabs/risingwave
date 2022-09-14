@@ -256,7 +256,7 @@ where
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
             let sync_result = self
                 .inner
-                .sync(epoch)
+                .await_sync_epoch(epoch)
                 .stack_trace("store_await_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
