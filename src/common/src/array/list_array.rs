@@ -101,14 +101,13 @@ impl ArrayBuilder for ListArrayBuilder {
         self.len += 1;
     }
 
-    fn append_array(&mut self, other: &ListArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &ListArray) {
         self.bitmap.append_bitmap(&other.bitmap);
         let last = *self.offsets.last().unwrap();
         self.offsets
             .append(&mut other.offsets[1..].iter().map(|o| *o + last).collect());
-        self.value.append_array(&other.value)?;
+        self.value.append_array(&other.value).unwrap();
         self.len += other.len();
-        Ok(())
     }
 
     fn finish(self) -> ListArray {
@@ -642,8 +641,8 @@ mod tests {
                 datatype: Box::new(DataType::Int32),
             },
         );
-        builder.append_array(&part1).unwrap();
-        builder.append_array(&part2).unwrap();
+        builder.append_array(&part1);
+        builder.append_array(&part2);
 
         assert_eq!(arr.values_vec(), builder.finish().values_vec());
     }

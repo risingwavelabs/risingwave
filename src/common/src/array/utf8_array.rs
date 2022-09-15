@@ -192,7 +192,7 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         }
     }
 
-    fn append_array(&mut self, other: &Utf8Array) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &Utf8Array) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -201,7 +201,6 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         for other_offset in &other.offset[1..] {
             self.offset.push(*other_offset + start);
         }
-        Ok(())
     }
 
     fn finish(self) -> Utf8Array {

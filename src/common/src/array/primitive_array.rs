@@ -261,12 +261,11 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         }
     }
 
-    fn append_array(&mut self, other: &PrimitiveArray<T>) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &PrimitiveArray<T>) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
         self.data.extend_from_slice(&other.data);
-        Ok(())
     }
 
     fn finish(self) -> PrimitiveArray<T> {

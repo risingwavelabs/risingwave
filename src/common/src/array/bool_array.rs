@@ -146,7 +146,7 @@ impl ArrayBuilder for BoolArrayBuilder {
         }
     }
 
-    fn append_array(&mut self, other: &BoolArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &BoolArray) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -154,8 +154,6 @@ impl ArrayBuilder for BoolArrayBuilder {
         for bit in other.data.iter() {
             self.data.append(bit);
         }
-
-        Ok(())
     }
 
     fn finish(self) -> BoolArray {

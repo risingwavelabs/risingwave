@@ -100,14 +100,13 @@ impl ArrayBuilder for StructArrayBuilder {
         self.len += 1;
     }
 
-    fn append_array(&mut self, other: &StructArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &StructArray) {
         self.bitmap.append_bitmap(&other.bitmap);
         self.children_array
             .iter_mut()
             .enumerate()
-            .try_for_each(|(i, a)| a.append_array(&other.children[i]))?;
+            .for_each(|(i, a)| a.append_array(&other.children[i]).unwrap());
         self.len += other.len();
-        Ok(())
     }
 
     fn finish(self) -> StructArray {

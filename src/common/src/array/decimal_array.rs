@@ -163,12 +163,11 @@ impl ArrayBuilder for DecimalArrayBuilder {
         }
     }
 
-    fn append_array(&mut self, other: &DecimalArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &DecimalArray) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
         self.data.extend_from_slice(&other.data);
-        Ok(())
     }
 
     fn finish(self) -> DecimalArray {
