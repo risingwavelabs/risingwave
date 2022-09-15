@@ -24,7 +24,7 @@ use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Ex
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug, Copy, Clone)]
-enum Operation { // 5 combinations
+enum Operation {
     ConcatArray,
     AppendArray,
     PrependArray,
@@ -109,7 +109,7 @@ impl ArrayConcatExpression {
                 .into(),
             ),
             _ => {
-                panic!("the operands must be two arrays with the same data type.");
+                panic!("the operands must be two arrays with the same data type");
             }
         }
     }
