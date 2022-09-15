@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use itertools::Itertools;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -85,6 +88,7 @@ where
 
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
         let parallel_unit_mappings = fragment_guard.all_fragment_mappings().collect_vec();
+        let all_internal_tables = fragment_guard.all_internal_tables();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
         // We should only pin for workers that will unpin.
@@ -98,6 +102,24 @@ where
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+
+        match worker_type {
+            WorkerType::Compactor | WorkerType::ComputeNode => {
+                tables.extend(creating_tables);
+                let all_table_set: HashSet<u32> = tables.iter().map(|table| table.id).collect();
+                // FIXME: since `SourceExecutor` doesn't have catalog yet, this is a workaround to
+                // sync internal tables of source.
+                for table_id in all_internal_tables {
+                    if !all_table_set.contains(table_id) {
+                        tables.extend(std::iter::once(Table {
+                            id: *table_id,
+                            ..Default::default()
+                        }));
+                    }
+                }
+            }
+            _ => {}
+        }
 
         // Send the snapshot on subscription. After that we will send only updates.
         let meta_snapshot = match worker_type {
@@ -115,24 +137,16 @@ where
                 hummock_snapshot,
             },
 
-            WorkerType::Compactor => {
-                tables.extend(creating_tables);
+            WorkerType::Compactor => MetaSnapshot {
+                tables,
+                ..Default::default()
+            },
 
-                MetaSnapshot {
-                    tables,
-                    ..Default::default()
-                }
-            }
-
-            WorkerType::ComputeNode => {
-                tables.extend(creating_tables);
-
-                MetaSnapshot {
-                    tables,
-                    hummock_version: Some(hummock_manager_guard.current_version.clone()),
-                    ..Default::default()
-                }
-            }
+            WorkerType::ComputeNode => MetaSnapshot {
+                tables,
+                hummock_version: Some(hummock_manager_guard.current_version.clone()),
+                ..Default::default()
+            },
 
             WorkerType::RiseCtl => MetaSnapshot {
                 hummock_version: Some(hummock_manager_guard.current_version.clone()),
