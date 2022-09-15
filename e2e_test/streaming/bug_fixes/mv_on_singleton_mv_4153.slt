@@ -1,8 +1,27 @@
 statement ok
 create table t (v int);
+
+statement ok
 insert into t values (666), (233), (233);
+
+# Create singleton mview
+statement ok
 create materialized view mv as select v from t order by v limit 10;
+
+statement ok
 create materialized view mom as select * from mv;
+
+query I
+select * from mv order by v;
+----
+233
+233
+666
+
+statement ok
+drop materialized view mom;
+
+statement ok
 create materialized view mvjoin as select mv1.v as vvvv from mv as mv1, mv as mv2 where mv1.v = mv2.v;
 
 query I
