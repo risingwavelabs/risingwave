@@ -224,7 +224,6 @@ fn infer_type_for_special(
                                         } else {
                                             return input.cast_implicit(array_res.clone());
                                         }
-                                        Ok(input)
                                     })
                                     .try_collect()?;
 
@@ -278,7 +277,6 @@ fn infer_type_for_special(
                         } else {
                             return input.cast_implicit(array_type.clone());
                         }
-                        Ok(input)
                     })
                     .try_collect()?;
                     Ok(Some(array_type))
@@ -315,7 +313,6 @@ fn infer_type_for_special(
                         } else {
                             return input.cast_implicit(array_type.clone());
                         }
-                        Ok(input)
                     })
                     .try_collect()?;
                     Ok(Some(array_type))
