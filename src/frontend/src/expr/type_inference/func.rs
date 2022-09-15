@@ -299,29 +299,27 @@ fn infer_type_for_special(
             // TODO: remove the clone here
             let res = least_restrictive(*right_ele_type_deref, left_type.clone());
             let array_type = DataType::List { datatype: Box::new(res.clone()?) };
-
+            
             let inputs_owned = std::mem::take(inputs);
             *inputs = inputs_owned
-                .into_iter()
-                .map(|input|  {
-                    if input.return_type().is_numeric() {
-                        return input.cast_implicit(res.clone()?);
-                    } else {
-                        return input.cast_implicit(array_type.clone());
-                    }
-                    Ok(input)
-                })
-                .try_collect()?;
+            .into_iter()
+            .map(|input|  {
+                if input.return_type().is_numeric() {
+                    return input.cast_implicit(res.clone()?);
+                } else {
+                    return input.cast_implicit(array_type.clone());
+                }
+                Ok(input)
+            })
+            .try_collect()?;
+            
+            // TODO: put error message where we define the array type
+                        //             Ok(Some(return_type.ok_or_else(|| {
+            //                 ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type))
+            //             })?))
 
-
-
-            let return_type = match res {
-                Ok(ret_type) => Some(ret_type.clone()), // Do I need clone here?
-                Err(err) => None, 
-            }; 
-            Ok(Some(return_type.ok_or_else(|| {
-                ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type))
-            })?))
+            // I think this should return the array type? 
+            Ok(Some(array_type))
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
