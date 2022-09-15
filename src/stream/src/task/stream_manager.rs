@@ -531,6 +531,10 @@ impl LocalStreamManagerCore {
         let executor = {
             let executor = create_executor(executor_params, self, node, store)?;
             if has_stateful && is_stateful {
+                tracing::warn!(
+                    "cut into sub-handles after {} in fragment {fragment_id}",
+                    executor.identity()
+                );
                 let (sub_handle, executor) = pair(executor);
                 sub_handles.push(sub_handle);
                 executor
@@ -624,6 +628,10 @@ impl LocalStreamManagerCore {
                 &actor_context,
                 vnode_bitmap,
             )?;
+
+            if !sub_handles.is_empty() {
+                tracing::warn!("{} sub-handles for actor {}!", sub_handles.len(), actor_id);
+            }
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
             let actor = Actor::new(
