@@ -188,8 +188,7 @@ fn infer_type_for_special(
                     } else if left_type == **right_elem_type {
                         Some(right_type.clone())
                     } else {
-                        let least_restrictive = least_restrictive((**left_elem_type).clone(), (**right_elem_type).clone()); 
-                        match least_restrictive { // put function call here instead of variable?
+                        match least_restrictive((**left_elem_type).clone(), (**right_elem_type).clone()) {
                             Ok(res) => {
                                 let array_res = DataType::List { datatype: Box::new(res.clone()) };
                               
