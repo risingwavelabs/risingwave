@@ -153,10 +153,9 @@ impl DataChunkBuilder {
         &mut self,
         datum_refs: impl Iterator<Item = DatumRef<'a>>,
     ) -> ArrayResult<()> {
-        self.array_builders
-            .iter_mut()
-            .zip_eq(datum_refs)
-            .try_for_each(|(array_builder, datum_ref)| array_builder.append_datum_ref(datum_ref))?;
+        for (array_builder, datum_ref) in self.array_builders.iter_mut().zip_eq(datum_refs) {
+            array_builder.append_datum_ref(datum_ref);
+        }
         self.buffered_count += 1;
         Ok(())
     }
@@ -165,10 +164,9 @@ impl DataChunkBuilder {
         &mut self,
         datums: impl Iterator<Item = &'a Datum>,
     ) -> ArrayResult<()> {
-        self.array_builders
-            .iter_mut()
-            .zip_eq(datums)
-            .try_for_each(|(array_builder, datum)| array_builder.append_datum(datum))?;
+        for (array_builder, datum) in self.array_builders.iter_mut().zip_eq(datums) {
+            array_builder.append_datum(datum);
+        }
         self.buffered_count += 1;
         Ok(())
     }
@@ -234,7 +232,7 @@ impl DataChunkBuilder {
                 .map(|array| (array, left_row_id))
                 .chain(right_arrays.map(|array| (array, right_row_id))),
         ) {
-            array_builder.append_array_element(array, row_id)?
+            array_builder.append_array_element(array, row_id)
         }
 
         self.buffered_count += 1;
@@ -446,17 +444,13 @@ mod tests {
 
         let mut left_array_builder = DataType::Int32.create_array_builder(5);
         for v in [1, 2, 3, 4, 5] {
-            assert!(left_array_builder
-                .append_datum(&Some(ScalarImpl::Int32(v)))
-                .is_ok())
+            left_array_builder.append_datum(&Some(ScalarImpl::Int32(v)));
         }
         let left_arrays = vec![left_array_builder.finish()];
 
         let mut right_array_builder = DataType::Int64.create_array_builder(5);
         for v in [5, 4, 3, 2, 1] {
-            assert!(right_array_builder
-                .append_datum(&Some(ScalarImpl::Int64(v)))
-                .is_ok())
+            right_array_builder.append_datum(&Some(ScalarImpl::Int64(v)));
         }
         let right_arrays = vec![right_array_builder.finish()];
 

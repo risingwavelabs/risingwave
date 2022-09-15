@@ -102,9 +102,8 @@ where
 
     fn output_concrete(&mut self, builder: &mut R::Builder) -> Result<()> {
         let res = std::mem::replace(&mut self.result, None);
-        builder
-            .append(res.as_ref().map(|x| x.as_scalar_ref()))
-            .map_err(Into::into)
+        builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+        Ok(())
     }
 }
 
