@@ -35,7 +35,7 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
-// Memcomparable row.
+/// Memcomparable row.
 type CacheKey = Vec<u8>;
 
 /// Generic managed agg state for min/max.

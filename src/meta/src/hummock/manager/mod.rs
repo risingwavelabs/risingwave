@@ -167,6 +167,18 @@ pub(crate) use start_measure_real_process_timer;
 
 use super::Compactor;
 
+lazy_static::lazy_static! {
+    static ref CACEL_STATUS_SET: HashSet<TaskStatus> = vec![
+        TaskStatus::ManualCanceled,
+        TaskStatus::NoAvailCanceled,
+        TaskStatus::SendFailCanceled,
+        TaskStatus::AssignFailCanceled,
+        TaskStatus::HeartbeatCanceled,
+    ]
+    .into_iter()
+    .collect();
+}
+
 impl<S> HummockManager<S>
 where
     S: MetaStore,
@@ -233,7 +245,10 @@ where
                         tracing::info!("CancelTask operation for task_id {} has been sent to node with context_id {context_id}", task.task_id);
                     }
 
-                    if let Err(e) = hummock_manager.cancel_compact_task(&mut task).await {
+                    if let Err(e) = hummock_manager
+                        .cancel_compact_task(&mut task, TaskStatus::HeartbeatCanceled)
+                        .await
+                    {
                         tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
                             until we can successfully report its status. {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
                     }
@@ -592,6 +607,26 @@ where
             .id_gen_manager()
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await?;
+        if !compaction
+            .compaction_statuses
+            .contains_key(&compaction_group_id)
+        {
+            let group_config = self
+                .compaction_group_manager()
+                .compaction_group(compaction_group_id)
+                .await
+                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
+            let mut compact_statuses =
+                BTreeMapTransaction::new(&mut compaction.compaction_statuses);
+            let new_compact_status = compact_statuses.new_entry_insert_txn(
+                compaction_group_id,
+                CompactStatus::new(
+                    compaction_group_id,
+                    group_config.compaction_config().max_level,
+                ),
+            );
+            commit_multi_var!(self, None, new_compact_status)?;
+        }
         let mut compact_status = VarTransaction::new(
             compaction
                 .compaction_statuses
@@ -716,13 +751,20 @@ where
     }
 
     /// Cancels a compaction task no matter it's assigned or unassigned.
-    pub async fn cancel_compact_task(&self, compact_task: &mut CompactTask) -> Result<bool> {
-        compact_task.set_task_status(TaskStatus::Canceled);
+    pub async fn cancel_compact_task(
+        &self,
+        compact_task: &mut CompactTask,
+        task_status: TaskStatus,
+    ) -> Result<bool> {
+        compact_task.set_task_status(task_status);
+        fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStoreError(
+            anyhow::anyhow!("failpoint metastore err")
+        )));
         self.cancel_compact_task_impl(compact_task).await
     }
 
     pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
-        assert_eq!(compact_task.task_status(), TaskStatus::Canceled);
+        assert!(CACEL_STATUS_SET.contains(&compact_task.task_status()));
         self.report_compact_task_impl(None, compact_task, None)
             .await
     }
@@ -731,6 +773,9 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<Option<CompactTask>> {
+        fail_point!("fp_get_compact_task", |_| Err(Error::MetaStoreError(
+            anyhow::anyhow!("failpoint metastore error")
+        )));
         while let Some(task) = self
             .get_compact_task_impl(compaction_group_id, None)
             .await?
@@ -940,6 +985,7 @@ where
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
 
+        let task_label = task_status.as_str_name();
         if let Some(context_id) = assignee_context_id {
             // A task heartbeat is removed IFF we report the task status of a task and it still has
             // a valid assignment, OR we remove the node context from our list of nodes,
@@ -950,19 +996,34 @@ where
             // policy.
             self.compactor_manager
                 .report_compact_task(context_id, compact_task);
-        }
 
-        // Update compaaction task count.
-        let task_label = match task_status {
-            TaskStatus::Success => "success",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Canceled => "canceled",
-            _ => unreachable!(),
-        };
-        self.metrics
-            .compact_frequency
-            .with_label_values(&[&compact_task.compaction_group_id.to_string(), task_label])
-            .inc();
+            // Update compaaction task count.
+            //
+            // A corner case is that the compactor is deleted
+            // immediately after it reports the task and before the meta node handles
+            // it. In that case, its host address will not be obtainable.
+            if let Some(worker) = self.cluster_manager.get_worker_by_id(context_id).await {
+                let host = worker.worker_node.host.unwrap();
+                self.metrics
+                    .compact_frequency
+                    .with_label_values(&[
+                        &format!("{}:{}", host.host, host.port),
+                        &compact_task.compaction_group_id.to_string(),
+                        task_label,
+                    ])
+                    .inc();
+            }
+        } else {
+            // Update compaaction task count. The task will be marked as `unassigned`.
+            self.metrics
+                .compact_frequency
+                .with_label_values(&[
+                    "unassigned",
+                    &compact_task.compaction_group_id.to_string(),
+                    task_label,
+                ])
+                .inc();
+        }
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",

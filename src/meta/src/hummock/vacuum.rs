@@ -149,7 +149,7 @@ where
                         err
                     );
                     self.compactor_manager
-                        .remove_compactor(compactor.context_id());
+                        .pause_compactor(compactor.context_id());
                 }
             }
         }
