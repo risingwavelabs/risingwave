@@ -126,14 +126,14 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
-    fn finish(self) -> ArrayResult<ListArray> {
-        Ok(ListArray {
+    fn finish(self) -> ListArray {
+        ListArray {
             bitmap: self.bitmap.finish(),
             offsets: self.offsets,
-            value: Box::new(self.value.finish()?),
+            value: Box::new(self.value.finish()),
             value_type: self.value_type,
             len: self.len,
-        })
+        }
     }
 }
 
@@ -271,11 +271,11 @@ impl ListArray {
         let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let mut offsets = vec![0];
         let mut values = values.into_iter().peekable();
-        let mut builderimpl = values.peek().unwrap().as_ref().unwrap().create_builder(0)?;
+        let mut builder = values.peek().unwrap().as_ref().unwrap().create_builder(0)?;
         values.try_for_each(|i| match i {
             Some(a) => {
                 offsets.push(a.len());
-                builderimpl.append_array(&a)
+                builder.append_array(&a)
             }
             None => {
                 offsets.push(0);
@@ -289,7 +289,7 @@ impl ListArray {
         Ok(ListArray {
             bitmap,
             offsets,
-            value: Box::new(builderimpl.finish()?),
+            value: Box::new(builder.finish()),
             value_type,
             len: cardinality,
         })
@@ -630,7 +630,7 @@ mod tests {
                 .append(v.as_ref().map(|s| s.as_scalar_ref()))
                 .unwrap()
         });
-        let arr = builder.finish().unwrap();
+        let arr = builder.finish();
         assert_eq!(arr.values_vec(), list_values);
 
         let part1 = ListArray::from_slices(
@@ -662,7 +662,7 @@ mod tests {
         builder.append_array(&part1).unwrap();
         builder.append_array(&part2).unwrap();
 
-        assert_eq!(arr.values_vec(), builder.finish().unwrap().values_vec());
+        assert_eq!(arr.values_vec(), builder.finish().values_vec());
     }
 
     // Ensure `create_builder` exactly copies the same metadata.
@@ -678,7 +678,7 @@ mod tests {
         )
         .unwrap();
         let builder = arr.create_builder(0).unwrap();
-        let arr2 = try_match_expand!(builder.finish().unwrap(), ArrayImpl::List).unwrap();
+        let arr2 = try_match_expand!(builder.finish(), ArrayImpl::List).unwrap();
         assert_eq!(arr.array_meta(), arr2.array_meta());
     }
 
@@ -836,7 +836,7 @@ mod tests {
                 .append(v.as_ref().map(|s| s.as_scalar_ref()))
                 .unwrap()
         });
-        let nestarray = builder.finish().unwrap();
+        let nestarray = builder.finish();
         assert_eq!(nestarray.values_vec(), nested_list_values);
     }
 
@@ -945,7 +945,7 @@ mod tests {
             },
         );
         builder.append(Some(list_ref)).unwrap();
-        let array = builder.finish().unwrap();
+        let array = builder.finish();
         let list_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
         list_ref.serialize(&mut serializer).unwrap();
@@ -1028,7 +1028,7 @@ mod tests {
             builder
                 .append(Some(ListRef::ValueRef { val: &rhs }))
                 .unwrap();
-            let array = builder.finish().unwrap();
+            let array = builder.finish();
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 array

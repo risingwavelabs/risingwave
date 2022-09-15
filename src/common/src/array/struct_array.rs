@@ -124,18 +124,18 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
-    fn finish(self) -> ArrayResult<StructArray> {
+    fn finish(self) -> StructArray {
         let children = self
             .children_array
             .into_iter()
-            .map(|b| Ok(Arc::new(b.finish()?)))
-            .collect::<ArrayResult<Vec<ArrayRef>>>()?;
-        Ok(StructArray {
+            .map(|b| Arc::new(b.finish()))
+            .collect::<Vec<ArrayRef>>();
+        StructArray {
             bitmap: self.bitmap.finish(),
             children,
             children_type: self.children_type,
             len: self.len,
-        })
+        }
     }
 }
 
@@ -602,7 +602,7 @@ mod tests {
                 .append(v.as_ref().map(|s| s.as_scalar_ref()))
                 .unwrap()
         });
-        let arr = builder.finish().unwrap();
+        let arr = builder.finish();
         assert_eq!(arr.values_vec(), struct_values);
     }
 
@@ -620,7 +620,7 @@ mod tests {
         )
         .unwrap();
         let builder = arr.create_builder(4).unwrap();
-        let arr2 = try_match_expand!(builder.finish().unwrap(), ArrayImpl::Struct).unwrap();
+        let arr2 = try_match_expand!(builder.finish(), ArrayImpl::Struct).unwrap();
         assert_eq!(arr.array_meta(), arr2.array_meta());
     }
 
@@ -725,7 +725,7 @@ mod tests {
             },
         );
         builder.append(Some(struct_ref)).unwrap();
-        let array = builder.finish().unwrap();
+        let array = builder.finish();
         let struct_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
         struct_ref.serialize(&mut serializer).unwrap();
@@ -837,7 +837,7 @@ mod tests {
             builder
                 .append(Some(StructRef::ValueRef { val: &rhs }))
                 .unwrap();
-            let array = builder.finish().unwrap();
+            let array = builder.finish();
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 array

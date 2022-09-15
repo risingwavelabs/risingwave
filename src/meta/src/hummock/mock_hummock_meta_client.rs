@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use fail::fail_point;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
@@ -113,6 +114,10 @@ impl HummockMetaClient for MockHummockMetaClient {
     }
 
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+        fail_point!("get_new_sst_ids_err", |_| Err(anyhow!(
+            "failpoint get_new_sst_ids_err"
+        )
+        .into()));
         self.hummock_manager
             .get_new_sst_ids(number)
             .await

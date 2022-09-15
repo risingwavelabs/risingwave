@@ -34,7 +34,7 @@ mod tests {
     fn test_concat_op() {
         let writer = Utf8ArrayBuilder::new(1).writer();
         let guard = concat_op("114", "514", writer).unwrap();
-        let array = guard.into_inner().finish().unwrap();
+        let array = guard.into_inner().finish();
 
         assert_eq!(array.value_at(0).unwrap(), "114514".to_owned())
     }

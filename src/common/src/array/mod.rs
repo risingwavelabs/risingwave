@@ -126,7 +126,7 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     }
 
     /// Finish build and return a new array.
-    fn finish(self) -> ArrayResult<Self::ArrayType>;
+    fn finish(self) -> Self::ArrayType;
 }
 
 /// A trait over all array.
@@ -260,7 +260,7 @@ impl<A: Array> CompactableArray for A {
                 builder.append(elem)?;
             }
         }
-        builder.finish()
+        Ok(builder.finish())
     }
 }
 
@@ -467,9 +467,9 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            pub fn finish(self) -> ArrayResult<ArrayImpl> {
+            pub fn finish(self) -> ArrayImpl {
                 match self {
-                    $( Self::$variant_name(inner) => Ok(inner.finish()?.into()), )*
+                    $( Self::$variant_name(inner) => inner.finish().into(), )*
                 }
             }
 
@@ -656,7 +656,7 @@ mod tests {
                 builder.append(data.value_at(i))?;
             }
         }
-        builder.finish()
+        Ok(builder.finish())
     }
 
     #[test]
@@ -665,7 +665,7 @@ mod tests {
         for i in 0..=60 {
             builder.append(Some(i as i32)).unwrap();
         }
-        let array = filter(&builder.finish().unwrap(), |x| x.unwrap_or(0) >= 60).unwrap();
+        let array = filter(&builder.finish(), |x| x.unwrap_or(0) >= 60).unwrap();
         assert_eq!(array.iter().collect::<Vec<Option<i32>>>(), vec![Some(60)]);
     }
 
@@ -689,7 +689,7 @@ mod tests {
             };
             builder.append(item)?;
         }
-        builder.finish()
+        Ok(builder.finish())
     }
 
     #[test]
@@ -698,13 +698,13 @@ mod tests {
         for i in 0..=60 {
             builder.append(Some(i as i32)).unwrap();
         }
-        let array1 = builder.finish().unwrap();
+        let array1 = builder.finish();
 
         let mut builder = PrimitiveArrayBuilder::<i16>::new(0);
         for i in 0..=60 {
             builder.append(Some(i as i16)).unwrap();
         }
-        let array2 = builder.finish().unwrap();
+        let array2 = builder.finish();
 
         let final_array = vec_add(&array1, &array2).unwrap() as PrimitiveArray<i64>;
 

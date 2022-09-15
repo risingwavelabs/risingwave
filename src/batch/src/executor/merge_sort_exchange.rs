@@ -171,7 +171,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
 
             let columns = builders
                 .into_iter()
-                .map(|builder| Ok(Column::new(Arc::new(builder.finish()?))))
+                .map(|builder| Ok(Column::new(Arc::new(builder.finish()))))
                 .collect::<Result<Vec<_>>>()?;
             let chunk = DataChunk::new(columns, array_len);
             yield chunk

@@ -53,10 +53,7 @@ impl Expression for NestedConstructExpression {
                 },
             );
             builder.append_array_refs(columns, input.capacity())?;
-            builder
-                .finish()
-                .map(|a| Arc::new(ArrayImpl::Struct(a)))
-                .map_err(Into::into)
+            Ok(Arc::new(ArrayImpl::Struct(builder.finish())))
         } else if let DataType::List { datatype } = &self.data_type {
             let columns = columns.into_iter().map(Column::new).collect();
             let chunk = DataChunk::new(columns, input.vis().clone());
@@ -73,10 +70,7 @@ impl Expression for NestedConstructExpression {
                     builder.append_null()
                 }
             })?;
-            builder
-                .finish()
-                .map(|a| Arc::new(ArrayImpl::List(a)))
-                .map_err(Into::into)
+            Ok(Arc::new(ArrayImpl::List(builder.finish())))
         } else {
             Err(ExprError::UnsupportedFunction(
                 "expects struct or list type".to_string(),

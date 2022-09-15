@@ -19,12 +19,9 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
-use risingwave_hummock_sdk::key::{user_key, FullKey};
-use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch, VersionedComparator};
+use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, KeyRange};
+use risingwave_pb::hummock::CompactionConfig;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
@@ -256,51 +253,10 @@ impl DynamicLevelSelector {
             let idx = input.target_level - base_level + 1;
             self.config.compression_algorithm[idx].clone()
         };
-        let mut splits = vec![];
-        const SPLIT_RANGE_STEP: usize = 8;
-        let mut keys = input
-            .input_levels
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| {
-                FullKey::from_user_key_slice(
-                    user_key(&table.key_range.as_ref().unwrap().left),
-                    HummockEpoch::MAX,
-                )
-                .into_inner()
-            })
-            .collect_vec();
-        let total_file_size = input
-            .input_levels
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| table.file_size)
-            .sum::<u64>();
-
-        if (total_file_size > self.config.sub_level_max_compaction_bytes
-            || total_file_size > self.config.max_bytes_for_level_base)
-            && keys.len() >= SPLIT_RANGE_STEP * 2
-        {
-            splits.push(KeyRange::new(vec![], vec![]));
-            keys.sort_by(|a, b| VersionedComparator::compare_key(a.as_ref(), b.as_ref()));
-            let concurrency = std::cmp::min(
-                keys.len() / SPLIT_RANGE_STEP,
-                self.config.max_sub_compaction as usize,
-            );
-            let step = (keys.len() + concurrency - 1) / concurrency;
-            assert!(step > 1);
-            for (idx, key) in keys.into_iter().enumerate() {
-                if idx > 0 && idx % step == 0 {
-                    splits.last_mut().unwrap().right = key.clone();
-                    splits.push(KeyRange::new(key, vec![]));
-                }
-            }
-        }
         CompactionTask {
             input,
             compression_algorithm,
             target_file_size,
-            splits,
         }
     }
 }
@@ -374,7 +330,7 @@ pub mod tests {
     use itertools::Itertools;
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
-    use risingwave_pb::hummock::{Level, LevelType, OverlappingLevel, SstableInfo};
+    use risingwave_pb::hummock::{KeyRange, Level, LevelType, OverlappingLevel, SstableInfo};
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -454,7 +410,9 @@ pub mod tests {
         }
     }
 
-    pub fn generate_l0_with_overlap(table_infos: Vec<SstableInfo>) -> OverlappingLevel {
+    /// Returns a `OverlappingLevel`, with each `table_infos`'s element placed in a nonoverlapping
+    /// sub-level.
+    pub fn generate_l0_nonoverlapping_sublevels(table_infos: Vec<SstableInfo>) -> OverlappingLevel {
         let total_file_size = table_infos.iter().map(|table| table.file_size).sum::<u64>();
         OverlappingLevel {
             sub_levels: table_infos
@@ -470,6 +428,29 @@ pub mod tests {
                 .collect_vec(),
             total_file_size,
         }
+    }
+
+    /// Returns a `OverlappingLevel`, with each `table_infos`'s element placed in a overlapping
+    /// sub-level.
+    pub fn generate_l0_overlapping_sublevels(
+        table_infos: Vec<Vec<SstableInfo>>,
+    ) -> OverlappingLevel {
+        let mut l0 = OverlappingLevel {
+            sub_levels: table_infos
+                .into_iter()
+                .enumerate()
+                .map(|(idx, table)| Level {
+                    level_idx: 0,
+                    level_type: LevelType::Overlapping as i32,
+                    total_file_size: table.iter().map(|table| table.file_size).sum::<u64>(),
+                    sub_level_id: idx as u64,
+                    table_infos: table.clone(),
+                })
+                .collect_vec(),
+            total_file_size: 0,
+        };
+        l0.total_file_size = l0.sub_levels.iter().map(|l| l.total_file_size).sum::<u64>();
+        l0
     }
 
     fn assert_compaction_task(compact_task: &CompactionTask, level_handlers: &[LevelHandler]) {
@@ -501,7 +482,7 @@ pub mod tests {
         ];
         let mut levels = Levels {
             levels,
-            l0: Some(generate_l0_with_overlap(vec![])),
+            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
         };
         let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 2);
@@ -572,7 +553,7 @@ pub mod tests {
         ];
         let mut levels = Levels {
             levels,
-            l0: Some(generate_l0_with_overlap(generate_tables(
+            l0: Some(generate_l0_nonoverlapping_sublevels(generate_tables(
                 15..25,
                 0..600,
                 3,
@@ -644,7 +625,7 @@ pub mod tests {
     fn test_manual_compaction_picker_l0() {
         let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
         let selector = DynamicLevelSelector::new(config, Arc::new(RangeOverlapStrategy::default()));
-        let l0 = generate_l0_with_overlap(vec![
+        let l0 = generate_l0_nonoverlapping_sublevels(vec![
             generate_table(0, 1, 0, 500, 1),
             generate_table(1, 1, 0, 500, 1),
         ]);
@@ -729,7 +710,7 @@ pub mod tests {
     fn test_manual_compaction_picker() {
         let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
         let selector = DynamicLevelSelector::new(config, Arc::new(RangeOverlapStrategy::default()));
-        let l0 = generate_l0_with_overlap(vec![]);
+        let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
         let levels = vec![
             generate_level(1, vec![]),

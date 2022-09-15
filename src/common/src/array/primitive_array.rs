@@ -141,10 +141,10 @@ pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
 }
 
 impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
-    pub fn from_slice(data: &[Option<T>]) -> ArrayResult<Self> {
+    pub fn from_slice(data: &[Option<T>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i)?;
+            builder.append(*i).unwrap();
         }
         builder.finish()
     }
@@ -274,11 +274,11 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
-    fn finish(self) -> ArrayResult<PrimitiveArray<T>> {
-        Ok(PrimitiveArray {
+    fn finish(self) -> PrimitiveArray<T> {
+        PrimitiveArray {
             bitmap: self.bitmap.finish(),
             data: self.data,
-        })
+        }
     }
 }
 
@@ -287,12 +287,10 @@ mod tests {
     use super::*;
     use crate::types::{OrderedF32, OrderedF64};
 
-    fn helper_test_builder<T: PrimitiveArrayItemType>(
-        data: Vec<Option<T>>,
-    ) -> ArrayResult<PrimitiveArray<T>> {
+    fn helper_test_builder<T: PrimitiveArrayItemType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());
         for d in data {
-            builder.append(d)?;
+            builder.append(d).unwrap();
         }
         builder.finish()
     }
@@ -303,8 +301,7 @@ mod tests {
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x) })
                 .collect(),
-        )
-        .unwrap();
+        );
         if !matches!(ArrayImpl::from(arr), ArrayImpl::Int16(_)) {
             unreachable!()
         }
@@ -316,8 +313,7 @@ mod tests {
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x) })
                 .collect(),
-        )
-        .unwrap();
+        );
         if !matches!(ArrayImpl::from(arr), ArrayImpl::Int32(_)) {
             unreachable!()
         }
@@ -329,8 +325,7 @@ mod tests {
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x) })
                 .collect(),
-        )
-        .unwrap();
+        );
         if !matches!(ArrayImpl::from(arr), ArrayImpl::Int64(_)) {
             unreachable!()
         }
@@ -348,8 +343,7 @@ mod tests {
                     }
                 })
                 .collect(),
-        )
-        .unwrap();
+        );
         if !matches!(ArrayImpl::from(arr), ArrayImpl::Float32(_)) {
             unreachable!()
         }
@@ -367,8 +361,7 @@ mod tests {
                     }
                 })
                 .collect(),
-        )
-        .unwrap();
+        );
         if !matches!(ArrayImpl::from(arr), ArrayImpl::Float64(_)) {
             unreachable!()
         }

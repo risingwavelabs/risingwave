@@ -32,10 +32,10 @@ impl BoolArray {
         Self { bitmap, data }
     }
 
-    pub fn from_slice(data: &[Option<bool>]) -> ArrayResult<Self> {
+    pub fn from_slice(data: &[Option<bool>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i)?;
+            builder.append(*i).unwrap();
         }
         builder.finish()
     }
@@ -163,11 +163,11 @@ impl ArrayBuilder for BoolArrayBuilder {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
-    fn finish(self) -> ArrayResult<BoolArray> {
-        Ok(BoolArray {
+    fn finish(self) -> BoolArray {
+        BoolArray {
             bitmap: self.bitmap.finish(),
             data: self.data.finish(),
-        })
+        }
     }
 }
 
@@ -183,7 +183,7 @@ mod tests {
         for d in data {
             builder.append(d).unwrap();
         }
-        builder.finish().unwrap()
+        builder.finish()
     }
 
     #[test]
