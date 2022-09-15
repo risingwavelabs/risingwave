@@ -690,8 +690,6 @@ where
         source_id: SourceId,
         table_id: TableId,
     ) -> MetaResult<CatalogVersion> {
-        use risingwave_common::catalog::TableId;
-
         // 1. Drop materialized source in catalog, source_id will be checked if it is
         // associated_source_id in mview.
         let version = self
@@ -702,9 +700,10 @@ where
         // 2. Drop source and mv separately.
         // Note: we need to drop the materialized view to unmap the source_id to fragment_ids in
         // `SourceManager` before we can drop the source
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(table_id))
-            .await?;
+
+        // drop mv in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![CatalogDeletedId::TableId(table_id.into())]);
 
         self.source_manager.drop_source(source_id).await?;
 
