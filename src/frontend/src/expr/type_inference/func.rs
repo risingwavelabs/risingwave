@@ -299,9 +299,22 @@ fn infer_type_for_special(
             // TODO: remove the clone here
             let res = least_restrictive(*right_ele_type_deref, left_type.clone());
             let array_type = DataType::List { datatype: Box::new(res.clone()?) };
-// TODO: cast these as well
-            //            inputs[0].cast_implicit(res?);
-//            inputs[1].cast_implicit(array_type);
+
+            let inputs_owned = std::mem::take(inputs);
+            *inputs = inputs_owned
+                .into_iter()
+                .map(|input|  {
+                    if input.return_type().is_numeric() {
+                        return input.cast_implicit(res.clone()?);
+                    } else {
+                        return input.cast_implicit(array_type.clone());
+                    }
+                    Ok(input)
+                })
+                .try_collect()?;
+
+
+
             let return_type = match res {
                 Ok(ret_type) => Some(ret_type.clone()), // Do I need clone here?
                 Err(err) => None, 
