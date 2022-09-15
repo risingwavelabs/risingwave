@@ -21,15 +21,16 @@ use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 #[derive(Debug)]
 pub struct JsonParser;
 
-// #[cfg(not(any(
-//     target_feature = "sse4.2",
-//     target_feature = "avx2",
-//     target_feature = "neon",
-//     target_feature = "simd128"
-// )))]
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
 impl SourceParser for JsonParser {
     fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         use serde_json::Value;
+
         use crate::parser::common::json_parse_value;
         let value: Value = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
@@ -47,33 +48,33 @@ impl SourceParser for JsonParser {
     }
 }
 
-// #[cfg(any(
-//     target_feature = "sse4.2",
-//     target_feature = "avx2",
-//     target_feature = "neon",
-//     target_feature = "simd128"
-// ))]
-// impl SourceParser for JsonParser {
-//     fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
-//         use simd_json::{BorrowedValue, ValueAccess};
-//         use crate::parser::common::simd_json_parse_value;
-//         let mut payload_mut = payload.to_vec();
-//         let value: BorrowedValue = simd_json::to_borrowed_value(&mut payload_mut)
-//             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
+impl SourceParser for JsonParser {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+        use simd_json::{BorrowedValue, ValueAccess};
 
-//         writer.insert(|desc| {
-//             simd_json_parse_value(&desc.into(), value.get(desc.name.as_str())).map_err(|e| {
-//                 tracing::error!(
-//                     "failed to process value ({}): {}",
-//                     String::from_utf8_lossy(payload),
-//                     e
-//                 );
-//                 e.into()
-//             })
-//         })
-//     }
-// }
+        use crate::parser::common::simd_json_parse_value;
+        let mut payload_mut = payload.to_vec();
+        let value: BorrowedValue = simd_json::to_borrowed_value(&mut payload_mut)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
+        writer.insert(|desc| {
+            simd_json_parse_value(&desc.into(), value.get(desc.name.as_str())).map_err(|e| {
+                tracing::error!(
+                    "failed to process value ({}): {}",
+                    String::from_utf8_lossy(payload),
+                    e
+                );
+                e.into()
+            })
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
