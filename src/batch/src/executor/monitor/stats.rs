@@ -237,7 +237,7 @@ impl BatchTaskMetrics {
 
     /// Following functions are used to custom executor level metrics.
     // Each task execution has its own label:
-    // QueryID, StageId, TaskId
+    // QueryId, StageId, TaskId
     pub fn task_labels(&self) -> HashMap<String, String> {
         self.labels.clone()
     }

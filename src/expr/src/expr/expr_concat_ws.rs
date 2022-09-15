@@ -57,13 +57,13 @@ impl Expression for ConcatWsExpression {
 
         for row_idx in 0..row_len {
             if !vis.is_set(row_idx) {
-                builder.append(None)?;
+                builder.append(None);
                 continue;
             }
             let sep = match sep_column.value_at(row_idx) {
                 Some(sep) => sep,
                 None => {
-                    builder.append(None)?;
+                    builder.append(None);
                     continue;
                 }
             };

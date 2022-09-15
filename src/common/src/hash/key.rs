@@ -608,7 +608,7 @@ where
     <<A as ArrayBuilder>::ArrayType as Array>::RefItem<'a>: HashKeySerDe<'a>,
     S: HashKeyDeserializer,
 {
-    builder.append(deserializer.deserialize()?)?;
+    builder.append(deserializer.deserialize()?);
     Ok(())
 }
 
@@ -660,12 +660,10 @@ impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
-        array_builders
-            .iter_mut()
-            .zip_eq(self.key.0)
-            .try_for_each(|(array_builder, key)| {
-                array_builder.append_datum(&key).map_err(Into::into)
-            })
+        for (array_builder, key) in array_builders.iter_mut().zip_eq(self.key.0) {
+            array_builder.append_datum(&key);
+        }
+        Ok(())
     }
 
     fn null_bitmap(&self) -> &FixedBitSet {

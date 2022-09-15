@@ -180,7 +180,7 @@ def section_cluster_node(panels):
         panels.row("Cluster Node"),
         panels.timeseries_count("Node Count", [
             panels.target(
-                "sum(node_num) by (node_type)", "{{node_type}}"
+                "sum(node_num) by (job)", "{{job}}"
             )], ["last"]),
         panels.timeseries_memory("Node Memory", [
             panels.target(
@@ -209,7 +209,7 @@ def section_compaction(outer_panels):
             ]),
             panels.timeseries_count("Compaction Success & Failure Count", [
                 panels.target(
-                    "sum(storage_level_compact_frequency) by (instance, group, result)", "{{instance}} - {{result}} - group-{{group}}"
+                    "sum(storage_level_compact_frequency) by (compactor, group, result)", "{{result}} - group-{{group}} @ {{compactor}}"
                 ),
             ]),
 
@@ -315,9 +315,9 @@ def section_compaction(outer_panels):
                 ),
             ]),
 
-            panels.timeseries_bytes("Hummock Sstable Meta Size", [
+            panels.timeseries_bytes("Hummock Sstable File Size", [
                 panels.target(
-                    "sum by(le, job, instance)(rate(state_store_sstable_meta_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_meta_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
+                    "sum by(le, job, instance)(rate(state_store_sstable_file_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_file_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
                 ),
             ]),
         ])

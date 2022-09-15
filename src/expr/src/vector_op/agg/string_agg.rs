@@ -103,9 +103,8 @@ impl Aggregator for StringAggUnordered {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
             let res = self.get_result_and_reset();
-            builder
-                .append(res.as_ref().map(|x| x.as_scalar_ref()))
-                .map_err(Into::into)
+            builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+            Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
         }
@@ -226,9 +225,8 @@ impl Aggregator for StringAggOrdered {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
             let res = self.get_result_and_reset();
-            builder
-                .append(res.as_ref().map(|x| x.as_scalar_ref()))
-                .map_err(Into::into)
+            builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+            Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
         }

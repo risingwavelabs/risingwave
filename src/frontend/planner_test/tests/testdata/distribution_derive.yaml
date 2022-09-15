@@ -141,8 +141,8 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [max(ak1k2.v)] }
-        BatchSortAgg { group_key: [ak1k2.k2], aggs: [max(ak1k2.v)] }
-          BatchExchange { order: [ak1k2.k2 ASC], dist: HashShard(ak1k2.k2) }
+        BatchHashAgg { group_key: [ak1k2.k2], aggs: [max(ak1k2.v)] }
+          BatchExchange { order: [], dist: HashShard(ak1k2.k2) }
             BatchScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [max_v, ak1k2.k2(hidden)], pk_columns: [ak1k2.k2] }

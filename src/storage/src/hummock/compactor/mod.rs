@@ -29,7 +29,7 @@ use bytes::BytesMut;
 pub use compaction_executor::CompactionExecutor;
 pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
-    TTLCompactionFilter,
+    TtlCompactionFilter,
 };
 pub use context::{CompactorContext, Context, TaskProgressTracker};
 use futures::future::try_join_all;
@@ -148,7 +148,7 @@ impl Compactor {
             Ok(tracker_id) => tracker_id,
             Err(err) => {
                 tracing::warn!("Failed to track pending SST id. {:#?}", err);
-                return TaskStatus::Failed;
+                return TaskStatus::TrackSstIdFailed;
             }
         };
         let sstable_id_manager_clone = context.sstable_id_manager.clone();
@@ -252,7 +252,7 @@ impl Compactor {
             tokio::select! {
                 _ = &mut shutdown_rx => {
                     tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
-                    task_status = TaskStatus::Failed;
+                    task_status = TaskStatus::ManualCanceled;
                     break;
                 }
                 future_result = buffered.next() => {
@@ -261,7 +261,7 @@ impl Compactor {
                             output_ssts.push((split_index, ssts));
                         }
                         Some(Ok(Err(e))) => {
-                            task_status = TaskStatus::Failed;
+                            task_status = TaskStatus::ExecuteFailed;
                             tracing::warn!(
                                 "Compaction task {} failed with error: {:#?}",
                                 compact_task.task_id,
@@ -270,7 +270,7 @@ impl Compactor {
                             break;
                         }
                         Some(Err(e)) => {
-                            task_status = TaskStatus::Failed;
+                            task_status = TaskStatus::JoinHandleFailed;
                             tracing::warn!(
                                 "Compaction task {} failed with join handle error: {:#?}",
                                 compact_task.task_id,
@@ -353,6 +353,7 @@ impl Compactor {
 
     /// The background compaction thread that receives compaction tasks from hummock compaction
     /// manager and runs compaction tasks.
+    #[cfg_attr(coverage, no_coverage)]
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -775,7 +776,7 @@ fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionF
             .map(|id_to_option| (*id_to_option.0, id_to_option.1.retention_seconds))
             .collect();
 
-        let ttl_filter = Box::new(TTLCompactionFilter::new(
+        let ttl_filter = Box::new(TtlCompactionFilter::new(
             id_to_ttl,
             compact_task.current_epoch_time,
         ));
