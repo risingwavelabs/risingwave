@@ -58,6 +58,8 @@ impl Default for ServerConfig {
 pub struct BatchConfig {
     // #[serde(default = "default::chunk_size")]
     // pub chunk_size: u32,
+    #[serde(default)]
+    pub worker_threads_num: Option<usize>,
 }
 
 impl Default for BatchConfig {
