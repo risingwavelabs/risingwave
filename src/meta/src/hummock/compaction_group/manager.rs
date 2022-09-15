@@ -144,6 +144,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         &self,
         source_id: u32,
         table_properties: &HashMap<String, String>,
+        independent_compaction_group_type: u32,
     ) -> Result<Vec<StateTableId>> {
         let table_option = TableOption::build_table_option(table_properties);
         self.inner
@@ -152,7 +153,12 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .register(
                 &mut [(
                     source_id,
-                    StaticCompactionGroupId::StateDefault.into(),
+                    (if independent_compaction_group_type == 1 {
+                        StaticCompactionGroupId::NewCompactionGroup
+                    } else {
+                        StaticCompactionGroupId::StateDefault
+                    })
+                    .into(),
                     table_option,
                 )],
                 self.env.meta_store(),
@@ -604,22 +610,22 @@ mod tests {
 
         // Test register_source
         compaction_group_manager
-            .register_source(source_1, &table_properties)
+            .register_source(source_1, &table_properties, 0)
             .await
             .unwrap();
         assert_eq!(registered_number().await, 1);
         compaction_group_manager
-            .register_source(source_2, &table_properties)
+            .register_source(source_2, &table_properties, 0)
             .await
             .unwrap();
         assert_eq!(registered_number().await, 2);
         compaction_group_manager
-            .register_source(source_2, &table_properties)
+            .register_source(source_2, &table_properties, 0)
             .await
             .unwrap();
         assert_eq!(registered_number().await, 2);
         compaction_group_manager
-            .register_source(source_3, &table_properties)
+            .register_source(source_3, &table_properties, 0)
             .await
             .unwrap();
         assert_eq!(registered_number().await, 3);

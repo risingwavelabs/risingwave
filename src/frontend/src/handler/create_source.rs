@@ -79,6 +79,7 @@ pub(crate) fn make_prost_source(
         name,
         info: Some(source_info),
         owner: session.user_id(),
+        independent_compaction_group_type: 0,
     })
 }
 

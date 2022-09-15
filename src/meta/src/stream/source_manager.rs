@@ -605,7 +605,11 @@ where
         // Register beforehand and is safeguarded by CompactionGroupManager::purge_stale_members.
         let registered_table_ids = self
             .compaction_group_manager
-            .register_source(source.id, &HashMap::new())
+            .register_source(
+                source.id,
+                &HashMap::new(),
+                source.independent_compaction_group_type,
+            )
             .await?;
         let compaction_group_manager_ref = self.compaction_group_manager.clone();
         revert_funcs.push(Box::pin(async move {

@@ -40,6 +40,7 @@ message Source {
     TableSourceInfo table_source = 6;
   }
   uint32 owner = 7;
+  uint32 independent_compaction_group_type = 8;
 }
 
 message Sink {
