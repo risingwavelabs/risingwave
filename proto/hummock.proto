@@ -180,7 +180,14 @@ message CompactTask {
     PENDING = 0;
     SUCCESS = 1;
     FAILED = 2;
-    CANCELED = 3;
+    HEARTBEAT_CANCELED = 3;
+    NO_AVAIL_CANCELED = 4;
+    ASSIGN_FAILL_CANCELED = 5;
+    SEND_FAILL_CANCELED = 6;
+    MANUAL_CANCELED = 7;
+    EXECUTE_FAILED = 8;
+    JOIN_HANDLE_FAILED = 9;
+    TRACK_SST_ID_FAILED = 10;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;

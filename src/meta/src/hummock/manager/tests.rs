@@ -156,12 +156,12 @@ async fn test_hummock_compaction_task() {
 
     // Cancel the task and succeed.
     assert!(hummock_manager
-        .cancel_compact_task(&mut compact_task)
+        .cancel_compact_task(&mut compact_task, TaskStatus::ManualCanceled)
         .await
         .unwrap());
     // Cancel a non-existent task and succeed.
     assert!(hummock_manager
-        .cancel_compact_task(&mut compact_task)
+        .cancel_compact_task(&mut compact_task, TaskStatus::ManualCanceled)
         .await
         .unwrap());
 

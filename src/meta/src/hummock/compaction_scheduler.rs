@@ -19,6 +19,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::error::SendError;
@@ -159,25 +160,33 @@ where
         let schedule_status = self
             .pick_and_assign_impl(compaction_group, request_channel)
             .await;
-        let cancel_task = match &schedule_status {
-            ScheduleStatus::Ok => None,
-            ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
-            ScheduleStatus::NoAvailableCompactor(task)
-            | ScheduleStatus::AssignFailure(task)
-            | ScheduleStatus::SendFailure(task) => Some(task.clone()),
+        let (cancel_task, cancle_task_state) = match &schedule_status {
+            ScheduleStatus::Ok => (None, None),
+            ScheduleStatus::NoTask | ScheduleStatus::PickFailure => (None, None),
+            ScheduleStatus::NoAvailableCompactor(task) => {
+                (Some(task.clone()), Some(TaskStatus::NoAvailCanceled))
+            }
+            ScheduleStatus::AssignFailure(task) => {
+                (Some(task.clone()), Some(TaskStatus::AssignFaillCanceled))
+            }
+            ScheduleStatus::SendFailure(task) => {
+                (Some(task.clone()), Some(TaskStatus::SendFaillCanceled))
+            }
         };
-        if let Some(mut compact_task) = cancel_task {
+
+        if let (Some(mut compact_task), Some(task_state)) = (cancel_task, cancle_task_state) {
             // Try to cancel task immediately.
             if let Err(err) = self
                 .hummock_manager
-                .cancel_compact_task(&mut compact_task)
+                .cancel_compact_task(&mut compact_task, task_state)
                 .await
             {
                 // Cancel task asynchronously.
                 tracing::warn!(
-                    "Failed to cancel task {}. {}. It will be cancelled asynchronously.",
+                    "Failed to cancel task {}. {}. {:?} It will be cancelled asynchronously.",
                     compact_task.task_id,
-                    err
+                    err,
+                    cancle_task_state
                 );
                 self.env
                     .notification_manager()
