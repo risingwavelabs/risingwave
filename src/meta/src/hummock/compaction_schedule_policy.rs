@@ -69,8 +69,11 @@ pub trait CompactionSchedulePolicy: Send + Sync {
 
 // This strategy is retained just for reference, it is not used.
 pub struct RoundRobinPolicy {
-    /// The context ids of compactors.
-    compactors: Vec<(HummockContextId, /* is not frozen */ bool)>,
+    /// The context ids of active compactors.
+    active_compactors: Vec<HummockContextId>,
+
+    /// The context ids of frozen compactors.
+    frozen_compactors: Vec<HummockContextId>,
 
     /// TODO: Let each compactor have its own Mutex, we should not need to lock whole thing.
     /// The outer lock is a RwLock, so we should still be able to modify each compactor
@@ -84,7 +87,8 @@ pub struct RoundRobinPolicy {
 impl RoundRobinPolicy {
     pub fn new() -> Self {
         Self {
-            compactors: vec![],
+            active_compactors: vec![],
+            frozen_compactors: vec![],
             compactor_map: HashMap::new(),
             next_compactor: 0,
         }
@@ -96,43 +100,33 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
-        if self.compactors.is_empty() {
+        if self.active_compactors.is_empty() {
             return None;
         }
-        let compactor_index = self.next_compactor % self.compactors.len();
-        for (context_id, is_not_frozen) in self.compactors[compactor_index..]
+        let compactor_index = self.next_compactor % self.active_compactors.len();
+        for context_id in self.active_compactors[compactor_index..]
             .iter()
-            .chain(&self.compactors[..compactor_index])
+            .chain(&self.active_compactors[..compactor_index])
         {
-            if *is_not_frozen {
-                let compactor = self.compactor_map.get(context_id).unwrap();
-                if *compactor_assigned_task_num
-                    .get(&compactor.context_id())
-                    .unwrap_or(&0)
-                    < compactor.max_concurrent_task_number()
-                {
-                    return Some(compactor.clone());
-                }
+            let compactor = self.compactor_map.get(context_id).unwrap();
+            if *compactor_assigned_task_num
+                .get(&compactor.context_id())
+                .unwrap_or(&0)
+                < compactor.max_concurrent_task_number()
+            {
+                return Some(compactor.clone());
             }
         }
         None
     }
 
     fn next_compactor(&self) -> Option<Arc<Compactor>> {
-        if self.compactors.is_empty() {
+        if self.active_compactors.is_empty() {
             return None;
         }
-        let compactor_index = self.next_compactor % self.compactors.len();
-        for (context_id, is_not_frozen) in self.compactors[compactor_index..]
-            .iter()
-            .chain(&self.compactors[..compactor_index])
-        {
-            if *is_not_frozen {
-                let compactor = self.compactor_map.get(context_id).unwrap();
-                return Some(compactor.clone());
-            }
-        }
-        None
+        let compactor_index = self.next_compactor % self.active_compactors.len();
+        let compactor = self.active_compactors[compactor_index];
+        Some(self.compactor_map.get(&compactor).unwrap().clone())
     }
 
     fn add_compactor(
@@ -141,8 +135,9 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
-        self.compactors.retain(|(c, _)| *c != context_id);
-        self.compactors.push((context_id, true));
+        self.active_compactors.retain(|c| *c != context_id);
+        self.frozen_compactors.retain(|c| *c != context_id);
+        self.active_compactors.push(context_id);
         self.compactor_map.insert(
             context_id,
             Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
@@ -151,15 +146,15 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
     }
 
     fn freeze_compactor(&mut self, context_id: HummockContextId) {
-        self.compactors.iter_mut().for_each(|(c, is_not_frozen)| {
-            if *c == context_id {
-                *is_not_frozen = false;
-            }
-        });
+        if let Some(pos) = self.active_compactors.iter().position(|c| *c == context_id) {
+            self.frozen_compactors.push(context_id);
+            self.active_compactors.remove(pos);
+        }
     }
 
     fn remove_compactor(&mut self, context_id: HummockContextId) {
-        self.compactors.retain(|(c, _)| *c != context_id);
+        self.active_compactors.retain(|c| *c != context_id);
+        self.frozen_compactors.retain(|c| *c != context_id);
         self.compactor_map.remove(&context_id);
     }
 
@@ -175,22 +170,14 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         if !self.compactor_map.contains_key(&context_id) {
             return Err(Error::InvalidContext(context_id));
         }
-        let end_next_compactor = self.next_compactor + self.compactors.len();
-        loop {
-            self.next_compactor += 1;
-            if self.next_compactor >= end_next_compactor
-                || self.compactors[self.next_compactor % self.compactors.len()].1
-            {
-                break;
-            }
-        }
+        self.next_compactor += 1;
         Ok(())
     }
 
     fn report_compact_task(&mut self, _context_id: HummockContextId, _compact_task: &CompactTask) {}
 
     fn compactor_num(&self) -> usize {
-        self.compactors.len()
+        self.active_compactors.len() + self.frozen_compactors.len()
     }
 }
 
@@ -281,14 +268,13 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
         for (compactor, is_not_frozen) in self.score_to_compactor.values() {
-            if *is_not_frozen {
-                if *compactor_assigned_task_num
+            if *is_not_frozen
+                && *compactor_assigned_task_num
                     .get(&compactor.context_id())
                     .unwrap_or(&0)
                     < compactor.max_concurrent_task_number()
-                {
-                    return Some(compactor.clone());
-                }
+            {
+                return Some(compactor.clone());
             }
         }
         None
@@ -453,14 +439,14 @@ mod tests {
     async fn test_rr_add_remove_compactor() {
         let mut policy = RoundRobinPolicy::new();
         // No compactors by default.
-        assert_eq!(policy.compactors.len(), 0);
+        assert_eq!(policy.active_compactors.len(), 0);
 
         let mut receiver = policy.add_compactor(1, u64::MAX);
-        assert_eq!(policy.compactors.len(), 1);
+        assert_eq!(policy.active_compactors.len(), 1);
         let _receiver_2 = policy.add_compactor(2, u64::MAX);
-        assert_eq!(policy.compactors.len(), 2);
+        assert_eq!(policy.active_compactors.len(), 2);
         policy.remove_compactor(2);
-        assert_eq!(policy.compactors.len(), 1);
+        assert_eq!(policy.active_compactors.len(), 1);
 
         // No compact task there.
         assert!(matches!(
@@ -470,7 +456,7 @@ mod tests {
 
         let task = dummy_compact_task(123, 0);
         let compactor = {
-            let compactor_id = policy.compactors.first().unwrap().0;
+            let compactor_id = policy.active_compactors.first().unwrap();
             policy.compactor_map.get(&compactor_id).unwrap().clone()
         };
         compactor
@@ -483,7 +469,7 @@ mod tests {
         assert_eq!(received_compact_task, task);
 
         policy.remove_compactor(compactor.context_id());
-        assert_eq!(policy.compactors.len(), 0);
+        assert_eq!(policy.active_compactors.len(), 0);
         drop(compactor);
         assert!(matches!(
             receiver.try_recv().unwrap_err(),
@@ -507,7 +493,7 @@ mod tests {
 
         // Add a compactor.
         let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX);
-        assert_eq!(compactor_manager.compactors.len(), 1);
+        assert_eq!(compactor_manager.active_compactors.len(), 1);
         let compactor = compactor_manager.next_compactor().unwrap();
         // No compact task.
         assert!(matches!(
@@ -531,7 +517,7 @@ mod tests {
         assert_eq!(received_compact_task, task);
 
         compactor_manager.remove_compactor(compactor.context_id());
-        assert_eq!(compactor_manager.compactors.len(), 0);
+        assert_eq!(compactor_manager.active_compactors.len(), 0);
         assert!(compactor_manager.next_compactor().is_none());
     }
 
@@ -542,7 +528,7 @@ mod tests {
         for context_id in 0..5 {
             receivers.push(policy.add_compactor(context_id, u64::MAX));
         }
-        assert_eq!(policy.compactors.len(), 5);
+        assert_eq!(policy.active_compactors.len(), 5);
         let task = dummy_compact_task(0, 1);
         for i in 0..receivers.len() * 3 {
             let compactor = policy.next_compactor().unwrap();
