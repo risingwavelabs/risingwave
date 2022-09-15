@@ -209,7 +209,7 @@ def section_compaction(outer_panels):
             ]),
             panels.timeseries_count("Compaction Success & Failure Count", [
                 panels.target(
-                    "sum(storage_level_compact_frequency) by (instance, group, result)", "{{instance}} - {{result}} - group-{{group}}"
+                    "sum(storage_level_compact_frequency) by (compactor, group, result)", "{{result}} - group-{{group}} @ {{compactor}}"
                 ),
             ]),
 

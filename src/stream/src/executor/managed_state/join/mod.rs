@@ -171,7 +171,7 @@ impl EstimateSize for EncodedJoinRow {
     }
 }
 
-// Memcomparable encoding.
+/// Memcomparable encoding.
 type PkType = Vec<u8>;
 
 pub type StateValueType = EncodedJoinRow;

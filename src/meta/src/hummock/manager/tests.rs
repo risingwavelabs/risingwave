@@ -1077,9 +1077,6 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 async fn test_extend_ssts_to_delete() {
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    hummock_manager
-        .compactor_manager
-        .add_compactor(context_id, u64::MAX);
     let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
     let max_committed_sst_id = sst_infos
         .iter()
