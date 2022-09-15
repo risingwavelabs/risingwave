@@ -201,14 +201,15 @@ fn infer_type_for_special(
                     // common_type = align_types(array(left_type, right_type))
                     // How do I write this in a rust way? Look up how to do proper rust-like nested error handling
                     // let res = align_types(inputs.iter_mut()); 
-                    if let Ok(res) = align_types(inputs.iter_mut()) {
+                    if let Ok(res) = align_types(inputs.iter_mut()) { // array + array of different types
                         Some(res)
-                    } else if **left_elem_type == right_type {
+                    } else if **left_elem_type == right_type { // array + scalar of same type
                         // in this branch types are equal, so no casting is needed
                         Some(left_type.clone())
-                    } else if left_type == **right_elem_type {
+                    } else if left_type == **right_elem_type { // scalar + array of same type
                         Some(right_type.clone())
                     } else {
+                        panic!("in least restrictive");
                         let least_restrictive = least_restrictive((**left_elem_type).clone(), (**right_elem_type).clone()); 
                         match least_restrictive { // put function call here instead of variable?
                             Ok(res) => {
@@ -226,22 +227,12 @@ fn infer_type_for_special(
                                         Ok(input)
                                     })
                                     .try_collect()?;
-                                    
+
                                 Some(array_res)
                             }, 
                             Err(err) => None
                         }
                     }
-// TODO clean this up 
-/*
-if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
-    Some(left_type.clone()) // success
-} else if left_type == **right_elem_type {
-    Some(right_type.clone()) // success
-} else {
-    None
-}
-*/
                 }
                 _ => {
                     None
