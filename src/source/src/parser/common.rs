@@ -19,6 +19,13 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{str_to_date, str_to_time, str_to_timestamp};
 use serde_json::Value;
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
+use simd_json::{BorrowedValue, ValueAccess, value::StaticNode};
 
 macro_rules! ensure_float {
     ($v:ident, $t:ty) => {
@@ -88,7 +95,12 @@ pub(crate) fn json_parse_value(column: &ColumnDesc, value: Option<&Value>) -> Re
     }
 }
 
-
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
 fn do_parse_simd_json_value(column: &ColumnDesc, v: &BorrowedValue) -> Result<ScalarImpl> {
     let v = match column.data_type {
         DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
@@ -128,6 +140,12 @@ fn do_parse_simd_json_value(column: &ColumnDesc, v: &BorrowedValue) -> Result<Sc
 }
 
 
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
 pub(crate) fn simd_json_parse_value(column: &ColumnDesc, value: Option<&BorrowedValue>) -> Result<Datum> {
     match value {
         None | Some(BorrowedValue::Static(StaticNode::Null)) => Ok(None),

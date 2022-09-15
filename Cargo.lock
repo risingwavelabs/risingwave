@@ -4635,6 +4635,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "smallvec",
+ "speedate",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -5701,6 +5702,16 @@ checksum = "66d72b759436ae32898a2af0a14218dbf55efde3feeb170eb623637db85ee1e0"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "speedate"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ddae0c66b5fc0cceffae4ef2f7ad9f9f7636d3d0d3599ba849db08eb1a313b9"
+dependencies = [
+ "strum",
+ "strum_macros",
 ]
 
 [[package]]

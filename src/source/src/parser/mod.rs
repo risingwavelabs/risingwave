@@ -19,26 +19,7 @@ use std::sync::Arc;
 pub use avro_parser::*;
 pub use debezium::*;
 use itertools::Itertools;
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-{
-    mod json_parser;
-    pub use json_parser::*;
-}
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
-{
-    mod simd_json_parser;
-    pub use simd_json_parser::*;
-}
+pub use json_parser::*;
 pub use protobuf_parser::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
@@ -48,6 +29,7 @@ use risingwave_common::types::Datum;
 
 use crate::{SourceColumnDesc, SourceFormat};
 
+mod json_parser;
 mod avro_parser;
 mod common;
 mod debezium;

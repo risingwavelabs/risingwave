@@ -4,13 +4,13 @@ use rand::distributions::Alphanumeric;
 use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::DataType;
-use risingwave_source::parser::{JsonParser, JsonParserV2};
+use risingwave_source::parser::JsonParser;
 use risingwave_source::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
 const NUM_RECORDS: usize = 1 << 18; // ~ 4 million
 
 fn generate_json(rng: &mut impl Rng) -> String {
-    format!("{{\"i32\":{},\"bool\":{},\"i16\":{},\"i64\":{},\"f32\":{},\"f64\":{},\"varchar\":\"{}\",\"date\":\"{}\"}}",//,\"timestamp\":\"{}\"}}",
+    format!("{{\"i32\":{},\"bool\":{},\"i16\":{},\"i64\":{},\"f32\":{},\"f64\":{},\"varchar\":\"{}\",\"date\":\"{}\",\"timestamp\":\"{}\"}}",
         rng.gen::<i32>(),
         rng.gen::<bool>(),
         rng.gen::<i16>(),

@@ -47,7 +47,7 @@ pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
 
 #[inline(always)]
 pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
-    if let Ok(time) = NaiveTime::parse_from_str(elem, "%H:%M:%S%.f") {
+    if let Ok(time) = NaiveTime::parse_from_str(elem, "%H:%M:%S") {
         return Ok(NaiveTimeWrapper::new(time));
     }
     if let Ok(time) = NaiveTime::parse_from_str(elem, "%H:%M") {
@@ -58,7 +58,7 @@ pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
 
 #[inline(always)]
 pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
-    if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S%.f") {
+    if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S") {
         return Ok(NaiveDateTimeWrapper::new(timestamp));
     }
     if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M") {
