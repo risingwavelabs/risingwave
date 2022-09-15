@@ -16,7 +16,7 @@ use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::StreamExt;
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
@@ -38,7 +38,7 @@ use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
-use crate::executor::PROCESSING_WINDOW_SIZE;
+use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
 
 pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
@@ -258,6 +258,15 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             self.ctx.id,
             self.metrics.clone(),
         );
+
+        pin_mut!(aligned_stream);
+
+        let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
+        self.right_table.init_epoch(barrier.epoch.prev);
+        self.range_cache.init(barrier.epoch);
+
+        // The first barrier message should be propagated.
+        yield Message::Barrier(barrier);
 
         let mut stream_chunk_builder =
             StreamChunkBuilder::new(PROCESSING_WINDOW_SIZE, &self.schema.data_types(), 0, 0)?;
