@@ -204,13 +204,33 @@ fn infer_type_for_special(
                     if let Ok(res) = align_types(inputs.iter_mut()) {
                         Some(res)
                     } else if **left_elem_type == right_type {
-                        // if left_elem_type is numeric and right_type is int, cast right_type to numeric
-                        // if left_elem_type is int and right_type is numeric, cast left_type to numeric[]
+                        // in this branch types are equal, so no casting is needed
                         Some(left_type.clone())
                     } else if left_type == **right_elem_type {
                         Some(right_type.clone())
                     } else {
-                        None
+                        let least_restrictive = least_restrictive((**left_elem_type).clone(), (**right_elem_type).clone()); 
+                        match least_restrictive { // put function call here instead of variable?
+                            Ok(res) => {
+                                let array_res = DataType::List { datatype: Box::new(res.clone()) };
+                              
+                                let inputs_owned = std::mem::take(inputs);
+                                *inputs = inputs_owned
+                                    .into_iter()
+                                    .map(|input|  {
+                                        if input.return_type().is_numeric() {
+                                            return input.cast_implicit(res.clone());
+                                        } else {
+                                            return input.cast_implicit(array_res.clone());
+                                        }
+                                        Ok(input)
+                                    })
+                                    .try_collect()?;
+                                    
+                                Some(array_res)
+                            }, 
+                            Err(err) => None
+                        }
                     }
 // TODO clean this up 
 /*
@@ -287,11 +307,12 @@ if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
             let left_type = inputs[0].return_type();
             // TODO: remove the clone here
             let res = least_restrictive(*right_ele_type_deref, left_type.clone());
-            let array_type = DataType::List { datatype: Box::new(res?) };
-            inputs[0].cast_implicit(res?);
-            inputs[1].cast_implicit(array_type);
+            let array_type = DataType::List { datatype: Box::new(res.clone()?) };
+// TODO: cast these as well
+            //            inputs[0].cast_implicit(res?);
+//            inputs[1].cast_implicit(array_type);
             let return_type = match res {
-                Ok(dt) => Some(dt.clone()), // Do I need clone here?
+                Ok(ret_type) => Some(ret_type.clone()), // Do I need clone here?
                 Err(err) => None, 
             }; 
             Ok(Some(return_type.ok_or_else(|| {
