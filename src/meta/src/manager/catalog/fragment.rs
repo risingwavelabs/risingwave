@@ -632,15 +632,11 @@ where
                             }
                         }
 
-                        println!("actor to pu {:#?}", actor_to_parallel_unit);
-
                         if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
                             let ActorMapping {
                                 original_indices,
                                 data,
                             } = actor_mapping;
-
-                            println!("actors {:?}", data);
 
                             let parallel_unit_data = data
                                 .iter()

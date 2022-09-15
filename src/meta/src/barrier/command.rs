@@ -342,8 +342,6 @@ where
                     dropped_actors,
                 });
                 tracing::trace!("update mutation: {mutation:#?}");
-                println!("update mutation: {mutation:#?}");
-
                 Some(mutation)
             }
         };
