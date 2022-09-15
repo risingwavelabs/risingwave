@@ -52,7 +52,7 @@ impl Expression for NestedConstructExpression {
                     children: t.fields.clone().into(),
                 },
             );
-            builder.append_array_refs(columns, input.capacity())?;
+            builder.append_array_refs(columns, input.capacity());
             Ok(Arc::new(ArrayImpl::Struct(builder.finish())))
         } else if let DataType::List { datatype } = &self.data_type {
             let columns = columns.into_iter().map(Column::new).collect();
@@ -63,13 +63,13 @@ impl Expression for NestedConstructExpression {
                     datatype: datatype.clone(),
                 },
             );
-            chunk.rows_with_holes().try_for_each(|row| {
+            for row in chunk.rows_with_holes() {
                 if let Some(row) = row {
-                    builder.append_row_ref(row)
+                    builder.append_row_ref(row);
                 } else {
-                    builder.append_null()
+                    builder.append_null();
                 }
-            })?;
+            }
             Ok(Arc::new(ArrayImpl::List(builder.finish())))
         } else {
             Err(ExprError::UnsupportedFunction(

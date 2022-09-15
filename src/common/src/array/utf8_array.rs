@@ -141,7 +141,7 @@ impl Utf8Array {
     pub fn from_slice(data: &[Option<&str>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i).unwrap();
+            builder.append(*i);
         }
         builder.finish()
     }
@@ -178,7 +178,7 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         }
     }
 
-    fn append<'a>(&'a mut self, value: Option<&'a str>) -> ArrayResult<()> {
+    fn append<'a>(&'a mut self, value: Option<&'a str>) {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -190,10 +190,9 @@ impl ArrayBuilder for Utf8ArrayBuilder {
                 self.offset.push(self.data.len())
             }
         }
-        Ok(())
     }
 
-    fn append_array(&mut self, other: &Utf8Array) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &Utf8Array) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -202,7 +201,6 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         for other_offset in &other.offset[1..] {
             self.offset.push(*other_offset + start);
         }
-        Ok(())
     }
 
     fn pop(&mut self) -> Option<()> {
@@ -255,7 +253,7 @@ pub struct BytesWriter {
 impl BytesWriter {
     /// `write_ref` will consume `BytesWriter` and pass the ownership of `builder` to `BytesGuard`.
     pub fn write_ref(mut self, value: &str) -> ArrayResult<BytesGuard> {
-        self.builder.append(Some(value))?;
+        self.builder.append(Some(value));
         Ok(BytesGuard {
             builder: self.builder,
         })
@@ -332,9 +330,9 @@ mod tests {
         let mut builder = Utf8ArrayBuilder::new(0);
         for i in 0..100 {
             if i % 2 == 0 {
-                builder.append(Some(&format!("{}", i))).unwrap();
+                builder.append(Some(&format!("{}", i)));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         builder.finish();

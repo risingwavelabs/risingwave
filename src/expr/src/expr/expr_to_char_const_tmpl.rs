@@ -45,12 +45,12 @@ impl Expression for ExprToCharConstTmpl {
         let mut output = Utf8ArrayBuilder::new(input.capacity());
         for (data, vis) in data_arr.iter().zip_eq(input.vis().iter()) {
             if !vis {
-                output.append_null()?;
+                output.append_null();
             } else if let Some(data) = data {
                 let res = data.0.format(&self.ctx.chrono_tmpl).to_string();
-                output.append(Some(res.as_str()))?;
+                output.append(Some(res.as_str()));
             } else {
-                output.append_null()?;
+                output.append_null();
             }
         }
 

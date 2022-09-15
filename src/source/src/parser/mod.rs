@@ -110,7 +110,7 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append_datum(&output).unwrap()
+        builder.append_datum(&output)
     }
 
     #[inline(always)]
@@ -133,7 +133,7 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append_datum(&output).unwrap()
+        builder.append_datum(&output)
     }
 
     #[inline(always)]
@@ -156,8 +156,8 @@ impl OpAction for OpActionUpdate {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) {
-        builder.append_datum(&output.0).unwrap();
-        builder.append_datum(&output.1).unwrap();
+        builder.append_datum(&output.0);
+        builder.append_datum(&output.1);
     }
 
     #[inline(always)]
@@ -214,9 +214,22 @@ impl SourceStreamChunkRowWriter<'_> {
     /// # Arguments
     ///
     /// * `self`: Ownership is consumed so only one record can be written.
-    /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    pub fn insert(self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<WriteGuard> {
-        self.do_action::<OpActionInsert>(f)
+    /// * `f`: A closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
+    pub fn insert(
+        self,
+        mut f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
+    ) -> Result<WriteGuard> {
+        self.descs
+            .iter()
+            .zip_eq(self.builders.iter_mut())
+            .try_for_each(|(desc, builder)| -> Result<()> {
+                let datum = if desc.skip_parse { None } else { f(desc)? };
+                builder.append_datum(&datum);
+                Ok(())
+            })?;
+        self.op_builder.push(Op::Insert);
+
+        Ok(WriteGuard(()))
     }
 
     /// Write a `Delete` record to the [`StreamChunk`].

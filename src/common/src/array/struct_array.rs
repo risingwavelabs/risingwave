@@ -80,12 +80,12 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<StructRef<'_>>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<StructRef<'_>>) {
         match value {
             None => {
                 self.bitmap.append(false);
                 for child in &mut self.children_array {
-                    child.append_datum_ref(None)?;
+                    child.append_datum_ref(None);
                 }
             }
             Some(v) => {
@@ -93,22 +93,19 @@ impl ArrayBuilder for StructArrayBuilder {
                 let fields = v.fields_ref();
                 assert_eq!(fields.len(), self.children_array.len());
                 for (field_idx, f) in fields.into_iter().enumerate() {
-                    self.children_array[field_idx].append_datum_ref(f)?;
+                    self.children_array[field_idx].append_datum_ref(f);
                 }
             }
         }
         self.len += 1;
-        Ok(())
     }
 
-    fn append_array(&mut self, other: &StructArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &StructArray) {
         self.bitmap.append_bitmap(&other.bitmap);
-        self.children_array
-            .iter_mut()
-            .enumerate()
-            .try_for_each(|(i, a)| a.append_array(&other.children[i]))?;
+        for (i, a) in self.children_array.iter_mut().enumerate() {
+            a.append_array(&other.children[i]);
+        }
         self.len += other.len();
-        Ok(())
     }
 
     fn pop(&mut self) -> Option<()> {
@@ -148,15 +145,14 @@ pub struct StructArray {
 }
 
 impl StructArrayBuilder {
-    pub fn append_array_refs(&mut self, refs: Vec<ArrayRef>, len: usize) -> ArrayResult<()> {
+    pub fn append_array_refs(&mut self, refs: Vec<ArrayRef>, len: usize) {
         for _ in 0..len {
             self.bitmap.append(true);
         }
         self.len += len;
-        self.children_array
-            .iter_mut()
-            .zip_eq(refs.iter())
-            .try_for_each(|(a, r)| a.append_array(r))
+        for (a, r) in self.children_array.iter_mut().zip_eq(refs.iter()) {
+            a.append_array(r);
+        }
     }
 }
 
@@ -597,11 +593,9 @@ mod tests {
                 children: Arc::new([DataType::Int32, DataType::Float32]),
             },
         );
-        struct_values.iter().for_each(|v| {
-            builder
-                .append(v.as_ref().map(|s| s.as_scalar_ref()))
-                .unwrap()
-        });
+        for v in &struct_values {
+            builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
+        }
         let arr = builder.finish();
         assert_eq!(arr.values_vec(), struct_values);
     }
@@ -724,7 +718,7 @@ mod tests {
                 children: Arc::new(fields.clone()),
             },
         );
-        builder.append(Some(struct_ref)).unwrap();
+        builder.append(Some(struct_ref));
         let array = builder.finish();
         let struct_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
@@ -831,12 +825,8 @@ mod tests {
                     children: Arc::from(fields),
                 },
             );
-            builder
-                .append(Some(StructRef::ValueRef { val: &lhs }))
-                .unwrap();
-            builder
-                .append(Some(StructRef::ValueRef { val: &rhs }))
-                .unwrap();
+            builder.append(Some(StructRef::ValueRef { val: &lhs }));
+            builder.append(Some(StructRef::ValueRef { val: &rhs }));
             let array = builder.finish();
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
