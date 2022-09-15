@@ -33,6 +33,7 @@ use super::{
     BlockLocation, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult,
     ObjectStore, StreamingUploader,
 };
+use crate::object::try_update_failure_metric;
 
 type PartId = i32;
 
@@ -96,6 +97,7 @@ impl S3StreamingUploader {
     }
 
     fn upload_next_part(&mut self) {
+        let operation_type = "s3_upload_part";
         let data = self.buf.drain(..).collect_vec();
         let len = self.not_uploaded_len;
         debug_assert_eq!(
@@ -112,15 +114,15 @@ impl S3StreamingUploader {
         let metrics = self.metrics.clone();
         metrics
             .operation_size
-            .with_label_values(&["s3_upload_part"])
+            .with_label_values(&[operation_type])
             .observe(len as f64);
 
         self.join_handles.push(tokio::spawn(async move {
-            let timer = metrics
+            let _timer = metrics
                 .operation_latency
-                .with_label_values(&["s3", "s3_upload_part"])
+                .with_label_values(&["s3", operation_type])
                 .start_timer();
-            let upload_output = client_cloned
+            let upload_output_res = client_cloned
                 .upload_part()
                 .bucket(bucket)
                 .key(key)
@@ -129,9 +131,10 @@ impl S3StreamingUploader {
                 .body(get_upload_body(data))
                 .content_length(len as i64)
                 .send()
-                .await?;
-            timer.observe_duration();
-            Ok((part_id, upload_output))
+                .await
+                .map_err(ObjectError::s3);
+            try_update_failure_metric(&metrics, &upload_output_res, operation_type);
+            Ok((part_id, upload_output_res?))
         }));
     }
 
