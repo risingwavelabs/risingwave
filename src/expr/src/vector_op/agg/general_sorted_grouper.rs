@@ -158,7 +158,7 @@ where
     }
 
     pub fn output_concrete(&mut self, builder: &mut T::Builder) -> Result<()> {
-        builder.append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))?;
+        builder.append(self.group_value.as_ref().map(|x| x.as_scalar_ref()));
         self.ongoing = false;
         self.group_value = None;
         Ok(())
