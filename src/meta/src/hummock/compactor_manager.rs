@@ -116,7 +116,6 @@ impl Compactor {
 /// Furthermore, the compactor for a compaction task must be picked with `CompactorManager`,
 /// or its internal states might not be correctly maintained.
 pub struct CompactorManager {
-    // `policy` must be locked before `compactor_assigned_task_num`.
     policy: RwLock<Box<dyn CompactionSchedulePolicy>>,
 
     pub task_expiry_seconds: u64,
@@ -131,14 +130,6 @@ impl CompactorManager {
     ) -> MetaResult<Self> {
         // Retrieve the existing task assignments from metastore.
         let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
-        // Initialize the number of tasks assigned to each comapctor.
-        let mut compactor_assigned_task_num = HashMap::new();
-        task_assignment.iter().for_each(|assignment| {
-            compactor_assigned_task_num
-                .entry(assignment.context_id)
-                .and_modify(|n| *n += 1)
-                .or_insert(1);
-        });
         let manager = Self {
             policy: RwLock::new(Box::new(ScoredPolicy::new_with_task_assignment(
                 &task_assignment,
