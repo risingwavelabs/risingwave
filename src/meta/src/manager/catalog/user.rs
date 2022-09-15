@@ -403,7 +403,7 @@ mod tests {
         let mut txn = Transaction::default();
         let users_need_update = CatalogManager::<MemStore>::release_privileges(
             catalog_manager.list_users().await,
-            &object,
+            &[object],
             &mut txn,
         )?;
         catalog_manager.env.meta_store().txn(txn).await?;

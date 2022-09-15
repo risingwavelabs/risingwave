@@ -28,8 +28,9 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
-    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
+    CatalogDeletedId, CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory,
+    IdCategoryType, MetaSrvEnv, NotificationVersion, SourceId, StreamingJob,
+    TableBackgroundDeleterRef, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -47,6 +48,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+    table_background_deleter: TableBackgroundDeleterRef,
     ddl_lock: Arc<RwLock<()>>,
 }
 
@@ -62,6 +64,7 @@ where
         source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        table_background_deleter: TableBackgroundDeleterRef,
         ddl_lock: Arc<RwLock<()>>,
     ) -> Self {
         Self {
@@ -71,6 +74,7 @@ where
             source_manager,
             cluster_manager,
             fragment_manager,
+            table_background_deleter,
             ddl_lock,
         }
     }
@@ -104,7 +108,10 @@ where
     ) -> Result<Response<DropDatabaseResponse>, Status> {
         let req = request.into_inner();
         let database_id = req.get_database_id();
-        let version = self.catalog_manager.drop_database(database_id).await?;
+        let (version, table_ids) = self.catalog_manager.drop_database(database_id).await?;
+
+        self.table_background_deleter.delete(table_ids);
+
         Ok(Response::new(DropDatabaseResponse {
             status: None,
             version,
@@ -220,16 +227,14 @@ where
         &self,
         request: Request<DropSinkRequest>,
     ) -> Result<Response<DropSinkResponse>, Status> {
-        use risingwave_common::catalog::TableId;
         let sink_id = request.into_inner().sink_id;
 
         // 1. Drop sink in catalog.
         let version = self.catalog_manager.drop_sink(sink_id).await?;
 
-        // 2. drop sink in stream manager
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(sink_id))
-            .await?;
+        // 2. drop sink in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![CatalogDeletedId::SinkId(sink_id.into())]);
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -265,7 +270,6 @@ where
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
         let _ddl_lock = self.ddl_lock.read().await;
-        use risingwave_common::catalog::TableId;
 
         self.env.idle_manager().record_activity();
 
@@ -281,10 +285,9 @@ where
             .drop_table(table_id, internal_tables)
             .await?;
 
-        // 2. drop mv in stream manager
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(table_id))
-            .await?;
+        // 2. drop mv in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![CatalogDeletedId::TableId(table_id.into())]);
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -321,7 +324,6 @@ where
         request: Request<DropIndexRequest>,
     ) -> Result<Response<DropIndexResponse>, Status> {
         let _ddl_lock = self.ddl_lock.read().await;
-        use risingwave_common::catalog::TableId;
 
         self.env.idle_manager().record_activity();
 
@@ -339,10 +341,9 @@ where
             .drop_index(index_id, index_table_id, internal_tables)
             .await?;
 
-        // 2. drop mv(index) in stream manager
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(index_table_id))
-            .await?;
+        // 2. drop mv(index) in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![CatalogDeletedId::TableId(index_table_id.into())]);
 
         Ok(Response::new(DropIndexResponse {
             status: None,
