@@ -695,7 +695,7 @@ impl Session for SessionImpl {
         format: bool,
     ) -> std::result::Result<PgResponse, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql).map_err(|e| { // parse string into statement -> AST
+        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
