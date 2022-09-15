@@ -51,15 +51,15 @@ pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<
             continue;
         }
         ret_type = match ret_type {
-            None => Some(e.return_type()), // detect return type
-            Some(t) => Some(least_restrictive(t, e.return_type())?), // abort if we cannot find common type 
+            None => Some(e.return_type()),
+            Some(t) => Some(least_restrictive(t, e.return_type())?),
         };
     }
     let ret_type = ret_type.unwrap_or(DataType::Varchar);
     for e in exprs {
         let mut dummy = ExprImpl::literal_bool(false);
         swap(&mut dummy, e);
-        *e = dummy.cast_implicit(ret_type.clone())?; // cast to return type 
+        *e = dummy.cast_implicit(ret_type.clone())?;
     }
     Ok(ret_type)
 }
