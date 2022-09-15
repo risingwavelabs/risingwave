@@ -296,8 +296,7 @@ fn infer_type_for_special(
             let right_ele_type_deref = right_ele_type.clone();
 
             let left_type = inputs[0].return_type();
-            // TODO: remove the clone here
-            let res = least_restrictive(*right_ele_type_deref, left_type.clone());
+            let res = least_restrictive(*right_ele_type_deref, left_type);
             match res {
                 Ok(dt) => {
                     let array_type = DataType::List { datatype: Box::new(dt.clone()) };
