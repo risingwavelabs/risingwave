@@ -26,6 +26,7 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 /// is not supported on backend.
 pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<DataType> {
     if let Some(res) = infer_type_for_special(func_type, inputs).transpose() {
+        /* 
         // cast to res here? 
         let res_type = res.clone().unwrap();
 
@@ -39,7 +40,7 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
                 Ok(expr)
             })
             .try_collect()?;
-
+            */
         return res;
     }
 
@@ -199,10 +200,16 @@ fn infer_type_for_special(
                 ) => {
                     // common_type = align_types(array(left_type, right_type))
                     // How do I write this in a rust way? Look up how to do proper rust-like nested error handling
-                    let res = align_types(inputs.iter_mut()); 
-                    if res.is_ok() {
-                        Some(res.unwrap())
-                    }else {
+                    // let res = align_types(inputs.iter_mut()); 
+                    if let Ok(res) = align_types(inputs.iter_mut()) {
+                        Some(res)
+                    } else if **left_elem_type == right_type {
+                        // if left_elem_type is numeric and right_type is int, cast right_type to numeric
+                        // if left_elem_type is int and right_type is numeric, cast left_type to numeric[]
+                        Some(left_type.clone())
+                    } else if left_type == **right_elem_type {
+                        Some(right_type.clone())
+                    } else {
                         None
                     }
 // TODO clean this up 
@@ -280,6 +287,9 @@ if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
             let left_type = inputs[0].return_type();
             // TODO: remove the clone here
             let res = least_restrictive(*right_ele_type_deref, left_type.clone());
+            let array_type = DataType::List { datatype: Box::new(res?) };
+            inputs[0].cast_implicit(res?);
+            inputs[1].cast_implicit(array_type);
             let return_type = match res {
                 Ok(dt) => Some(dt.clone()), // Do I need clone here?
                 Err(err) => None, 
