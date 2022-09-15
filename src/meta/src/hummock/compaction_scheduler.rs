@@ -160,21 +160,20 @@ where
         let schedule_status = self
             .pick_and_assign_impl(compaction_group, request_channel)
             .await;
-        let (cancel_task, cancel_task_state) = match &schedule_status {
-            ScheduleStatus::Ok => (None, None),
-            ScheduleStatus::NoTask | ScheduleStatus::PickFailure => (None, None),
+
+        let cancel_state = match &schedule_status {
+            ScheduleStatus::Ok => None,
+            ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
             ScheduleStatus::NoAvailableCompactor(task) => {
-                (Some(task.clone()), Some(TaskStatus::NoAvailCanceled))
+                Some((task.clone(), TaskStatus::NoAvailCanceled))
             }
             ScheduleStatus::AssignFailure(task) => {
-                (Some(task.clone()), Some(TaskStatus::AssignFailCanceled))
+                Some((task.clone(), TaskStatus::AssignFailCanceled))
             }
-            ScheduleStatus::SendFailure(task) => {
-                (Some(task.clone()), Some(TaskStatus::SendFailCanceled))
-            }
+            ScheduleStatus::SendFailure(task) => Some((task.clone(), TaskStatus::SendFailCanceled)),
         };
 
-        if let (Some(mut compact_task), Some(task_state)) = (cancel_task, cancel_task_state) {
+        if let Some((mut compact_task, task_state)) = cancel_state {
             // Try to cancel task immediately.
             if let Err(err) = self
                 .hummock_manager
@@ -186,7 +185,7 @@ where
                     "Failed to cancel task {}. {}. {:?} It will be cancelled asynchronously.",
                     compact_task.task_id,
                     err,
-                    cancel_task_state
+                    task_state
                 );
                 self.env
                     .notification_manager()
