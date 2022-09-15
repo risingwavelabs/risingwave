@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
-use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 // use tokio::sync::Mutex;
@@ -46,9 +45,8 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::info;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
@@ -64,7 +62,7 @@ use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{
-    HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager, QueryMessage,
+    HummockSnapshotManager, HummockSnapshotManagerRef, QueryExecution, QueryManager,
 };
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
@@ -72,8 +70,6 @@ use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterIm
 use crate::user::UserId;
 use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts};
-// use crate::scheduler::QueryMessage;
-
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
@@ -455,8 +451,7 @@ pub struct SessionImpl {
 
     /// Shutdown channels map
     /// FIXME: Use weak key hash map to remove query id if query ends.
-    shutdown_receivers_map:
-        Arc<tokio::sync::Mutex<HashMap<QueryId, Option<mpsc::Sender<QueryMessage>>>>>,
+    query_executions_map: Arc<tokio::sync::Mutex<HashMap<QueryId, Arc<QueryExecution>>>>,
 
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
@@ -474,8 +469,8 @@ impl SessionImpl {
             auth_context,
             user_authenticator,
             config_map: RwLock::new(Default::default()),
-            shutdown_receivers_map: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             id,
+            query_executions_map: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -490,7 +485,7 @@ impl SessionImpl {
             )),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
-            shutdown_receivers_map: Default::default(),
+            query_executions_map: Default::default(),
             // Mock session use non-sense id.
             id: (0, 0),
         }
@@ -524,26 +519,15 @@ impl SessionImpl {
         self.config_map.write().set(key, value)
     }
 
-    pub async fn insert_query_shutdown_sender(
-        &self,
-        query_id: QueryId,
-        shutdown_tx: mpsc::Sender<QueryMessage>,
-    ) {
-        let mut write_guard = self.shutdown_receivers_map.lock().await;
-        write_guard.insert(query_id, Some(shutdown_tx));
+    pub async fn add_query(&self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
+        let mut write_guard = self.query_executions_map.lock().await;
+        write_guard.insert(query_id, query_execution);
     }
 
-    // // TODO: Support cancel query's in current session. This needs to store query ID in session.
-    // pub fn cancel_running_queries(&self) {
-    //     let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
-    //     for (query_id, sender) in &mut *write_guard {
-    //         if let Some(sender_swap) = mem::take(sender) {
-    //             sender_swap.send(QueryMessage::CancelQuery).await.unwrap();
-    //             info!("Cancel query_id {:?} in query manager", query_id);
-    //         }
-    //     }
-    //     write_guard.clear();
-    // }
+    pub async fn delete_query(&self, query_id: &QueryId) {
+        let mut write_guard = self.query_executions_map.lock().await;
+        write_guard.remove(query_id);
+    }
 
     pub fn session_id(&self) -> SessionId {
         self.id
@@ -788,12 +772,9 @@ impl Session for SessionImpl {
     }
 
     async fn cancel_running_queries(&self) {
-        let mut write_guard = self.shutdown_receivers_map.lock().await;
-        for (query_id, sender) in &mut *write_guard {
-            if let Some(sender_swap) = mem::take(sender) {
-                sender_swap.send(QueryMessage::CancelQuery).await.unwrap();
-                info!("Cancel query_id {:?} in query manager", query_id);
-            }
+        let mut write_guard = self.query_executions_map.lock().await;
+        for sender in (*write_guard).values_mut() {
+            sender.abort().await;
         }
         write_guard.clear();
     }

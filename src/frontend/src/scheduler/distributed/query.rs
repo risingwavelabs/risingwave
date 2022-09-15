@@ -22,9 +22,9 @@ use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use super::{QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
@@ -74,6 +74,8 @@ pub struct QueryExecution {
     stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
+
+    shutdown_tx: Sender<QueryMessage>,
 }
 
 struct QueryRunner {
@@ -92,7 +94,7 @@ struct QueryRunner {
 }
 
 impl QueryExecution {
-    pub async fn new(
+    pub fn new(
         context: ExecutionContextRef,
         query: Query,
         epoch: u64,
@@ -130,15 +132,6 @@ impl QueryExecution {
             Arc::new(stage_executions)
         };
 
-        // Insert shutdown channel into channel map so able to cancel it outside.
-        // TODO: Find a way to delete it when query ends.
-        {
-            let session_ctx = context.session.clone();
-            session_ctx
-                .insert_query_shutdown_sender(query.query_id.clone(), sender)
-                .await;
-        }
-
         let state = QueryState::Pending {
             msg_receiver: receiver,
         };
@@ -150,6 +143,7 @@ impl QueryExecution {
             epoch,
             compute_client_pool,
             hummock_snapshot_manager,
+            shutdown_tx: sender,
         }
     }
 
@@ -201,9 +195,17 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
-    #[expect(clippy::unused_async)]
-    pub async fn abort(&mut self) -> SchedulerResult<()> {
-        todo!()
+    pub async fn abort(&self) {
+        if self
+            .shutdown_tx
+            .send(QueryMessage::CancelQuery)
+            .await
+            .is_err()
+        {
+            warn!("Send cancel query request failed: the query has ended");
+        } else {
+            info!("Send cancel request to query-{:?}", self.query.query_id);
+        };
     }
 }
 
@@ -400,8 +402,7 @@ mod tests {
             ))),
             compute_client_pool,
             catalog_reader,
-        )
-        .await;
+        );
         assert!(query_execution.start().await.is_err());
     }
 

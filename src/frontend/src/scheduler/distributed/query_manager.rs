@@ -83,8 +83,8 @@ impl QueryManager {
             .get_epoch(query_id.clone())
             .await?
             .committed_epoch;
-
-        let query_execution = QueryExecution::new(
+        let query_id = query.query_id.clone();
+        let query_execution = Arc::new(QueryExecution::new(
             context.clone(),
             query,
             epoch,
@@ -92,8 +92,13 @@ impl QueryManager {
             self.hummock_snapshot_manager.clone(),
             self.compute_client_pool.clone(),
             self.catalog_reader.clone(),
-        )
-        .await;
+        ));
+
+        // Add queries status when begin.
+        context
+            .session()
+            .add_query(query_id.clone(), query_execution.clone())
+            .await;
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
         let query_result_fetcher = match query_execution.start().await {
@@ -106,7 +111,12 @@ impl QueryManager {
             }
         };
 
-        query_result_fetcher.collect_rows_from_channel(format).await
+        let ret = query_result_fetcher.collect_rows_from_channel(format).await;
+
+        // Clean up queries status when ends. Note this can not be automatically done by RAII.
+        context.session().delete_query(&query_id).await;
+
+        ret
     }
 }
 
