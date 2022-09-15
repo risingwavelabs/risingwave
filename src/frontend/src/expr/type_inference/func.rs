@@ -221,9 +221,8 @@ fn infer_type_for_special(
                                     .map(|input|  {
                                         if input.return_type().is_numeric() {
                                             return input.cast_implicit(res.clone());
-                                        } else {
-                                            return input.cast_implicit(array_res.clone());
                                         }
+                                        return input.cast_implicit(array_res.clone());
                                     })
                                     .try_collect()?;
 
@@ -270,15 +269,14 @@ fn infer_type_for_special(
             
                     let inputs_owned = std::mem::take(inputs);
                     *inputs = inputs_owned
-                    .into_iter()
-                    .map(|input|  {
-                        if input.return_type().is_numeric() {
-                            return input.cast_implicit(ele_type.clone());
-                        } else {
+                        .into_iter()
+                        .map(|input|  {
+                            if input.return_type().is_numeric() {
+                                return input.cast_implicit(ele_type.clone());
+                            }
                             return input.cast_implicit(array_type.clone());
-                        }
-                    })
-                    .try_collect()?;
+                        })
+                        .try_collect()?;
                     Ok(Some(array_type))
                 }
                 Err(_) => Err(ErrorCode::BindError(format!("Cannot append {} to {}.", right_type, left_type)).into())
@@ -306,15 +304,14 @@ fn infer_type_for_special(
             
                     let inputs_owned = std::mem::take(inputs);
                     *inputs = inputs_owned
-                    .into_iter()
-                    .map(|input|  {
-                        if input.return_type().is_numeric() {
-                            return input.cast_implicit(ele_type.clone());
-                        } else {
+                        .into_iter()
+                        .map(|input|  {
+                            if input.return_type().is_numeric() {
+                                return input.cast_implicit(ele_type.clone());
+                            }
                             return input.cast_implicit(array_type.clone());
-                        }
-                    })
-                    .try_collect()?;
+                        })
+                        .try_collect()?;
                     Ok(Some(array_type))
                 }
                 Err(_) => Err(ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type)).into())
