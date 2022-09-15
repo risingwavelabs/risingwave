@@ -119,6 +119,33 @@ impl TableCatalogBuilder {
     }
 
     /// Consume builder and create `TableCatalog` (for proto).
+    pub fn build_with_value_indices(
+        self,
+        distribution_key: Vec<usize>,
+        append_only: bool,
+        vnode_col_idx: Option<usize>,
+        value_indices: Vec<usize>,
+    ) -> TableCatalog {
+        TableCatalog {
+            id: TableId::placeholder(),
+            associated_source_id: None,
+            name: String::new(),
+            columns: self.columns.clone(),
+            order_key: self.order_key,
+            stream_key: self.stream_key,
+            is_index_on: None,
+            distribution_key,
+            appendonly: append_only,
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
+            properties: self.properties,
+            // TODO(zehua): replace it with FragmentId::placeholder()
+            fragment_id: FragmentId::MAX - 1,
+            vnode_col_idx,
+            value_indices,
+        }
+    }
+
+    /// Consume builder and create `TableCatalog` (for proto).
     pub fn build_with_column_mapping(
         self,
         distribution_key: Vec<usize>,
@@ -156,6 +183,10 @@ impl TableCatalogBuilder {
             append_only,
             vnode_col_idx_in_table_columns,
         )
+    }
+
+    pub fn get_columns(&self) -> &[ColumnCatalog] {
+        &self.columns
     }
 }
 
