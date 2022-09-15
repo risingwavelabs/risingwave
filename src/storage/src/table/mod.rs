@@ -18,7 +18,6 @@ pub mod streaming_table;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
@@ -97,10 +96,10 @@ pub trait TableIter: Send {
         }
 
         let chunk = {
-            let columns: Vec<Column> = builders
+            let columns: Vec<_> = builders
                 .into_iter()
-                .map(|builder| builder.finish().map(Into::into))
-                .try_collect()?;
+                .map(|builder| builder.finish().into())
+                .collect();
             DataChunk::new(columns, row_count)
         };
 

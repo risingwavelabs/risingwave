@@ -127,7 +127,7 @@ impl<S: StateStore> SourceExecutor<S> {
             builder.append(Some(row_id)).unwrap();
         }
 
-        builder.finish().unwrap().into()
+        builder.finish().into()
     }
 
     /// Generate a row ID column according to ops.
@@ -150,7 +150,7 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
+        Column::new(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
     async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {

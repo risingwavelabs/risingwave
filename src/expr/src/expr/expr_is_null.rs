@@ -119,7 +119,7 @@ mod tests {
             builder.append(Some(Decimal::from_str("0.1").unwrap()))?;
             builder.append(Some(Decimal::from_str("-0.1").unwrap()))?;
             builder.append(None)?;
-            builder.finish()?
+            builder.finish()
         };
 
         let input_chunk = DataChunk::new(

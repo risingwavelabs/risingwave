@@ -191,8 +191,7 @@ impl Binder {
                         BoundQuery {
                             body: BoundSetExpr::Select(Box::new(bound_query)),
                             order: vec![],
-                            // to guarantee at most one row
-                            limit: Some(1),
+                            limit: None,
                             offset: None,
                             extra_order_exprs: vec![],
                         },
