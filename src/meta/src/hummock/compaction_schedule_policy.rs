@@ -60,7 +60,7 @@ pub trait CompactionSchedulePolicy: Send + Sync {
     /// Notify the policy of the assignment of a compaction task to adjust the next compactor to
     /// schedule.
     ///
-    /// An error will be returned if `context_id` does not exist.
+    /// An error will be returned if `context_id` is removed.
     fn assign_compact_task(
         &mut self,
         context_id: HummockContextId,
