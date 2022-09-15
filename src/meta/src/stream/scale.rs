@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
+use std::cmp::{min, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
 
 use anyhow::{anyhow, Context};
 use futures::future::BoxFuture;
 use itertools::Itertools;
+use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -101,85 +102,86 @@ pub(crate) fn rebalance_actor_vnode(
     actors_to_create: &BTreeSet<ActorId>,
 ) -> HashMap<ActorId, Bitmap> {
     assert!(actors.len() > actors_to_remove.len());
+
     let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
-    assert_ne!(target_actor_count, 0);
+    assert!(target_actor_count > 0);
 
-    if actors_to_remove.len() == actors_to_create.len() {
-        let map: HashMap<_, _> = actors_to_remove
-            .iter()
-            .zip_eq(actors_to_create.iter())
-            .map(|(src, dst)| (*src, *dst))
-            .collect();
-        return actors
-            .iter()
-            .filter(|actor| map.contains_key(&actor.actor_id))
-            .map(|actor| {
-                let bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
-                (*map.get(&actor.actor_id).unwrap(), bitmap)
-            })
-            .collect();
-    }
-
+    // represents the balance of each actor, used to sort later
     struct Balance {
         actor_id: ActorId,
         balance: i32,
         builder: BitmapBuilder,
     }
 
-    let expected = (VIRTUAL_NODE_COUNT as f64 / target_actor_count as f64) as i32;
-    let mut remain = VIRTUAL_NODE_COUNT - expected as usize * target_actor_count;
+    let (expected, mut remain) = VIRTUAL_NODE_COUNT.div_rem(&target_actor_count);
 
-    println!("target is {}", expected);
+    let (mut removed, mut rest): (Vec<_>, Vec<_>) = actors
+        .iter()
+        .filter_map(|actor| {
+            actor
+                .vnode_bitmap
+                .as_ref()
+                .map(|buffer| (actor.actor_id as ActorId, Bitmap::from(buffer)))
+        })
+        .partition(|(actor_id, _)| actors_to_remove.contains(actor_id));
 
-    let mut v = VecDeque::with_capacity(actors_to_create.len() + actors.len());
-
-    for actor in actors {
-        if let Some(buffer) = actor.vnode_bitmap.as_ref() {
-            let bitmap = Bitmap::from(buffer);
-            let mut bitmap_builder = BitmapBuilder::default();
-            bitmap_builder.append_bitmap(&bitmap);
-
-            if actors_to_remove.contains(&actor.actor_id) {
-                v.push_front(Balance {
-                    actor_id: actor.actor_id as ActorId,
-                    balance: bitmap.num_high_bits() as i32,
-                    builder: bitmap_builder,
-                });
-
-                continue;
-            }
-
-            let mut balance = Balance {
-                actor_id: actor.actor_id as ActorId,
-                balance: (bitmap.num_high_bits() as i32) - expected,
-                builder: bitmap_builder,
-            };
-
-            if remain > 0 {
-                balance.balance -= 1;
-                remain -= 1;
-            }
-
-            if balance.balance != 0 {
-                v.push_back(balance);
-            }
-        }
-    }
-
-    for actor_id in actors_to_create {
-        let mut balance = Balance {
-            actor_id: *actor_id as ActorId,
-            balance: -expected,
-            builder: BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT),
+    let order_by_bitmap_desc =
+        |(_, bitmap_a): &(ActorId, Bitmap), (_, bitmap_b): &(ActorId, Bitmap)| -> Ordering {
+            bitmap_a
+                .num_high_bits()
+                .cmp(&bitmap_b.num_high_bits())
+                .reverse()
         };
 
+    let builder_from_bitmap = |bitmap: &Bitmap| -> BitmapBuilder {
+        let mut builder = BitmapBuilder::default();
+        builder.append_bitmap(bitmap);
+        builder
+    };
+
+    removed.sort_by(order_by_bitmap_desc);
+    rest.sort_by(order_by_bitmap_desc);
+
+    let removed_balances = removed.into_iter().map(|(actor_id, bitmap)| Balance {
+        actor_id,
+        balance: bitmap.num_high_bits() as i32,
+        builder: builder_from_bitmap(&bitmap),
+    });
+
+    let mut rest_balances = rest
+        .into_iter()
+        .map(|(actor_id, bitmap)| Balance {
+            actor_id,
+            balance: bitmap.num_high_bits() as i32 - expected as i32,
+            builder: builder_from_bitmap(&bitmap),
+        })
+        .collect_vec();
+
+    let mut created_balances = actors_to_create
+        .iter()
+        .map(|actor_id| Balance {
+            actor_id: *actor_id,
+            balance: -(expected as i32),
+            builder: BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT),
+        })
+        .collect_vec();
+
+    for balance in created_balances
+        .iter_mut()
+        .rev()
+        .chain(rest_balances.iter_mut())
+    {
         if remain > 0 {
             balance.balance -= 1;
             remain -= 1;
         }
-
-        v.push_back(balance)
     }
+
+    let mut v: VecDeque<_> = removed_balances
+        .chain(rest_balances.into_iter())
+        .chain(created_balances.into_iter())
+        .filter(|balance| balance.balance != 0)
+        .collect();
 
     let mut result = HashMap::with_capacity(target_actor_count);
 
@@ -1283,6 +1285,12 @@ mod tests {
 
         let actors_to_remove = btreeset! {100};
         let actors_to_add = btreeset! {105};
+        let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
+
+        assert_eq!(result.len(), actors_to_add.len());
+
+        let actors_to_remove = btreeset! {100, 101, 102};
+        let actors_to_add = btreeset! {105, 106, 107};
         let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
 
         assert_eq!(result.len(), actors_to_add.len());
