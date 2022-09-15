@@ -940,6 +940,12 @@ where
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
 
+        let task_label = match task_status {
+            TaskStatus::Success => "success",
+            TaskStatus::Failed => "failed",
+            TaskStatus::Canceled => "canceled",
+            _ => unreachable!(),
+        };
         if let Some(context_id) = assignee_context_id {
             // A task heartbeat is removed IFF we report the task status of a task and it still has
             // a valid assignment, OR we remove the node context from our list of nodes,
@@ -950,19 +956,34 @@ where
             // policy.
             self.compactor_manager
                 .report_compact_task(context_id, compact_task);
-        }
 
-        // Update compaaction task count.
-        let task_label = match task_status {
-            TaskStatus::Success => "success",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Canceled => "canceled",
-            _ => unreachable!(),
-        };
-        self.metrics
-            .compact_frequency
-            .with_label_values(&[&compact_task.compaction_group_id.to_string(), task_label])
-            .inc();
+            // Update compaaction task count.
+            //
+            // A corner case is that the compactor is deleted
+            // immediately after it reports the task and before the meta node handles
+            // it. In that case, its host address will not be obtainable.
+            if let Some(worker) = self.cluster_manager.get_worker_by_id(context_id).await {
+                let host = worker.worker_node.host.unwrap();
+                self.metrics
+                    .compact_frequency
+                    .with_label_values(&[
+                        &format!("{}:{}", host.host, host.port),
+                        &compact_task.compaction_group_id.to_string(),
+                        task_label,
+                    ])
+                    .inc();
+            }
+        } else {
+            // Update compaaction task count. The task will be marked as `unassigned`.
+            self.metrics
+                .compact_frequency
+                .with_label_values(&[
+                    "unassigned",
+                    &compact_task.compaction_group_id.to_string(),
+                    task_label,
+                ])
+                .inc();
+        }
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",
