@@ -21,9 +21,9 @@ use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
 #[derive(Debug)]
-pub struct JsonParserV3;
+pub struct JsonParser;
 
-impl SourceParser for JsonParserV3 {
+impl SourceParser for JsonParser {
     fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         let mut payload_mut = payload.to_vec();
         let value: Value = simd_json::to_borrowed_value(&mut payload_mut)
@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn test_json_parser() {
-        let parser = JsonParserV3;
+        let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc {
                 name: "i32".to_string(),
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_json_parse_struct() {
-        let parser = JsonParserV3 {};
+        let parser = JsonParser;
 
         let descs = vec![
             ColumnDesc::new_struct(
