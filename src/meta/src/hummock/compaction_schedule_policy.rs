@@ -43,6 +43,7 @@ pub trait CompactionSchedulePolicy: Send + Sync {
         max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>>;
 
+    /// It is allowed to remove a non-existent compactor
     fn remove_compactor(&mut self, context_id: HummockContextId);
 
     fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>>;
@@ -288,9 +289,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
 
     fn remove_compactor(&mut self, context_id: HummockContextId) {
         if let Some(pending_bytes) = self.compactor_to_score.remove(&context_id) {
-            self.score_to_compactor
-                .remove(&(pending_bytes, context_id))
-                .unwrap();
+            self.score_to_compactor.remove(&(pending_bytes, context_id));
         }
     }
 
