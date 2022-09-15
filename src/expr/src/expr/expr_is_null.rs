@@ -116,8 +116,8 @@ mod tests {
     ) -> Result<()> {
         let input_array = {
             let mut builder = DecimalArrayBuilder::new(3);
-            builder.append(Some(Decimal::from_str("0.1")));
-            builder.append(Some(Decimal::from_str("-0.1")));
+            builder.append(Some(Decimal::from_str("0.1").unwrap()));
+            builder.append(Some(Decimal::from_str("-0.1").unwrap()));
             builder.append(None);
             builder.finish()
         };

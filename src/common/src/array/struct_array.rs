@@ -583,11 +583,9 @@ mod tests {
                 children: Arc::new([DataType::Int32, DataType::Float32]),
             },
         );
-        struct_values.iter().for_each(|v| {
-            builder
-                .append(v.as_ref().map(|s| s.as_scalar_ref()))
-                .unwrap()
-        });
+        for v in &struct_values {
+            builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
+        }
         let arr = builder.finish();
         assert_eq!(arr.values_vec(), struct_values);
     }
@@ -817,12 +815,8 @@ mod tests {
                     children: Arc::from(fields),
                 },
             );
-            builder
-                .append(Some(StructRef::ValueRef { val: &lhs }))
-                .unwrap();
-            builder
-                .append(Some(StructRef::ValueRef { val: &rhs }))
-                .unwrap();
+            builder.append(Some(StructRef::ValueRef { val: &lhs }));
+            builder.append(Some(StructRef::ValueRef { val: &rhs }));
             let array = builder.finish();
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);

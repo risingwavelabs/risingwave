@@ -611,9 +611,7 @@ mod tests {
             },
         );
         list_values.iter().for_each(|v| {
-            builder
-                .append(v.as_ref().map(|s| s.as_scalar_ref()))
-                .unwrap()
+            builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
         });
         let arr = builder.finish();
         assert_eq!(arr.values_vec(), list_values);
@@ -757,11 +755,9 @@ mod tests {
                 }),
             },
         );
-        nested_list_values.iter().for_each(|v| {
-            builder
-                .append(v.as_ref().map(|s| s.as_scalar_ref()))
-                .unwrap()
-        });
+        for v in &nested_list_values {
+            builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
+        }
         let nestarray = builder.finish();
         assert_eq!(nestarray.values_vec(), nested_list_values);
     }
@@ -948,12 +944,8 @@ mod tests {
                     datatype: Box::new(datatype),
                 },
             );
-            builder
-                .append(Some(ListRef::ValueRef { val: &lhs }))
-                .unwrap();
-            builder
-                .append(Some(ListRef::ValueRef { val: &rhs }))
-                .unwrap();
+            builder.append(Some(ListRef::ValueRef { val: &lhs }));
+            builder.append(Some(ListRef::ValueRef { val: &rhs }));
             let array = builder.finish();
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);

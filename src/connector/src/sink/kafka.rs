@@ -592,9 +592,7 @@ mod test {
         let column_i32 = Column::new(Arc::new(ArrayImpl::from(column_i32_builder.finish())));
         let mut column_f32_builder = F32ArrayBuilder::new(10);
         for i in 0..10 {
-            column_f32_builder
-                .append(Some(OrderedF32::from(i as f32)))
-                .unwrap();
+            column_f32_builder.append(Some(OrderedF32::from(i as f32)));
         }
         let column_f32 = Column::new(Arc::new(ArrayImpl::from(column_f32_builder.finish())));
 

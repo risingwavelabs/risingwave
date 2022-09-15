@@ -224,9 +224,7 @@ mod tests {
         let mut builder = NaiveDateArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder
-                    .append(NaiveDateWrapper::with_days(i as i32).ok())
-                    .unwrap();
+                builder.append(NaiveDateWrapper::with_days(i as i32).ok());
             } else {
                 builder.append(None);
             }
@@ -254,9 +252,7 @@ mod tests {
         let mut builder = NaiveTimeArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder
-                    .append(NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000).ok())
-                    .unwrap();
+                builder.append(NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000).ok());
             } else {
                 builder.append(None);
             }
@@ -287,8 +283,7 @@ mod tests {
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder
-                    .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok())
-                    .unwrap();
+                    .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok());
             } else {
                 builder.append(None);
             }

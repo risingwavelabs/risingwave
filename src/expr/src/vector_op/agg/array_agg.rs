@@ -199,7 +199,10 @@ mod tests {
         agg.output(&mut builder)?;
         let output = builder.finish();
         let actual = output.into_list();
-        let actual = actual.iter().map(|s| s.to_owned_scalar()).collect_vec();
+        let actual = actual
+            .iter()
+            .map(|v| v.map(|s| s.to_owned_scalar()))
+            .collect_vec();
         assert_eq!(
             actual,
             vec![Some(ListValue::new(vec![
