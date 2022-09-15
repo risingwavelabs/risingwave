@@ -69,3 +69,9 @@
 
 - input: select * from (select * from tumble(t, x, interval '10' minutes))
   error_msg: "sql parser error: Expected ), found: minutes"
+
+- input: SELECT 1, FROM t
+  error_msg: "sql parser error: syntax error at or near \"FROM\""
+
+- input: SELECT 1, WHERE true
+  error_msg: "sql parser error: syntax error at or near \"WHERE\""

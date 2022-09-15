@@ -404,6 +404,9 @@ impl Parser {
                 Keyword::ARRAY => Ok(Expr::Array(
                     self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
                 )),
+                k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
+                    parser_err!(format!("syntax error at or near \"{w}\""))
+                }
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token() {

@@ -323,10 +323,10 @@ fn parse_select_wildcard() {
 
 #[test]
 fn parse_count_wildcard() {
-    verified_only_select("SELECT COUNT(*) FROM Order WHERE id = 10");
+    verified_only_select("SELECT COUNT(*) FROM Orders WHERE id = 10");
 
     verified_only_select(
-        "SELECT COUNT(Employee.*) FROM Order JOIN Employee ON Order.employee = Employee.id",
+        "SELECT COUNT(Employee.*) FROM Orders JOIN Employee ON Orders.employee = Employee.id",
     );
 }
 
@@ -3278,7 +3278,7 @@ fn lateral_derived() {
         let lateral_str = if lateral_in { "LATERAL " } else { "" };
         let sql = format!(
             "SELECT * FROM customer LEFT JOIN {}\
-             (SELECT * FROM order WHERE order.customer = customer.id LIMIT 3) AS order ON true",
+             (SELECT * FROM orders WHERE orders.customer = customer.id LIMIT 3) AS orders ON true",
             lateral_str
         );
         let select = verified_only_select(&sql);
@@ -3296,10 +3296,10 @@ fn lateral_derived() {
         } = join.relation
         {
             assert_eq!(lateral_in, lateral);
-            assert_eq!(Ident::new("order"), alias.name);
+            assert_eq!(Ident::new("orders"), alias.name);
             assert_eq!(
                 subquery.to_string(),
-                "SELECT * FROM order WHERE order.customer = customer.id LIMIT 3"
+                "SELECT * FROM orders WHERE orders.customer = customer.id LIMIT 3"
             );
         } else {
             unreachable!()
