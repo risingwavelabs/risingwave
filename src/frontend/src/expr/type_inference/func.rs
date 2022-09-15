@@ -230,7 +230,7 @@ fn infer_type_for_special(
 
                                 Some(array_res)
                             }, 
-                            Err(err) => None
+                            Err(_) => None
                         }
                     }
                 }
@@ -283,8 +283,7 @@ fn infer_type_for_special(
                     .try_collect()?;
                     Ok(Some(array_type))
                 }
-                // TODO: Return proper error code
-                Err(err) => Err(ErrorCode::BindError(format!("Cannot append {} to {}.", right_type, left_type)).into())
+                Err(_) => Err(ErrorCode::BindError(format!("Cannot append {} to {}.", right_type, left_type)).into())
             }
         }
         ExprType::ArrayPrepend => {
@@ -321,8 +320,7 @@ fn infer_type_for_special(
                     .try_collect()?;
                     Ok(Some(array_type))
                 }
-                // TODO: Return proper error code
-                Err(err) => Err(ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type)).into())
+                Err(_) => Err(ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type)).into())
             }
         }
         ExprType::Vnode => {
