@@ -37,6 +37,7 @@ pub struct ComputeNodeConfig {
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
+    pub enable_in_memory_kv_state_backend: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
