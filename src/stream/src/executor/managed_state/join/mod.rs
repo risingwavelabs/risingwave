@@ -41,6 +41,7 @@ use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use self::iter_utils::zip_by_order_key;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::Epoch;
 use crate::task::ActorId;
 
 type DegreeType = u64;
@@ -322,6 +323,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     // FIXME: Currently, only memory used in the hash map itself is counted.
     pub fn bytes_in_use(&self) -> usize {
         self.alloc.bytes_in_use()
+    }
+
+    pub fn init(&mut self, epoch: Epoch) {
+        self.current_epoch = epoch.curr;
+        self.state.table.init_epoch(epoch.prev);
+        self.degree_state.table.init_epoch(epoch.prev);
     }
 
     pub fn update_epoch(&mut self, epoch: u64) {

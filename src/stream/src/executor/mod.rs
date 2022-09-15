@@ -116,6 +116,8 @@ pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use union::UnionExecutor;
 pub use wrapper::WrapperExecutor;
 
+use self::barrier_align::AlignedMessageStream;
+
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
@@ -594,6 +596,22 @@ pub type PkDataTypes = SmallVec<[DataType; 1]>;
 #[track_caller]
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
+) -> StreamExecutorResult<Barrier> {
+    let message = stream
+        .next()
+        .stack_trace("expect_first_barrier")
+        .await
+        .expect("failed to extract the first message: stream closed unexpectedly")?;
+    let barrier = message
+        .into_barrier()
+        .expect("the first message must be a barrier");
+    Ok(barrier)
+}
+
+/// Expect the first message of the given `stream` as a barrier.
+#[track_caller]
+pub async fn expect_first_barrier_from_aligned_stream(
+    stream: &mut (impl AlignedMessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
     let message = stream
         .next()
