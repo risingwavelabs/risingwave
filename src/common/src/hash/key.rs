@@ -608,7 +608,7 @@ where
     <<A as ArrayBuilder>::ArrayType as Array>::RefItem<'a>: HashKeySerDe<'a>,
     S: HashKeyDeserializer,
 {
-    builder.append(deserializer.deserialize()?)?;
+    builder.append(deserializer.deserialize()?);
     Ok(())
 }
 

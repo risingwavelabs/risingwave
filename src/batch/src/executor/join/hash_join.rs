@@ -1965,7 +1965,7 @@ mod tests {
             while let Some(data_chunk) = stream.next().await {
                 let data_chunk = data_chunk.unwrap();
                 let data_chunk = data_chunk.compact().unwrap();
-                data_chunk_merger.append(&data_chunk).unwrap();
+                data_chunk_merger.append(&data_chunk);
             }
 
             let result_chunk = data_chunk_merger.finish().unwrap();

@@ -107,7 +107,7 @@ impl ProjectSetExecutor {
                     .unwrap();
 
                 for i in 0..max_tf_len {
-                    projected_row_id_builder.append(Some(i as i64))?;
+                    projected_row_id_builder.append(Some(i as i64));
                 }
 
                 for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {

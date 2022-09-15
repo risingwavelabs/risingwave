@@ -67,7 +67,7 @@ impl Expression for NestedConstructExpression {
                 if let Some(row) = row {
                     builder.append_row_ref(row)
                 } else {
-                    builder.append_null()
+                    Ok(builder.append_null())
                 }
             })?;
             Ok(Arc::new(ArrayImpl::List(builder.finish())))

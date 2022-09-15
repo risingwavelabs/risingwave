@@ -678,7 +678,7 @@ mod tests {
             for chunk_idx in 0..num_chunks {
                 let mut builder = PrimitiveArrayBuilder::<i32>::new(0);
                 for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
-                    builder.append(Some(i as i32)).unwrap();
+                    builder.append(Some(i as i32));
                 }
                 let chunk = DataChunk::new(
                     vec![Column::new(Arc::new(builder.finish().into()))],
@@ -740,7 +740,7 @@ mod tests {
         for i in 0..num_of_columns {
             let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
-                builder.append(Some(i as i32)).unwrap();
+                builder.append(Some(i as i32));
             }
             let arr = builder.finish();
             columns.push(Column::new(Arc::new(arr.into())))

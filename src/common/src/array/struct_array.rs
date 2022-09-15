@@ -80,12 +80,12 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<StructRef<'_>>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<StructRef<'_>>) {
         match value {
             None => {
                 self.bitmap.append(false);
                 for child in &mut self.children_array {
-                    child.append_datum_ref(None)?;
+                    child.append_datum_ref(None).unwrap();
                 }
             }
             Some(v) => {
@@ -93,12 +93,11 @@ impl ArrayBuilder for StructArrayBuilder {
                 let fields = v.fields_ref();
                 assert_eq!(fields.len(), self.children_array.len());
                 for (field_idx, f) in fields.into_iter().enumerate() {
-                    self.children_array[field_idx].append_datum_ref(f)?;
+                    self.children_array[field_idx].append_datum_ref(f).unwrap();
                 }
             }
         }
         self.len += 1;
-        Ok(())
     }
 
     fn append_array(&mut self, other: &StructArray) -> ArrayResult<()> {
@@ -711,7 +710,7 @@ mod tests {
                 children: Arc::new(fields.clone()),
             },
         );
-        builder.append(Some(struct_ref)).unwrap();
+        builder.append(Some(struct_ref));
         let array = builder.finish();
         let struct_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);

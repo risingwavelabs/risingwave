@@ -76,7 +76,7 @@ where
     A1: ArrayBuilder,
 {
     for _ in 0..cardinality {
-        a.append(v)?
+        a.append(v)
     }
     Ok(())
 }

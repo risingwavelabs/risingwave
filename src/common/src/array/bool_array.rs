@@ -35,7 +35,7 @@ impl BoolArray {
     pub fn from_slice(data: &[Option<bool>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i).unwrap();
+            builder.append(*i);
         }
         builder.finish()
     }
@@ -133,7 +133,7 @@ impl ArrayBuilder for BoolArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<bool>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<bool>) {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -144,7 +144,6 @@ impl ArrayBuilder for BoolArrayBuilder {
                 self.data.append(bool::default());
             }
         }
-        Ok(())
     }
 
     fn append_array(&mut self, other: &BoolArray) -> ArrayResult<()> {
@@ -177,7 +176,7 @@ mod tests {
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
         let mut builder = BoolArrayBuilder::new(data.len());
         for d in data {
-            builder.append(d).unwrap();
+            builder.append(d);
         }
         builder.finish()
     }

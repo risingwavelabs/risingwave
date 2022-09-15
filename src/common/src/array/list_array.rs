@@ -81,7 +81,7 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<ListRef<'_>>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<ListRef<'_>>) {
         match value {
             None => {
                 self.bitmap.append(false);
@@ -94,12 +94,11 @@ impl ArrayBuilder for ListArrayBuilder {
                 let values_ref = v.values_ref();
                 self.offsets.push(last + values_ref.len());
                 for f in values_ref {
-                    self.value.append_datum_ref(f)?;
+                    self.value.append_datum_ref(f).unwrap();
                 }
             }
         }
         self.len += 1;
-        Ok(())
     }
 
     fn append_array(&mut self, other: &ListArray) -> ArrayResult<()> {
@@ -871,7 +870,7 @@ mod tests {
                 datatype: Box::new(DataType::Varchar),
             },
         );
-        builder.append(Some(list_ref)).unwrap();
+        builder.append(Some(list_ref));
         let array = builder.finish();
         let list_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);

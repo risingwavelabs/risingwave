@@ -587,7 +587,7 @@ mod test {
     fn test_chunk_to_json() -> Result<()> {
         let mut column_i32_builder = I32ArrayBuilder::new(10);
         for i in 0..10 {
-            column_i32_builder.append(Some(i)).unwrap();
+            column_i32_builder.append(Some(i));
         }
         let column_i32 = Column::new(Arc::new(ArrayImpl::from(column_i32_builder.finish())));
         let mut column_f32_builder = F32ArrayBuilder::new(10);

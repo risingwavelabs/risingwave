@@ -127,9 +127,9 @@ mod tests {
         let mut builder = I32ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Some(i as i32)).unwrap();
+                builder.append(Some(i as i32));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -152,9 +152,9 @@ mod tests {
         let mut builder = BoolArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             match i % 3 {
-                0 => builder.append(Some(false)).unwrap(),
-                1 => builder.append(Some(true)).unwrap(),
-                _ => builder.append(None).unwrap(),
+                0 => builder.append(Some(false)),
+                1 => builder.append(Some(true)),
+                _ => builder.append(None),
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -175,9 +175,9 @@ mod tests {
         let mut builder = Utf8ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Some("abc")).unwrap();
+                builder.append(Some("abc"));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -199,9 +199,9 @@ mod tests {
         let mut builder = DecimalArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Decimal::from_usize(i)).unwrap();
+                builder.append(Decimal::from_usize(i));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -228,7 +228,7 @@ mod tests {
                     .append(NaiveDateWrapper::with_days(i as i32).ok())
                     .unwrap();
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -258,7 +258,7 @@ mod tests {
                     .append(NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000).ok())
                     .unwrap();
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -290,7 +290,7 @@ mod tests {
                     .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok())
                     .unwrap();
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
