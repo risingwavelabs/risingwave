@@ -264,19 +264,28 @@ fn infer_type_for_special(
             let left_ele_type = left_ele_type_opt.ok_or_else(|| {
                 ErrorCode::BindError(format!("First element needs to be of type array, but is {}", left_type))
             })?; 
-            let left_ele_type_deref = left_ele_type.clone();
-
-            let right_type = inputs[1].return_type();
-            // TODO: remove the clone here
-            let res = least_restrictive(*left_ele_type_deref, right_type.clone());
-            let return_type = match res {
-                Ok(dt) => Some(dt.clone()),
-                Err(err) => None, 
-            }; 
+            let res_type = least_restrictive(*left_ele_type.clone(), inputs[1].return_type());
+            match res_type {
+                Ok(ele_type) => {
+                    let array_type = DataType::List { datatype: Box::new(ele_type.clone()) };
             
-            Ok(Some(return_type.ok_or_else(|| {
-                ErrorCode::BindError(format!("Cannot append {} to {}.", right_type, left_type))
-            })?))
+                    let inputs_owned = std::mem::take(inputs);
+                    *inputs = inputs_owned
+                    .into_iter()
+                    .map(|input|  {
+                        if input.return_type().is_numeric() {
+                            return input.cast_implicit(ele_type.clone());
+                        } else {
+                            return input.cast_implicit(array_type.clone());
+                        }
+                        Ok(input)
+                    })
+                    .try_collect()?;
+                    Ok(Some(array_type))
+                }
+                // TODO: Return proper error code
+                Err(err) => Err(err) // ErrorCode::BindError(format!("Cannot append {} to {}.", right_type, left_type))
+            }
         }
         ExprType::ArrayPrepend => {
             ensure_arity!("array_prepend", | inputs | == 2);
@@ -295,15 +304,15 @@ fn infer_type_for_special(
             })?; 
             let res_type = least_restrictive(*right_ele_type.clone(), inputs[0].return_type());
             match res_type {
-                Ok(dt) => {
-                    let array_type = DataType::List { datatype: Box::new(dt.clone()) };
+                Ok(ele_type) => {
+                    let array_type = DataType::List { datatype: Box::new(ele_type.clone()) };
             
                     let inputs_owned = std::mem::take(inputs);
                     *inputs = inputs_owned
                     .into_iter()
                     .map(|input|  {
                         if input.return_type().is_numeric() {
-                            return input.cast_implicit(dt.clone());
+                            return input.cast_implicit(ele_type.clone());
                         } else {
                             return input.cast_implicit(array_type.clone());
                         }
