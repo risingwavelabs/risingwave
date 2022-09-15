@@ -263,6 +263,8 @@ where
                 compactor.context_id(),
                 e
             );
+            self.compactor_manager
+                .pause_compactor(compactor.context_id());
             return ScheduleStatus::SendFailure(compact_task);
         }
 

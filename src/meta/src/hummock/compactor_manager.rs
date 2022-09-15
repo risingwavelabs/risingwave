@@ -195,6 +195,15 @@ impl CompactorManager {
         rx
     }
 
+    pub fn pause_compactor(&self, context_id: HummockContextId) {
+        let mut policy = self.policy.write();
+        policy.pause_compactor(context_id);
+
+        // To remove the heartbeats, they need to be forcefully purged,
+        // which is only safe when the context has been completely removed from meta.
+        tracing::info!("Paused compactor session {}", context_id);
+    }
+
     pub fn remove_compactor(&self, context_id: HummockContextId) {
         let mut policy = self.policy.write();
         policy.remove_compactor(context_id);
