@@ -167,6 +167,18 @@ pub(crate) use start_measure_real_process_timer;
 
 use super::Compactor;
 
+lazy_static::lazy_static! {
+    static ref CACEL_STATUS_SET: HashSet<TaskStatus> = vec![
+        TaskStatus::ManualCanceled,
+        TaskStatus::NoAvailCanceled,
+        TaskStatus::SendFailCanceled,
+        TaskStatus::AssignFailCanceled,
+        TaskStatus::HeartbeatCanceled,
+    ]
+    .into_iter()
+    .collect();
+}
+
 impl<S> HummockManager<S>
 where
     S: MetaStore,
@@ -233,7 +245,10 @@ where
                         tracing::info!("CancelTask operation for task_id {} has been sent to node with context_id {context_id}", task.task_id);
                     }
 
-                    if let Err(e) = hummock_manager.cancel_compact_task(&mut task).await {
+                    if let Err(e) = hummock_manager
+                        .cancel_compact_task(&mut task, TaskStatus::HeartbeatCanceled)
+                        .await
+                    {
                         tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
                             until we can successfully report its status. {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
                     }
@@ -736,13 +751,17 @@ where
     }
 
     /// Cancels a compaction task no matter it's assigned or unassigned.
-    pub async fn cancel_compact_task(&self, compact_task: &mut CompactTask) -> Result<bool> {
-        compact_task.set_task_status(TaskStatus::Canceled);
+    pub async fn cancel_compact_task(
+        &self,
+        compact_task: &mut CompactTask,
+        task_status: TaskStatus,
+    ) -> Result<bool> {
+        compact_task.set_task_status(task_status);
         self.cancel_compact_task_impl(compact_task).await
     }
 
     pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
-        assert_eq!(compact_task.task_status(), TaskStatus::Canceled);
+        assert!(CACEL_STATUS_SET.contains(&compact_task.task_status()));
         self.report_compact_task_impl(None, compact_task, None)
             .await
     }
@@ -960,12 +979,7 @@ where
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
 
-        let task_label = match task_status {
-            TaskStatus::Success => "success",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Canceled => "canceled",
-            _ => unreachable!(),
-        };
+        let task_label = task_status.as_str_name();
         if let Some(context_id) = assignee_context_id {
             // A task heartbeat is removed IFF we report the task status of a task and it still has
             // a valid assignment, OR we remove the node context from our list of nodes,
