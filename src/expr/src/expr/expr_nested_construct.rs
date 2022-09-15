@@ -63,13 +63,13 @@ impl Expression for NestedConstructExpression {
                     datatype: datatype.clone(),
                 },
             );
-            chunk.rows_with_holes().try_for_each(|row| {
+            for row in chunk.rows_with_holes() {
                 if let Some(row) = row {
-                    builder.append_row_ref(row)
+                    builder.append_row_ref(row)?;
                 } else {
-                    Ok(builder.append_null())
+                    builder.append_null();
                 }
-            })?;
+            }
             Ok(Arc::new(ArrayImpl::List(builder.finish())))
         } else {
             Err(ExprError::UnsupportedFunction(

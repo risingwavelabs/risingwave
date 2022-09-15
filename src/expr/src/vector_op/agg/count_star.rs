@@ -67,7 +67,10 @@ impl Aggregator for CountStar {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         let res = std::mem::replace(&mut self.result, 0) as i64;
         match builder {
-            ArrayBuilderImpl::Int64(b) => Ok(b.append(Some(res))),
+            ArrayBuilderImpl::Int64(b) => {
+                b.append(Some(res));
+                Ok(())
+            }
             _ => bail!("Unexpected builder for count(*)."),
         }
     }

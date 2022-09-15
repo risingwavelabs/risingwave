@@ -112,7 +112,8 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 
     /// Append an element in another array into builder.
     fn append_array_element(&mut self, other: &Self::ArrayType, idx: usize) -> ArrayResult<()> {
-        Ok(self.append(other.value_at(idx)))
+        self.append(other.value_at(idx));
+        Ok(())
     }
 
     /// Finish build and return a new array.
