@@ -495,6 +495,26 @@ where
         let fragment_actors_to_remove = fragment_actors_to_remove;
         let fragment_actors_to_create = fragment_actors_to_create;
 
+        let mut fragment_updated_bitmap = HashMap::new();
+        for fragment_id in reschedule.keys() {
+            let actors_to_create = fragment_actors_to_create
+                .get(fragment_id)
+                .map(|map| map.keys().cloned().collect())
+                .unwrap_or_default();
+
+            let actors_to_remove = fragment_actors_to_remove
+                .get(fragment_id)
+                .map(|map| map.keys().cloned().collect())
+                .unwrap_or_default();
+
+            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
+
+            let actor_vnode =
+                rebalance_actor_vnode(&fragment.actors, &actors_to_remove, &actors_to_create);
+
+            fragment_updated_bitmap.insert(fragment.fragment_id as FragmentId, actor_vnode);
+        }
+
         // Note: we must create hanging channels at first
         let mut worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
         let mut new_created_actors = HashMap::new();
@@ -522,6 +542,8 @@ where
                     .take(actors_to_create.len())
                     .collect()
             };
+
+            let updated_bitmap = fragment_updated_bitmap.get(&fragment_id).unwrap();
 
             for (actor_to_create, sample_actor) in
                 actors_to_create.iter().zip_eq(sample_actors.into_iter())
@@ -555,44 +577,23 @@ where
                     &ctx.actor_map,
                     &fragment_actors_to_remove,
                     &fragment_actors_to_create,
+                    &fragment_updated_bitmap,
                     &mut new_actor,
                 )?;
+
+                if let Some(bitmap) = updated_bitmap.get(new_actor_id) {
+                    new_actor.vnode_bitmap = Some(bitmap.to_protobuf());
+                }
 
                 new_actor.actor_id = *new_actor_id;
                 new_created_actors.insert(*new_actor_id, new_actor);
             }
         }
-
-        let mut updated_bitmap = HashMap::new();
-        for fragment_id in reschedule.keys() {
-            let actors_to_create = fragment_actors_to_create
-                .get(fragment_id)
-                .map(|map| map.keys().cloned().collect())
-                .unwrap_or_default();
-
-            let actors_to_remove = fragment_actors_to_remove
-                .get(fragment_id)
-                .map(|map| map.keys().cloned().collect())
-                .unwrap_or_default();
-
-            // let actors_to_remove = fragment_actors_to_remove
-            //     .get(fragment_id)
-            //     .cloned()
-            //     .unwrap_or_default();
-
-            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
-
-            let actor_vnode =
-                rebalance_actor_vnode(&fragment.actors, &actors_to_remove, &actors_to_create);
-
-            for (actor_id, actor) in &mut new_created_actors {
-                if let Some(bitmap) = actor_vnode.get(actor_id) {
-                    actor.vnode_bitmap = Some(bitmap.to_protobuf())
-                }
-            }
-
-            updated_bitmap.extend(actor_vnode);
-        }
+        // for (actor_id, actor) in &mut new_created_actors {
+        //     if let Some(bitmap) = updated_bitmap.get(actor_id) {
+        //         actor.vnode_bitmap = Some(bitmap.to_protobuf())
+        //     }
+        // }
 
         // After modification, for newly created `Actor` s, both upstream and downstream actor ids
         // have been modified
@@ -850,28 +851,17 @@ where
                             let mut vnode_mapping: Vec<ParallelUnitId> =
                                 decompress_data(&original_indices, &data);
 
+                            let updated_bitmap = fragment_updated_bitmap.get(&fragment_id).unwrap();
+
                             for (actor_id, parallel_unit_id) in actors_after_reschedule {
                                 if let Some(bitmap) = updated_bitmap.get(actor_id) {
-                                    println!(
-                                        "bitmap found for actor {}, bits {}",
-                                        actor_id,
-                                        bitmap.num_high_bits()
-                                    );
                                     for (idx, x) in vnode_mapping.iter_mut().enumerate() {
                                         if bitmap.is_set(idx).unwrap() {
                                             *x = *parallel_unit_id;
                                         }
                                     }
-                                    // cargo clippy
-                                    // for idx in 0..VIRTUAL_NODE_COUNT {
-                                    //     if bitmap.is_set(idx).unwrap() {
-                                    //         vnode_mapping[idx] = *parallel_unit_id;
-                                    //     }
-                                    // }
                                 }
                             }
-
-                            println!("vnode_mapping {:?}", vnode_mapping);
 
                             let actor_mapping = vnode_mapping
                                 .iter()
@@ -913,18 +903,21 @@ where
                 None
             };
 
-            let vnode_bitmap_updates = fragment
-                .actors
-                .iter()
-                .flat_map(|actor| {
-                    updated_bitmap
-                        .remove(&actor.actor_id)
-                        .map(|bitmap| (actor.actor_id, bitmap))
-                })
-                .collect();
+            // let vnode_bitmap_updates = fragment
+            //     .actors
+            //     .iter()
+            //     .flat_map(|actor| {
+            //         fragment_updated_bitmap
+            //             .remove(&actor.actor_id)
+            //             .map(|bitmap| (actor.actor_id, bitmap))
+            //     })
+            //     .collect();
+
+            let vnode_bitmap_updates = fragment_updated_bitmap.remove(&fragment_id).unwrap();
 
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();
+
             let reschedule1 = Reschedule {
                 added_actors: actors_to_create,
                 removed_actors: actors_to_remove,
@@ -1003,6 +996,7 @@ where
         actor_map: &HashMap<ActorId, StreamActor>,
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
+        updated_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
         let upstream_fragment_ids: HashSet<_> = new_actor
@@ -1152,7 +1146,31 @@ where
                     (None, None) => {
                         // do nothing
                     }
-                    _ => bail!("vnode mapping update for scaling is not supported for now"),
+                    //_ => bail!("vnode mapping update for scaling is not supported for now"),
+                    _ => {
+                        if let Some(downstream_updated_bitmap) =
+                            updated_bitmap.get(&downstream_fragment_id)
+                        {
+                            // if downstream scale in/out
+
+                            let mut raw = vec![0 as ActorId; VIRTUAL_NODE_COUNT];
+
+                            for (actor_id, bitmap) in downstream_updated_bitmap {
+                                for idx in 0..VIRTUAL_NODE_COUNT {
+                                    if bitmap.is_set(idx).unwrap() {
+                                        raw[idx] = *actor_id;
+                                    }
+                                }
+                            }
+
+                            let (original_indices, data) = compress_data(&raw);
+
+                            *mapping = ActorMapping {
+                                original_indices,
+                                data,
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1207,7 +1225,7 @@ mod tests {
         }
     }
 
-    fn check_bitmaps(bitmaps: &HashMap<ActorId, Bitmap>) -> bool {
+    fn check_bitmaps(bitmaps: &HashMap<ActorId, Bitmap>) {
         let mut target = (0..VIRTUAL_NODE_COUNT).map(|_| false).collect_vec();
 
         for bitmap in bitmaps.values() {
@@ -1220,14 +1238,12 @@ mod tests {
             }
         }
 
-        if !target.iter().all(|b| *b) {
-            return false;
-        }
+        assert!(target.iter().all(|b| *b));
 
         let vnodes = bitmaps.values().map(|bitmap| bitmap.num_high_bits());
         let (min, max) = vnodes.minmax().into_option().unwrap();
 
-        (max - min) <= 1
+        assert!((max - min) <= 1)
     }
 
     #[test]
@@ -1249,14 +1265,14 @@ mod tests {
         let actors_to_remove = btreeset! {100};
         let result = rebalance_actor_vnode(&actors, &actors_to_remove, &BTreeSet::new());
         assert_eq!(result.len(), parallel_units.len() - actors_to_remove.len());
-        assert!(check_bitmaps(&result));
+        check_bitmaps(&result);
         check_affinity_for_scale_in(result.get(&(101 as ActorId)).unwrap(), &actors[1]);
 
         // remove 2
         let actors_to_remove = btreeset! {100,101};
         let result = rebalance_actor_vnode(&actors, &actors_to_remove, &BTreeSet::new());
         assert_eq!(result.len(), parallel_units.len() - actors_to_remove.len());
-        assert!(check_bitmaps(&result));
+        check_bitmaps(&result);
         check_affinity_for_scale_in(result.get(&(102 as ActorId)).unwrap(), &actors[2]);
     }
 
@@ -1269,13 +1285,13 @@ mod tests {
         let actors_to_add = btreeset! {105};
         let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &actors_to_add);
         assert_eq!(result.len(), parallel_units.len() + actors_to_add.len());
-        assert!(check_bitmaps(&result));
+        check_bitmaps(&result);
 
         // add 2
         let actors_to_add = btreeset! {105,106};
         let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &actors_to_add);
         assert_eq!(result.len(), parallel_units.len() + actors_to_add.len());
-        assert!(check_bitmaps(&result));
+        check_bitmaps(&result);
     }
 
     #[test]
@@ -1309,7 +1325,7 @@ mod tests {
             result.len(),
             actors.len() - actors_to_remove.len() + actors_to_add.len()
         );
-        assert!(check_bitmaps(&result));
+        check_bitmaps(&result);
 
         let actors_to_remove = btreeset! {100, 101};
         let actors_to_add = btreeset! {105};
@@ -1319,7 +1335,7 @@ mod tests {
             result.len(),
             actors.len() - actors_to_remove.len() + actors_to_add.len()
         );
-        assert!(check_bitmaps(&result));
+        check_bitmaps(&result);
 
         check_affinity_for_scale_in(result.get(&(102 as ActorId)).unwrap(), &actors[2]);
     }
