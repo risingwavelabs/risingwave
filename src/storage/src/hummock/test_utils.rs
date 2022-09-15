@@ -115,15 +115,15 @@ pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> InMemWriter {
 }
 
 /// Generates sstable data and metadata from given `kv_iter`
-pub fn gen_test_sstable_data(
+pub async fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta) {
     let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice()).unwrap();
+        b.add(&key, value.as_slice()).await.unwrap();
     }
-    let output = b.finish().unwrap();
+    let output = b.finish().await.unwrap();
     output.writer_output
 }
 
@@ -140,7 +140,9 @@ pub async fn put_sst(
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
-        writer.write_block(&data[offset..end_offset], block_meta)?;
+        writer
+            .write_block(&data[offset..end_offset], block_meta)
+            .await?;
     }
     meta.meta_offset = writer.data_len() as u64;
     let sst = SstableInfo {
@@ -154,7 +156,7 @@ pub async fn put_sst(
         table_ids: vec![],
         meta_offset: meta.meta_offset,
     };
-    let writer_output = writer.finish(meta)?;
+    let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;
     Ok(sst)
 }
@@ -175,9 +177,9 @@ pub async fn gen_test_sstable_inner(
     let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
     let mut b = SstableBuilder::new_for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice()).unwrap();
+        b.add(&key, value.as_slice()).await.unwrap();
     }
-    let output = b.finish().unwrap();
+    let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
     let table = sstable_store
         .sstable(&output.sst_info, &mut StoreLocalStatistic::default())

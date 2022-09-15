@@ -124,7 +124,7 @@ impl BlockLocation {
 
 #[async_trait::async_trait]
 pub trait StreamingUploader: Send + Sync {
-    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
 
     async fn finish(self: Box<Self>) -> ObjectResult<()>;
 
@@ -397,12 +397,12 @@ impl MonitoredStreamingUploader {
 }
 
 impl MonitoredStreamingUploader {
-    pub fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+    pub async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         self.object_store_metrics
             .write_bytes
             .inc_by(data.len() as u64);
         self.operation_size += data.len();
-        self.inner.write_bytes(data)
+        self.inner.write_bytes(data).await
     }
 
     pub async fn finish(self) -> ObjectResult<()> {

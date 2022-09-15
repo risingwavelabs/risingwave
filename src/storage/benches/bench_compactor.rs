@@ -69,7 +69,7 @@ pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
 
 const MAX_KEY_COUNT: usize = 128 * 1024;
 
-fn build_table(
+async fn build_table(
     sstable_store: SstableStoreRef,
     sstable_id: u64,
     range: Range<u64>,
@@ -100,9 +100,10 @@ fn build_table(
         full_key[(user_len - 8)..user_len].copy_from_slice(&i.to_be_bytes());
         builder
             .add(&full_key, HummockValue::put(&value[start..end]))
+            .await
             .unwrap();
     }
-    let output = builder.finish().unwrap();
+    let output = builder.finish().await.unwrap();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
@@ -139,7 +140,9 @@ fn bench_table_scan(c: &mut Criterion) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
-    let info = build_table(sstable_store.clone(), 0, 0..(MAX_KEY_COUNT as u64), 1);
+    let info = runtime.block_on(async {
+        build_table(sstable_store.clone(), 0, 0..(MAX_KEY_COUNT as u64), 1).await
+    });
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
     let sstable_store1 = sstable_store.clone();
@@ -187,14 +190,21 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
 }
 
 fn bench_merge_iterator_compactor(c: &mut Criterion) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
     let sstable_store = mock_sstable_store();
     let test_key_size = 256 * 1024;
-    let info1 = build_table(sstable_store.clone(), 1, 0..test_key_size, 1);
-    let info2 = build_table(sstable_store.clone(), 2, 0..test_key_size, 1);
+    let info1 = runtime
+        .block_on(async { build_table(sstable_store.clone(), 1, 0..test_key_size, 1).await });
+    let info2 = runtime
+        .block_on(async { build_table(sstable_store.clone(), 2, 0..test_key_size, 1).await });
     let level1 = vec![info1, info2];
 
-    let info1 = build_table(sstable_store.clone(), 3, 0..test_key_size, 2);
-    let info2 = build_table(sstable_store.clone(), 4, 0..test_key_size, 2);
+    let info1 = runtime
+        .block_on(async { build_table(sstable_store.clone(), 3, 0..test_key_size, 2).await });
+    let info2 = runtime
+        .block_on(async { build_table(sstable_store.clone(), 4, 0..test_key_size, 2).await });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {
@@ -221,7 +231,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         MemoryLimiter::unlimit(),
     ));
     c.bench_function("bench_merge_iterator", |b| {
-        b.to_async(FuturesExecutor).iter(|| {
+        b.to_async(&runtime).iter(|| {
             let sub_iters = vec![
                 ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), compact_store.clone()),
                 ConcatSstableIterator::new(level2.clone(), KeyRange::inf(), compact_store.clone()),

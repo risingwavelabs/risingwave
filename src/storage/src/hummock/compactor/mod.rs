@@ -732,7 +732,7 @@ impl Compactor {
             compaction_filter,
         )
         .await?;
-        sst_builder.finish()
+        sst_builder.finish().await
     }
 }
 

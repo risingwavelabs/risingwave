@@ -64,7 +64,7 @@ async fn build_tables(mut builder: CapacitySplitTableBuilder<LocalTableBuilderFa
             .await
             .unwrap();
     }
-    let split_table_outputs = builder.finish().unwrap();
+    let split_table_outputs = builder.finish().await.unwrap();
     let join_handles = split_table_outputs
         .into_iter()
         .map(|o| o.upload_join_handle)

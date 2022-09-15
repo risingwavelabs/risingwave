@@ -134,7 +134,7 @@ where
     ) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.as_ref() {
             if allow_split && builder.reach_capacity() {
-                self.seal_current()?;
+                self.seal_current().await?;
             }
         }
 
@@ -144,7 +144,7 @@ where
         }
 
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key.into_inner(), value)?;
+        builder.add(full_key.into_inner(), value).await?;
         Ok(())
     }
 
@@ -152,9 +152,9 @@ where
     ///
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
-    pub fn seal_current(&mut self) -> HummockResult<()> {
+    pub async fn seal_current(&mut self) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.take() {
-            let builder_output = builder.finish()?;
+            let builder_output = builder.finish().await?;
             if let Some(tracker) = &self.task_progress_tracker {
                 tracker.inc_ssts_sealed();
             }
@@ -174,8 +174,8 @@ where
     }
 
     /// Finalizes all the tables to be ids, blocks and metadata.
-    pub fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
-        self.seal_current()?;
+    pub async fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
+        self.seal_current().await?;
         Ok(self.sst_outputs)
     }
 }
@@ -235,8 +235,8 @@ mod tests {
     use crate::hummock::test_utils::default_builder_opt_for_test;
     use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
-    #[test]
-    fn test_empty() {
+    #[tokio::test]
+    async fn test_empty() {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let opts = SstableBuilderOptions {
@@ -248,7 +248,7 @@ mod tests {
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
-        let results = builder.finish().unwrap();
+        let results = builder.finish().await.unwrap();
         assert!(results.is_empty());
     }
 
@@ -277,7 +277,7 @@ mod tests {
                 .unwrap();
         }
 
-        let results = builder.finish().unwrap();
+        let results = builder.finish().await.unwrap();
         assert!(results.len() > 1);
     }
 
@@ -302,22 +302,22 @@ mod tests {
         }
 
         assert_eq!(builder.len(), 0);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 0);
         add!();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 1);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 2);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
 
-        let results = builder.finish().unwrap();
+        let results = builder.finish().await.unwrap();
         assert_eq!(results.len(), 2);
     }
 

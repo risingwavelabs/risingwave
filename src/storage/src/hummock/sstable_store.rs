@@ -474,10 +474,11 @@ impl BatchUploadWriter {
     }
 }
 
+#[async_trait::async_trait]
 impl SstableWriter for BatchUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
 
-    fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
+    async fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
         self.buf.extend_from_slice(block);
         if let CachePolicy::Fill = self.policy {
             self.block_info.push(Block::decode(
@@ -488,7 +489,7 @@ impl SstableWriter for BatchUploadWriter {
         Ok(())
     }
 
-    fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
+    async fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
         fail_point!("data_upload_err");
         let join_handle = tokio::spawn(async move {
             meta.encode_to(&mut self.buf);
@@ -560,10 +561,11 @@ impl StreamingUploadWriter {
     }
 }
 
+#[async_trait::async_trait]
 impl SstableWriter for StreamingUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
 
-    fn write_block(&mut self, block_data: &[u8], meta: &BlockMeta) -> HummockResult<()> {
+    async fn write_block(&mut self, block_data: &[u8], meta: &BlockMeta) -> HummockResult<()> {
         self.data_len += block_data.len();
         let block_data = Bytes::from(block_data.to_vec());
         if let CachePolicy::Fill = self.policy {
@@ -572,14 +574,16 @@ impl SstableWriter for StreamingUploadWriter {
         }
         self.object_uploader
             .write_bytes(block_data)
+            .await
             .map_err(HummockError::object_io_error)
     }
 
-    fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
+    async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
         let meta_data = Bytes::from(meta.encode_to_bytes());
 
         self.object_uploader
             .write_bytes(meta_data)
+            .await
             .map_err(HummockError::object_io_error)?;
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
@@ -709,7 +713,8 @@ mod tests {
             x_range
                 .clone()
                 .map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
-        );
+        )
+        .await;
         let writer_opts = SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
@@ -738,7 +743,8 @@ mod tests {
             x_range
                 .clone()
                 .map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
-        );
+        )
+        .await;
         let writer_opts = SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
