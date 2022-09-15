@@ -23,6 +23,7 @@ use tokio::sync::{oneshot, watch, RwLock};
 
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
+use crate::barrier::notifier::NotifierCollected;
 use crate::hummock::HummockManagerRef;
 use crate::manager::META_NODE_ID;
 use crate::storage::MetaStore;
@@ -99,12 +100,12 @@ impl<S: MetaStore> BarrierScheduler<S> {
         let (tx, rx) = oneshot::channel();
         let notifier = if checkpoint {
             Notifier {
-                collected_checkpoint: Some(tx),
+                collected: Some(NotifierCollected::CollectedCheckpointBarrier(tx)),
                 ..Default::default()
             }
         } else {
             Notifier {
-                collected_no_checkpoint: Some(tx),
+                collected: Some(NotifierCollected::CollectedBarrier(tx)),
                 ..Default::default()
             }
         };
@@ -137,7 +138,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
             scheduleds.push((
                 command,
                 once(Notifier {
-                    collected_checkpoint: Some(collect_tx),
+                    collected: Some(NotifierCollected::CollectedCheckpointBarrier(collect_tx)),
                     finished: Some(finish_tx),
                     ..Default::default()
                 })
@@ -224,8 +225,9 @@ impl ScheduledBarriers {
         let mut queue = self.inner.queue.write().await;
         while let Some((_, notifiers)) = queue.pop_front() {
             notifiers.into_iter().for_each(|notify| {
-                notify
-                    .notify_collection_checkpoint_failed(anyhow!("Scheduled barrier abort.").into())
+                notify.notify_checkpoint_barrier_collection_failed(
+                    anyhow!("Scheduled barrier abort.").into(),
+                )
             })
         }
     }

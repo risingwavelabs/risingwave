@@ -72,8 +72,8 @@ type Scheduled = (Command, Vec<Notifier>);
 struct CheckpointPost<S: MetaStore> {
     command_contexts: Arc<CommandContext<S>>,
     /// The tx about collected with checkpoint.
-    collect_notifiers_checkpoint: Vec<Option<oneshot::Sender<MetaResult<()>>>>,
-    /// Create mv over, we need to notify `finish_rx`
+    collect_notifiers: Vec<Option<oneshot::Sender<MetaResult<()>>>>,
+    /// After create MV finishes, we need to notify `finish_rx`
     finish_notifiers: Vec<Notifier>,
 }
 
@@ -192,7 +192,7 @@ struct CheckpointControl<S: MetaStore> {
 
     /// We will inject a barrier(checkpoint=true) after `num_distance_checkpoint`
     /// barrier(checkpoint = false)
-    num_distance_checkpoint: usize,
+    num_uncheckpointed_barrier: usize,
 
     checkpoint_frequency: usize,
 }
@@ -210,7 +210,7 @@ where
             removing_actors: Default::default(),
             metrics,
             uncommitted_messages: Default::default(),
-            num_distance_checkpoint: checkpoint_frequency,
+            num_uncheckpointed_barrier: 0,
             checkpoint_frequency,
         }
     }
@@ -218,18 +218,20 @@ where
     /// Whether the barrier(checkpoint = true) should be injected. If true, reset
     /// `num_distance_checkpoint`
     fn try_get_checkpoint(&mut self) -> bool {
-        if self.num_distance_checkpoint == 0 {
-            self.num_distance_checkpoint = self.checkpoint_frequency;
-            true
-        } else {
-            self.num_distance_checkpoint -= 1;
-            false
-        }
+        self.num_uncheckpointed_barrier >= self.checkpoint_frequency
     }
 
     /// Make the `checkpoint` of the next barrier must be true
-    fn inject_checkpoint_in_next_barrier(&mut self) {
-        self.num_distance_checkpoint = 0;
+    fn force_checkpoint_in_next_barrier(&mut self) {
+        self.num_uncheckpointed_barrier = self.checkpoint_frequency;
+    }
+
+    fn update_num_uncheckpointed_barrier(&mut self, checkpoint: bool) {
+        if checkpoint {
+            self.num_uncheckpointed_barrier = 0
+        } else {
+            self.num_uncheckpointed_barrier += 1
+        }
     }
 
     fn add_uncommitted_messages(
@@ -266,8 +268,69 @@ where
             .push_front(checkpoint_post);
     }
 
-    fn get_uncommitted_messages(&mut self) -> UncommittedMessages<S> {
-        take(&mut self.uncommitted_messages)
+    fn take_uncommitted_ssts_work_ids(
+        &mut self,
+    ) -> (
+        VecDeque<Vec<LocalSstableInfo>>,
+        HashMap<HummockSstableId, WorkerId>,
+    ) {
+        (
+            take(&mut self.uncommitted_messages.uncommitted_ssts),
+            take(&mut self.uncommitted_messages.uncommitted_work_ids),
+        )
+    }
+
+    async fn do_post_checkpoint(&mut self) -> MetaResult<()> {
+        let mut changes_vec = vec![];
+        for checkpoint_post in &mut self
+            .uncommitted_messages
+            .uncommitted_checkpoint_post
+            .iter_mut()
+            .rev()
+        {
+            changes_vec.push(checkpoint_post.command_contexts.command.changes());
+            checkpoint_post.command_contexts.post_collect().await?;
+
+            // Notify about collected first.
+            checkpoint_post
+                .collect_notifiers
+                .iter_mut()
+                .for_each(|send| {
+                    if let Some(tx) = send.take() {
+                        tx.send(Ok(())).ok();
+                    }
+                });
+            // Then try to finish the barrier for Create MVs.
+            checkpoint_post
+                .finish_notifiers
+                .iter_mut()
+                .for_each(Notifier::notify_finished);
+        }
+        changes_vec
+            .into_iter()
+            .for_each(|changes| self.remove_changes(changes));
+        self.uncommitted_messages
+            .uncommitted_checkpoint_post
+            .clear();
+        Ok(())
+    }
+
+    fn fail_uncommitted_message(&mut self, err: &MetaError) {
+        for checkpoint_post in &mut self
+            .uncommitted_messages
+            .uncommitted_checkpoint_post
+            .iter_mut()
+        {
+            checkpoint_post
+                .collect_notifiers
+                .iter_mut()
+                .for_each(|send| {
+                    if let Some(tx) = send.take() {
+                        tx.send(Err(err.clone())).ok();
+                    }
+                });
+        }
+        self.uncommitted_messages = Default::default();
     }
 
     /// Before resolving the actors to be sent or collected, we should first record the newly
@@ -362,6 +425,7 @@ where
 
     /// Enqueue a barrier command, and init its state to `InFlight`.
     fn enqueue_command(&mut self, command_ctx: Arc<CommandContext<S>>, notifiers: Vec<Notifier>) {
+        self.update_num_uncheckpointed_barrier(command_ctx.checkpoint);
         let timer = self.metrics.barrier_latency.start_timer();
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
@@ -454,6 +518,13 @@ where
             }
             CommandChanges::None => {}
         }
+    }
+
+    pub fn clear_changes(&mut self) {
+        self.creating_tables.clear();
+        self.dropping_tables.clear();
+        self.adding_actors.clear();
+        self.dropping_tables.clear();
     }
 }
 
@@ -608,7 +679,7 @@ where
                 notifiers.iter_mut().for_each(Notifier::notify_to_send);
                 notifiers
                     .iter_mut()
-                    .for_each(Notifier::notify_collected_checkpoint);
+                    .for_each(Notifier::notify_checkpoint_barrier_collected);
                 continue;
             }
             let prev_epoch = state.in_flight_prev_epoch;
@@ -624,12 +695,13 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
-            let need_collected_checkpoint =
-                notifiers.iter().any(Notifier::need_collected_checkpoint);
+            let mut checkpoint = checkpoint_control.try_get_checkpoint();
+            let need_collected_checkpoint = notifiers
+                .iter()
+                .any(Notifier::need_collect_checkpoint_barrier);
             if !matches!(command, Command::Plain(_)) || need_collected_checkpoint {
-                checkpoint_control.inject_checkpoint_in_next_barrier();
+                checkpoint = true;
             }
-            let checkpoint = checkpoint_control.try_get_checkpoint();
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
                 self.env.stream_client_pool_ref(),
@@ -779,8 +851,14 @@ where
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
             tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
-            self.do_recovery(err, fail_node.into_iter(), state, tracker)
-                .await;
+            self.do_recovery(
+                err,
+                fail_node.into_iter(),
+                state,
+                tracker,
+                checkpoint_control,
+            )
+            .await;
             return;
         }
         // change the state is Complete
@@ -803,7 +881,8 @@ where
             let fail_nodes = complete_nodes
                 .drain(index..)
                 .chain(checkpoint_control.barrier_failed().into_iter());
-            self.do_recovery(err, fail_nodes, state, tracker).await;
+            self.do_recovery(err, fail_nodes, state, tracker, checkpoint_control)
+                .await;
         }
     }
 
@@ -813,7 +892,10 @@ where
         fail_nodes: impl IntoIterator<Item = EpochNode<S>>,
         state: &mut BarrierManagerState,
         tracker: &mut CreateMviewProgressTracker,
+        checkpoint_control: &mut CheckpointControl<S>,
     ) {
+        checkpoint_control.fail_uncommitted_message(&err);
+        checkpoint_control.clear_changes();
         let mut new_epoch = Epoch::from(INVALID_EPOCH);
         for node in fail_nodes {
             if let Some(timer) = node.timer {
@@ -822,9 +904,9 @@ where
             if let Some(wait_commit_timer) = node.wait_commit_timer {
                 wait_commit_timer.observe_duration();
             }
-            node.notifiers
-                .into_iter()
-                .for_each(|notifier| notifier.notify_collection_checkpoint_failed(err.clone()));
+            node.notifiers.into_iter().for_each(|notifier| {
+                notifier.notify_checkpoint_barrier_collection_failed(err.clone())
+            });
             new_epoch = node.command_ctx.prev_epoch;
         }
         if self.enable_recovery {
@@ -867,11 +949,11 @@ where
                 // Notify about collected without checkpoint.
                 notifiers
                     .iter_mut()
-                    .for_each(Notifier::notify_collected_no_checkpoint);
+                    .for_each(Notifier::notify_barrier_collected);
                 // Save rx about collected with checkpoint to wait a barrier(checkpoint = true)
                 let collect_notifiers_checkpoint = notifiers
                     .iter_mut()
-                    .map(|notifier| notifier.take_collected_checkpoint())
+                    .map(|notifier| notifier.take_collected_checkpoint_barrier())
                     .collect_vec();
 
                 // Save Notify about finished to wait a barrier(checkpoint = true)
@@ -895,53 +977,31 @@ where
                 if (!finish_notifiers.is_empty() || !collect_notifiers_checkpoint.is_empty())
                     && !*checkpoint
                 {
-                    checkpoint_control.inject_checkpoint_in_next_barrier();
+                    checkpoint_control.force_checkpoint_in_next_barrier();
                 }
 
                 checkpoint_control.add_uncommitted_messages(
                     resps,
                     CheckpointPost {
                         command_contexts: command_ctx,
-                        collect_notifiers_checkpoint,
+                        collect_notifiers: collect_notifiers_checkpoint,
                         finish_notifiers,
                     },
                 );
                 // If no checkpoint, we can't notify collection completion
                 if *checkpoint {
-                    let mut uncommitted_messages = checkpoint_control.get_uncommitted_messages();
+                    let (uncommitted_ssts, uncommitted_work_ids) =
+                        checkpoint_control.take_uncommitted_ssts_work_ids();
                     if prev_epoch != INVALID_EPOCH {
                         self.hummock_manager
                             .commit_epoch(
                                 prev_epoch,
-                                uncommitted_messages
-                                    .uncommitted_ssts
-                                    .into_iter()
-                                    .flatten()
-                                    .collect_vec(),
-                                uncommitted_messages.uncommitted_work_ids,
+                                uncommitted_ssts.into_iter().flatten().collect_vec(),
+                                uncommitted_work_ids,
                             )
                             .await?;
                     }
-                    while let Some(CheckpointPost {
-                        command_contexts,
-                        collect_notifiers_checkpoint,
-                        finish_notifiers,
-                    }) = uncommitted_messages.uncommitted_checkpoint_post.pop_back()
-                    {
-                        checkpoint_control.remove_changes(command_contexts.command.changes());
-                        command_contexts.post_collect().await?;
-
-                        // Notify about collected first.
-                        collect_notifiers_checkpoint.into_iter().for_each(|send| {
-                            if let Some(tx) = send {
-                                tx.send(Ok(())).ok();
-                            }
-                        });
-                        // Then try to finish the barrier for Create MVs.
-                        finish_notifiers
-                            .into_iter()
-                            .for_each(Notifier::notify_finished);
-                    }
+                    checkpoint_control.do_post_checkpoint().await?;
                 } else if prev_epoch != INVALID_EPOCH {
                     self.hummock_manager.update_current_epoch(prev_epoch)?;
                 }

@@ -16,20 +16,27 @@ use tokio::sync::oneshot;
 
 use crate::{MetaError, MetaResult};
 
+#[derive(Debug)]
+pub(super) enum NotifierCollected {
+    CollectedBarrier(oneshot::Sender<MetaResult<()>>),
+    CollectedCheckpointBarrier(oneshot::Sender<MetaResult<()>>),
+}
+
 /// Used for notifying the status of a scheduled command/barrier.
 #[derive(Debug, Default)]
 pub(super) struct Notifier {
     /// Get notified when scheduled barrier is about to send.
     pub to_send: Option<oneshot::Sender<()>>,
 
-    /// Get notified when scheduled barrier(checkpoint = true) is collected or failed,
-    pub collected_checkpoint: Option<oneshot::Sender<MetaResult<()>>>,
-
     /// Get notified when scheduled barrier is finished.
     pub finished: Option<oneshot::Sender<()>>,
 
-    /// Get notified when scheduled barrier(checkpoint = false) is collected or failed.
-    pub collected_no_checkpoint: Option<oneshot::Sender<MetaResult<()>>>,
+    pub collected: Option<NotifierCollected>,
+    // /// Get notified when scheduled barrier(checkpoint = false) is collected or failed.
+    // pub collected_no_checkpoint: Option<oneshot::Sender<MetaResult<()>>>,
+    //
+    // /// Get notified when scheduled barrier(checkpoint = true) is collected or failed,
+    // pub collected_checkpoint: Option<oneshot::Sender<MetaResult<()>>>,
 }
 
 impl Notifier {
@@ -40,53 +47,81 @@ impl Notifier {
         }
     }
 
-    pub fn take_collected_checkpoint(&mut self) -> Option<oneshot::Sender<MetaResult<()>>> {
-        self.collected_checkpoint.take()
+    pub fn take_collected_checkpoint_barrier(&mut self) -> Option<oneshot::Sender<MetaResult<()>>> {
+        let collected = self.collected.take();
+        match collected {
+            Some(NotifierCollected::CollectedCheckpointBarrier(tx)) => Some(tx),
+            _ => {
+                self.collected = collected;
+                None
+            }
+        }
     }
 
     /// Notify when we have collected a barrier(checkpoint = true) from all actors.
-    pub fn notify_collected_checkpoint(&mut self) {
-        self.notify_collected_no_checkpoint();
-        if let Some(tx) = self.collected_checkpoint.take() {
-            tx.send(Ok(())).ok();
-        }
+    pub fn notify_checkpoint_barrier_collected(&mut self) {
+        match self.collected.take() {
+            Some(NotifierCollected::CollectedBarrier(tx)) => {
+                tx.send(Ok(())).ok();
+            }
+            Some(NotifierCollected::CollectedCheckpointBarrier(tx)) => {
+                tx.send(Ok(())).ok();
+            }
+            _ => {}
+        };
     }
 
     /// Notify when we have collected a barrier(checkpoint = false) from all actors.
-    pub fn notify_collected_no_checkpoint(&mut self) {
-        if let Some(tx) = self.collected_no_checkpoint.take() {
-            tx.send(Ok(())).ok();
-        }
+    pub fn notify_barrier_collected(&mut self) {
+        let collected = self.collected.take();
+        match collected {
+            Some(NotifierCollected::CollectedBarrier(tx)) => {
+                tx.send(Ok(())).ok();
+            }
+            _ => self.collected = collected,
+        };
     }
 
-    pub fn need_collected_checkpoint(&self) -> bool {
-        self.collected_checkpoint.is_some()
+    pub fn need_collect_checkpoint_barrier(&self) -> bool {
+        matches!(
+            self.collected,
+            Some(NotifierCollected::CollectedCheckpointBarrier(_))
+        )
     }
 
     /// Notify when we failed to collect(checkpoint = true) a barrier. This function consumes
     /// `self`.
-    pub fn notify_collection_checkpoint_failed(mut self, err: MetaError) {
-        self.notify_collection_no_checkpoint_failed(err.clone());
-        if let Some(tx) = self.collected_checkpoint {
-            tx.send(Err(err)).ok();
-        }
+    pub fn notify_checkpoint_barrier_collection_failed(self, err: MetaError) {
+        match self.collected {
+            Some(NotifierCollected::CollectedBarrier(tx)) => {
+                tx.send(Err(err)).ok();
+            }
+            Some(NotifierCollected::CollectedCheckpointBarrier(tx)) => {
+                tx.send(Err(err)).ok();
+            }
+            _ => {}
+        };
     }
 
-    /// Notify when we failed to collect a barrier(checkpoint = false). This function consumes
-    /// `self`.
-    pub fn notify_collection_no_checkpoint_failed(&mut self, err: MetaError) {
-        if let Some(tx) = self.collected_no_checkpoint.take() {
-            tx.send(Err(err)).ok();
-        }
-    }
+    // /// Notify when we failed to collect a barrier(checkpoint = false). This function consumes
+    // /// `self`.
+    // pub fn notify_barrier_collection_failed(&mut self, err: MetaError) {
+    //     let collected = self.collected.take();
+    //     match collected {
+    //         Some(NotifierCollected::CollectedBarrier(tx)) => {
+    //             tx.send(Err(err)).ok();
+    //         }
+    //         _ => self.collected = collected,
+    //     };
+    // }
 
     /// Notify when we have finished a barrier from all actors. This function consumes `self`.
     ///
     /// Generally when a barrier is collected, it's also finished since it does not require further
     /// report of finishing from actors.
     /// However for creating MV, this is only called when all `Chain` report it finished.
-    pub fn notify_finished(self) {
-        if let Some(tx) = self.finished {
+    pub fn notify_finished(&mut self) {
+        if let Some(tx) = self.finished.take() {
             tx.send(()).ok();
         }
     }
