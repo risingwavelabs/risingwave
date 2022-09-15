@@ -1,7 +1,7 @@
 // Copyright 2022 Singularity Data
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
+// Licensed under the Apache Lic&&ense, Version 2.0 (the "License");
+// you may not use this file except in compliance with the &License.
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -98,6 +98,9 @@ pub struct StateTable<S: StateStore> {
     pub vnode_col_idx_in_pk: Option<usize>,
 
     value_indices: Vec<usize>,
+
+    /// the epoch flush to the state store last time
+    epoch: Option<u64>,
 }
 
 /// init Statetable
@@ -201,6 +204,7 @@ impl<S: StateStore> StateTable<S> {
             disable_sanity_check: false,
             vnode_col_idx_in_pk,
             value_indices,
+            epoch: None,
         }
     }
 
@@ -300,12 +304,41 @@ impl<S: StateStore> StateTable<S> {
             disable_sanity_check: false,
             vnode_col_idx_in_pk: None,
             value_indices,
+            epoch: None,
         }
     }
 
     /// Disable sanity check on this storage table.
     pub fn disable_sanity_check(&mut self) {
         self.disable_sanity_check = true;
+    }
+
+    fn table_id(&self) -> TableId {
+        self.keyspace.table_id()
+    }
+
+    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    pub fn init_epoch(&mut self, epoch: u64) {
+        match self.epoch {
+            Some(prev_epoch) => {
+                panic!(
+                    "init the state table's epoch twice, table_id: {}, prev_epoch: {}, new_epoch: {}",
+                    self.table_id(),
+                    prev_epoch,
+                    epoch
+                )
+            }
+            None => {
+                self.epoch = Some(epoch);
+            }
+        }
+    }
+
+    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    fn epoch(&self) -> u64 {
+        self.epoch.expect(format!(
+            "try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id()
+        ).as_str())
     }
 
     /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
@@ -344,7 +377,7 @@ impl<S: StateStore> StateTable<S> {
     fn get_read_option(&self, epoch: u64) -> ReadOptions {
         ReadOptions {
             epoch,
-            table_id: Some(self.keyspace.table_id()),
+            table_id: Some(self.table_id()),
             retention_seconds: self.table_option.retention_seconds,
         }
     }
@@ -439,7 +472,7 @@ impl<S: StateStore> StateTable<S> {
                 let (vnode, key) = deserialize_pk_with_vnode(&key, &self.pk_deserializer).unwrap();
                 panic!(
                     "mem-table operation conflicts! table_id: {}, vnode: {}, key: {:?}, prev: {}, new: {}",
-                    self.keyspace.table_id(),
+                    self.table_id(),
                     vnode,
                     &key,
                     Self::pretty_row_op(&prev, self.data_types.as_ref(),),
@@ -550,6 +583,7 @@ impl<S: StateStore> StateTable<S> {
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.batch_write_rows(mem_table, new_epoch).await?;
+        self.epoch = Some(new_epoch);
         Ok(())
     }
 
@@ -561,7 +595,7 @@ impl<S: StateStore> StateTable<S> {
     ) -> StorageResult<()> {
         let mut local = self.keyspace.start_write_batch(WriteOptions {
             epoch,
-            table_id: self.keyspace.table_id(),
+            table_id: self.table_id(),
         });
         for (pk, row_op) in buffer {
             match row_op {
@@ -678,7 +712,7 @@ impl<S: StateStore> StateTable<S> {
             };
 
             trace!(
-                table_id = ?self.keyspace.table_id(),
+                table_id = ?self.table_id(),
                 ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
                 dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
                 "storage_iter_with_prefix"
