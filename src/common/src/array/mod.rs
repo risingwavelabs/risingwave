@@ -428,7 +428,7 @@ macro_rules! impl_array_builder {
                     None => self.append_null(),
                     Some(ref scalar) => match (self, scalar) {
                         $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
-                        _ => bail!("Invalid datum type".to_string()),
+                        _ => bail!(format!("Invalid datum type {}", scalar)),
                     },
                 }
             }
