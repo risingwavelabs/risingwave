@@ -209,7 +209,6 @@ fn infer_type_for_special(
                     } else if left_type == **right_elem_type { // scalar + array of same type
                         Some(right_type.clone())
                     } else {
-                        panic!("should not be reached")
                         let least_restrictive = least_restrictive((**left_elem_type).clone(), (**right_elem_type).clone()); 
                         match least_restrictive { // put function call here instead of variable?
                             Ok(res) => {
