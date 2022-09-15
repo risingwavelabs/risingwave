@@ -784,12 +784,11 @@ where
             node.notifiers
                 .into_iter()
                 .for_each(|notifier| notifier.notify_collection_failed(err.clone()));
-            new_epoch = node.command_ctx.prev_epoch;
         }
         if self.enable_recovery {
             // If failed, enter recovery mode.
             let (new_epoch, actors_to_track, create_mview_progress) =
-                self.recovery(new_epoch).await;
+                self.recovery(state.in_flight_prev_epoch).await;
             *tracker = CreateMviewProgressTracker::default();
             tracker.add(new_epoch, actors_to_track, vec![]);
             for progress in &create_mview_progress {
