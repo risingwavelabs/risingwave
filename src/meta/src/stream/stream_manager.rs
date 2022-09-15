@@ -923,10 +923,8 @@ mod tests {
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
             let meta_metrics = Arc::new(MetaMetrics::new());
-            let cluster_manager = Arc::new(
-                ClusterManager::new(env.clone(), Duration::from_secs(3600), meta_metrics.clone())
-                    .await?,
-            );
+            let cluster_manager =
+                Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
             let host = HostAddress {
                 host: host.to_string(),
                 port: port as i32,
@@ -941,6 +939,7 @@ mod tests {
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
+
             // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
             // heartbeat thread here, so it doesn't matter.
             let compactor_manager = Arc::new(

@@ -29,7 +29,7 @@ use crate::PlanRef;
 /// ```sql
 /// SELECT .. from
 ///   (SELECT .., ROW_NUMBER() OVER(PARTITION BY .. ORDER BY ..) rank from ..)
-/// WHERE rank < ..;
+/// WHERE rank [ < | <= | > | >= | = ] ..;
 /// ```
 pub struct OverAggToTopNRule;
 
@@ -76,27 +76,45 @@ impl Rule for OverAggToTopNRule {
             predicate.clone().split_disjoint(&rank_col)
         };
 
-        // TODO: support multiple complex rank predicates. Currently only support rank<N
+        // TODO: support multiple complex rank predicates.
+        // Currently rank [ < | <= | > | >= ] N is used to implement group topn.
+        // While rank = 1 is used to implement deduplication.
         let (limit, offset) = {
             if rank_pred.conjunctions.len() != 1 {
                 tracing::error!("Multiple complex rank predicates is not supported yet.");
                 return None;
             }
-            let (input_ref, cmp, v) = rank_pred.conjunctions[0].as_comparison_const()?;
-            assert_eq!(input_ref.index, window_func_pos);
-            let v = v
-                .cast_implicit(DataType::Int64)
-                .ok()?
-                .eval_row_const()
-                .ok()??;
-            let v = *v.as_int64();
-            // Note: rank functions start from 1
-            match cmp {
-                ExprType::LessThanOrEqual => (v.max(0) as usize, 0),
-                ExprType::LessThan => ((v - 1).max(0) as usize, 0),
-                ExprType::GreaterThan => (LIMIT_ALL_COUNT, v.max(0) as usize),
-                ExprType::GreaterThanOrEqual => (LIMIT_ALL_COUNT, (v - 1).max(0) as usize),
-                _ => unreachable!(),
+            if let Some((input_ref, cmp, v)) = rank_pred.conjunctions[0].as_comparison_const() {
+                assert_eq!(input_ref.index, window_func_pos);
+                let v = v
+                    .cast_implicit(DataType::Int64)
+                    .ok()?
+                    .eval_row_const()
+                    .ok()??;
+                let v = *v.as_int64();
+                // Note: rank functions start from 1
+                match cmp {
+                    ExprType::LessThanOrEqual => (v.max(0) as usize, 0),
+                    ExprType::LessThan => ((v - 1).max(0) as usize, 0),
+                    ExprType::GreaterThan => (LIMIT_ALL_COUNT, v.max(0) as usize),
+                    ExprType::GreaterThanOrEqual => (LIMIT_ALL_COUNT, (v - 1).max(0) as usize),
+                    _ => unreachable!(),
+                }
+            } else if let Some((input_ref, v)) = rank_pred.conjunctions[0].as_eq_const() {
+                assert_eq!(input_ref.index, window_func_pos);
+                let v = v
+                    .cast_implicit(DataType::Int64)
+                    .ok()?
+                    .eval_row_const()
+                    .ok()??;
+                let v = *v.as_int64();
+                if v == 1 {
+                    (1, 0)
+                } else {
+                    return None;
+                }
+            } else {
+                return None;
             }
         };
 

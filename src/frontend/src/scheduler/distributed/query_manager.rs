@@ -16,16 +16,13 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use futures::StreamExt;
-use futures_async_stream::{for_await, try_stream};
+use futures_async_stream::try_stream;
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
-// use futures_async_stream::try_stream;
-use tokio::sync::oneshot;
-use tokio::sync::oneshot::Receiver;
 use tracing::debug;
 
 use super::QueryExecution;
@@ -34,9 +31,7 @@ use crate::handler::query::QueryResultSet;
 use crate::handler::util::to_pg_rows;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError, SchedulerResult,
-};
+use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult};
 
 pub struct QueryResultFetcher {
     // TODO: Remove these after implemented worker node level snapshot pinnning
@@ -46,6 +41,8 @@ pub struct QueryResultFetcher {
     task_output_id: TaskOutputId,
     task_host: HostAddress,
     compute_client_pool: ComputeClientPoolRef,
+
+    chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
 }
 
 /// Manages execution of distributed batch queries.
@@ -88,7 +85,7 @@ impl QueryManager {
             .committed_epoch;
 
         let query_execution = QueryExecution::new(
-            context,
+            context.clone(),
             query,
             epoch,
             self.worker_node_manager.clone(),
@@ -99,8 +96,7 @@ impl QueryManager {
         .await;
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let query_result_fetcher = match query_execution.start(shutdown_tx).await {
+        let query_result_fetcher = match query_execution.start().await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager
@@ -110,7 +106,7 @@ impl QueryManager {
             }
         };
 
-        query_result_fetcher.collect_rows(format, shutdown_rx).await
+        query_result_fetcher.collect_rows_from_channel(format).await
     }
 }
 
@@ -121,6 +117,7 @@ impl QueryResultFetcher {
         task_output_id: TaskOutputId,
         task_host: HostAddress,
         compute_client_pool: ComputeClientPoolRef,
+        chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
     ) -> Self {
         Self {
             epoch,
@@ -128,6 +125,7 @@ impl QueryResultFetcher {
             task_output_id,
             task_host,
             compute_client_pool,
+            chunk_rx,
         }
     }
 
@@ -151,26 +149,13 @@ impl QueryResultFetcher {
         Box::pin(self.run_inner())
     }
 
-    pub async fn collect_rows(
-        self,
-        format: bool,
-        shutdown_rx: Receiver<SchedulerError>,
-    ) -> SchedulerResult<QueryResultSet> {
-        let data_stream = self.run();
-        let mut data_stream = data_stream.take_until(shutdown_rx);
-        let mut rows = vec![];
-        #[for_await]
-        for chunk in &mut data_stream {
-            rows.extend(to_pg_rows(chunk?, format));
+    async fn collect_rows_from_channel(mut self, format: bool) -> SchedulerResult<QueryResultSet> {
+        let mut result_sets = vec![];
+        while let Some(chunk_inner) = self.chunk_rx.recv().await {
+            let chunk = chunk_inner?;
+            result_sets.extend(to_pg_rows(chunk, format));
         }
-
-        // Check whether error happen, if yes, returned.
-        let execution_ret = data_stream.take_result();
-        if let Some(ret) = execution_ret {
-            return Err(ret.expect("The shutdown message receiver should not fail"));
-        }
-
-        Ok(rows)
+        Ok(result_sets)
     }
 }
 

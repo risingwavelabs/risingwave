@@ -166,7 +166,7 @@ pub async fn handle(
             name,
             query,
             ..
-        } => create_mv::handle_create_mv(context, name, query).await,
+        } => create_mv::handle_create_mv(context, name, *query).await,
         Statement::Flush => flush::handle_flush(context).await,
         Statement::SetVariable {
             local: _,

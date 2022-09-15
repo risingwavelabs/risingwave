@@ -75,4 +75,3 @@ tempfile = "3"
 [features]
 test = []
 failpoints = ["fail/failpoints"]
-sync_point = ["sync-point/sync_point"]
