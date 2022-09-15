@@ -290,6 +290,7 @@ fn infer_type_for_special(
         }
         ExprType::ArrayPrepend => {
             ensure_arity!("array_prepend", | inputs | == 2);
+            let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let right_ele_type_opt = match(&right_type) {
                 (
@@ -303,7 +304,7 @@ fn infer_type_for_special(
             let right_ele_type = right_ele_type_opt.ok_or_else(|| {
                 ErrorCode::BindError(format!("Second element needs to be of type array, but is {}", right_type))
             })?; 
-            let res_type = least_restrictive(*right_ele_type.clone(), inputs[0].return_type());
+            let res_type = least_restrictive(*right_ele_type.clone(), left_type.clone());
             match res_type {
                 Ok(ele_type) => {
                     let array_type = DataType::List { datatype: Box::new(ele_type.clone()) };
@@ -323,7 +324,7 @@ fn infer_type_for_special(
                     Ok(Some(array_type))
                 }
                 // TODO: Return proper error code
-                Err(err) => Err(err) // ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type))
+                Err(err) => Err(ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type)).into())
             }
         }
         ExprType::Vnode => {
