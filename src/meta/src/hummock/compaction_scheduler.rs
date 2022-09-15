@@ -451,6 +451,6 @@ mod tests {
                 .await,
             ScheduleStatus::NoAvailableCompactor(_)
         );
-        assert_eq!(1, hummock_manager.list_all_tasks_ids().await.len());
+        assert_eq!(0, hummock_manager.list_all_tasks_ids().await.len());
     }
 }
