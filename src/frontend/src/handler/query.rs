@@ -39,8 +39,7 @@ pub async fn handle_query(
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
-    // bound is still an ast with bound functions and so on
-    let bound = { // binder resolves names: E.g. name of table to the actual table ID. Also resolves functions and operator names
+    let bound = {
         let mut binder = Binder::new(&session);
         binder.bind(stmt)?
     };
@@ -112,7 +111,7 @@ pub async fn distribute_execute(
     let session = context.session_ctx.clone();
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, pg_descs) = {
-        let root = Planner::new(context.into()).plan(stmt)?; // logical plan
+        let root = Planner::new(context.into()).plan(stmt)?;
 
         let pg_descs = root
             .schema()
@@ -121,14 +120,14 @@ pub async fn distribute_execute(
             .map(to_pg_field)
             .collect::<Vec<PgFieldDescriptor>>();
 
-        let plan = root.gen_batch_distributed_plan()?; // still plan, but distributed now. Physical plan 
+        let plan = root.gen_batch_distributed_plan()?;
 
         tracing::trace!(
             "Generated distributed plan: {:?}",
             plan.explain_to_string()?
         );
 
-        let plan_fragmenter = BatchPlanFragmenter::new( // cut plan into parts and send them to compute nodes to execute them
+        let plan_fragmenter = BatchPlanFragmenter::new(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
         );
@@ -138,7 +137,7 @@ pub async fn distribute_execute(
     };
 
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
-    let query_manager = execution_context.session().env().query_manager().clone(); // sends query fragments to compute nodes
+    let query_manager = execution_context.session().env().query_manager().clone();
     Ok((
         query_manager
             .schedule(execution_context, query, format)
