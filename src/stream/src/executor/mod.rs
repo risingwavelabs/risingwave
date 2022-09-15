@@ -74,6 +74,7 @@ mod receiver;
 mod simple;
 mod sink;
 mod source;
+mod sub;
 mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
@@ -111,14 +112,15 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
 pub use source::*;
+pub use sub::*;
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use union::UnionExecutor;
 pub use wrapper::WrapperExecutor;
 
 pub type BoxedExecutor = Box<dyn Executor>;
-pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
+pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 

@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_stack_trace::{StackTraceManager, StackTraceReport};
-use futures::Future;
+use futures::future::{join_all, BoxFuture};
+use futures::{Future, FutureExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
@@ -28,6 +29,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::mpsc::{channel, Receiver};
@@ -48,6 +51,7 @@ lazy_static::lazy_static! {
 }
 
 pub type ActorHandle = JoinHandle<()>;
+pub type ActorSubHandle = BoxFuture<'static, ()>;
 
 pub struct LocalStreamManagerCore {
     /// Runtime for the streaming actors.
@@ -462,7 +466,22 @@ impl LocalStreamManagerCore {
         store: impl StateStore,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
+        has_stateful: bool,
+        sub_handles: &mut Vec<ActorSubHandle>,
     ) -> Result<BoxedExecutor> {
+        fn is_stateful_executor(stream_node: &StreamNode) -> bool {
+            matches!(
+                stream_node.get_node_body().unwrap(),
+                NodeBody::HashAgg(_)
+                    | NodeBody::HashJoin(_)
+                    | NodeBody::DeltaIndexJoin(_)
+                    | NodeBody::Chain(_)
+                    | NodeBody::DynamicFilter(_)
+            )
+        }
+
+        let is_stateful = is_stateful_executor(node);
+
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
         // The node with no input must be a `get_receive_message`
@@ -479,6 +498,8 @@ impl LocalStreamManagerCore {
                     store.clone(),
                     actor_context,
                     vnode_bitmap.clone(),
+                    has_stateful || is_stateful,
+                    sub_handles,
                 )
             })
             .try_collect()?;
@@ -507,7 +528,17 @@ impl LocalStreamManagerCore {
             vnode_bitmap,
         };
 
-        let executor = create_executor(executor_params, self, node, store)?;
+        let executor = {
+            let executor = create_executor(executor_params, self, node, store)?;
+            if has_stateful && is_stateful {
+                let (sub_handle, executor) = pair(executor);
+                sub_handles.push(sub_handle);
+                executor
+            } else {
+                executor
+            }
+        };
+
         let executor = Self::wrap_executor_for_debug(
             executor,
             actor_context.id,
@@ -515,6 +546,7 @@ impl LocalStreamManagerCore {
             input_pos,
             self.streaming_metrics.clone(),
         );
+
         Ok(executor)
     }
 
@@ -526,8 +558,10 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-    ) -> Result<BoxedExecutor> {
-        dispatch_state_store!(self.state_store.clone(), store, {
+    ) -> Result<(BoxedExecutor, Vec<ActorSubHandle>)> {
+        let mut sub_handles = vec![];
+
+        let executor = dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(
                 fragment_id,
                 node,
@@ -536,8 +570,12 @@ impl LocalStreamManagerCore {
                 store,
                 actor_context,
                 vnode_bitmap,
+                false,
+                &mut sub_handles,
             )
-        })
+        })?;
+
+        Ok((executor, sub_handles))
     }
 
     fn wrap_executor_for_debug(
@@ -579,7 +617,7 @@ impl LocalStreamManagerCore {
                 .ok()
                 .map(|b| b.try_into())
                 .transpose()?;
-            let executor = self.create_nodes(
+            let (executor, sub_handles) = self.create_nodes(
                 actor.fragment_id,
                 actor.get_nodes()?,
                 env.clone(),
@@ -604,8 +642,11 @@ impl LocalStreamManagerCore {
 
             let handle = {
                 let actor = async move {
-                    // unwrap the actor result to panic on error
-                    actor.run().await.expect("actor failed");
+                    tokio::join!(
+                        // unwrap the actor result to panic on error
+                        actor.run().map(|r| r.expect("actor failed")),
+                        join_all(sub_handles)
+                    );
                 };
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {

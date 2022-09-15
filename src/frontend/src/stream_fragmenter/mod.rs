@@ -24,8 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FragmentType,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    DispatcherType, FragmentType, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
 use self::rewrite::build_delta_join_without_arrange;
@@ -93,75 +92,11 @@ pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
     fragment_graph
 }
 
-fn is_stateful_executor(stream_node: &StreamNode) -> bool {
-    matches!(
-        stream_node.get_node_body().unwrap(),
-        NodeBody::HashAgg(_)
-            | NodeBody::HashJoin(_)
-            | NodeBody::DeltaIndexJoin(_)
-            | NodeBody::Chain(_)
-            | NodeBody::DynamicFilter(_)
-    )
-}
-
-/// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
-/// fragments.
-fn rewrite_stream_node(
-    state: &mut BuildFragmentGraphState,
-    stream_node: StreamNode,
-    insert_exchange_flag: bool,
-) -> Result<StreamNode> {
-    let f = |child| {
-        // For stateful operators, set `exchange_flag = true`. If it's already true,
-        // force add an exchange.
-        if is_stateful_executor(&child) {
-            if insert_exchange_flag {
-                let child_node = rewrite_stream_node(state, child, true)?;
-
-                let strategy = DispatchStrategy {
-                    r#type: DispatcherType::NoShuffle.into(),
-                    column_indices: vec![], // TODO: use distribution key
-                };
-                Ok(StreamNode {
-                    stream_key: child_node.stream_key.clone(),
-                    fields: child_node.fields.clone(),
-                    node_body: Some(NodeBody::Exchange(ExchangeNode {
-                        strategy: Some(strategy),
-                    })),
-                    operator_id: state.gen_operator_id() as u64,
-                    append_only: child_node.append_only,
-                    input: vec![child_node],
-                    identity: "Exchange (NoShuffle)".to_string(),
-                })
-            } else {
-                rewrite_stream_node(state, child, true)
-            }
-        } else {
-            match child.get_node_body()? {
-                // For exchanges, reset the flag.
-                NodeBody::Exchange(_) => rewrite_stream_node(state, child, false),
-                // Otherwise, recursively visit the children.
-                _ => rewrite_stream_node(state, child, insert_exchange_flag),
-            }
-        }
-    };
-    Ok(StreamNode {
-        input: stream_node
-            .input
-            .into_iter()
-            .map(f)
-            .collect::<Result<_>>()?,
-        ..stream_node
-    })
-}
-
 /// Generate fragment DAG from input streaming plan by their dependency.
 fn generate_fragment_graph(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
 ) -> Result<()> {
-    let stateful = is_stateful_executor(&stream_node);
-    let stream_node = rewrite_stream_node(state, stream_node, stateful)?;
     build_and_add_fragment(state, stream_node)?;
     Ok(())
 }
