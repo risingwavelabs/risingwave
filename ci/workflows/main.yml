@@ -43,10 +43,24 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
     retry: *auto-retry
+  
+  - label: "docslt"
+    command: "ci/scripts/docslt.sh"
+    key: "docslt"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end test (release mode)"
     command: "ci/scripts/e2e-test.sh -p ci-release"
-    depends_on: "build"
+    depends_on:
+      - "build"
+      - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
@@ -65,7 +79,9 @@ steps:
 
   - label: "end-to-end test (parallel) (release mode)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
-    depends_on: "build"
+    depends_on:
+      - "build"
+      - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:

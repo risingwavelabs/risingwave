@@ -87,7 +87,7 @@ impl Expression for ConcatWsExpression {
 
             builder = writer.finish()?.into_inner();
         }
-        Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
+        Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

@@ -55,9 +55,23 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "docslt"
+    command: "ci/scripts/docslt.sh"
+    key: "docslt"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "end-to-end test"
     command: "ci/scripts/e2e-test.sh -p ci-dev"
-    depends_on: "build"
+    depends_on:
+      - "build"
+      - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
@@ -70,7 +84,9 @@ steps:
 
   - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
-    depends_on: "build"
+    depends_on:
+      - "build"
+      - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:

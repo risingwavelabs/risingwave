@@ -23,6 +23,7 @@ echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-"$profile" target/debug/
 buildkite-agent artifact download risedev-dev-"$profile" target/debug/
+buildkite-agent artifact download "e2e_test/generated/*" ./
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
@@ -51,6 +52,13 @@ sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profi
 sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt' --junit "batch-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
+
+echo "--- Kill cluster"
+cargo make ci-kill
+
+echo "--- e2e, ci-3cn-1fe, generated"
+cargo make ci-start ci-3cn-1fe
+sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill

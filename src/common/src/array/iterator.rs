@@ -111,7 +111,7 @@ mod tests {
                         for _ in 0..5 {
                             builder.append_null().unwrap();
                         }
-                        let array = builder.finish().unwrap();
+                        let array = builder.finish();
                         let mut iter = array.iter();
 
                         assert_eq!(iter.size_hint(), (5, Some(5))); iter.next();

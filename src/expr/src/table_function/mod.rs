@@ -65,7 +65,7 @@ pub fn build_from_prost(prost: &TableFunctionProst) -> Result<BoxedTableFunction
 
 /// Helper function to create an empty array.
 fn empty_array(data_type: DataType) -> ArrayRef {
-    Arc::new(data_type.create_array_builder(0).finish().unwrap())
+    Arc::new(data_type.create_array_builder(0).finish())
 }
 
 /// Used for tests. Repeat an expression n times
@@ -90,8 +90,7 @@ pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
                 for _ in 0..self.n {
                     builder.append_datum_ref(datum_ref)?;
                 }
-                let array = builder.finish()?;
-                res.push(Arc::new(array));
+                res.push(Arc::new(builder.finish()));
             }
 
             Ok(res)

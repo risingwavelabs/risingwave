@@ -51,6 +51,7 @@
 #![feature(is_sorted)]
 #![feature(btree_drain_filter)]
 #![feature(exact_size_is_empty)]
+#![cfg_attr(coverage, feature(no_coverage))]
 
 pub mod hummock;
 pub mod keyspace;
