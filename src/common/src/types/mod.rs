@@ -302,6 +302,25 @@ impl DataType {
         )
     }
 
+    pub fn is_scalar(&self) -> bool {
+        match self {
+            DataType::Boolean
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::Decimal
+            | DataType::Float32
+            | DataType::Float64
+            | DataType::Varchar
+            | DataType::Date
+            | DataType::Timestamp
+            | DataType::Timestampz
+            | DataType::Time
+            | DataType::Interval => true,
+            _ => false, 
+        }
+    }
+
     /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
     pub fn mem_cmp_eq_value_enc(&self) -> bool {
         use DataType::*;

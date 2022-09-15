@@ -196,7 +196,7 @@ fn infer_type_for_special(
                                 *inputs = inputs_owned
                                     .into_iter()
                                     .map(|input|  {
-                                        if input.return_type().is_numeric() {
+                                        if input.return_type().is_scalar() {
                                             return input.cast_implicit(res.clone());
                                         }
                                         input.cast_implicit(array_res.clone())
@@ -246,7 +246,7 @@ fn infer_type_for_special(
                     *inputs = inputs_owned
                         .into_iter()
                         .map(|input|  {
-                            if input.return_type().is_numeric() {
+                            if input.return_type().is_scalar() {
                                 return input.cast_implicit(ele_type.clone());
                             }
                             input.cast_implicit(array_type.clone())
@@ -283,7 +283,7 @@ fn infer_type_for_special(
                     *inputs = inputs_owned
                         .into_iter()
                         .map(|input|  {
-                            if input.return_type().is_numeric() {
+                            if input.return_type().is_scalar() {
                                 return input.cast_implicit(ele_type.clone());
                             }
                             input.cast_implicit(array_type.clone())
