@@ -284,7 +284,7 @@ pub mod tests {
 
     use super::*;
     use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_with_overlap, generate_table,
+        generate_l0_nonoverlapping_sublevels, generate_table,
     };
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
@@ -349,7 +349,7 @@ pub mod tests {
         ];
         let mut levels = Levels {
             levels,
-            l0: Some(generate_l0_with_overlap(vec![])),
+            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
         };
         let mut levels_handler = vec![
             LevelHandler::new(0),
@@ -472,7 +472,7 @@ pub mod tests {
 
     #[test]
     fn test_manual_compaction_picker_l0() {
-        let l0 = generate_l0_with_overlap(vec![
+        let l0 = generate_l0_nonoverlapping_sublevels(vec![
             generate_table(0, 1, 0, 500, 1),
             generate_table(1, 1, 0, 500, 1),
         ]);
@@ -562,7 +562,7 @@ pub mod tests {
 
     #[test]
     fn test_manual_compaction_picker_l0_empty() {
-        let l0 = generate_l0_with_overlap(vec![]);
+        let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         let levels = vec![Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping as i32,
@@ -593,7 +593,7 @@ pub mod tests {
 
     #[test]
     fn test_manual_compaction_picker_l0_lbase_internal_table() {
-        let mut l0 = generate_l0_with_overlap(vec![
+        let mut l0 = generate_l0_nonoverlapping_sublevels(vec![
             generate_table(0, 1, 0, 500, 1),
             generate_table(1, 1, 0, 500, 1),
         ]);

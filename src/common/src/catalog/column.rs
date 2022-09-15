@@ -19,8 +19,8 @@ use crate::catalog::Field;
 use crate::error::ErrorCode;
 use crate::types::DataType;
 
-/// Column ID is the unique identifier of a column in a table. Different from table ID,
-/// column ID is not globally unique.
+/// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
+/// not globally unique.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ColumnId(i32);
 
@@ -47,11 +47,13 @@ impl From<i32> for ColumnId {
         Self::new(column_id)
     }
 }
+
 impl From<ColumnId> for i32 {
     fn from(id: ColumnId) -> i32 {
         id.0
     }
 }
+
 impl std::fmt::Display for ColumnId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
