@@ -87,7 +87,8 @@ where
         let parallel_unit_mappings = fragment_guard.all_fragment_mappings().collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
-        // We should only pin for workers that will unpin.
+        // We should only pin for workers to which we send a `meta_snapshot` that includes
+        // `HummockVersion` below. As a result, these workers will eventually unpin.
         if worker_type == WorkerType::ComputeNode || worker_type == WorkerType::RiseCtl {
             self.hummock_manager
                 .pin_version(req.get_worker_id())
@@ -100,6 +101,7 @@ where
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
         // Send the snapshot on subscription. After that we will send only updates.
+        // If we let `HummockVersion` be in `meta_snapshot`, we should call `pin_version` above.
         let meta_snapshot = match worker_type {
             WorkerType::Frontend => MetaSnapshot {
                 nodes,
