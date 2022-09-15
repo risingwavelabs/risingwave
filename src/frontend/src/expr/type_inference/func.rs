@@ -251,7 +251,8 @@ fn infer_type_for_special(
         ExprType::ArrayAppend => {
             // works, gives the correct type, but I guess there is no casting? 
             ensure_arity!("array_append", | inputs | == 2);
-            let left_type = inputs[0].return_type(); // I need the left element type 
+            let left_type = inputs[0].return_type();
+            let right_type = inputs[1].return_type();
             let left_ele_type_opt = match(&left_type) {
                 (
                     DataType::List {
@@ -264,7 +265,7 @@ fn infer_type_for_special(
             let left_ele_type = left_ele_type_opt.ok_or_else(|| {
                 ErrorCode::BindError(format!("First element needs to be of type array, but is {}", left_type))
             })?; 
-            let res_type = least_restrictive(*left_ele_type.clone(), inputs[1].return_type());
+            let res_type = least_restrictive(*left_ele_type.clone(), right_type.clone());
             match res_type {
                 Ok(ele_type) => {
                     let array_type = DataType::List { datatype: Box::new(ele_type.clone()) };
@@ -284,7 +285,7 @@ fn infer_type_for_special(
                     Ok(Some(array_type))
                 }
                 // TODO: Return proper error code
-                Err(err) => Err(err) // ErrorCode::BindError(format!("Cannot append {} to {}.", right_type, left_type))
+                Err(err) => Err(ErrorCode::BindError(format!("Cannot append {} to {}.", right_type, left_type)).into())
             }
         }
         ExprType::ArrayPrepend => {
