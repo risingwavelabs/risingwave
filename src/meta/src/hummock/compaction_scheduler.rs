@@ -271,6 +271,8 @@ where
                 compactor.context_id(),
                 e
             );
+            self.compactor_manager
+                .pause_compactor(compactor.context_id());
             return ScheduleStatus::SendFailure(compact_task);
         }
 
@@ -447,7 +449,7 @@ mod tests {
         fail::remove(fp_compaction_send_task_fail);
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
 
-        // Succeeded.
+        // Fail, because the compactor is paused after send failure.
         assert_matches!(
             compaction_scheduler
                 .pick_and_assign(
@@ -455,8 +457,8 @@ mod tests {
                     request_channel.clone()
                 )
                 .await,
-            ScheduleStatus::Ok
+            ScheduleStatus::NoAvailableCompactor(_)
         );
-        assert_eq!(1, hummock_manager.list_all_tasks_ids().await.len());
+        assert_eq!(0, hummock_manager.list_all_tasks_ids().await.len());
     }
 }
