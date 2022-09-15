@@ -757,6 +757,9 @@ where
         task_status: TaskStatus,
     ) -> Result<bool> {
         compact_task.set_task_status(task_status);
+        fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStoreError(
+            anyhow::anyhow!("failpoint metastore err")
+        )));
         self.cancel_compact_task_impl(compact_task).await
     }
 
@@ -770,6 +773,9 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<Option<CompactTask>> {
+        fail_point!("fp_get_compact_task", |_| Err(Error::MetaStoreError(
+            anyhow::anyhow!("failpoint metastore error")
+        )));
         while let Some(task) = self
             .get_compact_task_impl(compaction_group_id, None)
             .await?
