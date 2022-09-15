@@ -293,8 +293,8 @@ fn infer_type_for_special(
             let right_ele_type = right_ele_type_opt.ok_or_else(|| {
                 ErrorCode::BindError(format!("Second element needs to be of type array, but is {}", right_type))
             })?; 
-            let res = least_restrictive(*right_ele_type.clone(), inputs[0].return_type());
-            match res {
+            let res_type = least_restrictive(*right_ele_type.clone(), inputs[0].return_type());
+            match res_type {
                 Ok(dt) => {
                     let array_type = DataType::List { datatype: Box::new(dt.clone()) };
             
