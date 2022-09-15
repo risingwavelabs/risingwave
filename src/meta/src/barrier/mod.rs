@@ -24,7 +24,7 @@ use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -773,7 +773,6 @@ where
         state: &mut BarrierManagerState,
         tracker: &mut CreateMviewProgressTracker,
     ) {
-        let mut new_epoch = Epoch::from(INVALID_EPOCH);
         for node in fail_nodes {
             if let Some(timer) = node.timer {
                 timer.observe_duration();
