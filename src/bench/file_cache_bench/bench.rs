@@ -33,14 +33,21 @@ use crate::utils::{dev_stat_path, iostat};
 struct Args {
     #[clap(short, long)]
     path: String,
-    #[clap(long, default_value = "1073741824")] // 1 GiB
+    /// (mb)
+    #[clap(long, default_value = "1024")]
     capacity: usize,
-    #[clap(long, default_value = "134217728")] // 2 * 64 MiB
+    /// (mb)
+    #[clap(long, default_value = "128")]
     total_buffer_capacity: usize,
-    #[clap(long, default_value = "67108864")] // 64 MiB
+    /// (mb)
+    #[clap(long, default_value = "512")]
     cache_file_fallocate_unit: usize,
+    /// (mb)
+    #[clap(long, default_value = "16")]
+    cache_meta_fallocate_unit: usize,
 
-    #[clap(long, default_value = "1048576")] // 1 MiB
+    /// (kb)
+    #[clap(long, default_value = "1024")]
     bs: usize,
     #[clap(long, default_value = "8")]
     concurrency: usize,
@@ -90,9 +97,10 @@ pub async fn run() {
 
     let options = FileCacheOptions {
         dir: args.path.clone(),
-        capacity: args.capacity,
-        total_buffer_capacity: args.total_buffer_capacity,
-        cache_file_fallocate_unit: args.cache_file_fallocate_unit,
+        capacity: args.capacity * 1024 * 1024,
+        total_buffer_capacity: args.total_buffer_capacity * 1024 * 1024,
+        cache_file_fallocate_unit: args.cache_file_fallocate_unit * 1024 * 1024,
+        cache_meta_fallocate_unit: args.cache_meta_fallocate_unit * 1024 * 1024,
         flush_buffer_hooks: vec![hook],
     };
 
@@ -205,6 +213,7 @@ async fn bench(
 
     let sst = id as u32;
     let mut idx = 0;
+    let bs = args.bs * 1024;
 
     loop {
         let loop_start = Instant::now();
@@ -220,7 +229,7 @@ async fn bench(
         for _ in 0..args.write {
             idx += 1;
             let key = Index { sst, idx };
-            let value = CacheValue(vec![b'x'; args.bs]);
+            let value = CacheValue(vec![b'x'; bs]);
 
             let start = Instant::now();
             cache.insert(key, value).unwrap();
@@ -230,7 +239,7 @@ async fn bench(
                 .record(start.elapsed().as_micros() as u64)
                 .expect("record out of range");
             metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
-            metrics.insert_bytes.fetch_add(args.bs, Ordering::Relaxed);
+            metrics.insert_bytes.fetch_add(bs, Ordering::Relaxed);
         }
         for _ in 0..args.read {
             let key = Index {

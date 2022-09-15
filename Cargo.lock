@@ -2015,6 +2015,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "getopts"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14dbbfd5c71d70241ecf9e6f13737f7b5ce823821063188d7e46c41d371eebd5"
+dependencies = [
+ "unicode-width",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3804,6 +3813,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d9cc634bc78768157b5cbfe988ffcd1dcba95cd2b2f03a88316c08c6d00ed63"
 dependencies = [
  "bitflags",
+ "getopts",
  "memchr",
  "unicase",
 ]
@@ -4119,6 +4129,7 @@ dependencies = [
  "isahc",
  "itertools",
  "kafka",
+ "pulldown-cmark",
  "redis",
  "regex",
  "serde",
@@ -5749,6 +5760,29 @@ dependencies = [
  "madsim-tokio",
  "spin 0.9.4",
  "thiserror",
+]
+
+[[package]]
+name = "sync_point_unit_test"
+version = "0.1.11"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "fail",
+ "futures",
+ "itertools",
+ "madsim-tokio",
+ "parking_lot 0.12.1",
+ "rand 0.8.5",
+ "risingwave_common",
+ "risingwave_common_service",
+ "risingwave_hummock_sdk",
+ "risingwave_meta",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "risingwave_storage",
+ "serial_test",
+ "sync-point",
 ]
 
 [[package]]
