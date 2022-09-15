@@ -393,18 +393,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
         let key = key.clone().deserialize(self.join_key_data_types.iter())?;
 
-        let table_iter_fut = self
-            .state
-            .table
-            .iter_with_pk_prefix(&key, self.current_epoch);
+        let table_iter_fut = self.state.table.iter_with_pk_prefix(&key);
 
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let degree_table_iter_fut = self
-                .degree_state
-                .table
-                .iter_with_pk_prefix(&key, self.current_epoch);
+            let degree_table_iter_fut = self.degree_state.table.iter_with_pk_prefix(&key);
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;

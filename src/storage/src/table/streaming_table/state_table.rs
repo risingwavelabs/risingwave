@@ -335,10 +335,8 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    fn epoch(&self) -> u64 {
-        self.epoch.expect(format!(
-            "try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id()
-        ).as_str())
+    pub fn epoch(&self) -> u64 {
+        self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id()))
     }
 
     /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
@@ -386,12 +384,12 @@ const ENABLE_STATE_TABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 /// point get
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
-    pub async fn get_row<'a>(&'a self, pk: &'a Row, epoch: u64) -> StorageResult<Option<Row>> {
+    pub async fn get_row<'a>(&'a self, pk: &'a Row) -> StorageResult<Option<Row>> {
         let serialized_pk =
             serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
 
-        let read_options = self.get_read_option(epoch);
+        let read_options = self.get_read_option(self.epoch());
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row_bytes) => {
@@ -580,11 +578,30 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
+    fn update_epoch(&mut self, new_epoch: u64) {
+        assert!(
+            self.epoch() <= new_epoch,
+            "state table commit a committed epoch, table_id: {}, prev_epoch: {}, new_epoch: {}",
+            self.table_id(),
+            self.epoch(),
+            new_epoch
+        );
+        self.epoch = Some(new_epoch);
+    }
+
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.batch_write_rows(mem_table, new_epoch).await?;
-        self.epoch = Some(new_epoch);
+        self.update_epoch(new_epoch);
         Ok(())
+    }
+
+    // TODO(st1page): maybe we should extract a pub struct to do it
+    /// just specially used by those state table read-only and after the call the data
+    /// in the epoch will be visible
+    pub fn commit_no_data_expected(&mut self, new_epoch: u64) {
+        assert!(!self.is_dirty());
+        self.update_epoch(new_epoch);
     }
 
     /// Write to state store.
@@ -673,15 +690,14 @@ impl<S: StateStore> StateTable<S> {
 /// Iterator functions.
 impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table.
-    pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
-        self.iter_with_pk_prefix(Row::empty(), epoch).await
+    pub async fn iter(&self) -> StorageResult<RowStream<'_, S>> {
+        self.iter_with_pk_prefix(Row::empty()).await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix<'a>(
         &'a self,
         pk_prefix: &'a Row,
-        epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
         let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
@@ -722,7 +738,7 @@ impl<S: StateStore> StateTable<S> {
                 &self.keyspace,
                 prefix_hint,
                 encoded_key_range_with_vnode,
-                self.get_read_option(epoch),
+                self.get_read_option(self.epoch()),
                 self.data_types.clone(),
             )
             .await?

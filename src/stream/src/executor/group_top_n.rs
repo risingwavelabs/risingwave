@@ -144,11 +144,7 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
 
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
-    async fn apply_chunk(
-        &mut self,
-        chunk: StreamChunk,
-        epoch: u64,
-    ) -> StreamExecutorResult<StreamChunk> {
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
 
@@ -170,7 +166,7 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
                 Vacant(entry) => {
                     let mut topn_cache = TopNCache::new(self.offset, self.limit);
                     self.managed_state
-                        .init_topn_cache(Some(&pk_prefix), &mut topn_cache, epoch)
+                        .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
                         .await?;
                     entry.insert(topn_cache);
                 }
@@ -198,7 +194,6 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
                     op,
                     ordered_pk_row,
                     row,
-                    epoch,
                     &mut res_ops,
                     &mut res_rows,
                 )
@@ -230,7 +225,8 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
             .update_vnode_bitmap(vnode_bitmap);
     }
 
-    async fn init(&mut self, _epoch: u64) -> StreamExecutorResult<()> {
+    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+        self.managed_state.state_table.init_epoch(epoch);
         Ok(())
     }
 }

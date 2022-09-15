@@ -57,7 +57,9 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
         order_types.clone(),
         pk_indices,
     );
-    let epoch: u64 = 0;
+    let mut epoch: u64 = 0;
+    state.init_epoch(epoch);
+    epoch += 1;
 
     state.insert(Row(vec![Some(1_i32.into()), None, None]));
     state.insert(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
