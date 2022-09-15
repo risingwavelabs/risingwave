@@ -42,7 +42,7 @@ macro_rules! gen_eval {
                     Some(bitmap) => {
                         for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
                             if !visible {
-                                output_array.append_null()?;
+                                output_array.append_null();
                                 continue;
                             }
                             $macro!(self, output_array, $([<v_ $arg:lower>],)*)
@@ -81,9 +81,9 @@ macro_rules! eval_normal {
         if let ($(Some($arg), )*) = ($($arg, )*) {
             let ret = ($self.func)($($arg, )*)?;
             let output = Some(ret.as_scalar_ref());
-            $output_array.append(output)?;
+            $output_array.append(output);
         } else {
-            $output_array.append(None)?;
+            $output_array.append(None);
         }
     }
 }
@@ -169,7 +169,7 @@ macro_rules! eval_bytes {
             let guard = ($self.func)($($arg, )* writer)?;
             $output_array = guard.into_inner();
         } else {
-            $output_array.append(None)?;
+            $output_array.append(None);
         }
     }
 }
@@ -248,7 +248,7 @@ macro_rules! eval_nullable {
     ($self:ident, $output_array:ident, $($arg:ident,)*) => {
         {
             let ret = ($self.func)($($arg,)*)?;
-            $output_array.append(option_as_scalar_ref(&ret))?;
+            $output_array.append(option_as_scalar_ref(&ret));
         }
     }
 }
