@@ -699,7 +699,7 @@ mod tests {
                 .unwrap();
             assert!(builder.pop().is_some());
             assert!(builder.pop().is_none());
-            let arr = builder.finish().unwrap();
+            let arr = builder.finish();
             assert!(arr.is_empty());
         }
 
@@ -727,7 +727,7 @@ mod tests {
 
             assert!(builder.pop().is_some());
 
-            let arr = builder.finish().unwrap();
+            let arr = builder.finish();
             assert_eq!(arr.len(), 1);
 
             let val = arr.value_at(0).unwrap();
