@@ -56,7 +56,7 @@ impl Expression for CoalesceExpression {
                     }
                 }
             }
-            builder.append_datum(&data)?;
+            builder.append_datum(&data);
         }
         Ok(Arc::new(builder.finish()))
     }

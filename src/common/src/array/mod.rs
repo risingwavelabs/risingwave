@@ -407,36 +407,36 @@ for_all_variants! { array_builder_impl_enum }
 macro_rules! impl_array_builder {
     ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         impl ArrayBuilderImpl {
-            pub fn append_array(&mut self, other: &ArrayImpl) -> ArrayResult<()> {
+            pub fn append_array(&mut self, other: &ArrayImpl) {
                 match self {
-                    $( Self::$variant_name(inner) => Ok(inner.append_array(other.into())), )*
+                    $( Self::$variant_name(inner) => inner.append_array(other.into()), )*
                 }
             }
 
-            pub fn append_null(&mut self) -> ArrayResult<()> {
+            pub fn append_null(&mut self) {
                 match self {
-                    $( Self::$variant_name(inner) => Ok(inner.append(None)), )*
+                    $( Self::$variant_name(inner) => inner.append(None), )*
                 }
             }
 
             /// Append a datum, return error while type not match.
-            pub fn append_datum(&mut self, datum: &Datum) -> ArrayResult<()> {
+            pub fn append_datum(&mut self, datum: &Datum) {
                 match datum {
                     None => self.append_null(),
                     Some(ref scalar) => match (self, scalar) {
-                        $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => Ok(inner.append(Some(v.as_scalar_ref()))), )*
-                        _ => bail!("Invalid datum type".to_string()),
+                        $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
+                        _ => panic!("Invalid datum type"),
                     },
                 }
             }
 
             /// Append a datum ref, return error while type not match.
-            pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) -> ArrayResult<()> {
+            pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) {
                 match datum_ref {
                     None => self.append_null(),
                     Some(scalar_ref) => match (self, scalar_ref) {
-                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => Ok(inner.append(Some(v))), )*
-                        (this_builder, this_scalar_ref) => bail!(
+                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
+                        (this_builder, this_scalar_ref) => panic!(
                             "Failed to append datum, array builder type: {}, scalar ref type: {}",
                             this_builder.get_ident(),
                             this_scalar_ref.get_ident()
@@ -445,10 +445,10 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) -> ArrayResult<()> {
+            pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
                 match self {
-                    $( Self::$variant_name(inner) => Ok(inner.append_array_element(other.into(), idx)), )*
-                }
+                    $( Self::$variant_name(inner) => inner.append_array_element(other.into(), idx), )*
+                };
             }
 
             pub fn finish(self) -> ArrayImpl {

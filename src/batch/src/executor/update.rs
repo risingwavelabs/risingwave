@@ -119,7 +119,7 @@ impl UpdateExecutor {
                 .flat_map(|(a, b)| [a, b])
             {
                 for (datum_ref, builder) in row.values().zip_eq(builders.iter_mut()) {
-                    builder.append_datum_ref(datum_ref)?;
+                    builder.append_datum_ref(datum_ref);
                 }
             }
             let columns = builders.into_iter().map(|b| b.finish().into()).collect();

@@ -94,7 +94,7 @@ impl ArrayBuilder for ListArrayBuilder {
                 let values_ref = v.values_ref();
                 self.offsets.push(last + values_ref.len());
                 for f in values_ref {
-                    self.value.append_datum_ref(f).unwrap();
+                    self.value.append_datum_ref(f);
                 }
             }
         }
@@ -106,7 +106,7 @@ impl ArrayBuilder for ListArrayBuilder {
         let last = *self.offsets.last().unwrap();
         self.offsets
             .append(&mut other.offsets[1..].iter().map(|o| *o + last).collect());
-        self.value.append_array(&other.value).unwrap();
+        self.value.append_array(&other.value);
         self.len += other.len();
     }
 
@@ -122,13 +122,14 @@ impl ArrayBuilder for ListArrayBuilder {
 }
 
 impl ListArrayBuilder {
-    pub fn append_row_ref(&mut self, row: RowRef) -> ArrayResult<()> {
+    pub fn append_row_ref(&mut self, row: RowRef) {
         self.bitmap.append(true);
         let last = *self.offsets.last().unwrap();
         self.offsets.push(last + row.size());
         self.len += 1;
-        row.values()
-            .try_for_each(|v| self.value.append_datum_ref(v))
+        for v in row.values() {
+            self.value.append_datum_ref(v);
+        }
     }
 }
 
@@ -256,16 +257,17 @@ impl ListArray {
         let mut offsets = vec![0];
         let mut values = values.into_iter().peekable();
         let mut builder = values.peek().unwrap().as_ref().unwrap().create_builder(0)?;
-        values.try_for_each(|i| match i {
-            Some(a) => {
-                offsets.push(a.len());
-                builder.append_array(&a)
+        for i in values {
+            match i {
+                Some(a) => {
+                    offsets.push(a.len());
+                    builder.append_array(&a)
+                }
+                None => {
+                    offsets.push(0);
+                }
             }
-            None => {
-                offsets.push(0);
-                Ok(())
-            }
-        })?;
+        }
         offsets.iter_mut().fold(0, |acc, x| {
             *x += acc;
             *x
