@@ -149,7 +149,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
                     let chunk_arr = cur_chunk.column_at(idx).array();
                     let chunk_arr = chunk_arr.as_ref();
                     let datum = chunk_arr.value_at(row_idx).to_owned_datum();
-                    builder.append_datum(&datum)?;
+                    builder.append_datum(&datum);
                 }
                 want_to_produce -= 1;
                 array_len += 1;

@@ -88,7 +88,7 @@ pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
             for datum_ref in array.iter() {
                 let mut builder = self.return_type().create_array_builder(self.n);
                 for _ in 0..self.n {
-                    builder.append_datum_ref(datum_ref)?;
+                    builder.append_datum_ref(datum_ref);
                 }
                 res.push(Arc::new(builder.finish()));
             }

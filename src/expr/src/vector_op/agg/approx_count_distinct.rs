@@ -146,7 +146,10 @@ impl Aggregator for ApproxCountDistinct {
         let result = self.calculate_result();
         self.registers = [0; NUM_OF_REGISTERS];
         match builder {
-            ArrayBuilderImpl::Int64(b) => b.append(Some(result)).map_err(Into::into),
+            ArrayBuilderImpl::Int64(b) => {
+                b.append(Some(result));
+                Ok(())
+            }
             _ => bail!("Unexpected builder for count(*)."),
         }
     }

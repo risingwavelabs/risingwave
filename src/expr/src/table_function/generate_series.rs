@@ -72,7 +72,7 @@ where
         } else {
             cur <= stop
         } {
-            builder.append(Some(cur.as_scalar_ref())).unwrap();
+            builder.append(Some(cur.as_scalar_ref()));
             cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
         }
 
