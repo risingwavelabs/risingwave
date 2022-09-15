@@ -43,6 +43,8 @@ pub trait CompactionSchedulePolicy: Send + Sync {
         max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>>;
 
+    fn freeze_compactor(&mut self, context_id: HummockContextId);
+
     fn remove_compactor(&mut self, context_id: HummockContextId);
 
     fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>>;
@@ -68,7 +70,7 @@ pub trait CompactionSchedulePolicy: Send + Sync {
 // This strategy is retained just for reference, it is not used.
 pub struct RoundRobinPolicy {
     /// The context ids of compactors.
-    compactors: Vec<HummockContextId>,
+    compactors: Vec<(HummockContextId, /* is not frozen */ bool)>,
 
     /// TODO: Let each compactor have its own Mutex, we should not need to lock whole thing.
     /// The outer lock is a RwLock, so we should still be able to modify each compactor
@@ -98,17 +100,19 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
             return None;
         }
         let compactor_index = self.next_compactor % self.compactors.len();
-        for context_id in self.compactors[compactor_index..]
+        for (context_id, is_not_frozen) in self.compactors[compactor_index..]
             .iter()
             .chain(&self.compactors[..compactor_index])
         {
-            let compactor = self.compactor_map.get(context_id).unwrap();
-            if *compactor_assigned_task_num
-                .get(&compactor.context_id())
-                .unwrap_or(&0)
-                < compactor.max_concurrent_task_number()
-            {
-                return Some(compactor.clone());
+            if *is_not_frozen {
+                let compactor = self.compactor_map.get(context_id).unwrap();
+                if *compactor_assigned_task_num
+                    .get(&compactor.context_id())
+                    .unwrap_or(&0)
+                    < compactor.max_concurrent_task_number()
+                {
+                    return Some(compactor.clone());
+                }
             }
         }
         None
@@ -119,8 +123,16 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
             return None;
         }
         let compactor_index = self.next_compactor % self.compactors.len();
-        let compactor = self.compactors[compactor_index];
-        Some(self.compactor_map.get(&compactor).unwrap().clone())
+        for (context_id, is_not_frozen) in self.compactors[compactor_index..]
+            .iter()
+            .chain(&self.compactors[..compactor_index])
+        {
+            if *is_not_frozen {
+                let compactor = self.compactor_map.get(context_id).unwrap();
+                return Some(compactor.clone());
+            }
+        }
+        None
     }
 
     fn add_compactor(
@@ -129,8 +141,8 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
-        self.compactors.retain(|c| *c != context_id);
-        self.compactors.push(context_id);
+        self.compactors.retain(|(c, _)| *c != context_id);
+        self.compactors.push((context_id, true));
         self.compactor_map.insert(
             context_id,
             Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
@@ -138,8 +150,16 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         rx
     }
 
+    fn freeze_compactor(&mut self, context_id: HummockContextId) {
+        self.compactors.iter_mut().for_each(|(c, is_not_frozen)| {
+            if *c == context_id {
+                *is_not_frozen = false;
+            }
+        });
+    }
+
     fn remove_compactor(&mut self, context_id: HummockContextId) {
-        self.compactors.retain(|c| *c != context_id);
+        self.compactors.retain(|(c, _)| *c != context_id);
         self.compactor_map.remove(&context_id);
     }
 
@@ -155,7 +175,15 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         if !self.compactor_map.contains_key(&context_id) {
             return Err(Error::InvalidContext(context_id));
         }
-        self.next_compactor += 1;
+        let end_next_compactor = self.next_compactor + self.compactors.len();
+        loop {
+            self.next_compactor += 1;
+            if self.next_compactor >= end_next_compactor
+                || self.compactors[self.next_compactor % self.compactors.len()].1
+            {
+                break;
+            }
+        }
         Ok(())
     }
 
@@ -183,7 +211,8 @@ pub struct ScoredPolicy {
     // node has not yet subscribed to meta node.
     //
     // That is to say `score_to_compactor` should be a subset of `compactor_to_score`.
-    score_to_compactor: BTreeMap<(Score, HummockContextId), Arc<Compactor>>,
+    score_to_compactor:
+        BTreeMap<(Score, HummockContextId), (Arc<Compactor>, /* is not frozen */ bool)>,
     compactor_to_score: HashMap<HummockContextId, Score>,
 }
 
@@ -251,24 +280,27 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
-        for compactor in self.score_to_compactor.values() {
-            if *compactor_assigned_task_num
-                .get(&compactor.context_id())
-                .unwrap_or(&0)
-                < compactor.max_concurrent_task_number()
-            {
-                return Some(compactor.clone());
+        for (compactor, is_not_frozen) in self.score_to_compactor.values() {
+            if *is_not_frozen {
+                if *compactor_assigned_task_num
+                    .get(&compactor.context_id())
+                    .unwrap_or(&0)
+                    < compactor.max_concurrent_task_number()
+                {
+                    return Some(compactor.clone());
+                }
             }
         }
         None
     }
 
     fn next_compactor(&self) -> Option<Arc<Compactor>> {
-        if let Some((_, compactor)) = self.score_to_compactor.first_key_value() {
-            Some(compactor.clone())
-        } else {
-            None
+        for (compactor, is_not_frozen) in self.score_to_compactor.values() {
+            if *is_not_frozen {
+                return Some(compactor.clone());
+            }
         }
+        None
     }
 
     fn add_compactor(
@@ -281,9 +313,22 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         let score = self.compactor_to_score.entry(context_id).or_insert(0);
         self.score_to_compactor.insert(
             (*score, context_id),
-            Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
+            (
+                Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
+                true,
+            ),
         );
         rx
+    }
+
+    fn freeze_compactor(&mut self, context_id: HummockContextId) {
+        self.score_to_compactor
+            .iter_mut()
+            .for_each(|((_, c), (_, is_not_frozen))| {
+                if *c == context_id {
+                    *is_not_frozen = false;
+                }
+            });
     }
 
     fn remove_compactor(&mut self, context_id: HummockContextId) {
@@ -297,7 +342,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
     fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
         if let Some(score) = self.compactor_to_score.get(&context_id) {
             let compactor = self.score_to_compactor.get(&(*score, context_id));
-            Some(compactor.unwrap().clone())
+            Some(compactor.unwrap().0.clone())
         } else {
             None
         }
@@ -425,8 +470,8 @@ mod tests {
 
         let task = dummy_compact_task(123, 0);
         let compactor = {
-            let compactor_id = policy.compactors.first().unwrap();
-            policy.compactor_map.get(compactor_id).unwrap().clone()
+            let compactor_id = policy.compactors.first().unwrap().0;
+            policy.compactor_map.get(&compactor_id).unwrap().clone()
         };
         compactor
             .send_task(Task::CompactTask(task.clone()))
@@ -571,6 +616,7 @@ mod tests {
             .first_entry()
             .unwrap()
             .get()
+            .0
             .clone();
         compactor
             .send_task(Task::CompactTask(task.clone()))
