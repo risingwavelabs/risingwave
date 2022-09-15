@@ -29,10 +29,10 @@ use risingwave_common::types::Datum;
 
 use crate::{SourceColumnDesc, SourceFormat};
 
-mod json_parser;
 mod avro_parser;
 mod common;
 mod debezium;
+mod json_parser;
 mod protobuf_parser;
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].

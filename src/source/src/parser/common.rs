@@ -25,7 +25,7 @@ use serde_json::Value;
     target_feature = "neon",
     target_feature = "simd128"
 ))]
-use simd_json::{BorrowedValue, ValueAccess, value::StaticNode};
+use simd_json::{value::StaticNode, BorrowedValue, ValueAccess};
 
 macro_rules! ensure_float {
     ($v:ident, $t:ty) => {
@@ -139,14 +139,16 @@ fn do_parse_simd_json_value(column: &ColumnDesc, v: &BorrowedValue) -> Result<Sc
     Ok(v)
 }
 
-
 #[cfg(any(
     target_feature = "sse4.2",
     target_feature = "avx2",
     target_feature = "neon",
     target_feature = "simd128"
 ))]
-pub(crate) fn simd_json_parse_value(column: &ColumnDesc, value: Option<&BorrowedValue>) -> Result<Datum> {
+pub(crate) fn simd_json_parse_value(
+    column: &ColumnDesc,
+    value: Option<&BorrowedValue>,
+) -> Result<Datum> {
     match value {
         None | Some(BorrowedValue::Static(StaticNode::Null)) => Ok(None),
         Some(v) => Ok(Some(do_parse_simd_json_value(column, v).map_err(|e| {
