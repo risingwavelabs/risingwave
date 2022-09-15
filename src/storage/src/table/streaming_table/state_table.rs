@@ -643,11 +643,6 @@ impl<S: StateStore> StateTable<S> {
         self.iter_with_pk_prefix(Row::empty(), epoch).await
     }
 
-    /// This function scans rows from the relational table.
-    pub async fn iter_partial(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
-        self.iter_with_pk_prefix(Row::empty(), epoch).await
-    }
-
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix<'a>(
         &'a self,

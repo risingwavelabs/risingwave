@@ -672,7 +672,7 @@ async fn test_mem_table_assertion() {
 }
 
 #[tokio::test]
-async fn test_state_table_iter_partial() {
+async fn test_state_table_iter_with_value_indices() {
     let state_store = MemoryStateStore::new();
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -727,7 +727,7 @@ async fn test_state_table_iter_partial() {
     ]));
 
     {
-        let iter = state.iter_partial(epoch).await.unwrap();
+        let iter = state.iter(epoch).await.unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -783,7 +783,7 @@ async fn test_state_table_iter_partial() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state.iter_partial(epoch).await.unwrap();
+    let iter = state.iter(epoch).await.unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
