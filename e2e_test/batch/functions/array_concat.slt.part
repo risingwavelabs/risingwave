@@ -132,3 +132,18 @@ query T
 select array['abc'] || '123'::varchar;
 ----
 {abc,123}
+
+query T
+select array[1]::int[] || array[1.2]::numeric[];
+----
+{1,1.2}
+
+query T
+select 1::int || array[1.2]::numeric[];
+----
+{1,1.2}
+
+query T
+select array[1.2]::numeric[] || 1::int;
+----
+{1.2,1}
