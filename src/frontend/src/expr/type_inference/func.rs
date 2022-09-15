@@ -26,21 +26,6 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 /// is not supported on backend.
 pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<DataType> {
     if let Some(res) = infer_type_for_special(func_type, inputs).transpose() {
-        /* 
-        // cast to res here? 
-        let res_type = res.clone().unwrap();
-
-        let inputs_owned = std::mem::take(inputs);
-        *inputs = inputs_owned
-            .into_iter()
-            .map(|expr| {
-                if expr.return_type() != res_type.clone() { // && expr.return_type().is_numeric() { // how do I handle the case if the array needs to be mapped?
-                    return expr.cast_implicit(res_type.clone());
-                }
-                Ok(expr)
-            })
-            .try_collect()?;
-            */
         return res;
     }
 
@@ -187,8 +172,6 @@ fn infer_type_for_special(
             ensure_arity!("array_cat", | inputs | == 2);
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
-            // return_type is left_type or right_type if types match. Else None
-            // If it is None, it will throw the error
             let return_type = match (&left_type, &right_type) {
                 (
                     DataType::List {
@@ -198,15 +181,11 @@ fn infer_type_for_special(
                         datatype: right_elem_type,
                     },
                 ) => {
-                    // common_type = align_types(array(left_type, right_type))
-                    // How do I write this in a rust way? Look up how to do proper rust-like nested error handling
-                    // let res = align_types(inputs.iter_mut()); 
-                    if let Ok(res) = align_types(inputs.iter_mut()) { // array + array of different types
+                    if let Ok(res) = align_types(inputs.iter_mut()) {
                         Some(res)
-                    } else if **left_elem_type == right_type { // array + scalar of same type
-                        // in this branch types are equal, so no casting is needed
+                    } else if **left_elem_type == right_type {
                         Some(left_type.clone())
-                    } else if left_type == **right_elem_type { // scalar + array of same type
+                    } else if left_type == **right_elem_type {
                         Some(right_type.clone())
                     } else {
                         let least_restrictive = least_restrictive((**left_elem_type).clone(), (**right_elem_type).clone()); 
