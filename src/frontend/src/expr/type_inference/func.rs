@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use itertools::{iproduct, Itertools as _};
 use num_integer::Integer as _;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeName};
 
 use super::{align_types, cast_ok_base, CastContext, least_restrictive};
@@ -209,7 +209,7 @@ fn infer_type_for_special(
                     } else if left_type == **right_elem_type { // scalar + array of same type
                         Some(right_type.clone())
                     } else {
-                        panic!("in least restrictive");
+                        panic!("should not be reached")
                         let least_restrictive = least_restrictive((**left_elem_type).clone(), (**right_elem_type).clone()); 
                         match least_restrictive { // put function call here instead of variable?
                             Ok(res) => {
