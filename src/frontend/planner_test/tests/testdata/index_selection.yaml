@@ -7,15 +7,6 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], distribution: UpstreamHashShard(idx1.a, idx1.b) }
 - sql: |
-    /* Use index if it provides required order */
-    create table t1 (a int, b int, c int);
-    create index idx1 on t1(a) include(b, c);
-    select b,c,a from t1 order by a
-  batch_plan: |
-    BatchExchange { order: [idx1.a ASC], dist: Single }
-      BatchProject { exprs: [idx1.b, idx1.c, idx1.a] }
-        BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], distribution: UpstreamHashShard(idx1.a) }
-- sql: |
     create table t1 (a int, b numeric, c bigint);
     create index idx1 on t1(a, b) include(c);
     select * from t1 where a = 1 or a = 2
@@ -62,33 +53,50 @@
       BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: [t1.a, t1.b, t1.c] }
         BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(1))], distribution: SomeShard }
 - sql: |
-    create table t1 (alpha int, b int, c int);
-    create index idx1 on t1(alpha);
-    /* Use secondary index scan with order required*/
-    select * from t1 order by alpha
+    /* Index on all required columns */
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(a, b, c);
+    select * from t1 order by a
   batch_plan: |
-    BatchExchange { order: [idx1.alpha ASC], dist: Single }
-      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: all }
-        BatchScan { table: idx1, columns: [idx1.alpha, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.alpha) }
+    BatchExchange { order: [idx1.a ASC], dist: Single }
+      BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], distribution: UpstreamHashShard(idx1.a, idx1.b, idx1.c) }
 - sql: |
-    create table t1 (a int, beta int, c int);
-    create index idx1 on t1(beta, a);
-    /* Use secondary index scan with order required*/
-    select a, beta, c from t1 order by beta, a
+    /* Index includes all required columns I */
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(b) include(c, a);
+    select * from t1 order by b
   batch_plan: |
-    BatchExchange { order: [idx1.a ASC, idx1.beta ASC], dist: Single }
-      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: all }
-        BatchScan { table: idx1, columns: [idx1.beta, idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.beta, idx1.a) }
+    BatchExchange { order: [idx1.b ASC], dist: Single }
+      BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], distribution: UpstreamHashShard(idx1.b) }
 - sql: |
-    create table t1 (a int, beta int, c int);
-    create index idx1 on t1(beta, a);
-    /* Use secondary index scan with order required*/
-    select beta, c, a from t1 order by beta, a
+    /* Index includes all required columns II */
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(c, b) include(a);
+    select b, c, a from t1 order by c, b
   batch_plan: |
-    BatchExchange { order: [idx1.a ASC, idx1.beta ASC], dist: Single }
-      BatchProject { exprs: [idx1.a, idx1.t1._row_id, idx1.beta] }
+    BatchExchange { order: [idx1.c ASC, idx1.b ASC], dist: Single }
+      BatchProject { exprs: [idx1.b, idx1.c, idx1.a] }
+        BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], distribution: UpstreamHashShard(idx1.c, idx1.b) }
+- sql: |
+    /* Secondary index scan with order required I */
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(a);
+    select * from t1 order by a
+  batch_plan: |
+    BatchExchange { order: [t1.a ASC], dist: Single }
+      BatchProject { exprs: [t1.a, t1.b, t1.c, t1._row_id] }
         BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: all }
-          BatchScan { table: idx1, columns: [idx1.beta, idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.beta, idx1.a) }
+          BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
+- sql: |
+    /* Secondary index scan with order required II */
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(b, a);
+    select b, c, a from t1 order by b, a
+  batch_plan: |
+    BatchExchange { order: [t1.b ASC, t1.a ASC], dist: Single }
+      BatchProject { exprs: [t1.b, t1.c, t1.a] }
+        BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: all }
+          BatchScan { table: idx1, columns: [idx1.b, idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.b, idx1.a) }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create index idx1 on t1(a, b) include(c);

@@ -545,7 +545,8 @@ impl LogicalScan {
             .satisfies(
                 &self
                     .o2i_col_mapping()
-                    .rewrite_required_order(required_order),
+                    .rewrite_required_order(required_order)
+                    .unwrap(),
             )
         })?;
 
@@ -578,6 +579,19 @@ impl LogicalScan {
                 self.ctx(),
             );
 
+            let proj_expr = primary_table_scan
+                .output_col_idx
+                .iter()
+                .map(|out_idx| {
+                    ExprImpl::InputRef(Box::new(InputRef::new(
+                        out_idx + index.index_item.len(),
+                        index.primary_table.table_desc().columns[*out_idx]
+                            .data_type
+                            .clone(),
+                    )))
+                })
+                .collect_vec();
+
             let conjunctions = index
                 .primary_table_order_key_ref_to_index_table()
                 .iter()
@@ -607,9 +621,19 @@ impl LogicalScan {
                 on,
             );
             let batch_lookup_join = join
-                .to_batch_lookup_join_with_order(required_order)
+                .to_batch_lookup_join_with_order(&Order {
+                    field_order: required_order
+                        .field_order
+                        .iter()
+                        .map(|field_order| FieldOrder {
+                            index: index.index_item.len() + field_order.index,
+                            direct: field_order.direct,
+                        })
+                        .collect_vec(),
+                })
                 .unwrap();
-            Some(Ok(batch_lookup_join))
+            let project = BatchProject::new(LogicalProject::new(batch_lookup_join, proj_expr));
+            Some(Ok(project.into()))
         }
     }
 }
