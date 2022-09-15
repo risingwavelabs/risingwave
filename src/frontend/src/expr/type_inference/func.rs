@@ -215,17 +215,14 @@ fn infer_type_for_special(
             };
             Ok(Some(return_type.ok_or_else(|| {
                 ErrorCode::BindError(format!(
-                    "Cannot concatenate {} and {}.",
+                    "Cannot concatenate {} and {}",
                     left_type, right_type
                 ))
             })?))
         }
-        // why do we have array append, prepend again here?
-        // guess: we match by function type. User selected diff function operator
-        // user can use array_cat, but this is in the end the same as append or prepend
         ExprType::ArrayAppend => {
-            // works, gives the correct type, but I guess there is no casting? 
             ensure_arity!("array_append", | inputs | == 2);
+            // get input types
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let left_ele_type_opt = match &left_type {
@@ -235,10 +232,11 @@ fn infer_type_for_special(
                 => Some(left_et),
                 _ => None
             };
-            // handle error 
             let left_ele_type = left_ele_type_opt.ok_or_else(|| {
                 ErrorCode::BindError(format!("First element needs to be of type array, but is {}", left_type))
             })?; 
+
+            // cast to restrictive type or return error
             let res_type = least_restrictive(*left_ele_type.clone(), right_type.clone());
             match res_type {
                 Ok(ele_type) => {
@@ -261,6 +259,7 @@ fn infer_type_for_special(
         }
         ExprType::ArrayPrepend => {
             ensure_arity!("array_prepend", | inputs | == 2);
+            // get input types
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let right_ele_type_opt = match &right_type {
@@ -270,10 +269,11 @@ fn infer_type_for_special(
                 => Some(right_et),
                 _ => None
             };
-            // handle error 
             let right_ele_type = right_ele_type_opt.ok_or_else(|| {
                 ErrorCode::BindError(format!("Second element needs to be of type array, but is {}", right_type))
-            })?; 
+            })?;
+
+            // cast to restrictive type or return error
             let res_type = least_restrictive(*right_ele_type.clone(), left_type.clone());
             match res_type {
                 Ok(ele_type) => {
