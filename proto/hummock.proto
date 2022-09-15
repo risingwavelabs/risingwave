@@ -179,15 +179,14 @@ message CompactTask {
   enum TaskStatus {
     PENDING = 0;
     SUCCESS = 1;
-    FAILED = 2;
-    HEARTBEAT_CANCELED = 3;
-    NO_AVAIL_CANCELED = 4;
-    ASSIGN_FAIL_CANCELED = 5;
-    SEND_FAIL_CANCELED = 6;
-    MANUAL_CANCELED = 7;
-    EXECUTE_FAILED = 8;
-    JOIN_HANDLE_FAILED = 9;
-    TRACK_SST_ID_FAILED = 10;
+    HEARTBEAT_CANCELED = 2;
+    NO_AVAIL_CANCELED = 3;
+    ASSIGN_FAIL_CANCELED = 4;
+    SEND_FAIL_CANCELED = 5;
+    MANUAL_CANCELED = 6;
+    EXECUTE_FAILED = 7;
+    JOIN_HANDLE_FAILED = 8;
+    TRACK_SST_ID_FAILED = 9;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;

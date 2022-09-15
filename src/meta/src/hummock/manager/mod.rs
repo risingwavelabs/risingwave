@@ -167,6 +167,18 @@ pub(crate) use start_measure_real_process_timer;
 
 use super::Compactor;
 
+lazy_static::lazy_static! {
+    static ref CACEL_STATUS_SET: HashSet<TaskStatus> = vec![
+        TaskStatus::ManualCanceled,
+        TaskStatus::NoAvailCanceled,
+        TaskStatus::SendFailCanceled,
+        TaskStatus::AssignFailCanceled,
+        TaskStatus::HeartbeatCanceled,
+    ]
+    .into_iter()
+    .collect();
+}
+
 impl<S> HummockManager<S>
 where
     S: MetaStore,
@@ -749,7 +761,7 @@ where
     }
 
     pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
-        // assert_eq!(compact_task.task_status(), TaskStatus::Canceled);
+        assert!(CACEL_STATUS_SET.contains(&compact_task.task_status()));
         self.report_compact_task_impl(None, compact_task, None)
             .await
     }
