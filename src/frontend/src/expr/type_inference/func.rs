@@ -199,7 +199,7 @@ fn infer_type_for_special(
                                         if input.return_type().is_numeric() {
                                             return input.cast_implicit(res.clone());
                                         }
-                                        return input.cast_implicit(array_res.clone());
+                                        input.cast_implicit(array_res.clone())
                                     })
                                     .try_collect()?;
 
@@ -251,7 +251,7 @@ fn infer_type_for_special(
                             if input.return_type().is_numeric() {
                                 return input.cast_implicit(ele_type.clone());
                             }
-                            return input.cast_implicit(array_type.clone());
+                            input.cast_implicit(array_type.clone())
                         })
                         .try_collect()?;
                     Ok(Some(array_type))
@@ -286,7 +286,7 @@ fn infer_type_for_special(
                             if input.return_type().is_numeric() {
                                 return input.cast_implicit(ele_type.clone());
                             }
-                            return input.cast_implicit(array_type.clone());
+                            input.cast_implicit(array_type.clone())
                         })
                         .try_collect()?;
                     Ok(Some(array_type))
