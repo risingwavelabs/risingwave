@@ -119,7 +119,7 @@ impl UpdateExecutor {
                 .flat_map(|(a, b)| [a, b])
             {
                 for (datum_ref, builder) in row.values().zip_eq(builders.iter_mut()) {
-                    builder.append_datum_ref(datum_ref)?;
+                    builder.append_datum_ref(datum_ref);
                 }
             }
             let columns = builders.into_iter().map(|b| b.finish().into()).collect();
@@ -149,7 +149,7 @@ impl UpdateExecutor {
         // Create ret value
         {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
-            array_builder.append(Some(rows_updated as i64))?;
+            array_builder.append(Some(rows_updated as i64));
 
             let array = array_builder.finish();
             let ret_chunk = DataChunk::new(vec![array.into()], 1);

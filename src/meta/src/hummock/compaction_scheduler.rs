@@ -19,6 +19,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::error::SendError;
@@ -159,25 +160,32 @@ where
         let schedule_status = self
             .pick_and_assign_impl(compaction_group, request_channel)
             .await;
-        let cancel_task = match &schedule_status {
+
+        let cancel_state = match &schedule_status {
             ScheduleStatus::Ok => None,
             ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
-            ScheduleStatus::NoAvailableCompactor(task)
-            | ScheduleStatus::AssignFailure(task)
-            | ScheduleStatus::SendFailure(task) => Some(task.clone()),
+            ScheduleStatus::NoAvailableCompactor(task) => {
+                Some((task.clone(), TaskStatus::NoAvailCanceled))
+            }
+            ScheduleStatus::AssignFailure(task) => {
+                Some((task.clone(), TaskStatus::AssignFailCanceled))
+            }
+            ScheduleStatus::SendFailure(task) => Some((task.clone(), TaskStatus::SendFailCanceled)),
         };
-        if let Some(mut compact_task) = cancel_task {
+
+        if let Some((mut compact_task, task_state)) = cancel_state {
             // Try to cancel task immediately.
             if let Err(err) = self
                 .hummock_manager
-                .cancel_compact_task(&mut compact_task)
+                .cancel_compact_task(&mut compact_task, task_state)
                 .await
             {
                 // Cancel task asynchronously.
                 tracing::warn!(
-                    "Failed to cancel task {}. {}. It will be cancelled asynchronously.",
+                    "Failed to cancel task {}. {}. {:?} It will be cancelled asynchronously.",
                     compact_task.task_id,
-                    err
+                    err,
+                    task_state
                 );
                 self.env
                     .notification_manager()
@@ -263,6 +271,8 @@ where
                 compactor.context_id(),
                 e
             );
+            self.compactor_manager
+                .pause_compactor(compactor.context_id());
             return ScheduleStatus::SendFailure(compact_task);
         }
 
@@ -439,7 +449,7 @@ mod tests {
         fail::remove(fp_compaction_send_task_fail);
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
 
-        // Succeeded.
+        // Fail, because the compactor is paused after send failure.
         assert_matches!(
             compaction_scheduler
                 .pick_and_assign(
@@ -447,8 +457,8 @@ mod tests {
                     request_channel.clone()
                 )
                 .await,
-            ScheduleStatus::Ok
+            ScheduleStatus::NoAvailableCompactor(_)
         );
-        assert_eq!(1, hummock_manager.list_all_tasks_ids().await.len());
+        assert_eq!(0, hummock_manager.list_all_tasks_ids().await.len());
     }
 }
