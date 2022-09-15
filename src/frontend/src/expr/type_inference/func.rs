@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use itertools::{iproduct, Itertools as _};
 use num_integer::Integer as _;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, DataTypeName};
 
 use super::{align_types, cast_ok_base, CastContext, least_restrictive};
@@ -298,28 +298,27 @@ fn infer_type_for_special(
             let left_type = inputs[0].return_type();
             // TODO: remove the clone here
             let res = least_restrictive(*right_ele_type_deref, left_type.clone());
-            let array_type = DataType::List { datatype: Box::new(res.clone()?) };
+            match res {
+                Ok(dt) => {
+                    let array_type = DataType::List { datatype: Box::new(dt.clone()) };
             
-            let inputs_owned = std::mem::take(inputs);
-            *inputs = inputs_owned
-            .into_iter()
-            .map(|input|  {
-                if input.return_type().is_numeric() {
-                    return input.cast_implicit(res.clone()?);
-                } else {
-                    return input.cast_implicit(array_type.clone());
+                    let inputs_owned = std::mem::take(inputs);
+                    *inputs = inputs_owned
+                    .into_iter()
+                    .map(|input|  {
+                        if input.return_type().is_numeric() {
+                            return input.cast_implicit(dt.clone());
+                        } else {
+                            return input.cast_implicit(array_type.clone());
+                        }
+                        Ok(input)
+                    })
+                    .try_collect()?;
+                    Ok(Some(array_type))
                 }
-                Ok(input)
-            })
-            .try_collect()?;
-            
-            // TODO: put error message where we define the array type
-                        //             Ok(Some(return_type.ok_or_else(|| {
-            //                 ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type))
-            //             })?))
-
-            // I think this should return the array type? 
-            Ok(Some(array_type))
+                // TODO: Return proper error code
+                Err(err) => Err(err) // ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type))
+            }
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
