@@ -396,6 +396,7 @@ where
             msg.sql_bytes,
             types,
             fields,
+            is_query_sql,
         );
 
         // 4. Insert the statement.
@@ -493,6 +494,11 @@ where
     async fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
         //  b'S' => Statement
         //  b'P' => Portal
+        tracing::trace!(
+            "(extended query)describe name: {}",
+            cstr_to_str(&msg.name).unwrap()
+        );
+
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {
             let name = cstr_to_str(&msg.name).unwrap().to_string();
@@ -513,9 +519,15 @@ where
                 .await?;
 
             // 2. Send row description.
-            self.stream
-                .write(&BeMessage::RowDescription(&statement.row_desc()))
-                .await?;
+            if statement.is_query() {
+                self.stream
+                    .write(&BeMessage::RowDescription(&statement.row_desc()))
+                    .await?;
+            } else {
+                // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
+                // return NoData message if the statement is not a query.
+                self.stream.write(&BeMessage::NoData).await?;
+            }
         } else if msg.kind == b'P' {
             let name = cstr_to_str(&msg.name).unwrap().to_string();
             let portal = if name.is_empty() {
@@ -530,9 +542,15 @@ where
             };
 
             // 3. Send row description.
-            self.stream
-                .write(&BeMessage::RowDescription(&portal.row_desc()))
-                .await?;
+            if portal.is_query() {
+                self.stream
+                    .write(&BeMessage::RowDescription(&portal.row_desc()))
+                    .await?;
+            } else {
+                // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
+                // return NoData message if the statement is not a query.
+                self.stream.write(&BeMessage::NoData).await?;
+            }
         }
         Ok(())
     }

@@ -118,7 +118,7 @@ impl TableCatalogBuilder {
         }
     }
 
-    /// Consume builder and create `TableCatalog` (for proto).
+    /// Consume builder and create `TableCatalog` with `value_indices`.
     pub fn build_with_value_indices(
         self,
         distribution_key: Vec<usize>,
