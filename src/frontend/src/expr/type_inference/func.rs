@@ -253,12 +253,11 @@ fn infer_type_for_special(
             ensure_arity!("array_append", | inputs | == 2);
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
-            let left_ele_type_opt = match(&left_type) {
-                (
-                    DataType::List {
-                        datatype: left_et 
-                    }
-                ) => Some(left_et),
+            let left_ele_type_opt = match &left_type {
+                DataType::List {
+                    datatype: left_et 
+                }
+                => Some(left_et),
                 _ => None
             };
             // handle error 
@@ -292,12 +291,11 @@ fn infer_type_for_special(
             ensure_arity!("array_prepend", | inputs | == 2);
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
-            let right_ele_type_opt = match(&right_type) {
-                (
-                    DataType::List {
-                        datatype: right_et 
-                    }
-                ) => Some(right_et),
+            let right_ele_type_opt = match &right_type {
+                DataType::List {
+                    datatype: right_et 
+                }
+                => Some(right_et),
                 _ => None
             };
             // handle error 
