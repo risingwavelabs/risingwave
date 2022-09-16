@@ -120,7 +120,7 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
-        // XXX(st1page): add join keys in the pk_indices a work around before we really have stream
+        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         let pk_indices = pk_indices.and_then(|mut pk_indices| {
             let left_len = left.schema().len();
@@ -148,7 +148,7 @@ impl LogicalJoin {
             }
             Some(pk_indices)
         });
-        // XXX(st1page) over
+        // NOTE(st1page) over
         let functional_dependency = Self::derive_fd(
             left.schema().len(),
             right.schema().len(),
@@ -158,7 +158,7 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
-        // XXX(st1page): add join keys in the pk_indices a work around before we really have stream
+        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         // let pk_indices = match pk_indices {
         //     Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
@@ -1146,7 +1146,7 @@ impl ToStream for LogicalJoin {
             .filter(|i| r2i.try_map(*i) == None)
             .map(|i| i + left_len);
 
-        // XXX(st1page): add join keys in the pk_indices a work around before we really have stream
+        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         let right_len = right.schema().len();
         let eq_predicate = EqJoinPredicate::create(left_len, right_len, join.on.clone());
@@ -1168,7 +1168,7 @@ impl ToStream for LogicalJoin {
                     .map(|i| i + left_len),
             )
             .unique();
-        // XXX(st1page) over
+        // NOTE(st1page) over
 
         let mut new_output_indices = join.output_indices.clone();
         if !join.is_right_join() {

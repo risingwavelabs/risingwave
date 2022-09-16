@@ -104,7 +104,7 @@ impl LogicalHopWindow {
             }
             fd_set
         };
-        // XXX(st1page): add join keys in the pk_indices a work around before we really have stream
+        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         // let pk_indices = match pk_indices {
         //     Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
