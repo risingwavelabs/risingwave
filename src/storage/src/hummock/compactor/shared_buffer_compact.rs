@@ -196,7 +196,7 @@ async fn compact_shared_buffer(
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
         let handle = compaction_executor
-            .execute(async move { compactor.run(iter, multi_filter_key_extractor).await });
+            .spawn(async move { compactor.run(iter, multi_filter_key_extractor).await });
         compaction_futures.push(handle);
     }
     local_stats.report(stats.as_ref());

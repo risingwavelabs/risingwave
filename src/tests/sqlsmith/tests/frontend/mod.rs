@@ -37,10 +37,6 @@ pub struct SqlsmithEnv {
     setup_sql: String,
 }
 
-lazy_static::lazy_static! {
-    static ref SQLSMITH_ENV: SqlsmithEnv = setup_sqlsmith_with_seed(0).unwrap();
-}
-
 /// Executes sql queries, prints recoverable errors.
 /// Panic recovery happens separately.
 async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<()> {
@@ -217,16 +213,18 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
 
 pub fn run() {
     let args = Arguments::from_args();
+    let env = Arc::new(setup_sqlsmith_with_seed(0).unwrap());
 
     let num_tests = 512;
     let tests = (0..num_tests)
         .map(|i| {
+            let env = env.clone();
             Trial::test(format!("run_sqlsmith_on_frontend_{}", i), move || {
                 let SqlsmithEnv {
                     session,
                     tables,
                     setup_sql,
-                } = &*SQLSMITH_ENV;
+                } = &*env;
                 test_batch_query(session.clone(), tables.clone(), i, setup_sql)?;
                 let test_stream_query =
                     test_stream_query(session.clone(), tables.clone(), i, setup_sql);

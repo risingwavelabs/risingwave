@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -30,7 +32,7 @@ pub const PG_CAST_COLUMNS: &[PgCatalogColumnsDef] = &[
     (DataType::Varchar, "castcontext"),
 ];
 
-fn build_pg_cast_rows() -> Vec<Row> {
+pub static PG_CAST_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
     let mut cast_array = cast_map_array();
     cast_array.sort();
     cast_array
@@ -49,8 +51,4 @@ fn build_pg_cast_rows() -> Vec<Row> {
             ])
         })
         .collect_vec()
-}
-
-lazy_static::lazy_static! {
-    pub static ref PG_CAST_DATA_ROWS: Vec<Row> = build_pg_cast_rows();
-}
+});
