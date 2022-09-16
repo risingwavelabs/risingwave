@@ -19,7 +19,7 @@ use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeName};
 
-use super::{align_types, cast_ok_base, CastContext, least_restrictive};
+use super::{align_types, cast_ok_base, least_restrictive, CastContext};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
@@ -188,14 +188,19 @@ fn infer_type_for_special(
                     } else if left_type == **right_elem_type {
                         Some(right_type.clone())
                     } else {
-                        match least_restrictive((**left_elem_type).clone(), (**right_elem_type).clone()) {
+                        match least_restrictive(
+                            (**left_elem_type).clone(),
+                            (**right_elem_type).clone(),
+                        ) {
                             Ok(res) => {
-                                let array_res = DataType::List { datatype: Box::new(res.clone()) };
-                              
+                                let array_res = DataType::List {
+                                    datatype: Box::new(res.clone()),
+                                };
+
                                 let inputs_owned = std::mem::take(inputs);
                                 *inputs = inputs_owned
                                     .into_iter()
-                                    .map(|input|  {
+                                    .map(|input| {
                                         if input.return_type().is_scalar() {
                                             return input.cast_implicit(res.clone());
                                         }
@@ -204,14 +209,12 @@ fn infer_type_for_special(
                                     .try_collect()?;
 
                                 Some(array_res)
-                            }, 
-                            Err(_) => None
+                            }
+                            Err(_) => None,
                         }
                     }
                 }
-                _ => {
-                    None
-                } // fail, did not even match
+                _ => None, // fail, did not even match
             };
             Ok(Some(return_type.ok_or_else(|| {
                 ErrorCode::BindError(format!(
@@ -226,26 +229,28 @@ fn infer_type_for_special(
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let left_ele_type_opt = match &left_type {
-                DataType::List {
-                    datatype: left_et 
-                }
-                => Some(left_et),
-                _ => None
+                DataType::List { datatype: left_et } => Some(left_et),
+                _ => None,
             };
             let left_ele_type = left_ele_type_opt.ok_or_else(|| {
-                ErrorCode::BindError(format!("First element needs to be of type array, but is {}", left_type))
-            })?; 
+                ErrorCode::BindError(format!(
+                    "Cannot append {} to {}.",
+                    right_type, left_type
+                ))
+            })?;
 
             // cast to restrictive type or return error
             let res_type = least_restrictive(*left_ele_type.clone(), right_type.clone());
             match res_type {
                 Ok(ele_type) => {
-                    let array_type = DataType::List { datatype: Box::new(ele_type.clone()) };
-            
+                    let array_type = DataType::List {
+                        datatype: Box::new(ele_type.clone()),
+                    };
+                    // need nested error handling. If this fails, this should also throw error
                     let inputs_owned = std::mem::take(inputs);
                     *inputs = inputs_owned
                         .into_iter()
-                        .map(|input|  {
+                        .map(|input| {
                             if input.return_type().is_scalar() {
                                 return input.cast_implicit(ele_type.clone());
                             }
@@ -254,7 +259,11 @@ fn infer_type_for_special(
                         .try_collect()?;
                     Ok(Some(array_type))
                 }
-                Err(_) => Err(ErrorCode::BindError(format!("Cannot append {} to {}.", right_type, left_type)).into())
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot append {} to {}.",
+                    right_type, left_type
+                ))
+                .into()),
             }
         }
         ExprType::ArrayPrepend => {
@@ -263,35 +272,50 @@ fn infer_type_for_special(
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let right_ele_type_opt = match &right_type {
-                DataType::List {
-                    datatype: right_et 
-                }
-                => Some(right_et),
-                _ => None
+                DataType::List { datatype: right_et } => Some(right_et),
+                _ => None,
             };
             let right_ele_type = right_ele_type_opt.ok_or_else(|| {
-                ErrorCode::BindError(format!("Second element needs to be of type array, but is {}", right_type))
+                ErrorCode::BindError(format!(
+                    "Second element needs to be of type array, but is {}",
+                    right_type
+                ))
             })?;
 
             // cast to restrictive type or return error
             let res_type = least_restrictive(*right_ele_type.clone(), left_type.clone());
-            match res_type {
+            let result: Result<DataType> = match res_type {
                 Ok(ele_type) => {
-                    let array_type = DataType::List { datatype: Box::new(ele_type.clone()) };
-            
+                    // TODO: Write this as a function
+                    let array_type = DataType::List {
+                        datatype: Box::new(ele_type.clone()),
+                    };
+
                     let inputs_owned = std::mem::take(inputs);
                     *inputs = inputs_owned
                         .into_iter()
-                        .map(|input|  {
+                        .map(|input| {
                             if input.return_type().is_scalar() {
                                 return input.cast_implicit(ele_type.clone());
                             }
                             input.cast_implicit(array_type.clone())
                         })
                         .try_collect()?;
-                    Ok(Some(array_type))
-                }
-                Err(_) => Err(ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type)).into())
+                    Ok(array_type)
+                },
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot prepend {} to {}",
+                    left_type, right_type
+                ))
+                .into()),
+            };
+            match result {
+                Ok(val) => Ok(Some(val)), 
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot prepend {} to {}",
+                    left_type, right_type
+                ))
+                .into())
             }
         }
         ExprType::Vnode => {
