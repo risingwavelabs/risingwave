@@ -325,7 +325,7 @@ def section_compaction(outer_panels):
                 ),
 
                 panels.target(
-                    "sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_count[$__rate_interval]))", "avg file - {{job}} @ {{instance}}"
+                    "sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_count[$__rate_interval]))", "avg_value_size - {{job}} @ {{instance}}"
                 ),
             ]),
         ])
