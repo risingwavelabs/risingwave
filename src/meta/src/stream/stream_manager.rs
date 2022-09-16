@@ -1043,7 +1043,7 @@ mod tests {
         let services = MockServices::start("127.0.0.1", 12333).await?;
 
         let table_id = TableId::new(0);
-        let actors = make_mview_stream_actors(&table_id, 5);
+        let actors = make_mview_stream_actors(&table_id, 4);
 
         let mut fragments = BTreeMap::default();
         fragments.insert(
@@ -1106,8 +1106,8 @@ mod tests {
             .fragment_manager
             .get_table_actor_ids(&table_id)
             .await?;
-        assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
-        assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
+        assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
+        assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
 
         services.stop().await;
         Ok(())
@@ -1118,7 +1118,7 @@ mod tests {
         let services = MockServices::start("127.0.0.1", 12334).await?;
 
         let table_id = TableId::new(0);
-        let actors = make_mview_stream_actors(&table_id, 5);
+        let actors = make_mview_stream_actors(&table_id, 4);
 
         let mut fragments = BTreeMap::default();
         fragments.insert(
@@ -1180,8 +1180,8 @@ mod tests {
             .fragment_manager
             .get_table_actor_ids(&table_id)
             .await?;
-        assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
-        assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
+        assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
+        assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
 
         // test drop materialized_view
         // the table_fragments will be deleted when barrier_manager run_command DropMaterializedView
@@ -1214,7 +1214,7 @@ mod tests {
         let services = MockServices::start("127.0.0.1", 12335).await.unwrap();
 
         let table_id = TableId::new(0);
-        let actors = make_mview_stream_actors(&table_id, 5);
+        let actors = make_mview_stream_actors(&table_id, 4);
 
         let mut fragments = BTreeMap::default();
         fragments.insert(
@@ -1280,8 +1280,8 @@ mod tests {
             .get_table_actor_ids(&table_id)
             .await
             .unwrap();
-        assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
-        assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
+        assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
+        assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
         let notify = Arc::new(Notify::new());
         let notify1 = notify.clone();
 
@@ -1303,7 +1303,7 @@ mod tests {
             .select_table_fragments_by_table_id(&table_id)
             .await
             .unwrap();
-        assert_eq!(table_fragments.actor_ids(), (0..5).collect_vec());
+        assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
         services

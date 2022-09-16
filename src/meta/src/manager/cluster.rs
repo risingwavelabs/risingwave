@@ -468,6 +468,15 @@ mod tests {
             worker_nodes.push(worker_node);
         }
 
+        // Since no worker is active, the parallel unit count should be 0.
+        assert_cluster_manager(&cluster_manager, 0).await;
+
+        for worker_node in worker_nodes {
+            cluster_manager
+                .activate_worker_node(worker_node.get_host().unwrap().clone())
+                .await
+                .unwrap();
+        }
         let parallel_count = fake_parallelism * worker_count;
         assert_cluster_manager(&cluster_manager, parallel_count).await;
 
