@@ -32,7 +32,7 @@ pub async fn profile(sleep_s: u64) -> anyhow::Result<()> {
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = ComputeClientPool::new(u64::MAX);
+    let clients = ComputeClientPool::default();
 
     let profile_root_path = PathBuf::from(&std::env::var("PREFIX_PROFILING")?);
     let dir_name = Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();

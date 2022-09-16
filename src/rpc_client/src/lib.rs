@@ -64,11 +64,19 @@ use crate::error::{Result, RpcError};
 pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr) -> Result<Self>;
 
-    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Vec<Self>>;
+    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Vec<Self>> {
+        let mut v = vec![];
+        for _ in 0..size {
+            v.push(Self::new_client(host_addr.clone()).await?);
+        }
+        Ok(v)
+    }
 }
 
 #[derive(Clone)]
 pub struct RpcClientPool<S> {
+    connection_pool_size: u16,
+
     #[cfg(not(madsim))]
     clients: Cache<HostAddr, Vec<S>>,
 
@@ -82,7 +90,7 @@ where
     S: RpcClient,
 {
     fn default() -> Self {
-        Self::new(u64::MAX)
+        Self::new(1)
     }
 }
 
@@ -90,10 +98,11 @@ impl<S> RpcClientPool<S>
 where
     S: RpcClient,
 {
-    pub fn new(cache_capacity: u64) -> Self {
+    pub fn new(connection_pool_size: u16) -> Self {
         Self {
+            connection_pool_size,
             #[cfg(not(madsim))]
-            clients: Cache::new(cache_capacity),
+            clients: Cache::new(u64::MAX),
             #[cfg(madsim)]
             clients: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -112,7 +121,10 @@ where
     pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
         Ok(self
             .clients
-            .try_get_with(addr.clone(), S::new_clients(addr, 64))
+            .try_get_with(
+                addr.clone(),
+                S::new_clients(addr, self.connection_pool_size as usize),
+            )
             .await
             .map_err(|e| -> RpcError { anyhow!("failed to create RPC client: {:?}", e).into() })?
             .choose(&mut rand::thread_rng())
