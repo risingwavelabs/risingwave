@@ -229,12 +229,12 @@ where
                 TableDeleted((*table).clone()).upsert_in_transaction(&mut transaction)?;
             }
 
-            let indexs = Index::list(self.env.meta_store())
+            let indexes = Index::list(self.env.meta_store())
                 .await?
                 .into_iter()
                 .filter(|index| index.database_id == database_id)
                 .collect_vec();
-            for index in &indexs {
+            for index in &indexes {
                 index.delete_in_transaction(&mut transaction)?;
             }
 
@@ -262,7 +262,7 @@ where
             for table in &tables {
                 database_core.drop_table(table);
             }
-            for index in &indexs {
+            for index in &indexes {
                 database_core.drop_index(index);
             }
 
