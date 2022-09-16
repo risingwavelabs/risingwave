@@ -291,6 +291,9 @@ impl fmt::Debug for StreamChunk {
 /// Test utilities for [`StreamChunk`].
 pub trait StreamChunkTestExt {
     fn from_pretty(s: &str) -> Self;
+
+    /// Validate the `StreamChunk` layout.
+    fn valid(&self) -> bool;
 }
 
 impl StreamChunkTestExt for StreamChunk {
@@ -414,6 +417,16 @@ impl StreamChunkTestExt for StreamChunk {
             Some(Bitmap::from_iter(visibility))
         };
         StreamChunk::new(ops, columns, visibility)
+    }
+
+    fn valid(&self) -> bool {
+        let len = self.ops.len();
+        let data = &self.data;
+        data.vis().len() == len
+            && data
+                .columns()
+                .iter()
+                .all(|col| col.array_ref().len() == len)
     }
 }
 

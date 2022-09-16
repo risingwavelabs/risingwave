@@ -41,6 +41,7 @@
 #![feature(is_some_with)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
+#![feature(once_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
