@@ -315,9 +315,9 @@ def section_compaction(outer_panels):
                 ),
             ]),
 
-            panels.timeseries_bytes("Hummock Sstable Meta Size", [
+            panels.timeseries_bytes("Hummock Sstable File Size", [
                 panels.target(
-                    "sum by(le, job, instance)(rate(state_store_sstable_meta_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_meta_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
+                    "sum by(le, job, instance)(rate(state_store_sstable_file_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_file_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
                 ),
             ]),
         ])
@@ -368,6 +368,11 @@ def section_object_storage(outer_panels):
                 panels.target(
                     "histogram_quantile(0.80, sum(rate(object_store_operation_bytes_bucket[$__rate_interval])) by (le, type))", "{{type}} p80"
                 ),
+            ]),
+            panels.timeseries_count("Operation Failure Count", [
+                panels.target(
+                    "sum(object_store_failure_count) by (instance, job, type)", "{{type}} - {{job}} @ {{instance}}"
+                )
             ]),
             panels.timeseries_dollar("Estimated S3 Cost (Realtime)", [
                 panels.target(
