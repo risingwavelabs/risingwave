@@ -726,7 +726,7 @@ where
             }
         }
         self.source_manager
-            .drop_update(Some(source_fragments), Some(actor_ids))
+            .drop_update(source_fragments, actor_ids)
             .await?;
 
         // Unregister from compaction group afterwards.
