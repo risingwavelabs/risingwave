@@ -146,7 +146,6 @@ impl CreateMviewProgressTracker {
                     // Notify about finishing.
                     let notifiers = o.remove().1;
                     Some(notifiers)
-                    // notifiers.into_iter().for_each(Notifier::notify_finished);
                 } else {
                     None
                 }

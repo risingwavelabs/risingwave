@@ -292,7 +292,7 @@ mod default {
     }
 
     pub fn checkpoint_frequency() -> usize {
-        20
+        10
     }
 
     pub fn share_buffer_upload_concurrency() -> usize {

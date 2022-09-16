@@ -93,7 +93,7 @@ impl Default for MetaOpts {
             barrier_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
-            checkpoint_frequency: 20,
+            checkpoint_frequency: 10,
             vacuum_interval_sec: 30,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             collect_gc_watermark_spin_interval_sec: 5,
@@ -112,7 +112,7 @@ impl MetaOpts {
             barrier_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
-            checkpoint_frequency: 20,
+            checkpoint_frequency: 10,
             ..Default::default()
         }
     }

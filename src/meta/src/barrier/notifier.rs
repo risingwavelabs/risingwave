@@ -18,7 +18,9 @@ use crate::{MetaError, MetaResult};
 
 #[derive(Debug)]
 pub(super) enum NotifierCollected {
+    /// Get notified when scheduled barrier is collected.
     CollectedBarrier(oneshot::Sender<MetaResult<()>>),
+    /// Get notified when scheduled barrier(checkpoint = true) is collected.
     CollectedCheckpointBarrier(oneshot::Sender<MetaResult<()>>),
 }
 
@@ -31,12 +33,8 @@ pub(super) struct Notifier {
     /// Get notified when scheduled barrier is finished.
     pub finished: Option<oneshot::Sender<()>>,
 
+    /// Get notified when scheduled different barrier is collected.
     pub collected: Option<NotifierCollected>,
-    // /// Get notified when scheduled barrier(checkpoint = false) is collected or failed.
-    // pub collected_no_checkpoint: Option<oneshot::Sender<MetaResult<()>>>,
-    //
-    // /// Get notified when scheduled barrier(checkpoint = true) is collected or failed,
-    // pub collected_checkpoint: Option<oneshot::Sender<MetaResult<()>>>,
 }
 
 impl Notifier {
@@ -102,18 +100,6 @@ impl Notifier {
             _ => {}
         };
     }
-
-    // /// Notify when we failed to collect a barrier(checkpoint = false). This function consumes
-    // /// `self`.
-    // pub fn notify_barrier_collection_failed(&mut self, err: MetaError) {
-    //     let collected = self.collected.take();
-    //     match collected {
-    //         Some(NotifierCollected::CollectedBarrier(tx)) => {
-    //             tx.send(Err(err)).ok();
-    //         }
-    //         _ => self.collected = collected,
-    //     };
-    // }
 
     /// Notify when we have finished a barrier from all actors. This function consumes `self`.
     ///

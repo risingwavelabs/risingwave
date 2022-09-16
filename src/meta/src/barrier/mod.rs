@@ -190,8 +190,7 @@ struct CheckpointControl<S: MetaStore> {
     /// Messages that needs to be completed or processed with checkpoints
     uncommitted_messages: UncommittedMessages<S>,
 
-    /// We will inject a barrier(checkpoint=true) after `num_distance_checkpoint`
-    /// barrier(checkpoint = false)
+    /// The numbers of barrier (checkpoint = false) since the last barrier (checkpoint = true)
     num_uncheckpointed_barrier: usize,
 
     checkpoint_frequency: usize,
@@ -215,8 +214,7 @@ where
         }
     }
 
-    /// Whether the barrier(checkpoint = true) should be injected. If true, reset
-    /// `num_distance_checkpoint`
+    /// Whether the barrier(checkpoint = true) should be injected.
     fn try_get_checkpoint(&mut self) -> bool {
         self.num_uncheckpointed_barrier >= self.checkpoint_frequency
     }
@@ -226,6 +224,7 @@ where
         self.num_uncheckpointed_barrier = self.checkpoint_frequency;
     }
 
+    /// Update the `num_uncheckpointed_barrier`
     fn update_num_uncheckpointed_barrier(&mut self, checkpoint: bool) {
         if checkpoint {
             self.num_uncheckpointed_barrier = 0
@@ -234,6 +233,7 @@ where
         }
     }
 
+    /// To add uncommitted message, we need an barrier(checkpoint = true) to handle it
     fn add_uncommitted_messages(
         &mut self,
         resps: &Vec<BarrierCompleteResponse>,
@@ -280,6 +280,7 @@ where
         )
     }
 
+    /// Process `checkpoint_post`, send success message
     async fn do_post_checkpoint(&mut self) -> MetaResult<()> {
         let mut changes_vec = vec![];
         for checkpoint_post in &mut self
@@ -315,6 +316,7 @@ where
         Ok(())
     }
 
+    /// Sending failure messages using `collect_notifiers`
     fn fail_uncommitted_message(&mut self, err: &MetaError) {
         for checkpoint_post in &mut self
             .uncommitted_messages
@@ -520,6 +522,7 @@ where
         }
     }
 
+    /// Clear all changes
     pub fn clear_changes(&mut self) {
         self.creating_tables.clear();
         self.dropping_tables.clear();
