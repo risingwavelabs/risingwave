@@ -604,8 +604,10 @@ where
                     table_fragment.actor_status.remove(actor_id);
                 }
 
+                // update fragment's vnode mapping
                 if let Some(vnode_mapping) = fragment.vnode_mapping.as_mut() {
                     if removed_parallel_units.len() == added_parallel_units.len() {
+                        // for migration, use the added actor to replace the removed actor
                         let replace_map: HashMap<_, _> = removed_parallel_units
                             .into_iter()
                             .zip_eq(added_parallel_units.into_iter())
@@ -617,6 +619,7 @@ where
                             }
                         }
                     } else {
+                        // for scaling, use actor mapping to restore vnode mapping
                         let mut actor_to_parallel_unit =
                             HashMap::with_capacity(fragment.actors.len());
                         for actor in &fragment.actors {

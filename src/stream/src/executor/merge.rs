@@ -151,8 +151,7 @@ impl MergeExecutor {
                                 .map_err(|e| anyhow!("failed to create upstream receivers: {e}"))?;
 
                             // Poll the first barrier from the new upstreams. It must be the same as
-                            // the one we polled from original
-                            // upstreams.
+                            // the one we polled from original upstreams.
                             let mut select_new =
                                 SelectReceivers::new(self.actor_context.id, new_upstreams);
                             let new_barrier = expect_first_barrier(&mut select_new).await?;
@@ -204,6 +203,8 @@ pub struct SelectReceivers {
 
 impl SelectReceivers {
     fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
+        assert!(!upstreams.is_empty());
+
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
             upstreams,

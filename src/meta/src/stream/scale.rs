@@ -204,8 +204,8 @@ pub(crate) fn rebalance_actor_vnode(
     }
 
     let mut v: VecDeque<_> = removed_balances
-        .chain(rest_balances.into_iter())
-        .chain(created_balances.into_iter())
+        .chain(rest_balances)
+        .chain(created_balances)
         .collect();
 
     // We will return the full bitmap here after rebalancing,
@@ -924,6 +924,8 @@ where
 
             let mut vnode_bitmap_updates = fragment_updated_bitmap.remove(&fragment_id).unwrap();
 
+            // We need to keep the bitmaps from changed actors only,
+            // otherwise the barrier will become very large with many actors
             for actor_id in actors_after_reschedule.keys() {
                 assert!(vnode_bitmap_updates.contains_key(actor_id));
 
