@@ -16,7 +16,6 @@ use std::collections::{hash_map, HashMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use futures::Future;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::{Result, RwError};
@@ -26,7 +25,6 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::task_service::GetDataResponse;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
-use tokio::task::JoinHandle;
 use tonic::Status;
 
 use crate::rpc::service::exchange::GrpcExchangeWriter;
@@ -40,13 +38,11 @@ pub struct BatchManager {
     tasks: Arc<Mutex<HashMap<TaskId, Arc<BatchTaskExecution<ComputeNodeContext>>>>>,
 
     /// Runtime for the batch manager.
-    #[cfg(not(madsim))]
     runtime: &'static Runtime,
 }
 
 impl BatchManager {
     pub fn new(worker_threads_num: Option<usize>) -> Self {
-        #[cfg(not(madsim))]
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             if let Some(worker_threads_num) = worker_threads_num {
@@ -63,7 +59,6 @@ impl BatchManager {
             // Leak the runtime to avoid runtime shutting-down in the main async context.
             // TODO: may manually shutdown the runtime after we implement graceful shutdown for
             // stream manager.
-            #[cfg(not(madsim))]
             runtime: Box::leak(Box::new(runtime)),
         }
     }
@@ -96,19 +91,6 @@ impl BatchManager {
         ret
     }
 
-    /// Spawn a task using the actor runtime. Fallback to the main runtime if `madsim` is enabled.
-    #[inline(always)]
-    fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        #[cfg(not(madsim))]
-        return self.runtime.spawn(future);
-        #[cfg(madsim)]
-        return tokio::spawn(future);
-    }
-
     pub fn get_data(
         &self,
         tx: Sender<std::result::Result<GetDataResponse, Status>>,
@@ -118,7 +100,7 @@ impl BatchManager {
         let task_id = TaskOutputId::try_from(pb_task_output_id)?;
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
         let mut task_output = self.take_output(pb_task_output_id)?;
-        self.spawn(async move {
+        self.runtime.spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
             match task_output.take_data(&mut writer).await {
                 Ok(_) => {

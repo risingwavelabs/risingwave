@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use futures::{Future, StreamExt};
+use futures::StreamExt;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
@@ -28,7 +28,6 @@ use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
-use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
 
 use crate::error::BatchError::SenderError;
@@ -190,7 +189,6 @@ pub struct BatchTaskExecution<C> {
     epoch: u64,
 
     /// Runtime for the batch tasks.
-    #[cfg(not(madsim))]
     runtime: &'static Runtime,
 }
 
@@ -219,19 +217,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn get_task_id(&self) -> &TaskId {
         &self.task_id
-    }
-
-    /// Spawn a task using the actor runtime. Fallback to the main runtime if `madsim` is enabled.
-    #[inline(always)]
-    fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        #[cfg(not(madsim))]
-        return self.runtime.spawn(future);
-        #[cfg(madsim)]
-        return tokio::spawn(future);
     }
 
     /// `async_execute` executes the task in background, it spawns a tokio coroutine and returns
@@ -274,10 +259,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         self.change_state_notify(TaskStatus::Running, &mut state_tx)
             .await?;
 
-        // Spawn task for real execution.
+        // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
         let t_2 = self.clone();
-        self.spawn(async move {
+        // Spawn task for real execution.
+        self.runtime.spawn(async move {
             trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
             let mut state_tx = state_tx;
@@ -311,7 +297,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
             if let Some(task_metrics) = task_metrics {
                 let monitor = TaskMonitor::new();
-                let join_handle = t_2.spawn(monitor.instrument(task(task_id.clone())));
+                let join_handle = t_2.runtime.spawn(monitor.instrument(task(task_id.clone())));
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
                     error!("Batch task {:?} panic!", task_id);
                 }
@@ -336,7 +322,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
                 task_metrics.clear_record();
             } else {
-                let join_handle = t_2.spawn(task(task_id.clone()));
+                let join_handle = t_2.runtime.spawn(task(task_id.clone()));
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
                     error!("Batch task {:?} panic!", task_id);
                 }
