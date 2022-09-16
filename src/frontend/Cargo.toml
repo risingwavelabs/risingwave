@@ -20,7 +20,6 @@ fixedbitset = "0.4.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
-lazy_static = "1"
 maplit = "1"
 md5 = "0.7.0"
 num-integer = "0.1"

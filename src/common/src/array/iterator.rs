@@ -109,7 +109,7 @@ mod tests {
                         use crate::array::$builder;
                         let mut builder = $builder::new(5);
                         for _ in 0..5 {
-                            builder.append_null().unwrap();
+                            builder.append_null();
                         }
                         let array = builder.finish();
                         let mut iter = array.iter();
@@ -134,5 +134,5 @@ mod tests {
         };
     }
 
-    for_all_variants! {test_trusted_len}
+    for_all_variants! { test_trusted_len }
 }

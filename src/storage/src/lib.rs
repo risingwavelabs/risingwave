@@ -50,6 +50,8 @@
 #![feature(assert_matches)]
 #![feature(is_sorted)]
 #![feature(btree_drain_filter)]
+#![feature(exact_size_is_empty)]
+#![feature(once_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 pub mod hummock;

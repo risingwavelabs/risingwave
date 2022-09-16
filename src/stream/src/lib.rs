@@ -47,6 +47,7 @@
 #![feature(result_option_inspect)]
 #![feature(never_type)]
 #![feature(btreemap_alloc)]
+#![feature(once_cell)]
 
 #[macro_use]
 extern crate tracing;

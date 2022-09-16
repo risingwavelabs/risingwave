@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use itertools::Itertools as _;
 use risingwave_common::error::{ErrorCode, Result};
@@ -114,7 +115,7 @@ fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> b
     }
 }
 
-fn build_cast_map() -> CastMap {
+pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
     use DataTypeName as T;
 
     // Implicit cast operations in PG are organized in 3 sequences, with the reverse direction being
@@ -160,7 +161,7 @@ fn build_cast_map() -> CastMap {
     m.insert((T::Boolean, T::Int32), CastContext::Explicit);
     m.insert((T::Int32, T::Boolean), CastContext::Explicit);
     m
-}
+});
 
 fn insert_cast_seq(
     m: &mut BTreeMap<(DataTypeName, DataTypeName), CastContext>,
@@ -187,12 +188,6 @@ pub fn cast_map_array() -> Vec<(DataTypeName, DataTypeName, CastContext)> {
         .iter()
         .map(|((src, target), ctx)| (*src, *target, *ctx))
         .collect_vec()
-}
-
-lazy_static::lazy_static! {
-    pub static ref CAST_MAP: CastMap = {
-        build_cast_map()
-    };
 }
 
 #[derive(Clone)]
