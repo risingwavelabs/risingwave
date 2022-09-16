@@ -139,7 +139,7 @@ impl<S: StateStore> AggState<S> {
                 {
                     let data = state.get_output(epoch, state_table).await?;
                     trace!("append_datum (0 -> N): {:?}", &data);
-                    builder.append_datum(&data)?;
+                    builder.append_datum(&data);
                 }
 
                 1
@@ -154,7 +154,7 @@ impl<S: StateStore> AggState<S> {
                     .zip_eq(self.prev_states.as_ref().unwrap().iter())
                 {
                     trace!("append_datum (N -> 0): {:?}", &state);
-                    builder.append_datum(state)?;
+                    builder.append_datum(state);
                 }
 
                 1
@@ -178,8 +178,8 @@ impl<S: StateStore> AggState<S> {
                         &cur_state
                     );
 
-                    builder.append_datum(prev_state)?;
-                    builder.append_datum(&cur_state)?;
+                    builder.append_datum(prev_state);
+                    builder.append_datum(&cur_state);
                 }
 
                 2

@@ -81,7 +81,7 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<ListRef<'_>>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<ListRef<'_>>) {
         match value {
             None => {
                 self.bitmap.append(false);
@@ -94,22 +94,34 @@ impl ArrayBuilder for ListArrayBuilder {
                 let values_ref = v.values_ref();
                 self.offsets.push(last + values_ref.len());
                 for f in values_ref {
-                    self.value.append_datum_ref(f)?;
+                    self.value.append_datum_ref(f);
                 }
             }
         }
         self.len += 1;
-        Ok(())
     }
 
-    fn append_array(&mut self, other: &ListArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &ListArray) {
         self.bitmap.append_bitmap(&other.bitmap);
         let last = *self.offsets.last().unwrap();
         self.offsets
             .append(&mut other.offsets[1..].iter().map(|o| *o + last).collect());
-        self.value.append_array(&other.value)?;
+        self.value.append_array(&other.value);
         self.len += other.len();
-        Ok(())
+    }
+
+    fn pop(&mut self) -> Option<()> {
+        if self.bitmap.pop().is_some() {
+            let start = self.offsets.pop().unwrap();
+            let end = *self.offsets.last().unwrap();
+            self.len -= 1;
+            for _ in end..start {
+                self.value.pop().unwrap()
+            }
+            Some(())
+        } else {
+            None
+        }
     }
 
     fn finish(self) -> ListArray {
@@ -124,13 +136,14 @@ impl ArrayBuilder for ListArrayBuilder {
 }
 
 impl ListArrayBuilder {
-    pub fn append_row_ref(&mut self, row: RowRef) -> ArrayResult<()> {
+    pub fn append_row_ref(&mut self, row: RowRef) {
         self.bitmap.append(true);
         let last = *self.offsets.last().unwrap();
         self.offsets.push(last + row.size());
         self.len += 1;
-        row.values()
-            .try_for_each(|v| self.value.append_datum_ref(v))
+        for v in row.values() {
+            self.value.append_datum_ref(v);
+        }
     }
 }
 
@@ -258,16 +271,17 @@ impl ListArray {
         let mut offsets = vec![0];
         let mut values = values.into_iter().peekable();
         let mut builder = values.peek().unwrap().as_ref().unwrap().create_builder(0)?;
-        values.try_for_each(|i| match i {
-            Some(a) => {
-                offsets.push(a.len());
-                builder.append_array(&a)
+        for i in values {
+            match i {
+                Some(a) => {
+                    offsets.push(a.len());
+                    builder.append_array(&a)
+                }
+                None => {
+                    offsets.push(0);
+                }
             }
-            None => {
-                offsets.push(0);
-                Ok(())
-            }
-        })?;
+        }
         offsets.iter_mut().fold(0, |acc, x| {
             *x += acc;
             *x
@@ -612,9 +626,7 @@ mod tests {
             },
         );
         list_values.iter().for_each(|v| {
-            builder
-                .append(v.as_ref().map(|s| s.as_scalar_ref()))
-                .unwrap()
+            builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
         });
         let arr = builder.finish();
         assert_eq!(arr.values_vec(), list_values);
@@ -645,8 +657,8 @@ mod tests {
                 datatype: Box::new(DataType::Int32),
             },
         );
-        builder.append_array(&part1).unwrap();
-        builder.append_array(&part2).unwrap();
+        builder.append_array(&part1);
+        builder.append_array(&part2);
 
         assert_eq!(arr.values_vec(), builder.finish().values_vec());
     }
@@ -666,6 +678,59 @@ mod tests {
         let builder = arr.create_builder(0).unwrap();
         let arr2 = try_match_expand!(builder.finish(), ArrayImpl::List).unwrap();
         assert_eq!(arr.array_meta(), arr2.array_meta());
+    }
+
+    #[test]
+    fn test_builder_pop() {
+        use crate::array::*;
+
+        {
+            let mut builder = ListArrayBuilder::with_meta(
+                1,
+                ArrayMeta::List {
+                    datatype: Box::new(DataType::Int32),
+                },
+            );
+            let val = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+            builder.append(Some(ListRef::ValueRef { val: &val }));
+            assert!(builder.pop().is_some());
+            assert!(builder.pop().is_none());
+            let arr = builder.finish();
+            assert!(arr.is_empty());
+        }
+
+        {
+            let meta = ArrayMeta::List {
+                datatype: Box::new(DataType::List {
+                    datatype: Box::new(DataType::Int32),
+                }),
+            };
+            let mut builder = ListArrayBuilder::with_meta(2, meta);
+            let val1 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+            let val2 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+            let list1 = ListValue::new(vec![Some(val1.into()), Some(val2.into())]);
+            builder.append(Some(ListRef::ValueRef { val: &list1 }));
+
+            let val3 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+            let val4 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+            let list2 = ListValue::new(vec![Some(val3.into()), Some(val4.into())]);
+
+            builder.append(Some(ListRef::ValueRef { val: &list2 }));
+
+            assert!(builder.pop().is_some());
+
+            let arr = builder.finish();
+            assert_eq!(arr.len(), 1);
+
+            let val = arr.value_at(0).unwrap();
+
+            let datums = val
+                .values_ref()
+                .into_iter()
+                .map(ToOwnedDatum::to_owned_datum)
+                .collect_vec();
+            assert_eq!(datums, list1.values.to_vec());
+        }
     }
 
     #[test]
@@ -758,11 +823,9 @@ mod tests {
                 }),
             },
         );
-        nested_list_values.iter().for_each(|v| {
-            builder
-                .append(v.as_ref().map(|s| s.as_scalar_ref()))
-                .unwrap()
-        });
+        for v in &nested_list_values {
+            builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
+        }
         let nestarray = builder.finish();
         assert_eq!(nestarray.values_vec(), nested_list_values);
     }
@@ -871,7 +934,7 @@ mod tests {
                 datatype: Box::new(DataType::Varchar),
             },
         );
-        builder.append(Some(list_ref)).unwrap();
+        builder.append(Some(list_ref));
         let array = builder.finish();
         let list_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
@@ -949,12 +1012,8 @@ mod tests {
                     datatype: Box::new(datatype),
                 },
             );
-            builder
-                .append(Some(ListRef::ValueRef { val: &lhs }))
-                .unwrap();
-            builder
-                .append(Some(ListRef::ValueRef { val: &rhs }))
-                .unwrap();
+            builder.append(Some(ListRef::ValueRef { val: &lhs }));
+            builder.append(Some(ListRef::ValueRef { val: &rhs }));
             let array = builder.finish();
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);

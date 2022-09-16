@@ -35,7 +35,7 @@ impl DecimalArray {
     pub fn from_slice(data: &[Option<Decimal>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i).unwrap();
+            builder.append(*i);
         }
         builder.finish()
     }
@@ -150,7 +150,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<Decimal>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<Decimal>) {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -161,15 +161,17 @@ impl ArrayBuilder for DecimalArrayBuilder {
                 self.data.push(Decimal::default());
             }
         }
-        Ok(())
     }
 
-    fn append_array(&mut self, other: &DecimalArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &DecimalArray) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
         self.data.extend_from_slice(&other.data);
-        Ok(())
+    }
+
+    fn pop(&mut self) -> Option<()> {
+        self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
     fn finish(self) -> DecimalArray {
@@ -194,7 +196,7 @@ mod tests {
         let v = (0..1000).map(Decimal::from_i64).collect_vec();
         let mut builder = DecimalArrayBuilder::new(0);
         for i in &v {
-            builder.append(*i).unwrap();
+            builder.append(*i);
         }
         let a = builder.finish();
         let res = v.iter().zip_eq(a.iter()).all(|(a, b)| *a == b);
@@ -285,7 +287,7 @@ mod tests {
             .map(|v| {
                 let mut builder = DecimalArrayBuilder::new(0);
                 for i in v {
-                    builder.append(*i).unwrap();
+                    builder.append(*i);
                 }
                 builder.finish()
             })
