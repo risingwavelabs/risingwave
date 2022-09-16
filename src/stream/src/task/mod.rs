@@ -95,7 +95,7 @@ impl SharedContext {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
-            compute_client_pool: ComputeClientPool::new(u64::MAX),
+            compute_client_pool: ComputeClientPool::default(),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new())),
         }
     }
