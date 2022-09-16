@@ -161,6 +161,10 @@ mod tests {
             vec![],
             vec![],
         );
+        let mut epoch: u64 = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
+
         let mut managed_state =
             ManagedValueState::new(create_test_count_state(), Some(0), None, &state_table)
                 .await
@@ -178,7 +182,6 @@ mod tests {
         assert!(managed_state.is_dirty());
 
         // write to state store
-        let epoch: u64 = 0;
         managed_state.flush(&mut state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
 
@@ -220,6 +223,10 @@ mod tests {
             vec![],
             pk_index,
         );
+        let mut epoch: u64 = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
+
         let mut managed_state = ManagedValueState::new(
             create_test_max_agg_append_only(),
             Some(0),
@@ -241,7 +248,6 @@ mod tests {
         assert!(managed_state.is_dirty());
 
         // write to state store
-        let epoch: u64 = 0;
         managed_state.flush(&mut state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
 

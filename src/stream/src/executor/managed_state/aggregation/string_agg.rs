@@ -301,6 +301,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         let chunk = StreamChunk::from_pretty(
             " T T i i I
@@ -375,6 +377,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         let chunk = StreamChunk::from_pretty(
             " T T I
@@ -458,6 +462,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -561,7 +567,8 @@ mod tests {
         );
 
         let mut epoch = 0;
-
+        state_table.init_epoch(epoch);
+        epoch += 1;
         {
             let chunk = StreamChunk::from_pretty(
                 " T T i i I

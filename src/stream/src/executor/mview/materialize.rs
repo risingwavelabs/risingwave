@@ -208,10 +208,11 @@ mod tests {
             schema.clone(),
             PkIndices::new(),
             vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(chunk1),
-                Message::Barrier(Barrier::default()),
+                Message::Barrier(Barrier::new_test_barrier(2)),
                 Message::Chunk(chunk2),
-                Message::Barrier(Barrier::default()),
+                Message::Barrier(Barrier::new_test_barrier(3)),
             ],
         );
 
@@ -238,6 +239,7 @@ mod tests {
             1,
         ))
         .execute();
+        materialize_executor.next().await.transpose().unwrap();
 
         materialize_executor.next().await.transpose().unwrap();
 

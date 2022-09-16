@@ -250,7 +250,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
         let mut current_epoch_row = None;
-        let mut epoch: u64 = 0;
 
         let aligned_stream = barrier_align(
             input_l.execute(),
@@ -344,9 +343,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     if self.is_right_table_writer {
                         if let Some(row) = current_epoch_row.take() {
-                            assert_eq!(epoch, barrier.epoch.prev);
                             self.right_table.insert(row);
-                            self.right_table.commit(epoch).await?;
+                            self.right_table.commit(barrier.epoch.prev).await?;
                         }
                     }
 
@@ -354,7 +352,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     // We have flushed all the state for the prev epoch. We can now update the
                     // epochs.
-                    epoch = barrier.epoch.curr;
                     self.range_cache.update_epoch(barrier.epoch.curr);
 
                     prev_epoch_value = Some(curr);

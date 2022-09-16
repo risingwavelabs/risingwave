@@ -337,7 +337,7 @@ mod tests {
             ],
             vec![0, 1], // [c, _row_id]
         );
-        state_table.init_epoch(0);
+
         let mut managed_state = GenericExtremeState::new(
             agg_call.clone(),
             None,
@@ -348,6 +348,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -448,7 +450,7 @@ mod tests {
             ],
             vec![0, 1], // [c, _row_id]
         );
-        state_table.init_epoch(0);
+
         let mut managed_state = GenericExtremeState::new(
             agg_call.clone(),
             None,
@@ -459,6 +461,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -550,7 +554,6 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),   // _row_id
         ];
         let state_table_col_mapping_1 = Arc::new(StateTableColumnMapping::new(vec![0, 3]));
-        let mut epoch = 0;
         let mut state_table_1 = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -561,7 +564,6 @@ mod tests {
             ],
             vec![0, 1], // [b, _row_id]
         );
-        state_table_1.init_epoch(epoch);
         let table_id = TableId::new(0x2333);
         let columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // b
@@ -578,6 +580,9 @@ mod tests {
             ],
             vec![0, 1], // [b, _row_id]
         );
+
+        let mut epoch = 0;
+        state_table_1.init_epoch(epoch);
         state_table_2.init_epoch(epoch);
         epoch += 1;
 
@@ -666,7 +671,6 @@ mod tests {
             ],
             vec![0, 1, 2], // [c, b, _row_id]
         );
-        state_table.init_epoch(0);
         let group_key = Row::new(vec![Some(8.into())]);
 
         let mut managed_state = GenericExtremeState::new(
@@ -679,6 +683,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -778,7 +784,9 @@ mod tests {
             ],
             vec![0, 1], // [a, _row_id]
         );
-        state_table.init_epoch(0);
+        let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
         let mut managed_state = GenericExtremeState::new(
             agg_call.clone(),
             None,
@@ -796,8 +804,6 @@ mod tests {
             .into_iter()
             .collect();
         let mut min_value = i32::MAX;
-
-        let mut epoch = 0;
 
         {
             let mut pretty_lines = vec!["i I".to_string()];
@@ -900,7 +906,6 @@ mod tests {
             ],
             vec![0, 1], // [a, _row_id]
         );
-        state_table.init_epoch(0);
 
         let mut managed_state = GenericExtremeState::new(
             agg_call.clone(),
@@ -912,6 +917,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         {
             let chunk = StreamChunk::from_pretty(
