@@ -179,12 +179,6 @@ static CACEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     .collect()
 });
 
-static NO_RESCHEDULE_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
-    [TaskStatus::NoAvailCanceled, TaskStatus::SendFailCanceled]
-        .into_iter()
-        .collect()
-});
-
 impl<S> HummockManager<S>
 where
     S: MetaStore,
@@ -1051,7 +1045,13 @@ where
             compact_task.compaction_group_id,
         );
 
-        if !NO_RESCHEDULE_STATUS_SET.contains(&compact_task.task_status()) {
+        if !CACEL_STATUS_SET.contains(&compact_task.task_status()) {
+            // We no need to reschedule when report cancel_task
+            // In fact, when `cancel_task` appears in the system, it means that the system
+            // processing capacity may have been overloaded, and we may no longer need to try to
+            // schedule. And this is a quick fix
+            // TODO: need to consider the fairness of the compaction_group and unload the schedule
+            // when overloaded
             self.try_send_compaction_request(compact_task.compaction_group_id)?;
         }
 
