@@ -472,7 +472,6 @@ async fn test_sst_gc_watermark() {
     );
 
     for epoch in epochs.iter() {
-        local_version_manager.seal_epoch(*epoch, true);
         let result = local_version_manager
             .sync_shared_buffer(*epoch)
             .await
