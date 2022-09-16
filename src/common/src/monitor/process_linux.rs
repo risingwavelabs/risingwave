@@ -173,18 +173,9 @@ impl Collector for ProcessCollector {
 }
 
 #[cfg(target_os = "linux")]
-lazy_static::lazy_static! {
-    // getconf PAGESIZE
-    static ref PAGESIZE: i64 = {
-        unsafe {
-            libc::sysconf(libc::_SC_PAGESIZE)
-        }
-    };
+static PAGESIZE: std::sync::LazyLock<i64> =
+    std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_PAGESIZE) });
 
-    // getconf CLK_TCK
-    static ref CLOCK_TICK: u64 = {
-        unsafe {
-            libc::sysconf(libc::_SC_CLK_TCK) as u64
-        }
-    };
-}
+#[cfg(target_os = "linux")]
+static CLOCK_TICK: std::sync::LazyLock<u64> =
+    std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_CLK_TCK) as u64 });

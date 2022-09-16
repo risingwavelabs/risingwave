@@ -88,15 +88,15 @@ impl Expression for CaseExpression {
                             .as_bool()
                     })
                 {
-                    output_array.append_datum(&t.to_owned_datum())?;
+                    output_array.append_datum(&t.to_owned_datum());
                 } else if let Some(els) = els.as_mut() {
                     let t = els.datum_at(idx);
-                    output_array.append_datum(&t)?;
+                    output_array.append_datum(&t);
                 } else {
-                    output_array.append_null()?;
+                    output_array.append_null();
                 };
             } else {
-                output_array.append_null()?;
+                output_array.append_null();
             }
         }
         let output_array = output_array.finish().into();

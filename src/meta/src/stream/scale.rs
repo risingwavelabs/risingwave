@@ -117,7 +117,7 @@ where
         // Associating ParallelUnit with Worker
         let parallel_unit_id_to_worker_id: BTreeMap<_, _> = self
             .cluster_manager
-            .list_parallel_units()
+            .list_active_parallel_units()
             .await
             .into_iter()
             .map(|parallel_unit| {

@@ -34,9 +34,9 @@ pub(crate) trait SourceChunkBuilder {
             .collect();
 
         for row in rows {
-            row.iter()
-                .zip_eq(&mut builders)
-                .try_for_each(|(datum, builder)| builder.append_datum(datum))?
+            for (datum, builder) in row.iter().zip_eq(&mut builders) {
+                builder.append_datum(datum);
+            }
         }
 
         Ok(builders
