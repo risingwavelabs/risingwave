@@ -33,6 +33,14 @@ impl RpcClient for StreamClient {
     async fn new_client(host_addr: HostAddr) -> Result<Self> {
         Self::new(host_addr).await
     }
+
+    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Vec<Self>> {
+        let mut v = vec![];
+        for _ in 0..size {
+            v.push(Self::new(host_addr.clone()).await?);
+        }
+        Ok(v)
+    }
 }
 
 impl StreamClient {

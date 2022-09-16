@@ -50,6 +50,7 @@ mod hummock_meta_client;
 pub use hummock_meta_client::HummockMetaClient;
 pub mod error;
 mod stream_client;
+use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
@@ -57,17 +58,19 @@ pub use stream_client::*;
 #[cfg(madsim)]
 use tokio::sync::Mutex;
 
-use crate::error::Result;
+use crate::error::{Result, RpcError};
 
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr) -> Result<Self>;
+
+    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Vec<Self>>;
 }
 
 #[derive(Clone)]
 pub struct RpcClientPool<S> {
     #[cfg(not(madsim))]
-    clients: Cache<HostAddr, S>,
+    clients: Cache<HostAddr, Vec<S>>,
 
     // moka::Cache internally uses system thread, so we can't use it in simulation
     #[cfg(madsim)]
@@ -107,10 +110,14 @@ where
     /// new client will be created and returned.
     #[cfg(not(madsim))]
     pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
-        self.clients
-            .try_get_with(addr.clone(), S::new_client(addr))
+        Ok(self
+            .clients
+            .try_get_with(addr.clone(), S::new_clients(addr, 64))
             .await
-            .map_err(|e| anyhow!("failed to create RPC client: {:?}", e).into())
+            .map_err(|e| -> RpcError { anyhow!("failed to create RPC client: {:?}", e).into() })?
+            .choose(&mut rand::thread_rng())
+            .unwrap()
+            .clone())
     }
 
     #[cfg(madsim)]
