@@ -129,14 +129,14 @@ impl ScheduledLocations {
 
 impl Scheduler {
     pub fn new(parallel_units: impl IntoIterator<Item = ParallelUnit>) -> Self {
+        // Group parallel units with worker node.
         let mut parallel_units_map = BTreeMap::new();
         for p in parallel_units {
             parallel_units_map
-                .entry(p.id)
+                .entry(p.worker_node_id)
                 .or_insert_with(Vec::new)
                 .push(p);
         }
-
         let mut parallel_units: LinkedList<_> = parallel_units_map
             .into_iter()
             .map(|(_k, v)| v.into_iter())

@@ -66,11 +66,12 @@ pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.
     pub enable_recovery: bool,
-    /// The interval of automatic checkpointing.
+    /// The interval of periodic checkpointing.
     pub checkpoint_interval: Duration,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
-
+    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
+    /// fragment on one parallel unit per compute node.
     pub minimal_scheduling: bool,
 
     /// After specified seconds of idle (no mview or flush), the process will be exited.
