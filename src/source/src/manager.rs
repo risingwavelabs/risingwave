@@ -64,6 +64,24 @@ pub struct SourceColumnDesc {
     pub skip_parse: bool,
 }
 
+impl SourceColumnDesc {
+    /// Create a [`SourceColumnDesc`] without composite types.
+    #[track_caller]
+    pub fn simple(name: impl Into<String>, data_type: DataType, column_id: ColumnId) -> Self {
+        assert!(
+            !matches!(data_type, DataType::List { .. } | DataType::Struct(..)),
+            "called `SourceColumnDesc::simple` with a composite type."
+        );
+        Self {
+            name: name.into(),
+            data_type,
+            column_id,
+            fields: vec![],
+            skip_parse: false,
+        }
+    }
+}
+
 impl From<&ColumnDesc> for SourceColumnDesc {
     fn from(c: &ColumnDesc) -> Self {
         Self {
