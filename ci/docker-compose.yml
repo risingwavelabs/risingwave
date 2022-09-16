@@ -64,4 +64,4 @@ services:
   release-env:
     image: quay.io/pypa/manylinux2014_x86_64
     volumes:
-      - ..:/risingwave
+      - ..:/mnt
