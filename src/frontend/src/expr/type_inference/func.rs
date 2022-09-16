@@ -298,26 +298,23 @@ fn infer_type_for_special(
                 datatype: Box::new(common_ele_type.clone()),
             };
 
-            // cast inputs to common type
-            let try_cast_inputs  = || -> Result<()> {
-                let inputs_owned = std::mem::take(inputs);
-                // *inputs = 
-                let tmp = inputs_owned
-                    .into_iter()
-                    .map(|input| {
-                        if input.return_type().is_scalar() {
-                            return input.cast_implicit(common_ele_type.clone());
-                        }
-                        input.cast_implicit(array_type.clone())
-                    })
-                    .try_collect()?;
-                Ok(())
-            }();
+            // try to cast inputs to inputs to common type
+            let inputs_owned = std::mem::take(inputs);
+            let try_cast = inputs_owned
+                .into_iter()
+                .map(|input| {
+                    if input.return_type().is_scalar() {
+                        return input.cast_implicit(common_ele_type.clone());
+                    }
+                    input.cast_implicit(array_type.clone())
+                })
+                .try_collect();
 
-            // array_type is result
-
-            match try_cast_inputs {
-                Ok(_) => Ok(Some(array_type)), 
+            match try_cast {
+                Ok(casted) => { // apply type conversion and return common type
+                    *inputs = casted;
+                    Ok(Some(array_type))
+                },
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot prepend {} to {}",
                     left_type, right_type
