@@ -28,9 +28,9 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::manager::{
-    CatalogDeletedId, CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory,
-    IdCategoryType, MetaSrvEnv, NotificationVersion, SourceId, StreamingJob,
-    TableBackgroundDeleterRef, TableId,
+    CatalogBackgroundDeleterRef, CatalogDeletedId, CatalogManagerRef, ClusterManagerRef,
+    FragmentManagerRef, IdCategory, IdCategoryType, MetaSrvEnv, NotificationVersion, SourceId,
+    StreamingJob, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -48,7 +48,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
-    table_background_deleter: TableBackgroundDeleterRef,
+    table_background_deleter: CatalogBackgroundDeleterRef,
     ddl_lock: Arc<RwLock<()>>,
 }
 
@@ -64,7 +64,7 @@ where
         source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        table_background_deleter: TableBackgroundDeleterRef,
+        table_background_deleter: CatalogBackgroundDeleterRef,
         ddl_lock: Arc<RwLock<()>>,
     ) -> Self {
         Self {
@@ -108,9 +108,9 @@ where
     ) -> Result<Response<DropDatabaseResponse>, Status> {
         let req = request.into_inner();
         let database_id = req.get_database_id();
-        let (version, table_ids) = self.catalog_manager.drop_database(database_id).await?;
+        let (version, catalog_ids) = self.catalog_manager.drop_database(database_id).await?;
 
-        self.table_background_deleter.delete(table_ids);
+        self.table_background_deleter.delete(catalog_ids);
 
         Ok(Response::new(DropDatabaseResponse {
             status: None,
@@ -191,8 +191,9 @@ where
         // 1. Drop source in catalog. Ref count will be checked.
         let version = self.catalog_manager.drop_source(source_id).await?;
 
-        // 2. Drop source on compute nodes.
-        self.source_manager.drop_source(source_id).await?;
+        // 2. Drop source in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![CatalogDeletedId::SourceId(source_id)]);
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -697,15 +698,13 @@ where
             .drop_materialized_source(source_id, table_id)
             .await?;
 
-        // 2. Drop source and mv separately.
-        // Note: we need to drop the materialized view to unmap the source_id to fragment_ids in
-        // `SourceManager` before we can drop the source
-
-        // drop mv in table background deleter asynchronously.
-        self.table_background_deleter
-            .delete(vec![CatalogDeletedId::TableId(table_id.into())]);
-
-        self.source_manager.drop_source(source_id).await?;
+        // 2. Drop source and mv in table background deleter asynchronously.
+        // Note: we need to drop the materialized view to unmap the source_id to fragment_ids before
+        // we can drop the source.
+        self.table_background_deleter.delete(vec![
+            CatalogDeletedId::TableId(table_id.into()),
+            CatalogDeletedId::SourceId(source_id),
+        ]);
 
         Ok(version)
     }

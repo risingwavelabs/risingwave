@@ -14,19 +14,21 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::catalog::{Sink, Table};
+use risingwave_pb::catalog::{Sink, Source, Table};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+use super::SourceId;
 use crate::manager::MetaSrvEnv;
 use crate::model::{MetadataModel, MetadataModelResult};
 use crate::storage::MetaStore;
-use crate::stream::GlobalStreamManagerRef;
+use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::MetaResult;
 
-pub type TableBackgroundDeleterRef = Arc<TableBackgroundDeleter>;
+pub type CatalogBackgroundDeleterRef = Arc<CatalogBackgroundDeleter>;
 
 macro_rules! create_catalog_deleted {
     ($name:ident, $cf:ident) => {
@@ -62,30 +64,27 @@ macro_rules! create_catalog_deleted {
 const CATALOG_TABLE_DELETED_CF_NAME: &str = "cf/deleted_catalog_table";
 /// Column family name for deleted sink catalog.
 const CATALOG_SINK_DELETED_CF_NAME: &str = "cf/deleted_catalog_sink";
+/// Column family name for deleted source catalog.
+const CATALOG_SOURCE_DELETED_CF_NAME: &str = "cf/deleted_catalog_source";
 
 create_catalog_deleted!(Table, CATALOG_TABLE_DELETED_CF_NAME);
 create_catalog_deleted!(Sink, CATALOG_SINK_DELETED_CF_NAME);
+create_catalog_deleted!(Source, CATALOG_SOURCE_DELETED_CF_NAME);
 
 #[derive(Debug)]
 pub enum CatalogDeletedId {
     TableId(TableId),
     SinkId(TableId),
+    SourceId(SourceId),
 }
 
-impl CatalogDeletedId {
-    pub fn get_id(&self) -> &TableId {
-        match self {
-            CatalogDeletedId::SinkId(id) | CatalogDeletedId::TableId(id) => id,
-        }
-    }
-}
+pub struct CatalogBackgroundDeleter(mpsc::UnboundedSender<Vec<CatalogDeletedId>>);
 
-pub struct TableBackgroundDeleter(mpsc::UnboundedSender<Vec<CatalogDeletedId>>);
-
-impl TableBackgroundDeleter {
+impl CatalogBackgroundDeleter {
     pub async fn new<S: MetaStore>(
         env: MetaSrvEnv<S>,
         stream_manager: GlobalStreamManagerRef<S>,
+        source_manager: SourceManagerRef<S>,
     ) -> MetaResult<(Self, JoinHandle<()>, Sender<()>)> {
         let env_clone = env.clone();
         let (tx, mut rx) = mpsc::unbounded_channel::<Vec<CatalogDeletedId>>();
@@ -104,9 +103,21 @@ impl TableBackgroundDeleter {
                 };
 
                 if let Some(catalog_ids) = catalog_ids {
+                    let (source_ids, table_ids): (Vec<_>, Vec<_>) =
+                        catalog_ids.iter().partition_map(|id| match id {
+                            CatalogDeletedId::SourceId(id) => either::Either::Left(id),
+                            CatalogDeletedId::TableId(id) | CatalogDeletedId::SinkId(id) => {
+                                either::Either::Right(id)
+                            }
+                        });
+
                     // TODO(zehua): add retry and batch.
-                    for id in catalog_ids.iter().map(CatalogDeletedId::get_id) {
+                    for id in table_ids {
                         stream_manager.drop_materialized_view(id).await.ok();
+                    }
+
+                    for id in source_ids {
+                        source_manager.drop_source(id).await.ok();
                     }
 
                     for id in catalog_ids {
@@ -121,6 +132,7 @@ impl TableBackgroundDeleter {
                                     .await
                                     .ok();
                             }
+                            _ => (),
                         }
                     }
                 }
@@ -147,6 +159,12 @@ impl TableBackgroundDeleter {
                 .await?
                 .into_iter()
                 .map(|sink_deleted| CatalogDeletedId::SinkId(sink_deleted.0.id.into())),
+        );
+        catalog_ids.extend(
+            SourceDeleted::list(env.meta_store())
+                .await?
+                .into_iter()
+                .map(|source_deleted| CatalogDeletedId::SourceId(source_deleted.0.id)),
         );
         self.delete(catalog_ids);
         Ok(())

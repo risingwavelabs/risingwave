@@ -319,12 +319,6 @@ where
                         entry.remove();
                     }
                 }
-
-                if let Some(managed_fragment_ids) = self.source_fragments.get_mut(&source_id) {
-                    for fragment_id in fragment_ids {
-                        managed_fragment_ids.remove(&fragment_id);
-                    }
-                }
             }
         }
 

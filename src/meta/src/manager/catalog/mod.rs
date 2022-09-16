@@ -41,7 +41,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
 use super::background_deleter::{SinkDeleted, TableDeleted};
-use super::CatalogDeletedId;
+use super::{CatalogDeletedId, SourceDeleted};
 use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
 use crate::model::{MetadataModel, MetadataModelResult, Transactional};
 use crate::storage::{MetaStore, Transaction};
@@ -177,6 +177,7 @@ where
         let user_core = &mut core.user;
         let database = Database::select(self.env.meta_store(), &database_id).await?;
         if let Some(database) = database {
+            // prepare transaction
             let mut transaction = Transaction::default();
             database.delete_in_transaction(&mut transaction)?;
 
@@ -189,11 +190,33 @@ where
                 schema.delete_in_transaction(&mut transaction)?;
             }
 
+            let sources = Source::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .filter(|source| source.database_id == database_id)
+                .collect_vec();
+            let source_ids = sources.iter().map(|source| source.id).collect_vec();
+            for source in &sources {
+                source.delete_in_transaction(&mut transaction)?;
+                SourceDeleted(source.clone()).upsert_in_transaction(&mut transaction)?;
+            }
+
+            let sinks = Sink::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .filter(|sink| sink.database_id == database_id)
+                .collect_vec();
+            for sink in &sinks {
+                sink.delete_in_transaction(&mut transaction)?;
+                SinkDeleted(sink.clone()).upsert_in_transaction(&mut transaction)?;
+            }
+
             let tables = Table::list(self.env.meta_store())
                 .await?
                 .into_iter()
                 .filter(|table| table.database_id == database_id)
                 .collect_vec();
+            let table_ids = tables.iter().map(|table| table.id).collect_vec();
             for table in &tables {
                 table.delete_in_transaction(&mut transaction)?;
             }
@@ -206,6 +229,15 @@ where
                 TableDeleted((*table).clone()).upsert_in_transaction(&mut transaction)?;
             }
 
+            let indexs = Index::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .filter(|index| index.database_id == database_id)
+                .collect_vec();
+            for index in &indexs {
+                index.delete_in_transaction(&mut transaction)?;
+            }
+
             let mut objects = Vec::with_capacity(1 + schemas.len() + tables.len());
             objects.push(Object::DatabaseId(database.id));
             objects.extend(schemas.iter().map(|schema| Object::SchemaId(schema.id)));
@@ -216,13 +248,28 @@ where
 
             self.env.meta_store().txn(transaction).await?;
 
+            // drop from catalog core.
             database_core.drop_database(&database);
-            for schema in schemas {
-                database_core.drop_schema(&schema);
+            for schema in &schemas {
+                database_core.drop_schema(schema);
+            }
+            for source in &sources {
+                database_core.drop_source(source);
+            }
+            for sink in &sinks {
+                database_core.drop_sink(sink);
             }
             for table in &tables {
                 database_core.drop_table(table);
             }
+            for index in &indexs {
+                database_core.drop_index(index);
+            }
+
+            database_core
+                .relation_ref_count
+                .retain(|k, _| (!table_ids.contains(k)) && (!source_ids.contains(k)));
+
             for user in users_need_update {
                 user_core.insert_user_info(user.id, user.clone());
                 self.notify_frontend(Operation::Update, Info::User(user))
@@ -234,12 +281,22 @@ where
                 .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
-            let valid_table_ids = valid_tables
-                .into_iter()
-                .map(|table| CatalogDeletedId::TableId(table.id.into()))
-                .collect_vec();
+            // prepare catalog sent to catalog background deleter.
+            let mut catalog_deleted_ids =
+                Vec::with_capacity(valid_tables.len() + source_ids.len() + sinks.len());
+            catalog_deleted_ids.extend(
+                valid_tables
+                    .into_iter()
+                    .map(|table| CatalogDeletedId::TableId(table.id.into())),
+            );
+            catalog_deleted_ids.extend(source_ids.into_iter().map(CatalogDeletedId::SourceId));
+            catalog_deleted_ids.extend(
+                sinks
+                    .into_iter()
+                    .map(|sink| CatalogDeletedId::SinkId(sink.id.into())),
+            );
 
-            Ok((version, valid_table_ids))
+            Ok((version, catalog_deleted_ids))
         } else {
             bail!("database doesn't exist");
         }
