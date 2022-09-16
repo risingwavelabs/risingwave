@@ -27,7 +27,7 @@ use risingwave_common::array::{Op, Row, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
-use risingwave_common::types::{DataType, VirtualNode};
+use risingwave_common::types::VirtualNode;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
@@ -415,24 +415,6 @@ impl<S: StateStore> StateTable<S> {
 
 // write
 impl<S: StateStore> StateTable<S> {
-    fn pretty_row_op(row_op: &RowOp, data_types: &[DataType]) -> String {
-        match row_op {
-            RowOp::Insert(after) => {
-                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
-                format!("Insert({:?})", &after)
-            }
-            RowOp::Delete(before) => {
-                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
-                format!("Delete({:?})", &before)
-            }
-            RowOp::Update((before, after)) => {
-                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
-                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
-                format!("Update({:?}, {:?})", &before, &after)
-            }
-        }
-    }
-
     fn handle_mem_table_error(&self, e: MemTableError) {
         match e {
             MemTableError::Conflict { key, prev, new } => {
@@ -442,8 +424,8 @@ impl<S: StateStore> StateTable<S> {
                     self.keyspace.table_id(),
                     vnode,
                     &key,
-                    Self::pretty_row_op(&prev, self.data_types.as_ref(),),
-                    Self::pretty_row_op(&new, self.data_types.as_ref(),),
+                    prev.debug_fmt(self.data_types.as_ref()),
+                    new.debug_fmt(self.data_types.as_ref()),
                 )
             }
         }
