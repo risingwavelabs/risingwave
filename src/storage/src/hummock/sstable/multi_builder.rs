@@ -165,6 +165,12 @@ where
                     .observe(builder_output.bloom_filter_size as _);
             }
 
+            if builder_output.sst_info.file_size != 0 {
+                self.stats
+                    .sstable_file_size
+                    .observe(builder_output.sst_info.file_size as _);
+            }
+
             self.sst_outputs.push(SplitTableOutput {
                 upload_join_handle: builder_output.writer_output,
                 sst_info: builder_output.sst_info,

@@ -1137,7 +1137,7 @@ mod tests {
             let output_idx =
                 hash_mapping[hasher.finish() as usize % VIRTUAL_NODE_COUNT] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
-                builder.append(Some(*val)).unwrap();
+                builder.append(Some(*val));
             }
             output_cols[output_idx]
                 .iter_mut()

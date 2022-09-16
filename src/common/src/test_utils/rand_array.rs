@@ -125,10 +125,10 @@ where
     for _ in 0..size {
         let is_null = rand.gen::<bool>();
         if is_null {
-            builder.append_null().unwrap();
+            builder.append_null();
         } else {
             let value = A::OwnedItem::rand_value(rand);
-            builder.append(Some(value.as_scalar_ref())).unwrap();
+            builder.append(Some(value.as_scalar_ref()));
         }
     }
 
