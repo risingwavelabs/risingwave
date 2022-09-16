@@ -224,6 +224,7 @@ fn infer_type_for_special(
             })?))
         }
         ExprType::ArrayAppend => {
+            // TODO: ArrayAppend and ArrayPrepend are basically the same. Refactor in one common function
             ensure_arity!("array_append", | inputs | == 2);
             // get input types
             let left_type = inputs[0].return_type();
@@ -234,36 +235,49 @@ fn infer_type_for_special(
             };
             let left_ele_type = left_ele_type_opt.ok_or_else(|| {
                 ErrorCode::BindError(format!(
-                    "Cannot append {} to {}.",
+                    "Cannot prepend {} to {}.",
                     right_type, left_type
                 ))
             })?;
 
-            // cast to restrictive type or return error
-            let res_type = least_restrictive(*left_ele_type.clone(), right_type.clone());
-            match res_type {
-                Ok(ele_type) => {
-                    let array_type = DataType::List {
-                        datatype: Box::new(ele_type.clone()),
-                    };
-                    // need nested error handling. If this fails, this should also throw error
-                    let inputs_owned = std::mem::take(inputs);
-                    *inputs = inputs_owned
-                        .into_iter()
-                        .map(|input| {
-                            if input.return_type().is_scalar() {
-                                return input.cast_implicit(ele_type.clone());
-                            }
-                            input.cast_implicit(array_type.clone())
-                        })
-                        .try_collect()?;
-                    Ok(Some(array_type))
-                }
-                Err(_) => Err(ErrorCode::BindError(format!(
-                    "Cannot append {} to {}.",
-                    right_type, left_type
+            // cast to least restrictive type or return error
+            let common_ele_type = least_restrictive(*left_ele_type.clone(), right_type.clone());
+            if common_ele_type.is_err() {
+                return Err(ErrorCode::BindError(format!(
+                    "unable to find least restrictive type between {} and {}",
+                    left_type, right_type
                 ))
-                .into()),
+                .into());
+            }
+
+            // found common type
+            let common_ele_type = common_ele_type.unwrap();
+            let array_type = DataType::List {
+                datatype: Box::new(common_ele_type.clone()),
+            };
+
+            // try to cast inputs to inputs to common type
+            let inputs_owned = std::mem::take(inputs);
+            let try_cast = inputs_owned
+                .into_iter()
+                .map(|input| {
+                    if input.return_type().is_scalar() {
+                        return input.cast_implicit(common_ele_type.clone());
+                    }
+                    input.cast_implicit(array_type.clone())
+                })
+                .try_collect();
+
+            match try_cast {
+                Ok(casted) => { // apply type conversion and return common type
+                    *inputs = casted;
+                    Ok(Some(array_type))
+                },
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot append {} to {}",
+                    left_type, right_type
+                ))
+                .into())
             }
         }
         ExprType::ArrayPrepend => {
@@ -277,12 +291,12 @@ fn infer_type_for_special(
             };
             let right_ele_type = right_ele_type_opt.ok_or_else(|| {
                 ErrorCode::BindError(format!(
-                    "Second element needs to be of type array, but is {}",
-                    right_type
+                    "Cannot append {} to {}.",
+                    right_type, left_type
                 ))
             })?;
 
-            // cast to restrictive type or return error
+            // cast to least restrictive type or return error
             let common_ele_type = least_restrictive(*right_ele_type.clone(), left_type.clone());
             if common_ele_type.is_err() {
                 return Err(ErrorCode::BindError(format!(
