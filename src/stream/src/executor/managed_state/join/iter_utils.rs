@@ -26,7 +26,7 @@ use risingwave_storage::error::{StorageError, StorageResult};
 #[try_stream(ok = (Cow<'a, Row>, Cow<'a, Row>), error = StorageError)]
 pub async fn zip_by_order_key<'a, S>(stream1: S, stream2: S)
 where
-    S: Stream<Item = StorageResult<(Vec<u8>, Cow<'a, Row>)>> + 'a,
+    S: Stream<Item = StorageResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>> + 'a,
 {
     let (stream1, stream2) = (stream1.peekable(), stream2.peekable());
     pin_mut!(stream1);
@@ -58,6 +58,51 @@ where
                 // Throw the right error.
                 return Err(stream2.next().await.unwrap().unwrap_err());
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_async_stream::for_await;
+    use risingwave_common::types::ScalarImpl;
+    use risingwave_storage::error::StorageResult;
+
+    use super::*;
+
+    fn gen_row_with_pk(i: i64) -> StorageResult<(Cow<'static, Vec<u8>>, Cow<'static, Row>)> {
+        Ok((
+            Cow::Owned(i.to_be_bytes().to_vec()),
+            Cow::Owned(Row(vec![Some(ScalarImpl::Int64(i))])),
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_zip_by_order_key() {
+        let stream1 = futures::stream::iter(vec![
+            gen_row_with_pk(0),
+            gen_row_with_pk(3),
+            gen_row_with_pk(6),
+            gen_row_with_pk(9),
+        ]);
+
+        let stream2 = futures::stream::iter(vec![
+            gen_row_with_pk(2),
+            gen_row_with_pk(3),
+            gen_row_with_pk(9),
+            gen_row_with_pk(10),
+        ]);
+
+        let zipped = zip_by_order_key(stream1, stream2);
+
+        let expected_results = vec![3, 9];
+
+        #[for_await]
+        for (i, result) in zipped.enumerate() {
+            let (res0, res1) = result.unwrap();
+            let expected_res = gen_row_with_pk(expected_results[i]).unwrap();
+            assert_eq!(res0, expected_res.1);
+            assert_eq!(res1, expected_res.1);
         }
     }
 }
