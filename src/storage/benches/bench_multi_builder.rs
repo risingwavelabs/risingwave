@@ -142,7 +142,7 @@ fn bench_builder(
                 build_tables(CapacitySplitTableBuilder::new_for_test(
                     LocalTableBuilderFactory::new(
                         1,
-                        BatchSstableWriterFactory::new(sstable_store.clone()),
+                        StreamingSstableWriterFactory::new(sstable_store.clone()),
                         get_builder_options(capacity_mb),
                     ),
                 ))
@@ -154,7 +154,7 @@ fn bench_builder(
                 build_tables(CapacitySplitTableBuilder::new_for_test(
                     LocalTableBuilderFactory::new(
                         1,
-                        StreamingSstableWriterFactory::new(sstable_store.clone()),
+                        BatchSstableWriterFactory::new(sstable_store.clone()),
                         get_builder_options(capacity_mb),
                     ),
                 ))

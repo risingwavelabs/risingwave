@@ -41,6 +41,7 @@
 #![feature(is_some_with)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
+#![feature(once_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
@@ -203,8 +204,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
                 checkpoint_interval,
-                max_idle_ms,
                 in_flight_barrier_nums,
+                minimal_scheduling: meta_config.streaming.minimal_scheduling,
+                max_idle_ms,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
                 min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,

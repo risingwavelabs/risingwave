@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::{BufMut, Bytes, BytesMut};
@@ -201,9 +201,8 @@ impl ObjectStore for InMemObjectStore {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref SHARED: spin::Mutex<InMemObjectStore> = spin::Mutex::new(InMemObjectStore::new());
-}
+static SHARED: LazyLock<spin::Mutex<InMemObjectStore>> =
+    LazyLock::new(|| spin::Mutex::new(InMemObjectStore::new()));
 
 impl InMemObjectStore {
     pub fn new() -> Self {

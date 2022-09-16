@@ -155,20 +155,37 @@ where
     pub async fn seal_current(&mut self) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.take() {
             let builder_output = builder.finish().await?;
-            if let Some(tracker) = &self.task_progress_tracker {
-                tracker.inc_ssts_sealed();
-            }
 
-            if builder_output.bloom_filter_size != 0 {
-                self.stats
-                    .sstable_bloom_filter_size
-                    .observe(builder_output.bloom_filter_size as _);
-            }
+            {
+                // report
 
-            if builder_output.sst_info.file_size != 0 {
-                self.stats
-                    .sstable_file_size
-                    .observe(builder_output.sst_info.file_size as _);
+                if let Some(tracker) = &self.task_progress_tracker {
+                    tracker.inc_ssts_sealed();
+                }
+
+                if builder_output.bloom_filter_size != 0 {
+                    self.stats
+                        .sstable_bloom_filter_size
+                        .observe(builder_output.bloom_filter_size as _);
+                }
+
+                if builder_output.sst_info.file_size != 0 {
+                    self.stats
+                        .sstable_file_size
+                        .observe(builder_output.sst_info.file_size as _);
+                }
+
+                if builder_output.avg_key_size != 0 {
+                    self.stats
+                        .sstable_avg_key_size
+                        .observe(builder_output.avg_key_size as _);
+                }
+
+                if builder_output.avg_value_size != 0 {
+                    self.stats
+                        .sstable_avg_value_size
+                        .observe(builder_output.avg_value_size as _);
+                }
             }
 
             self.sst_outputs.push(SplitTableOutput {

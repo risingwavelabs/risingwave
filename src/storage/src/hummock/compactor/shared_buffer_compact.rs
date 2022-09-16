@@ -33,7 +33,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::state_store::ForwardIter;
-use crate::hummock::{CachePolicy, HummockError, HummockResult};
+use crate::hummock::{CachePolicy, HummockError, HummockResult, SstableBuilderOptions};
 use crate::monitor::StoreLocalStatistic;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
@@ -86,30 +86,62 @@ async fn compact_shared_buffer(
     context: Arc<Context>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<SstableInfo>> {
-    let mut start_user_keys = payload
+    let mut size_and_start_user_keys = payload
         .iter()
-        .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
+        .flat_map(|data_list| {
+            data_list.iter().map(|data| {
+                let data_size = match data {
+                    UncommittedData::Sst(sst) => sst.1.file_size,
+                    UncommittedData::Batch(batch) => {
+                        // calculate encoded bytes of key var length
+                        (batch.get_payload().len() * 8 + batch.size()) as u64
+                    }
+                };
+                (data_size, data.start_user_key())
+            })
+        })
         .collect_vec();
-    start_user_keys.sort();
-    start_user_keys.dedup();
-    let mut splits = Vec::with_capacity(start_user_keys.len());
+    let compact_data_size = size_and_start_user_keys
+        .iter()
+        .map(|(data_size, _)| *data_size)
+        .sum::<u64>();
+    size_and_start_user_keys.sort();
+    let mut splits = Vec::with_capacity(size_and_start_user_keys.len());
     splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
     let mut key_split_append = |key_before_last: &Bytes| {
         splits.last_mut().unwrap().right = key_before_last.clone();
         splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
     };
-    if start_user_keys.len() > 1 {
-        let split_num = context.options.share_buffers_sync_parallelism as usize;
-        let buffer_per_split = start_user_keys.len() / split_num;
-        for i in 1..split_num {
-            key_split_append(
-                &FullKey::from_user_key_slice(
-                    start_user_keys[i * buffer_per_split],
-                    HummockEpoch::MAX,
-                )
-                .into_inner()
-                .into(),
-            );
+    let sstable_size = (context.options.sstable_size_mb as u64) << 20;
+    let parallelism = std::cmp::min(
+        context.options.share_buffers_sync_parallelism as u64,
+        size_and_start_user_keys.len() as u64,
+    );
+    let sub_compaction_data_size = if compact_data_size > sstable_size && parallelism > 1 {
+        compact_data_size / parallelism
+    } else {
+        compact_data_size
+    };
+    // mul 1.2 for other extra memory usage.
+    let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
+    if parallelism > 1 && compact_data_size > sstable_size {
+        let mut last_buffer_size = 0;
+        let mut last_user_key = vec![];
+        for (data_size, user_key) in size_and_start_user_keys {
+            if last_buffer_size >= sub_compaction_data_size
+                && !last_user_key.as_slice().eq(user_key)
+            {
+                key_split_append(
+                    &FullKey::from_user_key_slice(user_key, HummockEpoch::MAX)
+                        .into_inner()
+                        .into(),
+                );
+                last_buffer_size = data_size;
+            } else {
+                last_buffer_size += data_size;
+            }
+            last_user_key.clear();
+            last_user_key.extend_from_slice(user_key);
         }
     }
 
@@ -120,7 +152,6 @@ async fn compact_shared_buffer(
                 .iter()
                 .flat_map(|uncommitted_data| match uncommitted_data {
                     UncommittedData::Sst(local_sst_info) => local_sst_info.1.table_ids.clone(),
-
                     UncommittedData::Batch(shared_buffer_write_batch) => {
                         vec![shared_buffer_write_batch.table_id]
                     }
@@ -148,7 +179,12 @@ async fn compact_shared_buffer(
 
     let mut local_stats = StoreLocalStatistic::default();
     for (split_index, key_range) in splits.into_iter().enumerate() {
-        let compactor = SharedBufferCompactRunner::new(split_index, key_range, context.clone());
+        let compactor = SharedBufferCompactRunner::new(
+            split_index,
+            key_range,
+            context.clone(),
+            sub_compaction_sstable_size as usize,
+        );
         let iter = build_ordered_merge_iter::<ForwardIter>(
             &payload,
             sstable_store.clone(),
@@ -218,8 +254,14 @@ pub struct SharedBufferCompactRunner {
 }
 
 impl SharedBufferCompactRunner {
-    pub fn new(split_index: usize, key_range: KeyRange, context: Arc<Context>) -> Self {
-        let options = context.options.as_ref().into();
+    pub fn new(
+        split_index: usize,
+        key_range: KeyRange,
+        context: Arc<Context>,
+        sub_compaction_sstable_size: usize,
+    ) -> Self {
+        let mut options: SstableBuilderOptions = context.options.as_ref().into();
+        options.capacity = sub_compaction_sstable_size;
         let compactor = Compactor::new(context, options, key_range, CachePolicy::Fill, false, 0);
         Self {
             compactor,
