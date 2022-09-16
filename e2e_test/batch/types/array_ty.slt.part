@@ -16,8 +16,17 @@ select ARRAY[null];
 ----
 {NULL}
 
-statement error
-select ARRAY[];
+# PostgreSQL requires a cast from user for this. But we treat it as varchar[] here.
+# Because the cast source need to be a valid subexpr.
+query T
+select pg_typeof(ARRAY[]);
+----
+varchar[]
+
+query T
+select ARRAY[]::int[];
+----
+{}
 
 statement ok
 create table t (v1 int);
