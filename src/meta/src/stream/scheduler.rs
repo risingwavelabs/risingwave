@@ -208,11 +208,16 @@ impl Scheduler {
                     self.all_parallel_units.len(),
                 );
             } else {
-                &self.all_parallel_units[..fragment.actors.len()]
+                // By taking a prefix of all parallel units, we schedule the actors round-robin-ly.
+                // Then sort them by parallel unit id to make the actor ids continuous against the
+                // parallel unit id.
+                let mut parallel_units = self.all_parallel_units[..fragment.actors.len()].to_vec();
+                parallel_units.sort_unstable_by_key(|p| p.id);
+                parallel_units
             };
 
             // Build vnode mapping according to the parallel units.
-            let vnode_mapping = self.set_fragment_vnode_mapping(fragment, parallel_units)?;
+            let vnode_mapping = self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
 
             let mut vnode_bitmaps = HashMap::new();
             vnode_mapping
