@@ -20,6 +20,7 @@ risedev:
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
     - use: compute-node
+      enable-in-memory-kv-state-backend: true
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
@@ -374,6 +375,33 @@ risedev:
       exporter-port: 2224
     - use: compactor
 
+  ci-3cn-3fe-in-memory:
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      port: 5687
+      exporter-port: 1222
+      enable-in-memory-kv-state-backend: true
+    - use: compute-node
+      port: 5688
+      exporter-port: 1223
+      enable-in-memory-kv-state-backend: true
+    - use: compute-node
+      port: 5689
+      exporter-port: 1224
+      enable-in-memory-kv-state-backend: true
+    - use: frontend
+      port: 4565
+      exporter-port: 2222
+    - use: frontend
+      port: 4566
+      exporter-port: 2223
+    - use: frontend
+      port: 4567
+      exporter-port: 2224
+
   ci-kafka:
     - use: minio
     - use: etcd
@@ -508,6 +536,9 @@ template:
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
+    # Whether to enable in-memory pure KV state backend
+    enable-in-memory-kv-state-backend: false
+
   meta-node:
     # Meta-node advertise address
     address: "127.0.0.1"
@@ -604,7 +635,7 @@ template:
 
     # Listen address
     listen-address: ${address}
-    
+
     # Prometheus exporter listen port
     exporter-port: 2222
 

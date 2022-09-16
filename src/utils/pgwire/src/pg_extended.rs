@@ -87,6 +87,7 @@ pub struct PgStatement {
     query_string: Bytes,
     type_description: Vec<TypeOid>,
     row_description: Vec<PgFieldDescriptor>,
+    is_query: bool,
 }
 
 impl PgStatement {
@@ -95,12 +96,14 @@ impl PgStatement {
         query_string: Bytes,
         type_description: Vec<TypeOid>,
         row_description: Vec<PgFieldDescriptor>,
+        is_query: bool,
     ) -> Self {
         PgStatement {
             name,
             query_string,
             type_description,
             row_description,
+            is_query,
         }
     }
 
@@ -147,6 +150,7 @@ impl PgStatement {
                 stmt_type: None,
                 row_description: self.row_desc(),
                 result_format,
+                is_query: self.is_query,
             });
         }
 
@@ -181,7 +185,14 @@ impl PgStatement {
             stmt_type: None,
             row_description,
             result_format,
+            is_query: self.is_query,
         })
+    }
+
+    /// We define the statement start with ("select","values","show","with","describe") is query
+    /// statement. Because these statement will return a result set.
+    pub fn is_query(&self) -> bool {
+        self.is_query
     }
 }
 
@@ -193,6 +204,7 @@ pub struct PgPortal {
     stmt_type: Option<StatementType>,
     row_description: Vec<PgFieldDescriptor>,
     result_format: bool,
+    is_query: bool,
 }
 
 impl PgPortal {
@@ -255,6 +267,12 @@ impl PgPortal {
             self.row_description.clone(),
             row_end,
         ))
+    }
+
+    /// We define the statement start with ("select","values","show","with","describe") is query
+    /// statement. Because these statement will return a result set.
+    pub fn is_query(&self) -> bool {
+        self.is_query
     }
 }
 

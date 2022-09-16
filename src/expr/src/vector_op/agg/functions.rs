@@ -124,11 +124,33 @@ pub fn max_list<'a>(r: Option<ListRef<'a>>, i: Option<ListRef<'a>>) -> Result<Op
     max(r, i)
 }
 
+/// Note the following corner cases:
+///
+/// ```slt
+/// statement ok
 /// create table t(v1 int);
+///
+/// statement ok
 /// insert into t values (null);
-/// select count(*) from t; gives 1.
-/// select count(v1) from t; gives 0.
-/// select sum(v1) from t; gives null
+///
+/// query I
+/// select count(*) from t;
+/// ----
+/// 1
+///
+/// query I
+/// select count(v1) from t;
+/// ----
+/// 0
+///
+/// query I
+/// select sum(v1) from t;
+/// ----
+/// NULL
+///
+/// statement ok
+/// drop table t;
+/// ```
 pub fn count<T>(result: Option<i64>, input: Option<T>) -> Result<Option<i64>> {
     let res = match (result, input) {
         (None, None) => Some(0),
