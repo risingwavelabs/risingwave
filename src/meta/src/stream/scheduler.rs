@@ -275,11 +275,10 @@ pub(crate) fn vnode_mapping_to_bitmaps(
                 .or_insert_with(|| BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT))
                 .set(vnode, true);
         });
-    let vnode_bitmaps = vnode_bitmaps
+    vnode_bitmaps
         .into_iter()
         .map(|(u, b)| (u, b.finish()))
-        .collect::<HashMap<_, _>>();
-    vnode_bitmaps
+        .collect()
 }
 
 /// Build a vnode mapping according to parallel units where the fragment is scheduled.
