@@ -526,6 +526,11 @@ where
             to_remove: &HashSet<ActorId>,
             to_create: &[ActorId],
         ) {
+            for actor_id in actors.iter() {
+                assert!(!to_create.contains(actor_id));
+                assert!(to_remove.contains(actor_id));
+            }
+
             actors.drain_filter(|actor_id| to_remove.contains(actor_id));
             actors.extend_from_slice(to_create);
         }
@@ -555,6 +560,11 @@ where
                 );
             }
         }
+
+        let new_created_actors: HashSet<_> = reschedules
+            .values()
+            .flat_map(|reschedule| reschedule.added_actors.clone())
+            .collect();
 
         for table_fragment in map.values_mut() {
             // Takes out the reschedules of the fragments in this table.
@@ -662,7 +672,12 @@ where
                         .fragments
                         .get_mut(&upstream_fragment_id)
                         .unwrap();
+
                     for upstream_actor in &mut upstream_fragment.actors {
+                        if new_created_actors.contains(&upstream_actor.actor_id) {
+                            continue;
+                        }
+
                         for dispatcher in &mut upstream_actor.dispatcher {
                             if dispatcher.dispatcher_id == dispatcher_id {
                                 dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
@@ -683,6 +698,10 @@ where
                         .get_mut(&downstream_fragment_id)
                         .unwrap();
                     for downstream_actor in &mut downstream_fragment.actors {
+                        if new_created_actors.contains(&downstream_actor.actor_id) {
+                            continue;
+                        }
+
                         update_actors(
                             downstream_actor.upstream_actor_id.as_mut(),
                             &removed_actor_ids,
