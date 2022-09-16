@@ -224,7 +224,8 @@ fn infer_type_for_special(
             })?))
         }
         ExprType::ArrayAppend => {
-            // TODO: ArrayAppend and ArrayPrepend are basically the same. Refactor in one common function
+            // TODO: ArrayAppend and ArrayPrepend are basically the same. Refactor in one common
+            // function
             ensure_arity!("array_append", | inputs | == 2);
             // get input types
             let left_type = inputs[0].return_type();
@@ -234,10 +235,7 @@ fn infer_type_for_special(
                 _ => None,
             };
             let left_ele_type = left_ele_type_opt.ok_or_else(|| {
-                ErrorCode::BindError(format!(
-                    "Cannot append {} to {}",
-                    right_type, left_type
-                ))
+                ErrorCode::BindError(format!("Cannot append {} to {}", right_type, left_type))
             })?;
 
             // cast to least restrictive type or return error
@@ -269,15 +267,16 @@ fn infer_type_for_special(
                 .try_collect();
 
             match try_cast {
-                Ok(casted) => { // apply type conversion and return common type
+                Ok(casted) => {
+                    // apply type conversion and return common type
                     *inputs = casted;
                     Ok(Some(array_type))
-                },
+                }
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot append {} to {}",
                     right_type, left_type
                 ))
-                .into())
+                .into()),
             }
         }
         ExprType::ArrayPrepend => {
@@ -290,10 +289,7 @@ fn infer_type_for_special(
                 _ => None,
             };
             let right_ele_type = right_ele_type_opt.ok_or_else(|| {
-                ErrorCode::BindError(format!(
-                    "Cannot prepend {} to {}",
-                    right_type, left_type
-                ))
+                ErrorCode::BindError(format!("Cannot prepend {} to {}", right_type, left_type))
             })?;
 
             // cast to least restrictive type or return error
@@ -325,15 +321,16 @@ fn infer_type_for_special(
                 .try_collect();
 
             match try_cast {
-                Ok(casted) => { // apply type conversion and return common type
+                Ok(casted) => {
+                    // apply type conversion and return common type
                     *inputs = casted;
                     Ok(Some(array_type))
-                },
+                }
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot prepend {} to {}",
                     left_type, right_type
                 ))
-                .into())
+                .into()),
             }
         }
         ExprType::Vnode => {
