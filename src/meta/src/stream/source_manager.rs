@@ -361,7 +361,7 @@ pub(crate) fn fetch_source_fragments(
     }
 }
 
-// todo use min heap to optimize
+/// TODO: use min heap to optimize
 fn diff_splits(
     mut prev_actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     discovered_splits: &BTreeMap<SplitId, SplitImpl>,

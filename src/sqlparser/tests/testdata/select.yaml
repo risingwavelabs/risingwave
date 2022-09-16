@@ -1,7 +1,7 @@
 - input: SELECT sqrt(id) FROM foo
   formatted_sql: SELECT sqrt(id) FROM foo
   formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Function(Function { name: ObjectName([Ident { value: "sqrt", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "id", quote_style: None })))], over: None, distinct: false, order_by: [], filter: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "foo", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+    Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Function(Function { name: ObjectName([Ident { value: "sqrt", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "id", quote_style: None })))], over: None, distinct: false, order_by: [], filter: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "foo", quote_style: None }]), alias: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
 # Typed string literal
 - input: SELECT INT '1'
@@ -13,7 +13,7 @@
 - input: SELECT ((((foo).v1)).v2) FROM foo
   formatted_sql: SELECT (foo.v1.v2) FROM foo
   formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Nested(FieldIdentifier(Identifier(Ident { value: "foo", quote_style: None }), [Ident { value: "v1", quote_style: None }, Ident { value: "v2", quote_style: None }])))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "foo", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+    Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Nested(FieldIdentifier(Identifier(Ident { value: "foo", quote_style: None }), [Ident { value: "v1", quote_style: None }, Ident { value: "v2", quote_style: None }])))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "foo", quote_style: None }]), alias: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
 - input: SELECT (foo.v1).v2 FROM foo
   formatted_sql: SELECT foo.v1.v2 FROM foo
@@ -45,12 +45,12 @@
 - input: SELECT * FROM generate_series('2'::INT,'10'::INT,'2'::INT)
   formatted_sql: SELECT * FROM generate_series(CAST('2' AS INT), CAST('10' AS INT), CAST('2' AS INT))
   formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: false, projection: [Wildcard], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "generate_series", quote_style: None }]), alias: None, args: [Unnamed(Expr(Cast { expr: Value(SingleQuotedString("2")), data_type: Int(None) })), Unnamed(Expr(Cast { expr: Value(SingleQuotedString("10")), data_type: Int(None) })), Unnamed(Expr(Cast { expr: Value(SingleQuotedString("2")), data_type: Int(None) }))] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+    Query(Query { with: None, body: Select(Select { distinct: false, projection: [Wildcard], from: [TableWithJoins { relation: TableFunction { name: ObjectName([Ident { value: "generate_series", quote_style: None }]), alias: None, args: [Unnamed(Expr(Cast { expr: Value(SingleQuotedString("2")), data_type: Int(None) })), Unnamed(Expr(Cast { expr: Value(SingleQuotedString("10")), data_type: Int(None) })), Unnamed(Expr(Cast { expr: Value(SingleQuotedString("2")), data_type: Int(None) }))] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
 - input: SELECT * FROM unnest(Array[1,2,3]);
   formatted_sql: SELECT * FROM unnest(ARRAY[1, 2, 3])
   formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: false, projection: [Wildcard], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "unnest", quote_style: None }]), alias: None, args: [Unnamed(Expr(Array([Value(Number("1")), Value(Number("2")), Value(Number("3"))])))] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+    Query(Query { with: None, body: Select(Select { distinct: false, projection: [Wildcard], from: [TableWithJoins { relation: TableFunction { name: ObjectName([Ident { value: "unnest", quote_style: None }]), alias: None, args: [Unnamed(Expr(Array([Value(Number("1")), Value(Number("2")), Value(Number("3"))])))] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
 - input: SELECT id, fname, lname FROM customer WHERE salary <> 'Not Provided' AND salary <> ''
   formatted_sql: SELECT id, fname, lname FROM customer WHERE (salary <> 'Not Provided') AND (salary <> '')
@@ -63,3 +63,9 @@
 
 - input: SELECT * FROM t FETCH FIRST ROWS WITH TIES
   error_msg: "sql parser error: WITH TIES cannot be specified without ORDER BY clause"
+
+- input: select * from (select 1 from 1);
+  error_msg: "sql parser error: Expected identifier, found: 1"
+
+- input: select * from (select * from tumble(t, x, interval '10' minutes))
+  error_msg: "sql parser error: Expected ), found: minutes"

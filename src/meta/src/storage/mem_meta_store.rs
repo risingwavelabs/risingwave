@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use tokio::sync::{OwnedRwLockReadGuard, RwLock};
@@ -70,9 +70,7 @@ impl Snapshot for MemSnapshot {
 impl MemStore {
     /// Get a global shared in-memory store.
     pub fn shared() -> Self {
-        lazy_static::lazy_static! {
-            static ref STORE: MemStore = MemStore::default();
-        }
+        static STORE: LazyLock<MemStore> = LazyLock::new(MemStore::default);
         STORE.clone()
     }
 }

@@ -88,7 +88,11 @@ impl LruManager {
                 1
             } else if last_total_bytes_used < cur_total_bytes_used {
                 // Aggressively evict
-                if step == 0 { 2 } else { step * 2 }
+                if step == 0 {
+                    2
+                } else {
+                    step * 2
+                }
             } else {
                 step
             };
@@ -98,6 +102,5 @@ impl LruManager {
 
             self.set_watermark_time(watermark_time);
         }
-        
     }
 }
