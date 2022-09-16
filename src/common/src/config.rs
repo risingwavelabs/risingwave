@@ -46,6 +46,9 @@ pub struct ServerConfig {
     /// The interval for periodic heartbeat from worker to the meta service.
     #[serde(default = "default::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
+
+    #[serde(default = "default::connection_pool_size")]
+    pub connection_pool_size: u16,
 }
 
 impl Default for ServerConfig {
@@ -242,6 +245,10 @@ mod default {
 
     pub fn heartbeat_interval_ms() -> u32 {
         1000
+    }
+
+    pub fn connection_pool_size() -> u16 {
+        16
     }
 
     #[expect(dead_code)]
