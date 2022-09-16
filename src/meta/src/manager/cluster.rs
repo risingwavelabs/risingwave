@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -300,14 +300,14 @@ where
         core.list_worker_node(worker_type, worker_state)
     }
 
-    pub async fn list_parallel_units(&self) -> Vec<ParallelUnit> {
+    pub async fn list_active_parallel_units(&self) -> Vec<ParallelUnit> {
         let core = self.core.read().await;
-        core.list_parallel_units()
+        core.list_active_parallel_units()
     }
 
-    pub async fn get_parallel_unit_count(&self) -> usize {
+    pub async fn get_active_parallel_unit_count(&self) -> usize {
         let core = self.core.read().await;
-        core.get_parallel_unit_count()
+        core.get_active_parallel_unit_count()
     }
 
     /// Generate `parallel_degree` parallel units.
@@ -419,12 +419,22 @@ impl ClusterManagerCore {
             .collect_vec()
     }
 
-    fn list_parallel_units(&self) -> Vec<ParallelUnit> {
-        self.parallel_units.clone()
+    fn list_active_parallel_units(&self) -> Vec<ParallelUnit> {
+        let active_workers: HashSet<_> = self
+            .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+            .into_iter()
+            .map(|w| w.id)
+            .collect();
+
+        self.parallel_units
+            .iter()
+            .filter(|p| active_workers.contains(&p.worker_node_id))
+            .cloned()
+            .collect()
     }
 
-    fn get_parallel_unit_count(&self) -> usize {
-        self.parallel_units.len()
+    fn get_active_parallel_unit_count(&self) -> usize {
+        self.list_active_parallel_units().len()
     }
 }
 
@@ -481,7 +491,7 @@ mod tests {
         cluster_manager: &ClusterManager<MemStore>,
         parallel_count: usize,
     ) {
-        let parallel_units = cluster_manager.list_parallel_units().await;
+        let parallel_units = cluster_manager.list_active_parallel_units().await;
         assert_eq!(parallel_units.len(), parallel_count);
     }
 
