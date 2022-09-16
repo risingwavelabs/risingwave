@@ -77,6 +77,8 @@ pub struct SstableBuilderOutput<WO> {
     pub sst_info: SstableInfo,
     pub bloom_filter_size: usize,
     pub writer_output: WO,
+    pub avg_key_size: usize,
+    pub avg_value_size: usize,
 }
 
 pub struct SstableBuilder<W: SstableWriter> {
@@ -99,31 +101,21 @@ pub struct SstableBuilder<W: SstableWriter> {
     raw_value: BytesMut,
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     last_bloom_filter_key_length: usize,
+
+    total_key_size: usize,
+    total_value_size: usize,
 }
 
 impl<W: SstableWriter> SstableBuilder<W> {
     pub fn new_for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
-        Self {
-            writer,
-            block_builder: BlockBuilder::new(BlockBuilderOptions {
-                capacity: options.block_capacity,
-                restart_interval: options.restart_interval,
-                compression_algorithm: options.compression_algorithm,
-            }),
-            block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
-            table_ids: BTreeSet::new(),
-            user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
-            last_table_id: 0,
-            options,
-            key_count: 0,
+        Self::new(
             sstable_id,
-            raw_value: BytesMut::new(),
-            last_full_key: vec![],
-            filter_key_extractor: Arc::new(FilterKeyExtractorImpl::FullKey(
+            writer,
+            options,
+            Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),
             )),
-            last_bloom_filter_key_length: 0,
-        }
+        )
     }
 
     pub fn new(
@@ -150,6 +142,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
             sstable_id,
             filter_key_extractor,
             last_bloom_filter_key_length: 0,
+            total_key_size: 0,
+            total_value_size: 0,
         }
     }
 
@@ -178,6 +172,9 @@ impl<W: SstableWriter> SstableBuilder<W> {
         extract_key = self.filter_key_extractor.extract(extract_key);
 
         self.block_builder.add(full_key, self.raw_value.as_ref());
+        self.total_key_size += full_key.len();
+        self.total_value_size += self.raw_value.len();
+
         self.raw_value.clear();
 
         // add bloom_filter check
@@ -260,12 +257,16 @@ impl<W: SstableWriter> SstableBuilder<W> {
             self.key_count,
         );
         let bloom_filter_size = meta.bloom_filter.len();
+        let avg_key_size = self.total_key_size / self.key_count;
+        let avg_value_size = self.total_value_size / self.key_count;
 
         let writer_output = self.writer.finish(meta)?;
         Ok(SstableBuilderOutput::<W::Output> {
             sst_info,
             bloom_filter_size,
             writer_output,
+            avg_key_size,
+            avg_value_size,
         })
     }
 
