@@ -309,15 +309,23 @@ def section_compaction(outer_panels):
                 ),
             ]),
 
-            panels.timeseries_bytes("Hummock Sstable BloomFilter Size", [
+            panels.timeseries_bytes("Hummock Sstable Size", [
                 panels.target(
-                    "sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
+                    "sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_count[$__rate_interval]))", "avg_meta - {{job}} @ {{instance}}"
+                ),
+
+                panels.target(
+                    "sum by(le, job, instance)(rate(state_store_sstable_file_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_file_size_count[$__rate_interval]))", "avg_file - {{job}} @ {{instance}}"
                 ),
             ]),
 
-            panels.timeseries_bytes("Hummock Sstable File Size", [
+            panels.timeseries_bytes("Hummock Sstable Item Size", [
                 panels.target(
-                    "sum by(le, job, instance)(rate(state_store_sstable_file_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_file_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
+                    "sum by(le, job, instance)(rate(state_store_sstable_avg_key_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_avg_key_size_count[$__rate_interval]))", "avg_key_size - {{job}} @ {{instance}}"
+                ),
+
+                panels.target(
+                    "sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_count[$__rate_interval]))", "avg file - {{job}} @ {{instance}}"
                 ),
             ]),
         ])
