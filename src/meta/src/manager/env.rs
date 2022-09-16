@@ -89,6 +89,8 @@ pub struct MetaOpts {
     pub enable_committed_sst_sanity_check: bool,
     /// Schedule compaction for all compaction groups with this interval.
     pub periodic_compaction_interval_sec: u64,
+    /// Seconds compaction scheduler should stall when there is no available compactor.
+    pub no_available_compactor_stall_sec: u64,
 }
 
 impl Default for MetaOpts {
@@ -104,6 +106,7 @@ impl Default for MetaOpts {
             collect_gc_watermark_spin_interval_sec: 5,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
+            no_available_compactor_stall_sec: 10,
         }
     }
 }
