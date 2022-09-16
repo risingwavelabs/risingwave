@@ -150,6 +150,9 @@ pub struct MetaNodeOpts {
     /// Schedule compaction for all compaction groups with this interval.
     #[clap(long, default_value = "60")]
     pub periodic_compaction_interval_sec: u64,
+
+    #[clap(long, default_value = "10")]
+    node_num_monitor_interval_sec: u64,
 }
 
 use std::future::Future;
@@ -212,6 +215,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
+                node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
             },
         )
         .await
