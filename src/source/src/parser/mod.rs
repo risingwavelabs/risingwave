@@ -63,15 +63,15 @@ impl SourceStreamChunkBuilder {
         }
     }
 
-    pub fn finish(self) -> Result<StreamChunk> {
-        Ok(StreamChunk::new(
+    pub fn finish(self) -> StreamChunk {
+        StreamChunk::new(
             self.op_builder,
             self.builders
                 .into_iter()
-                .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()))) })
-                .try_collect()?,
+                .map(|builder| { Column::new(Arc::new(builder.finish())) })
+                .collect(),
             None,
-        ))
+        )
     }
 }
 

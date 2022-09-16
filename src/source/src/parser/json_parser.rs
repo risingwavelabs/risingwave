@@ -77,7 +77,7 @@ mod tests {
             parser.parse(payload, writer).unwrap();
         }
 
-        let chunk = builder.finish().unwrap();
+        let chunk = builder.finish();
 
         let mut rows = chunk.rows();
 
@@ -164,7 +164,7 @@ mod tests {
             parser.parse(payload, writer).unwrap();
         }
 
-        let chunk = builder.finish().unwrap();
+        let chunk = builder.finish();
         assert!(chunk.valid());
 
         assert_eq!(chunk.cardinality(), 2);
@@ -222,7 +222,7 @@ mod tests {
             let writer = builder.row_writer();
             parser.parse(payload, writer).unwrap();
         }
-        let chunk = builder.finish().unwrap();
+        let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
         let row = row.to_owned_row().0;

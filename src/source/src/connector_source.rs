@@ -209,7 +209,7 @@ impl ConnectorSourceReader {
             }
         }
 
-        let chunk = builder.finish()?;
+        let chunk = builder.finish();
 
         Ok(StreamChunkWithState {
             chunk,
