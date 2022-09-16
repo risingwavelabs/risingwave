@@ -63,5 +63,6 @@ services:
 
   release-env:
     image: quay.io/pypa/manylinux2014_x86_64
+    working_dir:/mnt
     volumes:
       - ..:/mnt
