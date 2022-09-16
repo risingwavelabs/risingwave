@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use fail::fail_point;
@@ -167,8 +167,8 @@ pub(crate) use start_measure_real_process_timer;
 
 use super::Compactor;
 
-lazy_static::lazy_static! {
-    static ref CACEL_STATUS_SET: HashSet<TaskStatus> = vec![
+static CACEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
+    [
         TaskStatus::ManualCanceled,
         TaskStatus::NoAvailCanceled,
         TaskStatus::SendFailCanceled,
@@ -176,8 +176,8 @@ lazy_static::lazy_static! {
         TaskStatus::HeartbeatCanceled,
     ]
     .into_iter()
-    .collect();
-}
+    .collect()
+});
 
 impl<S> HummockManager<S>
 where
