@@ -658,8 +658,9 @@ impl<S: StateStore> StateTable<S> {
         )
     }
 
-    /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn iter_with_key<'a>(
+    /// This function scans rows from the relational table with specific `pk_prefix`, return both
+    /// key and value.
+    pub async fn iter_key_and_val<'a>(
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
