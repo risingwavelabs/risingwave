@@ -93,7 +93,7 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         Ok(Box::new(InMemStreamingUploader {
             path: path.to_string(),
             buf: BytesMut::new(),
@@ -302,7 +302,7 @@ mod tests {
         let obj = Bytes::from("123456789");
 
         let store = InMemObjectStore::new();
-        let mut uploader = store.streaming_upload("/abc").await.unwrap();
+        let mut uploader = store.streaming_upload("/abc").unwrap();
 
         for block in blocks {
             uploader.write_bytes(block).await.unwrap();

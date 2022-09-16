@@ -72,7 +72,6 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
         let writer = self
             .writer_factory
             .create_sst_writer(id, writer_options)
-            .await
             .unwrap();
         let builder = SstableBuilder::new_for_test(id, writer, self.options.clone());
 

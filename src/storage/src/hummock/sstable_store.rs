@@ -408,11 +408,10 @@ pub struct SstableWriterOptions {
     pub policy: CachePolicy,
 }
 
-#[async_trait::async_trait]
 pub trait SstableWriterFactory: Send + Sync {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
 
-    async fn create_sst_writer(
+    fn create_sst_writer(
         &self,
         sst_id: HummockSstableId,
         options: SstableWriterOptions,
@@ -429,11 +428,10 @@ impl BatchSstableWriterFactory {
     }
 }
 
-#[async_trait::async_trait]
 impl SstableWriterFactory for BatchSstableWriterFactory {
     type Writer = BatchUploadWriter;
 
-    async fn create_sst_writer(
+    fn create_sst_writer(
         &self,
         sst_id: HummockSstableId,
         options: SstableWriterOptions,
@@ -633,17 +631,16 @@ impl StreamingSstableWriterFactory {
     }
 }
 
-#[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {
     type Writer = StreamingUploadWriter;
 
-    async fn create_sst_writer(
+    fn create_sst_writer(
         &self,
         sst_id: HummockSstableId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
         let path = self.sstable_store.get_sst_data_path(sst_id);
-        let uploader = self.sstable_store.store.streaming_upload(&path).await?;
+        let uploader = self.sstable_store.store.streaming_upload(&path)?;
         Ok(StreamingUploadWriter::new(
             sst_id,
             self.sstable_store.clone(),

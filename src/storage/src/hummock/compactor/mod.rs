@@ -102,8 +102,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
         };
         let writer = self
             .sstable_writer_factory
-            .create_sst_writer(table_id, writer_options)
-            .await?;
+            .create_sst_writer(table_id, writer_options)?;
         let builder = SstableBuilder::new(
             table_id,
             writer,
