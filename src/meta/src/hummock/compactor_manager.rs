@@ -326,3 +326,113 @@ impl CompactorManager {
         self.policy.read().compactor_num()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_pb::hummock::CompactTaskProgress;
+
+    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
+    use crate::hummock::CompactorManager;
+
+    #[tokio::test]
+    async fn test_compactor_manager() {
+        // Initialize metastore with task assignment.
+        let (env, context_id) = {
+            let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+            let context_id = worker_node.id;
+            let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+            let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
+            let _receiver = compactor_manager.add_compactor(context_id, 1);
+            let task = hummock_manager
+                .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+                .await
+                .unwrap()
+                .unwrap();
+            let _compactor = hummock_manager.assign_compaction_task(&task).await.unwrap();
+            (env, context_id)
+        };
+
+        // Restart. Set task_expiry_seconds to 0 only to speed up test.
+        let compactor_manager = CompactorManager::new_with_meta(env, 0).await.unwrap();
+        // Because task assignment exists.
+        assert_eq!(compactor_manager.task_heartbeats.read().len(), 1);
+        // Because compactor gRPC is not established yet.
+        assert_eq!(compactor_manager.compactor_num(), 0);
+        assert!(compactor_manager.get_compactor(context_id).is_none());
+
+        // Ensure task is expired.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let expired = compactor_manager.get_expired_tasks();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].0, context_id);
+
+        // Mimic no-op compaction heartbeat
+        compactor_manager.update_task_heartbeats(
+            context_id,
+            &vec![CompactTaskProgress {
+                task_id: expired[0].1.task_id,
+                num_ssts_sealed: 0,
+                num_ssts_uploaded: 0,
+            }],
+        );
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
+
+        // Mimic compaction heartbeat with invalid task id
+        compactor_manager.update_task_heartbeats(
+            context_id,
+            &vec![CompactTaskProgress {
+                task_id: expired[0].1.task_id + 1,
+                num_ssts_sealed: 1,
+                num_ssts_uploaded: 1,
+            }],
+        );
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
+
+        // Mimic effective compaction heartbeat
+        compactor_manager.update_task_heartbeats(
+            context_id,
+            &vec![CompactTaskProgress {
+                task_id: expired[0].1.task_id,
+                num_ssts_sealed: 1,
+                num_ssts_uploaded: 1,
+            }],
+        );
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
+        assert!(compactor_manager.purge_heartbeats_for_context(context_id));
+
+        // Test add
+        assert_eq!(compactor_manager.compactor_num(), 0);
+        assert!(compactor_manager.get_compactor(context_id).is_none());
+        compactor_manager.add_compactor(context_id, 1);
+        assert_eq!(compactor_manager.compactor_num(), 1);
+        assert_eq!(
+            compactor_manager
+                .get_compactor(context_id)
+                .unwrap()
+                .context_id(),
+            context_id
+        );
+        // Test pause
+        compactor_manager.pause_compactor(context_id);
+        assert_eq!(compactor_manager.compactor_num(), 0);
+        assert!(compactor_manager.get_compactor(context_id).is_none());
+        for _ in 0..3 {
+            compactor_manager.add_compactor(context_id, 1);
+            assert_eq!(compactor_manager.compactor_num(), 1);
+            assert_eq!(
+                compactor_manager
+                    .get_compactor(context_id)
+                    .unwrap()
+                    .context_id(),
+                context_id
+            );
+        }
+        // Test remove
+        compactor_manager.remove_compactor(context_id);
+        assert_eq!(compactor_manager.compactor_num(), 0);
+        assert!(compactor_manager.get_compactor(context_id).is_none());
+    }
+}

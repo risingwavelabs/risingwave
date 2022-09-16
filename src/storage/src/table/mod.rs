@@ -15,7 +15,7 @@
 pub mod batch_table;
 pub mod streaming_table;
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
@@ -43,14 +43,12 @@ pub struct Distribution {
 impl Distribution {
     /// Fallback distribution for singleton or tests.
     pub fn fallback() -> Self {
-        lazy_static::lazy_static! {
-            /// A bitmap that only the default vnode is set.
-            static ref FALLBACK_VNODES: Arc<Bitmap> = {
-                let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
-                vnodes.set(DEFAULT_VNODE as _, true);
-                vnodes.finish().into()
-            };
-        }
+        /// A bitmap that only the default vnode is set.
+        static FALLBACK_VNODES: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
+            let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
+            vnodes.set(DEFAULT_VNODE as _, true);
+            vnodes.finish().into()
+        });
         Self {
             dist_key_indices: vec![],
             vnodes: FALLBACK_VNODES.clone(),
@@ -59,10 +57,9 @@ impl Distribution {
 
     /// Distribution that accesses all vnodes, mainly used for tests.
     pub fn all_vnodes(dist_key_indices: Vec<usize>) -> Self {
-        lazy_static::lazy_static! {
-            /// A bitmap that all vnodes are set.
-            static ref ALL_VNODES: Arc<Bitmap> = Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).into();
-        }
+        /// A bitmap that all vnodes are set.
+        static ALL_VNODES: LazyLock<Arc<Bitmap>> =
+            LazyLock::new(|| Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).into());
         Self {
             dist_key_indices,
             vnodes: ALL_VNODES.clone(),

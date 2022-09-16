@@ -15,7 +15,7 @@
 use std::collections::hash_map::HashMap;
 use std::collections::{BTreeMap, VecDeque};
 use std::ops::{Deref, Range};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
@@ -1174,9 +1174,6 @@ impl StreamFragmentGraph {
         &self,
         fragment_id: GlobalFragmentId,
     ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
-        lazy_static::lazy_static! {
-            static ref EMPTY_HASHMAP: HashMap<GlobalFragmentId, StreamFragmentEdge> = HashMap::new();
-        }
         self.downstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
 
@@ -1184,9 +1181,9 @@ impl StreamFragmentGraph {
         &self,
         fragment_id: GlobalFragmentId,
     ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
-        lazy_static::lazy_static! {
-            static ref EMPTY_HASHMAP: HashMap<GlobalFragmentId, StreamFragmentEdge> = HashMap::new();
-        }
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
 }
+
+static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
+    LazyLock::new(HashMap::new);

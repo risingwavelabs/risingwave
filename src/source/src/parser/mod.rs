@@ -63,15 +63,15 @@ impl SourceStreamChunkBuilder {
         }
     }
 
-    pub fn finish(self) -> Result<StreamChunk> {
-        Ok(StreamChunk::new(
+    pub fn finish(self) -> StreamChunk {
+        StreamChunk::new(
             self.op_builder,
             self.builders
                 .into_iter()
-                .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()))) })
-                .try_collect()?,
+                .map(|builder| Column::new(Arc::new(builder.finish())))
+                .collect(),
             None,
-        ))
+        )
     }
 }
 
@@ -86,30 +86,137 @@ pub struct SourceStreamChunkRowWriter<'a> {
 /// `WriteGuard` can't be constructed directly in other mods due to a private field, so it can be
 /// used to ensure that all methods on [`SourceStreamChunkRowWriter`] are called at least once in
 /// the [`SourceParser::parse`] implementation.
+#[derive(Debug)]
 pub struct WriteGuard(());
 
+trait OpAction {
+    type Output;
+
+    const DEFAULT_OUTPUT: Self::Output;
+
+    fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output);
+
+    fn rollback(builder: &mut ArrayBuilderImpl);
+
+    fn finish(writer: SourceStreamChunkRowWriter<'_>);
+}
+
+struct OpActionInsert;
+
+impl OpAction for OpActionInsert {
+    type Output = Datum;
+
+    const DEFAULT_OUTPUT: Self::Output = None;
+
+    #[inline(always)]
+    fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
+        builder.append_datum(&output)
+    }
+
+    #[inline(always)]
+    fn rollback(builder: &mut ArrayBuilderImpl) {
+        builder.pop().unwrap()
+    }
+
+    #[inline(always)]
+    fn finish(writer: SourceStreamChunkRowWriter<'_>) {
+        writer.op_builder.push(Op::Insert)
+    }
+}
+
+struct OpActionDelete;
+
+impl OpAction for OpActionDelete {
+    type Output = Datum;
+
+    const DEFAULT_OUTPUT: Self::Output = None;
+
+    #[inline(always)]
+    fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
+        builder.append_datum(&output)
+    }
+
+    #[inline(always)]
+    fn rollback(builder: &mut ArrayBuilderImpl) {
+        builder.pop().unwrap()
+    }
+
+    #[inline(always)]
+    fn finish(writer: SourceStreamChunkRowWriter<'_>) {
+        writer.op_builder.push(Op::Delete)
+    }
+}
+
+struct OpActionUpdate;
+
+impl OpAction for OpActionUpdate {
+    type Output = (Datum, Datum);
+
+    const DEFAULT_OUTPUT: Self::Output = (None, None);
+
+    #[inline(always)]
+    fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) {
+        builder.append_datum(&output.0);
+        builder.append_datum(&output.1);
+    }
+
+    #[inline(always)]
+    fn rollback(builder: &mut ArrayBuilderImpl) {
+        builder.pop().unwrap();
+        builder.pop().unwrap();
+    }
+
+    #[inline(always)]
+    fn finish(writer: SourceStreamChunkRowWriter<'_>) {
+        writer.op_builder.push(Op::UpdateDelete);
+        writer.op_builder.push(Op::UpdateInsert);
+    }
+}
+
 impl SourceStreamChunkRowWriter<'_> {
+    fn do_action<A: OpAction>(
+        self,
+        mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
+    ) -> Result<WriteGuard> {
+        // The closure `f` may fail so that a part of builders were appended incompletely.
+        // Loop invariant: `builders[0..appended_idx)` has been appended on every iter ended or loop
+        // exited.
+        let mut appended_idx = 0;
+
+        self.descs
+            .iter()
+            .zip_eq(self.builders.iter_mut())
+            .enumerate()
+            .try_for_each(|(idx, (desc, builder))| -> Result<()> {
+                let output = if desc.skip_parse {
+                    A::DEFAULT_OUTPUT
+                } else {
+                    f(desc)?
+                };
+                A::apply(builder, output);
+                appended_idx = idx + 1;
+
+                Ok(())
+            })
+            .inspect_err(|_e| {
+                self.builders[..appended_idx]
+                    .iter_mut()
+                    .for_each(A::rollback);
+            })?;
+
+        A::finish(self);
+
+        Ok(WriteGuard(()))
+    }
+
     /// Write an `Insert` record to the [`StreamChunk`].
     ///
     /// # Arguments
     ///
     /// * `self`: Ownership is consumed so only one record can be written.
-    /// * `f`: A closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    pub fn insert(
-        self,
-        mut f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
-    ) -> Result<WriteGuard> {
-        self.descs
-            .iter()
-            .zip_eq(self.builders.iter_mut())
-            .try_for_each(|(desc, builder)| -> Result<()> {
-                let datum = if desc.skip_parse { None } else { f(desc)? };
-                builder.append_datum(&datum);
-                Ok(())
-            })?;
-        self.op_builder.push(Op::Insert);
-
-        Ok(WriteGuard(()))
+    /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
+    pub fn insert(self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<WriteGuard> {
+        self.do_action::<OpActionInsert>(f)
     }
 
     /// Write a `Delete` record to the [`StreamChunk`].
@@ -117,22 +224,9 @@ impl SourceStreamChunkRowWriter<'_> {
     /// # Arguments
     ///
     /// * `self`: Ownership is consumed so only one record can be written.
-    /// * `f`: A closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    pub fn delete(
-        self,
-        mut f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
-    ) -> Result<WriteGuard> {
-        self.descs
-            .iter()
-            .zip_eq(self.builders.iter_mut())
-            .try_for_each(|(desc, builder)| -> Result<()> {
-                let datum = if desc.skip_parse { None } else { f(desc)? };
-                builder.append_datum(&datum);
-                Ok(())
-            })?;
-        self.op_builder.push(Op::Delete);
-
-        Ok(WriteGuard(()))
+    /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
+    pub fn delete(self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<WriteGuard> {
+        self.do_action::<OpActionDelete>(f)
     }
 
     /// Write a `Delete` record to the [`StreamChunk`].
@@ -140,29 +234,13 @@ impl SourceStreamChunkRowWriter<'_> {
     /// # Arguments
     ///
     /// * `self`: Ownership is consumed so only one record can be written.
-    /// * `f`: A closure that produced two [`Datum`]s as old and new value by corresponding
+    /// * `f`: A failable closure that produced two [`Datum`]s as old and new value by corresponding
     ///   [`SourceColumnDesc`].
     pub fn update(
         self,
-        mut f: impl FnMut(&SourceColumnDesc) -> Result<(Datum, Datum)>,
+        f: impl FnMut(&SourceColumnDesc) -> Result<(Datum, Datum)>,
     ) -> Result<WriteGuard> {
-        self.descs
-            .iter()
-            .zip_eq(self.builders.iter_mut())
-            .try_for_each(|(desc, builder)| -> Result<()> {
-                let (old, new) = if desc.skip_parse {
-                    (None, None)
-                } else {
-                    f(desc)?
-                };
-                builder.append_datum(&old);
-                builder.append_datum(&new);
-                Ok(())
-            })?;
-        self.op_builder.push(Op::UpdateDelete);
-        self.op_builder.push(Op::UpdateInsert);
-
-        Ok(WriteGuard(()))
+        self.do_action::<OpActionUpdate>(f)
     }
 }
 
@@ -214,7 +292,7 @@ impl SourceParserImpl {
     ) -> Result<Arc<Self>> {
         const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
         let parser = match format {
-            SourceFormat::Json => SourceParserImpl::Json(JsonParser {}),
+            SourceFormat::Json => SourceParserImpl::Json(JsonParser),
             SourceFormat::Protobuf => {
                 let message_name = properties.get(PROTOBUF_MESSAGE_KEY).ok_or_else(|| {
                     RwError::from(ProtocolError(format!(
@@ -224,7 +302,7 @@ impl SourceParserImpl {
                 })?;
                 SourceParserImpl::Protobuf(ProtobufParser::new(schema_location, message_name)?)
             }
-            SourceFormat::DebeziumJson => SourceParserImpl::DebeziumJson(DebeziumJsonParser {}),
+            SourceFormat::DebeziumJson => SourceParserImpl::DebeziumJson(DebeziumJsonParser),
             SourceFormat::Avro => {
                 SourceParserImpl::Avro(AvroParser::new(schema_location, properties.clone()).await?)
             }
