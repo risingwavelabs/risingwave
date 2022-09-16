@@ -40,8 +40,9 @@ drop materialized view tpch_q13;
 statement ok
 drop materialized view tpch_q14;
 
-statement ok
-drop materialized view tpch_q15;
+# FIXME: duplicated inserts in streaming TPC-H Q15 (#5277)
+# statement ok
+# drop materialized view tpch_q15;
 
 statement ok
 drop materialized view tpch_q16;
