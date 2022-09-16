@@ -82,6 +82,9 @@ pub struct StreamingConfig {
 
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
+
+    #[serde(default = "default::total_memory_available_bytes")]
+    pub total_memory_available_bytes: usize,
 }
 
 impl Default for StreamingConfig {
@@ -196,6 +199,7 @@ impl Default for FileCacheConfig {
 }
 
 mod default {
+    use sysinfo::{System, SystemExt};
 
     pub fn heartbeat_interval_ms() -> u32 {
         1000
@@ -272,6 +276,12 @@ mod default {
 
     pub fn worker_node_parallelism() -> usize {
         std::thread::available_parallelism().unwrap().get()
+    }
+
+    pub fn total_memory_available_bytes() -> usize {
+        let mut sys = System::new();
+        sys.refresh_memory();
+        sys.total_memory() as usize
     }
 
     pub fn compactor_memory_limit_mb() -> usize {

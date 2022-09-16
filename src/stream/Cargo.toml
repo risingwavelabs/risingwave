@@ -25,6 +25,7 @@ hyper = "0.14"
 iter-chunks = "0.1"
 itertools = "0.10"
 lazy_static = "1"
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "e0e9ddaf8e4a51c244a03676734437e68a336b30" }
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"
@@ -45,12 +46,14 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
+local_stats_alloc = { path = "../utils/local_stats_alloc" }
+global_stats_alloc = { path = "../utils/global_stats_alloc" }
 serde = { version = "1", features = ["derive"] }
 serde-value = "0.7"
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
-stats_alloc = { path = "../utils/stats_alloc" }
+stats_alloc = { version = "0.1", features = ["nightly"]}
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

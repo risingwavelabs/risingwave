@@ -24,6 +24,7 @@ use fixedbitset::FixedBitSet;
 use futures::future::try_join;
 use futures_async_stream::for_await;
 pub(super) use join_entry_state::JoinEntryState;
+use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
@@ -35,7 +36,6 @@ use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
-use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
 use self::iter_utils::zip_by_order_key;
 use crate::executor::error::StreamExecutorResult;

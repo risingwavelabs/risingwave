@@ -26,6 +26,7 @@ use crate::executor::Message;
 
 mod barrier_manager;
 mod env;
+mod lru_manager;
 mod stream_manager;
 
 pub use barrier_manager::*;

@@ -2048,6 +2048,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
+name = "global_stats_alloc"
+version = "0.1.11"
+dependencies = [
+ "stats_alloc",
+ "tikv-jemallocator",
+ "workspace-hack",
+]
+
+[[package]]
 name = "globset"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2602,6 +2611,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
+name = "local_stats_alloc"
+version = "0.1.11"
+dependencies = [
+ "workspace-hack",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3090,6 +3106,15 @@ checksum = "a8903e5a29a317527874d0402f867152a3d21c908bb0b933e416c65e301d4c36"
 dependencies = [
  "memchr",
  "minimal-lexical",
+]
+
+[[package]]
+name = "ntapi"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c28774a7fd2fbb4f0babd8237ce554b73af68021b5f695a3cebd6c59bac0980f"
+dependencies = [
+ "winapi",
 ]
 
 [[package]]
@@ -4229,6 +4254,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
+ "global_stats_alloc",
  "log",
  "madsim-tokio",
  "risingwave_compactor",
@@ -4237,6 +4263,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
+ "stats_alloc",
  "tikv-jemallocator",
  "tracing",
  "workspace-hack",
@@ -4249,6 +4276,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
+ "global_stats_alloc",
  "log",
  "madsim-tokio",
  "risedev",
@@ -4259,6 +4287,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
+ "stats_alloc",
  "sync-point",
  "tikv-jemallocator",
  "tracing",
@@ -4315,6 +4344,7 @@ dependencies = [
  "spin 0.9.4",
  "strum",
  "strum_macros",
+ "sysinfo",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -5043,10 +5073,13 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "global_stats_alloc",
  "hyper",
  "iter-chunks",
  "itertools",
  "lazy_static",
+ "local_stats_alloc",
+ "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -5642,10 +5675,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stats_alloc"
-version = "0.1.11"
-dependencies = [
- "workspace-hack",
-]
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
 
 [[package]]
 name = "str_stack"
@@ -5767,6 +5799,21 @@ dependencies = [
  "quote",
  "syn",
  "unicode-xid",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ae2421f3e16b3afd4aa692d23b83d0ba42ee9b0081d5deeb7d21428d7195fb1"
+dependencies = [
+ "cfg-if",
+ "core-foundation-sys",
+ "libc",
+ "ntapi",
+ "once_cell",
+ "rayon",
+ "winapi",
 ]
 
 [[package]]
