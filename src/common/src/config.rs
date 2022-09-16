@@ -82,6 +82,9 @@ pub struct StreamingConfig {
 
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
+
+    #[serde(default)]
+    pub developer: DeveloperConfig,
 }
 
 impl Default for StreamingConfig {
@@ -164,6 +167,10 @@ pub struct StorageConfig {
     /// Whether to enable streaming upload for sstable.
     #[serde(default = "default::min_sst_size_for_streaming_upload")]
     pub min_sst_size_for_streaming_upload: u64,
+
+    /// Max sub compaction task numbers
+    #[serde(default = "default::max_sub_compaction")]
+    pub max_sub_compaction: u32,
 }
 
 impl Default for StorageConfig {
@@ -175,17 +182,36 @@ impl Default for StorageConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileCacheConfig {
-    #[serde(default = "default::file_cache_capacity")]
-    pub capacity: usize,
+    #[serde(default = "default::file_cache_capacity_mb")]
+    pub capacity_mb: usize,
 
-    #[serde(default = "default::file_cache_total_buffer_capacity")]
-    pub total_buffer_capacity: usize,
+    #[serde(default = "default::file_cache_total_buffer_capacity_mb")]
+    pub total_buffer_capacity_mb: usize,
 
-    #[serde(default = "default::file_cache_cache_file_fallocate_unit")]
-    pub cache_file_fallocate_unit: usize,
+    #[serde(default = "default::file_cache_cache_file_fallocate_unit_mb")]
+    pub cache_file_fallocate_unit_mb: usize,
+
+    #[serde(default = "default::file_cache_cache_meta_fallocate_unit_mb")]
+    pub cache_meta_fallocate_unit_mb: usize,
 }
 
 impl Default for FileCacheConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeveloperConfig {
+    /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
+    /// and might affect the prometheus performance. If you only need actor input and output
+    /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
+    #[serde(default = "default::developer_enable_executor_row_count")]
+    pub enable_executor_row_count: bool,
+}
+
+impl Default for DeveloperConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -278,24 +304,33 @@ mod default {
         10
     }
 
-    pub fn file_cache_capacity() -> usize {
-        // 1 GiB
-        1024 * 1024 * 1024
+    pub fn file_cache_capacity_mb() -> usize {
+        1024
     }
 
-    pub fn file_cache_total_buffer_capacity() -> usize {
-        // 128 MiB
-        128 * 1024 * 1024
+    pub fn file_cache_total_buffer_capacity_mb() -> usize {
+        128
     }
 
-    pub fn file_cache_cache_file_fallocate_unit() -> usize {
-        // 96 MiB
-        96 * 1024 * 1024
+    pub fn file_cache_cache_file_fallocate_unit_mb() -> usize {
+        512
+    }
+
+    pub fn file_cache_cache_meta_fallocate_unit_mb() -> usize {
+        16
     }
 
     pub fn min_sst_size_for_streaming_upload() -> u64 {
         // 32MB
         32 * 1024 * 1024
+    }
+
+    pub fn max_sub_compaction() -> u32 {
+        4
+    }
+
+    pub fn developer_enable_executor_row_count() -> bool {
+        false
     }
 }
 

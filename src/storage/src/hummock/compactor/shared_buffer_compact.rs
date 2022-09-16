@@ -40,7 +40,6 @@ use crate::monitor::StoreLocalStatistic;
 pub async fn compact(
     context: Arc<Context>,
     payload: UploadTaskPayload,
-    sst_watermark_epoch: HummockEpoch,
 ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
     for uncommitted_list in payload {
@@ -65,14 +64,12 @@ pub async fn compact(
     for (id, group_payload) in grouped_payload {
         let id_copy = id;
         futures.push(
-            compact_shared_buffer(context.clone(), group_payload, sst_watermark_epoch).map_ok(
-                move |results| {
-                    results
-                        .into_iter()
-                        .map(move |result| (id_copy, result))
-                        .collect_vec()
-                },
-            ),
+            compact_shared_buffer(context.clone(), group_payload).map_ok(move |results| {
+                results
+                    .into_iter()
+                    .map(move |result| (id_copy, result))
+                    .collect_vec()
+            }),
         );
     }
     // Note that the output is reordered compared with input `payload`.
@@ -88,7 +85,6 @@ pub async fn compact(
 async fn compact_shared_buffer(
     context: Arc<Context>,
     payload: UploadTaskPayload,
-    sst_watermark_epoch: HummockEpoch,
 ) -> HummockResult<Vec<SstableInfo>> {
     let mut start_user_keys = payload
         .iter()
@@ -152,12 +148,7 @@ async fn compact_shared_buffer(
 
     let mut local_stats = StoreLocalStatistic::default();
     for (split_index, key_range) in splits.into_iter().enumerate() {
-        let compactor = SharedBufferCompactRunner::new(
-            split_index,
-            key_range,
-            context.clone(),
-            sst_watermark_epoch,
-        );
+        let compactor = SharedBufferCompactRunner::new(split_index, key_range, context.clone());
         let iter = build_ordered_merge_iter::<ForwardIter>(
             &payload,
             sstable_store.clone(),
@@ -169,7 +160,7 @@ async fn compact_shared_buffer(
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
         let handle = compaction_executor
-            .execute(async move { compactor.run(iter, multi_filter_key_extractor).await });
+            .spawn(async move { compactor.run(iter, multi_filter_key_extractor).await });
         compaction_futures.push(handle);
     }
     local_stats.report(stats.as_ref());
@@ -227,21 +218,9 @@ pub struct SharedBufferCompactRunner {
 }
 
 impl SharedBufferCompactRunner {
-    pub fn new(
-        split_index: usize,
-        key_range: KeyRange,
-        context: Arc<Context>,
-        sst_watermark_epoch: HummockEpoch,
-    ) -> Self {
+    pub fn new(split_index: usize, key_range: KeyRange, context: Arc<Context>) -> Self {
         let options = context.options.as_ref().into();
-        let compactor = Compactor::new(
-            context,
-            options,
-            key_range,
-            CachePolicy::Fill,
-            false,
-            sst_watermark_epoch,
-        );
+        let compactor = Compactor::new(context, options, key_range, CachePolicy::Fill, false, 0);
         Self {
             compactor,
             split_index,

@@ -35,7 +35,7 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
-// Memcomparable row.
+/// Memcomparable row.
 type CacheKey = Vec<u8>;
 
 /// Generic managed agg state for min/max.
@@ -207,7 +207,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                     {
                         self.cache.insert(cache_key, cache_data);
                     }
-                    state_table.insert(state_row)?;
+                    state_table.insert(state_row);
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -218,7 +218,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                             self.cache_synced = false;
                         }
                     }
-                    state_table.delete(state_row)?;
+                    state_table.delete(state_row);
                     self.total_count -= 1;
                 }
             }

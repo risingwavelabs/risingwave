@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
@@ -23,7 +22,7 @@ use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumManager};
+use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -35,7 +34,7 @@ where
 {
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    vacuum_manager: Arc<VacuumManager<S>>,
+    vacuum_manager: VacuumManagerRef<S>,
     compaction_group_manager: CompactionGroupManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -47,7 +46,7 @@ where
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
         compactor_manager: CompactorManagerRef,
-        vacuum_trigger: Arc<VacuumManager<S>>,
+        vacuum_trigger: VacuumManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
@@ -88,6 +87,21 @@ where
             status: None,
             current_version: Some(current_version),
         }))
+    }
+
+    async fn get_version_deltas(
+        &self,
+        request: Request<GetVersionDeltasRequest>,
+    ) -> Result<Response<GetVersionDeltasResponse>, Status> {
+        let req = request.into_inner();
+        let version_deltas = self
+            .hummock_manager
+            .get_version_deltas(req.start_id, req.num_epochs)
+            .await?;
+        let resp = GetVersionDeltasResponse {
+            version_deltas: Some(version_deltas),
+        };
+        Ok(Response::new(resp))
     }
 
     async fn report_compaction_tasks(
@@ -197,7 +211,7 @@ where
         if let Some(vacuum_task) = request.into_inner().vacuum_task {
             self.vacuum_manager.report_vacuum_task(vacuum_task).await?;
         }
-        sync_point::on("AFTER_REPORT_VACUUM").await;
+        sync_point::sync_point!("AFTER_REPORT_VACUUM");
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
     }
 

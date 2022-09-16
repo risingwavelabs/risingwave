@@ -23,3 +23,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+
+[features]
+sync_point = ["sync-point/sync_point"]

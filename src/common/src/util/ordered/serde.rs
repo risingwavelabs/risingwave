@@ -13,12 +13,9 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::cmp::Reverse;
 
 use itertools::Itertools;
 
-use super::OrderedDatum::{NormalOrder, ReversedOrder};
-use super::OrderedRow;
 use crate::array::{ArrayImpl, Row, RowRef};
 use crate::error::Result;
 use crate::types::{
@@ -132,19 +129,15 @@ impl OrderedRowDeserializer {
         }
     }
 
-    pub fn deserialize(&self, data: &[u8]) -> Result<OrderedRow> {
+    pub fn deserialize(&self, data: &[u8]) -> Result<Row> {
         let mut values = Vec::with_capacity(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for (data_type, order_type) in self.data_types.iter().zip_eq(self.order_types.iter()) {
             deserializer.set_reverse(*order_type == OrderType::Descending);
             let datum = deserialize_datum_from(data_type, &mut deserializer)?;
-            let datum = match order_type {
-                OrderType::Ascending => NormalOrder(datum),
-                OrderType::Descending => ReversedOrder(Reverse(datum)),
-            };
             values.push(datum);
         }
-        Ok(OrderedRow(values))
+        Ok(Row(values))
     }
 
     pub fn get_order_types(&self) -> &[OrderType] {
@@ -275,25 +268,16 @@ mod tests {
             let row2 = Row(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);
             let row3 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(6))]);
             let rows = vec![row1.clone(), row2.clone(), row3.clone()];
-            let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
+            let deserializer = OrderedRowDeserializer::new(schema, order_types);
             let mut array = vec![];
             for row in &rows {
                 let mut row_bytes = vec![];
                 serializer.serialize(row, &mut row_bytes);
                 array.push(row_bytes);
             }
-            assert_eq!(
-                deserializer.deserialize(&array[0]).unwrap(),
-                OrderedRow::new(row1, &order_types)
-            );
-            assert_eq!(
-                deserializer.deserialize(&array[1]).unwrap(),
-                OrderedRow::new(row2, &order_types)
-            );
-            assert_eq!(
-                deserializer.deserialize(&array[2]).unwrap(),
-                OrderedRow::new(row3, &order_types)
-            );
+            assert_eq!(deserializer.deserialize(&array[0]).unwrap(), row1);
+            assert_eq!(deserializer.deserialize(&array[1]).unwrap(), row2);
+            assert_eq!(deserializer.deserialize(&array[2]).unwrap(), row3);
         }
 
         {
@@ -316,25 +300,16 @@ mod tests {
                 Some(ScalarImpl::Decimal(Decimal::NegativeINF)),
             ]);
             let rows = vec![row1.clone(), row2.clone(), row3.clone()];
-            let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
+            let deserializer = OrderedRowDeserializer::new(schema, order_types);
             let mut array = vec![];
             for row in &rows {
                 let mut row_bytes = vec![];
                 serializer.serialize(row, &mut row_bytes);
                 array.push(row_bytes);
             }
-            assert_eq!(
-                deserializer.deserialize(&array[0]).unwrap(),
-                OrderedRow::new(row1, &order_types)
-            );
-            assert_eq!(
-                deserializer.deserialize(&array[1]).unwrap(),
-                OrderedRow::new(row2, &order_types)
-            );
-            assert_eq!(
-                deserializer.deserialize(&array[2]).unwrap(),
-                OrderedRow::new(row3, &order_types)
-            );
+            assert_eq!(deserializer.deserialize(&array[0]).unwrap(), row1);
+            assert_eq!(deserializer.deserialize(&array[1]).unwrap(), row2);
+            assert_eq!(deserializer.deserialize(&array[2]).unwrap(), row3);
         }
     }
 
@@ -360,11 +335,11 @@ mod tests {
 
             let schema = vec![DataType::Varchar];
             let order_types = vec![OrderType::Descending];
-            let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
+            let deserializer = OrderedRowDeserializer::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_0_len];
             assert_eq!(
                 deserializer.deserialize(prefix_slice).unwrap(),
-                OrderedRow::new(Row(vec![Some(Utf8("abc".to_string()))]), &order_types)
+                Row(vec![Some(Utf8("abc".to_string()))])
             );
         }
 
@@ -375,12 +350,9 @@ mod tests {
 
             let order_types = vec![OrderType::Descending, OrderType::Ascending];
             let schema = vec![DataType::Varchar, DataType::Int16];
-            let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
+            let deserializer = OrderedRowDeserializer::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_1_len];
-            assert_eq!(
-                deserializer.deserialize(prefix_slice).unwrap(),
-                OrderedRow::new(row1, &order_types)
-            );
+            assert_eq!(deserializer.deserialize(prefix_slice).unwrap(), row1);
         }
     }
 

@@ -2377,13 +2377,13 @@ impl Parser {
                         match explain_type {
                             Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                             Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                             _ => unreachable!("{}", keyword),
                         }
                     }
                     Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                     Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                     _ => unreachable!("{}", keyword),
                 }
             }
@@ -2418,62 +2418,49 @@ impl Parser {
             None
         };
 
-        if !self.parse_keyword(Keyword::INSERT) {
-            let body = self.parse_query_body(0)?;
+        let body = self.parse_query_body(0)?;
 
-            let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
-                self.parse_comma_separated(Parser::parse_order_by_expr)?
-            } else {
-                vec![]
-            };
-
-            let limit = if self.parse_keyword(Keyword::LIMIT) {
-                self.parse_limit()?
-            } else {
-                None
-            };
-
-            let offset = if self.parse_keyword(Keyword::OFFSET) {
-                Some(self.parse_offset()?)
-            } else {
-                None
-            };
-
-            let fetch = if self.parse_keyword(Keyword::FETCH) {
-                if limit.is_some() {
-                    return parser_err!("Cannot specify both LIMIT and FETCH".to_string());
-                }
-                let fetch = self.parse_fetch()?;
-                if fetch.with_ties && order_by.is_empty() {
-                    return parser_err!(
-                        "WITH TIES cannot be specified without ORDER BY clause".to_string()
-                    );
-                }
-                Some(fetch)
-            } else {
-                None
-            };
-
-            Ok(Query {
-                with,
-                body,
-                order_by,
-                limit,
-                offset,
-                fetch,
-            })
+        let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
+            self.parse_comma_separated(Parser::parse_order_by_expr)?
         } else {
-            let insert = self.parse_insert()?;
+            vec![]
+        };
 
-            Ok(Query {
-                with,
-                body: SetExpr::Insert(insert),
-                limit: None,
-                order_by: vec![],
-                offset: None,
-                fetch: None,
-            })
-        }
+        let limit = if self.parse_keyword(Keyword::LIMIT) {
+            self.parse_limit()?
+        } else {
+            None
+        };
+
+        let offset = if self.parse_keyword(Keyword::OFFSET) {
+            Some(self.parse_offset()?)
+        } else {
+            None
+        };
+
+        let fetch = if self.parse_keyword(Keyword::FETCH) {
+            if limit.is_some() {
+                return parser_err!("Cannot specify both LIMIT and FETCH".to_string());
+            }
+            let fetch = self.parse_fetch()?;
+            if fetch.with_ties && order_by.is_empty() {
+                return parser_err!(
+                    "WITH TIES cannot be specified without ORDER BY clause".to_string()
+                );
+            }
+            Some(fetch)
+        } else {
+            None
+        };
+
+        Ok(Query {
+            with,
+            body,
+            order_by,
+            limit,
+            offset,
+            fetch,
+        })
     }
 
     /// Parse a CTE (`alias [( col1, col2, ... )] AS (subquery)`)
@@ -2858,13 +2845,25 @@ impl Parser {
             //                   (1) an additional set of parens around a nested join
             //
 
-            // If the recently consumed '(' starts a derived table, the call to
-            // `parse_derived_table_factor` below will return success after parsing the
-            // subquery, followed by the closing ')', and the alias of the derived table.
-            // In the example above this is case (3).
-            return_ok_if_some!(
-                self.maybe_parse(|parser| parser.parse_derived_table_factor(NotLateral))
-            );
+            // It can only be a subquery. We don't use `maybe_parse` so that a meaningful error can
+            // be returned.
+            match self.peek_token() {
+                Token::Word(w)
+                    if [Keyword::SELECT, Keyword::WITH, Keyword::VALUES].contains(&w.keyword) =>
+                {
+                    return self.parse_derived_table_factor(NotLateral);
+                }
+                _ => {}
+            };
+            // It can still be a subquery, e.g., the case (3) in the example above:
+            // (SELECT 1) UNION (SELECT 2)
+            // TODO: how to produce a good error message here?
+            if self.peek_token() == Token::LParen {
+                return_ok_if_some!(
+                    self.maybe_parse(|parser| parser.parse_derived_table_factor(NotLateral))
+                );
+            }
+
             // A parsing error from `parse_derived_table_factor` indicates that the '(' we've
             // recently consumed does not start a derived table (cases 1, 2, or 4).
             // `maybe_parse` will ignore such an error and rewind to be after the opening '('.
@@ -2885,7 +2884,10 @@ impl Parser {
             } else {
                 // The SQL spec prohibits derived tables and bare tables from
                 // appearing alone in parentheses (e.g. `FROM (mytable)`)
-                self.expected("joined table", self.peek_token())
+                parser_err!(format!(
+                    "Expected joined table, found: {table_and_joins}, next_token: {}",
+                    self.peek_token()
+                ))
             }
         } else {
             let name = self.parse_object_name()?;
@@ -3288,7 +3290,7 @@ impl Parser {
 
     pub fn parse_begin(&mut self) -> Result<Statement, ParserError> {
         let _ = self.parse_one_of_keywords(&[Keyword::TRANSACTION, Keyword::WORK]);
-        Ok(Statement::StartTransaction {
+        Ok(Statement::BEGIN {
             modes: self.parse_transaction_modes()?,
         })
     }

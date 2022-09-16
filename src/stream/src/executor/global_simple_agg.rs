@@ -227,8 +227,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         let columns: Vec<Column> = builders
             .into_iter()
-            .map(|builder| builder.finish().map(Into::into))
-            .try_collect()?;
+            .map(|builder| builder.finish().into())
+            .collect();
 
         let chunk = StreamChunk::new(new_ops, columns, None);
 

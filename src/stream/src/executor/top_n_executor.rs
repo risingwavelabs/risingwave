@@ -124,9 +124,10 @@ pub(crate) fn generate_output(
     schema: &Schema,
 ) -> StreamExecutorResult<StreamChunk> {
     if !new_rows.is_empty() {
-        let mut data_chunk_builder = DataChunkBuilder::with_default_size(schema.data_types());
+        let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
         for row in &new_rows {
-            data_chunk_builder.append_one_row_from_datums(row.0.iter())?;
+            let res = data_chunk_builder.append_one_row_from_datums(row.0.iter())?;
+            debug_assert!(res.is_none());
         }
         // since `new_rows` is not empty, we unwrap directly
         let new_data_chunk = data_chunk_builder.consume_all()?.unwrap();
@@ -136,7 +137,7 @@ pub(crate) fn generate_output(
         let columns = schema
             .create_array_builders(0)
             .into_iter()
-            .map(|x| Column::new(Arc::new(x.finish().unwrap())))
+            .map(|x| Column::new(Arc::new(x.finish())))
             .collect_vec();
         Ok(StreamChunk::new(vec![], columns, None))
     }
