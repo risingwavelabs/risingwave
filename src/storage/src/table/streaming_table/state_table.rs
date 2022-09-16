@@ -566,7 +566,7 @@ impl<S: StateStore> StateTable<S> {
                             row
                         );
                     }
-                    local.put(pk, StorageValue::new_default_put(row));
+                    local.put(pk, StorageValue::new_put(row));
                 }
                 RowOp::Delete(old_row) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
@@ -611,7 +611,7 @@ impl<S: StateStore> StateTable<S> {
                             old_row
                         );
                     }
-                    local.put(pk, StorageValue::new_default_put(new_row));
+                    local.put(pk, StorageValue::new_put(new_row));
                 }
             }
         }
