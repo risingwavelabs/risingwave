@@ -275,7 +275,7 @@ fn infer_type_for_special(
                 },
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot append {} to {}",
-                    left_type, right_type
+                    right_type, left_type
                 ))
                 .into())
             }
