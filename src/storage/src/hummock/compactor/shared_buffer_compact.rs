@@ -86,7 +86,7 @@ async fn compact_shared_buffer(
     context: Arc<Context>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<SstableInfo>> {
-    let mut start_user_keys = payload
+    let mut size_and_start_user_keys = payload
         .iter()
         .flat_map(|data_list| {
             data_list.iter().map(|data| {
@@ -101,12 +101,12 @@ async fn compact_shared_buffer(
             })
         })
         .collect_vec();
-    let compact_data_size = start_user_keys
+    let compact_data_size = size_and_start_user_keys
         .iter()
         .map(|(data_size, _)| *data_size)
         .sum::<u64>();
-    start_user_keys.sort();
-    let mut splits = Vec::with_capacity(start_user_keys.len());
+    size_and_start_user_keys.sort();
+    let mut splits = Vec::with_capacity(size_and_start_user_keys.len());
     splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
     let mut key_split_append = |key_before_last: &Bytes| {
         splits.last_mut().unwrap().right = key_before_last.clone();
@@ -115,18 +115,19 @@ async fn compact_shared_buffer(
     let sstable_size = (context.options.sstable_size_mb as u64) << 20;
     let parallelism = std::cmp::min(
         context.options.share_buffers_sync_parallelism as u64,
-        start_user_keys.len() as u64,
+        size_and_start_user_keys.len() as u64,
     );
     let sub_compaction_data_size = if compact_data_size > sstable_size && parallelism > 1 {
         compact_data_size / parallelism
     } else {
         compact_data_size
     };
-    let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size);
+    // mul 1.2 for other extra memory usage.
+    let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
     if parallelism > 1 && compact_data_size > sstable_size {
         let mut last_buffer_size = 0;
         let mut last_user_key = vec![];
-        for (data_size, user_key) in start_user_keys {
+        for (data_size, user_key) in size_and_start_user_keys {
             if last_buffer_size >= sub_compaction_data_size
                 && !last_user_key.as_slice().eq(user_key)
             {
