@@ -349,7 +349,9 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 }
-const ENABLE_STATE_TABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
+
+const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
+
 /// point get
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
@@ -548,7 +550,7 @@ impl<S: StateStore> StateTable<S> {
         for (pk, row_op) in buffer {
             match row_op {
                 RowOp::Insert(row) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                    if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
                         // If we want to insert a row, it should not exist in storage.
                         let storage_row = self
                             .keyspace
@@ -567,7 +569,7 @@ impl<S: StateStore> StateTable<S> {
                     local.put(pk, StorageValue::new_default_put(row));
                 }
                 RowOp::Delete(old_row) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                    if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
                         // If we want to delete a row, it should exist in storage, and should
                         // have the same old_value as recorded.
                         let storage_row = self
@@ -587,7 +589,7 @@ impl<S: StateStore> StateTable<S> {
                     local.delete(pk);
                 }
                 RowOp::Update((old_row, new_row)) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                    if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
                         // If we want to update a row, it should exist in storage, and should
                         // have the same old_value as recorded.
                         let storage_row = self
