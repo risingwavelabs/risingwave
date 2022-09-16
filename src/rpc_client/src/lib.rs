@@ -36,11 +36,13 @@ mod meta_client;
 
 #[cfg(madsim)]
 use std::collections::HashMap;
+use std::iter::repeat;
 use std::sync::Arc;
 
 #[cfg(not(madsim))]
 use anyhow::anyhow;
 use async_trait::async_trait;
+use futures::future::try_join_all;
 pub use meta_client::{GrpcMetaClient, MetaClient};
 #[cfg(not(madsim))]
 use moka::future::Cache;
@@ -65,11 +67,7 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr) -> Result<Self>;
 
     async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Vec<Self>> {
-        let mut v = vec![];
-        for _ in 0..size {
-            v.push(Self::new_client(host_addr.clone()).await?);
-        }
-        Ok(v)
+        try_join_all(repeat(host_addr).take(size).map(Self::new_client)).await
     }
 }
 
