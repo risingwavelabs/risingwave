@@ -60,7 +60,6 @@ pub(crate) fn create_table_factor_from_table(table: &Table) -> TableFactor {
     TableFactor::Table {
         name: ObjectName(vec![Ident::new(&table.name)]),
         alias: None,
-        args: vec![],
     }
 }
 
