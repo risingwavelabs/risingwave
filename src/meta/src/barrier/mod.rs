@@ -510,10 +510,6 @@ where
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
             // may need to avoid this when we have more state persisted in meta store.
-            let new_epoch = state.in_flight_prev_epoch.next();
-            assert!(new_epoch > state.in_flight_prev_epoch);
-            state.in_flight_prev_epoch = new_epoch;
-
             let (new_epoch, actors_to_track, create_mview_progress) =
                 self.recovery(state.in_flight_prev_epoch).await;
             tracker.add(new_epoch, actors_to_track, vec![]);
