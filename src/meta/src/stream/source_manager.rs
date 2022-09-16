@@ -661,26 +661,24 @@ where
             handle.handle.abort();
         }
 
-        if core.source_fragments.contains_key(&source_id) {
+        assert!(
+            !core.source_fragments.contains_key(&source_id),
+            "dropping source {}, but associated fragments still exists",
+            source_id
+        );
+
+        // Unregister afterwards and is safeguarded by
+        // CompactionGroupManager::purge_stale_members.
+        if let Err(e) = self
+            .compaction_group_manager
+            .unregister_source(source_id)
+            .await
+        {
             tracing::warn!(
-                "dropping source {}, but associated fragments still exists",
-                source_id
+                "Failed to unregister source {}. It will be unregistered eventually.\n{:#?}",
+                source_id,
+                e
             );
-            core.source_fragments.remove(&source_id);
-        } else {
-            // Unregister afterwards and is safeguarded by
-            // CompactionGroupManager::purge_stale_members.
-            if let Err(e) = self
-                .compaction_group_manager
-                .unregister_source(source_id)
-                .await
-            {
-                tracing::warn!(
-                    "Failed to unregister source {}. It will be unregistered eventually.\n{:#?}",
-                    source_id,
-                    e
-                );
-            }
         }
 
         Ok(())
