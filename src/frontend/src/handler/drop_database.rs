@@ -85,13 +85,6 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(frontend.run_sql("DROP DATABASE database").await.is_err());
-
-        frontend
-            .run_sql("DROP SCHEMA database.schema")
-            .await
-            .unwrap();
-
         frontend
             .run_sql("DROP SCHEMA database.public")
             .await
