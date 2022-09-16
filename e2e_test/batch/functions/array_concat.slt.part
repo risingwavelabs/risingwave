@@ -134,16 +134,377 @@ select array['abc'] || '123'::varchar;
 {abc,123}
 
 query T
-select array[1]::int[] || array[1.2]::numeric[];
+select array[1]::smallint[] || array[1]::smallint[];
 ----
-{1,1.2}
+{1, 1}
 
 query T
-select 1::int || array[1.2]::numeric[];
+select 1::smallint || array[1]::smallint[];
 ----
-{1,1.2}
+{1, 1}
 
 query T
-select array[1.2]::numeric[] || 1::int;
+select array[1]::smallint[] || 1::smallint;
 ----
-{1.2,1}
+{1, 1}
+
+query T
+select array[1]::integer[] || array[1]::smallint[];
+----
+{1, 1}
+
+query T
+select 1::integer || array[1]::smallint[];
+----
+{1, 1}
+
+query T
+select array[1]::integer[] || 1::smallint;
+----
+{1, 1}
+
+query T
+select array[1]::bigint[] || array[1]::smallint[];
+----
+{1, 1}
+
+query T
+select 1::bigint || array[1]::smallint[];
+----
+{1, 1}
+
+query T
+select array[1]::bigint[] || 1::smallint;
+----
+{1, 1}
+
+query T
+select array[1]::numeric[] || array[1]::smallint[];
+----
+{1, 1}
+
+query T
+select 1::numeric || array[1]::smallint[];
+----
+{1, 1}
+
+query T
+select array[1]::numeric[] || 1::smallint;
+----
+{1, 1}
+
+query T
+select array[1]::real[] || array[1]::smallint[];
+----
+{1, 1}
+
+query T
+select 1::real || array[1]::smallint[];
+----
+{1, 1}
+
+query T
+select array[1]::real[] || 1::smallint;
+----
+{1, 1}
+
+query T
+select array[1]::smallint[] || array[1]::integer[];
+----
+{1, 1}
+
+query T
+select 1::smallint || array[1]::integer[];
+----
+{1, 1}
+
+query T
+select array[1]::smallint[] || 1::integer;
+----
+{1, 1}
+
+query T
+select array[1]::integer[] || array[1]::integer[];
+----
+{1, 1}
+
+query T
+select 1::integer || array[1]::integer[];
+----
+{1, 1}
+
+query T
+select array[1]::integer[] || 1::integer;
+----
+{1, 1}
+
+query T
+select array[1]::bigint[] || array[1]::integer[];
+----
+{1, 1}
+
+query T
+select 1::bigint || array[1]::integer[];
+----
+{1, 1}
+
+query T
+select array[1]::bigint[] || 1::integer;
+----
+{1, 1}
+
+query T
+select array[1]::numeric[] || array[1]::integer[];
+----
+{1, 1}
+
+query T
+select 1::numeric || array[1]::integer[];
+----
+{1, 1}
+
+query T
+select array[1]::numeric[] || 1::integer;
+----
+{1, 1}
+
+query T
+select array[1]::real[] || array[1]::integer[];
+----
+{1, 1}
+
+query T
+select 1::real || array[1]::integer[];
+----
+{1, 1}
+
+query T
+select array[1]::real[] || 1::integer;
+----
+{1, 1}
+
+query T
+select array[1]::smallint[] || array[1]::bigint[];
+----
+{1, 1}
+
+query T
+select 1::smallint || array[1]::bigint[];
+----
+{1, 1}
+
+query T
+select array[1]::smallint[] || 1::bigint;
+----
+{1, 1}
+
+query T
+select array[1]::integer[] || array[1]::bigint[];
+----
+{1, 1}
+
+query T
+select 1::integer || array[1]::bigint[];
+----
+{1, 1}
+
+query T
+select array[1]::integer[] || 1::bigint;
+----
+{1, 1}
+
+query T
+select array[1]::bigint[] || array[1]::bigint[];
+----
+{1, 1}
+
+query T
+select 1::bigint || array[1]::bigint[];
+----
+{1, 1}
+
+query T
+select array[1]::bigint[] || 1::bigint;
+----
+{1, 1}
+
+query T
+select array[1]::numeric[] || array[1]::bigint[];
+----
+{1, 1}
+
+query T
+select 1::numeric || array[1]::bigint[];
+----
+{1, 1}
+
+query T
+select array[1]::numeric[] || 1::bigint;
+----
+{1, 1}
+
+query T
+select array[1]::real[] || array[1]::bigint[];
+----
+{1, 1}
+
+query T
+select 1::real || array[1]::bigint[];
+----
+{1, 1}
+
+query T
+select array[1]::real[] || 1::bigint;
+----
+{1, 1}
+
+query T
+select array[1]::smallint[] || array[1]::numeric[];
+----
+{1, 1}
+
+query T
+select 1::smallint || array[1]::numeric[];
+----
+{1, 1}
+
+query T
+select array[1]::smallint[] || 1::numeric;
+----
+{1, 1}
+
+query T
+select array[1]::integer[] || array[1]::numeric[];
+----
+{1, 1}
+
+query T
+select 1::integer || array[1]::numeric[];
+----
+{1, 1}
+
+query T
+select array[1]::integer[] || 1::numeric;
+----
+{1, 1}
+
+query T
+select array[1]::bigint[] || array[1]::numeric[];
+----
+{1, 1}
+
+query T
+select 1::bigint || array[1]::numeric[];
+----
+{1, 1}
+
+query T
+select array[1]::bigint[] || 1::numeric;
+----
+{1, 1}
+
+query T
+select array[1]::numeric[] || array[1]::numeric[];
+----
+{1, 1}
+
+query T
+select 1::numeric || array[1]::numeric[];
+----
+{1, 1}
+
+query T
+select array[1]::numeric[] || 1::numeric;
+----
+{1, 1}
+
+query T
+select array[1]::real[] || array[1]::numeric[];
+----
+{1, 1}
+
+query T
+select 1::real || array[1]::numeric[];
+----
+{1, 1}
+
+query T
+select array[1]::real[] || 1::numeric;
+----
+{1, 1}
+
+query T
+select array[1]::smallint[] || array[1]::real[];
+----
+{1, 1}
+
+query T
+select 1::smallint || array[1]::real[];
+----
+{1, 1}
+
+query T
+select array[1]::smallint[] || 1::real;
+----
+{1, 1}
+
+query T
+select array[1]::integer[] || array[1]::real[];
+----
+{1, 1}
+
+query T
+select 1::integer || array[1]::real[];
+----
+{1, 1}
+
+query T
+select array[1]::integer[] || 1::real;
+----
+{1, 1}
+
+query T
+select array[1]::bigint[] || array[1]::real[];
+----
+{1, 1}
+
+query T
+select 1::bigint || array[1]::real[];
+----
+{1, 1}
+
+query T
+select array[1]::bigint[] || 1::real;
+----
+{1, 1}
+
+query T
+select array[1]::numeric[] || array[1]::real[];
+----
+{1, 1}
+
+query T
+select 1::numeric || array[1]::real[];
+----
+{1, 1}
+
+query T
+select array[1]::numeric[] || 1::real;
+----
+{1, 1}
+
+query T
+select array[1]::real[] || array[1]::real[];
+----
+{1, 1}
+
+query T
+select 1::real || array[1]::real[];
+----
+{1, 1}
+
+query T
+select array[1]::real[] || 1::real;
+----
+{1, 1}
+
