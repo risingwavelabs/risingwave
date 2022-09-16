@@ -18,6 +18,7 @@ use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use pgwire::pg_server::SessionId;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_pb::common::HostAddress;
@@ -76,6 +77,9 @@ pub struct QueryExecution {
     compute_client_pool: ComputeClientPoolRef,
 
     shutdown_tx: Sender<QueryMessage>,
+
+    /// Identified by process_id, secret_key. Query in the same session should have same key.
+    pub session_id: SessionId,
 }
 
 struct QueryRunner {
@@ -94,6 +98,7 @@ struct QueryRunner {
 }
 
 impl QueryExecution {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         context: ExecutionContextRef,
         query: Query,
@@ -102,6 +107,7 @@ impl QueryExecution {
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
+        session_id: SessionId,
     ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
@@ -144,6 +150,7 @@ impl QueryExecution {
             compute_client_pool,
             hummock_snapshot_manager,
             shutdown_tx: sender,
+            session_id,
         }
     }
 
@@ -195,7 +202,7 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
-    pub async fn abort(&self) {
+    pub async fn abort(self: Arc<Self>) {
         if self
             .shutdown_tx
             .send(QueryMessage::CancelQuery)
@@ -402,6 +409,7 @@ mod tests {
             ))),
             compute_client_pool,
             catalog_reader,
+            (0, 0),
         );
         assert!(query_execution.start().await.is_err());
     }

@@ -22,7 +22,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
@@ -59,11 +58,8 @@ use crate::monitor::FrontendMetrics;
 use crate::observer::observer_manager::FrontendObserverNode;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
-use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::{
-    HummockSnapshotManager, HummockSnapshotManagerRef, QueryExecution, QueryManager,
-};
+use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -449,10 +445,6 @@ pub struct SessionImpl {
     /// Stores the value of configurations.
     config_map: RwLock<ConfigMap>,
 
-    /// Shutdown channels map
-    /// FIXME: Use weak key hash map to remove query id if query ends.
-    query_executions_map: Arc<tokio::sync::Mutex<HashMap<QueryId, Arc<QueryExecution>>>>,
-
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
 }
@@ -462,7 +454,7 @@ impl SessionImpl {
         env: FrontendEnv,
         auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
-        id: (i32, i32),
+        id: SessionId,
     ) -> Self {
         Self {
             env,
@@ -470,7 +462,6 @@ impl SessionImpl {
             user_authenticator,
             config_map: RwLock::new(Default::default()),
             id,
-            query_executions_map: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -485,7 +476,6 @@ impl SessionImpl {
             )),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
-            query_executions_map: Default::default(),
             // Mock session use non-sense id.
             id: (0, 0),
         }
@@ -517,16 +507,6 @@ impl SessionImpl {
 
     pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
         self.config_map.write().set(key, value)
-    }
-
-    pub async fn add_query(&self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
-        let mut write_guard = self.query_executions_map.lock().await;
-        write_guard.insert(query_id, query_execution);
-    }
-
-    pub async fn delete_query(&self, query_id: &QueryId) {
-        let mut write_guard = self.query_executions_map.lock().await;
-        write_guard.remove(query_id);
     }
 
     pub fn session_id(&self) -> SessionId {
@@ -635,16 +615,8 @@ impl SessionManager for SessionManagerImpl {
     }
 
     /// Used when cancel request happened, returned corresponding session ref.
-    fn connect_for_cancel(
-        &self,
-        process_id: i32,
-        secret_key: i32,
-    ) -> PsqlResult<Arc<Self::Session>> {
-        let write_guard = self.env.sessions_map.lock().unwrap();
-        write_guard
-            .get(&(process_id, secret_key))
-            .cloned()
-            .ok_or(PsqlError::CancelNotFound)
+    fn cancel_queries_in_session(&self, session_id: SessionId) {
+        self.env.query_manager.cancel_queries_in_session(session_id);
     }
 }
 
@@ -772,11 +744,12 @@ impl Session for SessionImpl {
     }
 
     async fn cancel_running_queries(&self) {
-        let mut write_guard = self.query_executions_map.lock().await;
-        for sender in (*write_guard).values_mut() {
-            sender.abort().await;
-        }
-        write_guard.clear();
+        // self.env.query_manager.
+        // let mut write_guard = self.env.query_manager.query_executions_map.lock().await;
+        // for sender in (*write_guard).values_mut() {
+        //     sender.abort().await;
+        // }
+        // write_guard.clear();
     }
 
     fn id(&self) -> SessionId {

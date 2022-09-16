@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use pgwire::pg_server::{Session, SessionId};
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
@@ -29,7 +31,7 @@ use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::handler::query::QueryResultSet;
 use crate::handler::util::to_pg_rows;
-use crate::scheduler::plan_fragmenter::Query;
+use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult};
 
@@ -52,6 +54,10 @@ pub struct QueryManager {
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
+
+    /// Shutdown channels map
+    /// FIXME: Use weak key hash map to remove query id if query ends.
+    query_executions_map: Arc<std::sync::Mutex<HashMap<QueryId, Arc<QueryExecution>>>>,
 }
 
 type QueryManagerRef = Arc<QueryManager>;
@@ -68,6 +74,7 @@ impl QueryManager {
             hummock_snapshot_manager,
             compute_client_pool,
             catalog_reader,
+            query_executions_map: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -92,13 +99,15 @@ impl QueryManager {
             self.hummock_snapshot_manager.clone(),
             self.compute_client_pool.clone(),
             self.catalog_reader.clone(),
+            context.session().id(),
         ));
 
         // Add queries status when begin.
         context
             .session()
-            .add_query(query_id.clone(), query_execution.clone())
-            .await;
+            .env()
+            .query_manager()
+            .add_query(query_id.clone(), query_execution.clone());
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
         let query_result_fetcher = match query_execution.start().await {
@@ -111,12 +120,30 @@ impl QueryManager {
             }
         };
 
-        let ret = query_result_fetcher.collect_rows_from_channel(format).await;
+        // TODO: Clean up queries status when ends. This should be done lazily.
 
-        // Clean up queries status when ends. Note this can not be automatically done by RAII.
-        context.session().delete_query(&query_id).await;
+        query_result_fetcher.collect_rows_from_channel(format).await
+    }
 
-        ret
+    pub fn cancel_queries_in_session(&self, session_id: SessionId) {
+        let mut write_guard = self.query_executions_map.lock().unwrap();
+        let values_iter = write_guard.values();
+        for query in values_iter {
+            let query = query.clone();
+            // spawn a task to abort. Avoid await point in this function.
+            tokio::spawn(async move { query.abort().await });
+        }
+        (*write_guard).retain(|_, query| query.session_id == session_id);
+    }
+
+    pub fn add_query(&self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
+        let mut write_guard = self.query_executions_map.lock().unwrap();
+        write_guard.insert(query_id, query_execution);
+    }
+
+    pub fn delete_query(&self, query_id: &QueryId) {
+        let mut write_guard = self.query_executions_map.lock().unwrap();
+        write_guard.remove(query_id);
     }
 }
 
