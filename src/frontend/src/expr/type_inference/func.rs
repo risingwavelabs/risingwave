@@ -188,30 +188,34 @@ fn infer_type_for_special(
                     } else if left_type == **right_elem_type {
                         Some(right_type.clone())
                     } else {
-                        match least_restrictive(
-                            (**left_elem_type).clone(),
-                            (**right_elem_type).clone(),
-                        ) {
-                            Ok(res) => {
-                                let array_res = DataType::List {
-                                    datatype: Box::new(res.clone()),
-                                };
-
-                                let inputs_owned = std::mem::take(inputs);
-                                *inputs = inputs_owned
-                                    .into_iter()
-                                    .map(|input| {
-                                        if input.return_type().is_scalar() {
-                                            return input.cast_implicit(res.clone());
-                                        }
-                                        input.cast_implicit(array_res.clone())
-                                    })
-                                    .try_collect()?;
-
-                                Some(array_res)
-                            }
-                            Err(_) => None,
+                        // TODO: Do I need the clone here? 
+                        let common_ele_type = least_restrictive((**left_elem_type).clone(), (**right_elem_type).clone());
+                        if common_ele_type.is_err() {
+                            return Err(ErrorCode::BindError(format!(
+                                "Cannot concatenate {} and {}",
+                                left_type, right_type
+                            ))
+                            .into());
                         }
+
+                        // found common type
+                        let common_ele_type = common_ele_type.unwrap();
+                        let array_type = DataType::List {
+                            datatype: Box::new(common_ele_type.clone()),
+                        };
+                    
+                        // try to cast inputs to inputs to common type
+                        let inputs_owned = std::mem::take(inputs);
+                        *inputs = inputs_owned
+                            .into_iter()
+                            .map(|input| {
+                                if input.return_type().is_scalar() {
+                                    return input.cast_implicit(common_ele_type.clone());
+                                }
+                                input.cast_implicit(array_type.clone())
+                            })
+                            .try_collect()?; 
+                        Some(array_type)
                     }
                 }
                 _ => None, // fail, did not even match
