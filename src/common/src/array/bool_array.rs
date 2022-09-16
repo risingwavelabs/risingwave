@@ -32,10 +32,10 @@ impl BoolArray {
         Self { bitmap, data }
     }
 
-    pub fn from_slice(data: &[Option<bool>]) -> ArrayResult<Self> {
+    pub fn from_slice(data: &[Option<bool>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i)?;
+            builder.append(*i);
         }
         builder.finish()
     }
@@ -133,7 +133,7 @@ impl ArrayBuilder for BoolArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<bool>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<bool>) {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -144,10 +144,9 @@ impl ArrayBuilder for BoolArrayBuilder {
                 self.data.append(bool::default());
             }
         }
-        Ok(())
     }
 
-    fn append_array(&mut self, other: &BoolArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &BoolArray) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -155,15 +154,17 @@ impl ArrayBuilder for BoolArrayBuilder {
         for bit in other.data.iter() {
             self.data.append(bit);
         }
-
-        Ok(())
     }
 
-    fn finish(self) -> ArrayResult<BoolArray> {
-        Ok(BoolArray {
+    fn pop(&mut self) -> Option<()> {
+        self.data.pop().map(|_| self.bitmap.pop().unwrap())
+    }
+
+    fn finish(self) -> BoolArray {
+        BoolArray {
             bitmap: self.bitmap.finish(),
             data: self.data.finish(),
-        })
+        }
     }
 }
 
@@ -177,9 +178,9 @@ mod tests {
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
         let mut builder = BoolArrayBuilder::new(data.len());
         for d in data {
-            builder.append(d).unwrap();
+            builder.append(d);
         }
-        builder.finish().unwrap()
+        builder.finish()
     }
 
     #[test]

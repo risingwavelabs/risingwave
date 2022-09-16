@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use itertools::Itertools as _;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DataTypeName};
 
-use super::DataTypeName;
 use crate::expr::{Expr as _, ExprImpl};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -75,7 +75,7 @@ pub enum CastContext {
     Explicit,
 }
 
-pub type CastMap = HashMap<(DataTypeName, DataTypeName), CastContext>;
+pub type CastMap = BTreeMap<(DataTypeName, DataTypeName), CastContext>;
 
 impl From<&CastContext> for String {
     fn from(c: &CastContext) -> Self {
@@ -122,13 +122,13 @@ fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> b
     }
 }
 
-fn build_cast_map() -> CastMap {
+pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
     use DataTypeName as T;
 
     // Implicit cast operations in PG are organized in 3 sequences, with the reverse direction being
     // assign cast operations.
     // https://github.com/postgres/postgres/blob/e0064f0ff6dfada2695330c6bc1945fa7ae813be/src/include/catalog/pg_cast.dat#L18-L20
-    let mut m = HashMap::new();
+    let mut m = BTreeMap::new();
     insert_cast_seq(
         &mut m,
         &[
@@ -168,10 +168,10 @@ fn build_cast_map() -> CastMap {
     m.insert((T::Boolean, T::Int32), CastContext::Explicit);
     m.insert((T::Int32, T::Boolean), CastContext::Explicit);
     m
-}
+});
 
 fn insert_cast_seq(
-    m: &mut HashMap<(DataTypeName, DataTypeName), CastContext>,
+    m: &mut BTreeMap<(DataTypeName, DataTypeName), CastContext>,
     types: &[DataTypeName],
 ) {
     for (source_index, source_type) in types.iter().enumerate() {
@@ -195,12 +195,6 @@ pub fn cast_map_array() -> Vec<(DataTypeName, DataTypeName, CastContext)> {
         .iter()
         .map(|((src, target), ctx)| (*src, *target, *ctx))
         .collect_vec()
-}
-
-lazy_static::lazy_static! {
-    pub static ref CAST_MAP: CastMap = {
-        build_cast_map()
-    };
 }
 
 #[derive(Clone)]

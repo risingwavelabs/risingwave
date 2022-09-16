@@ -26,8 +26,13 @@ pub struct ApplyFilterRule {}
 impl Rule for ApplyFilterRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_id, correlated_indices) =
+        let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
+
+        if max_one_row {
+            return None;
+        }
+
         assert_eq!(join_type, JoinType::Inner);
         let filter = right.as_logical_filter()?;
         let input = filter.input();
@@ -72,6 +77,7 @@ impl Rule for ApplyFilterRule {
             new_on,
             apply.correlated_id(),
             correlated_indices,
+            false,
         );
         let new_filter = LogicalFilter::new(
             new_apply,

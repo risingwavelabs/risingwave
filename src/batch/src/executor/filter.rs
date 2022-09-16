@@ -148,18 +148,14 @@ mod tests {
 
         // Add 4 ListValues to ArrayBuilder
         (1..=4).for_each(|i| {
-            builder
-                .append(Some(ListRef::ValueRef {
-                    val: &ListValue::new(vec![Some(i.to_scalar_value())]),
-                }))
-                .unwrap();
+            builder.append(Some(ListRef::ValueRef {
+                val: &ListValue::new(vec![Some(i.to_scalar_value())]),
+            }));
         });
 
         // Use builder to obtain a single (List) column DataChunk
         let chunk = DataChunk::new(
-            vec![Column::new(Arc::new(ArrayImpl::from(
-                builder.finish().unwrap(),
-            )))],
+            vec![Column::new(Arc::new(ArrayImpl::from(builder.finish())))],
             4,
         );
 

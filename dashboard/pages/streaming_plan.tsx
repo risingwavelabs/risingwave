@@ -26,14 +26,15 @@ import {
   VStack,
 } from "@chakra-ui/react"
 import * as d3 from "d3"
-import { Dag, dagStratify } from "d3-dag"
+import { dagStratify } from "d3-dag"
 import { toLower } from "lodash"
 import Head from "next/head"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
 import DependencyGraph from "../components/DependencyGraph"
-import FragmentGraph, { ActorBox } from "../components/FragmentGraph"
+import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
+import { ActorBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { StreamNode } from "../proto/gen/stream_plan"
 import { getFragments, getMaterializedViews } from "./api/streaming"
@@ -60,9 +61,7 @@ function buildPlanNodeDependency(
   })
 }
 
-function buildFragmentDependencyAsEdges(
-  fragments: TableFragments
-): Dag<ActorBox, any> {
+function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
   const nodes: ActorBox[] = []
   const actorToFragmentMapping = new Map<number, number>()
   for (const fragmentId in fragments.fragments) {
@@ -86,12 +85,12 @@ function buildFragmentDependencyAsEdges(
       id: fragment.fragmentId.toString(),
       name: `Fragment ${fragment.fragmentId}`,
       parentIds: Array.from(parentIds).map((x) => x.toString()),
-      width: 200,
-      height: 100,
+      width: 0,
+      height: 0,
       order: fragment.fragmentId,
     } as ActorBox)
   }
-  return dagStratify()(nodes)
+  return nodes
 }
 
 const SIDEBAR_WIDTH = 200
@@ -103,7 +102,6 @@ function useFetch<T>(fetchFn: () => Promise<T>) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const abortController = new AbortController()
         const res = await fetchFn()
         setResponse(res)
       } catch (e: any) {
@@ -136,9 +134,11 @@ export default function Streaming() {
         const mvId = parseInt(router.query.id as string)
         const fragments = fragmentList.find((x) => x.tableId === mvId)
         if (fragments) {
+          const fragmentDep = buildFragmentDependencyAsEdges(fragments)
           return {
             fragments,
-            fragmentDep: buildFragmentDependencyAsEdges(fragments),
+            fragmentDep,
+            fragmentDepDag: dagStratify()(fragmentDep),
           }
         }
       }
@@ -158,24 +158,27 @@ export default function Streaming() {
   }, [router, router.query.id, mvList])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
+  const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
   const fragments = fragmentDependencyCallback()?.fragments
 
-  const planNodeDependencyCallback = useCallback(() => {
-    if (selectedFragmentId) {
-      const fragment = fragments?.fragments[selectedFragmentId]
-      if (fragment) {
+  const planNodeDependenciesCallback = useCallback(() => {
+    const fragments_ = fragments?.fragments
+    if (fragments_) {
+      const planNodeDependencies = new Map<string, d3.HierarchyNode<any>>()
+      for (const fragmentId in fragments_) {
+        const fragment = fragments_[fragmentId]
         const dep = buildPlanNodeDependency(fragment)
-        console.log(dep)
-        return dep
+        planNodeDependencies.set(fragmentId, dep)
       }
+      return planNodeDependencies
     }
     return undefined
-  }, [selectedFragmentId, fragments?.fragments])
+  }, [fragments?.fragments])
 
-  const planNodeDependency = planNodeDependencyCallback()
+  const planNodeDependencies = planNodeDependenciesCallback()
 
   const retVal = (
-    <Flex p={3} height="100vh" flexDirection="column">
+    <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
       <Title>Streaming Plan</Title>
       <Flex flexDirection="row" height="full" width="full">
         <VStack
@@ -203,11 +206,11 @@ export default function Streaming() {
           </FormControl>
           <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Plan</Text>
-            {fragmentDependency && (
+            {fragmentDependencyDag && (
               <Box flex="1" overflowY="scroll">
                 <DependencyGraph
                   svgWidth={SIDEBAR_WIDTH}
-                  mvDependency={fragmentDependency}
+                  mvDependency={fragmentDependencyDag}
                   onSelectedIdChange={(id) =>
                     setSelectedFragmentId(parseInt(id))
                   }
@@ -217,14 +220,22 @@ export default function Streaming() {
             )}
           </Flex>
         </VStack>
-        <Flex flex={1} height="full" ml={3} flexDirection="column">
+        <Box
+          flex={1}
+          height="full"
+          ml={3}
+          overflowX="scroll"
+          overflowY="scroll"
+        >
           <Text fontWeight="semibold">Fragment Graph</Text>
-          {planNodeDependency && (
-            <Box flex="1" overflowX="scroll" overflowY="scroll">
-              <FragmentGraph planNodeDependency={planNodeDependency} />
-            </Box>
+          {planNodeDependencies && fragmentDependency && (
+            <FragmentGraph
+              selectedFragmentId={selectedFragmentId?.toString()}
+              fragmentDependency={fragmentDependency}
+              planNodeDependencies={planNodeDependencies}
+            />
           )}
-        </Flex>
+        </Box>
       </Flex>
     </Flex>
   )

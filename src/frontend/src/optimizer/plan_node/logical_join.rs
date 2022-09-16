@@ -820,7 +820,13 @@ impl PredicatePushdown for LogicalJoin {
 
         let new_left = self.left.predicate_pushdown(left_predicate);
         let new_right = self.right.predicate_pushdown(right_predicate);
-        let new_join = LogicalJoin::new(new_left, new_right, join_type, new_on);
+        let new_join = LogicalJoin::new_with_output_indices(
+            new_left,
+            new_right,
+            join_type,
+            new_on,
+            self.output_indices.clone(),
+        );
         LogicalFilter::create(new_join.into(), predicate)
     }
 }

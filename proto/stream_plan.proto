@@ -195,12 +195,16 @@ message HashJoinNode {
   catalog.Table left_table = 6;
   // Used for internal table states.
   catalog.Table right_table = 7;
+  // Used for internal table states.
+  catalog.Table left_degree_table = 8;
+  // Used for internal table states.
+  catalog.Table right_degree_table = 9;
+  // The output indices of current node
+  repeated uint32 output_indices = 10;
+  repeated bool null_safe = 11;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
-  bool is_append_only = 8;
-  // The output indices of current node
-  repeated uint32 output_indices = 9;
-  repeated bool null_safe = 10;
+  bool is_append_only = 12;
 }
 
 message DynamicFilterNode {
@@ -247,14 +251,17 @@ message HopWindowNode {
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
   uint32 upstream_fragment_id = 2;
+  // Type of the upstream dispatcher. If there's always one upstream according to this
+  // type, the compute node may use the `ReceiverExecutor` as an optimization.
+  DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. TODO: remove this field.
-  repeated plan_common.Field fields = 3;
+  repeated plan_common.Field fields = 4;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
 // and maybe `DispatcherNode` later.
 message ExchangeNode {
-  DispatchStrategy strategy = 2;
+  DispatchStrategy strategy = 1;
 }
 
 // ChainNode is used for mv on mv.

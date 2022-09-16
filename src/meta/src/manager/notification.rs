@@ -30,7 +30,7 @@ pub type Notification = Result<SubscribeResponse, Status>;
 pub type NotificationManagerRef = Arc<NotificationManager>;
 pub type NotificationVersion = u64;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum LocalNotification {
     WorkerNodeIsDeleted(WorkerNode),
     CompactionTaskNeedCancel(CompactTask),
@@ -62,10 +62,7 @@ impl NotificationManager {
             while let Some(task) = task_rx.recv().await {
                 let mut guard = core.lock().await;
                 guard.current_version += 1;
-                match task.target {
-                    WorkerType::Generic => guard.notify_all(task.operation, &task.info),
-                    _ => guard.notify(task.target, task.operation, &task.info),
-                };
+                guard.notify(task.target, task.operation, &task.info);
                 if let Some(tx) = task.callback_tx {
                     tx.send(guard.current_version).unwrap();
                 }
@@ -128,11 +125,6 @@ impl NotificationManager {
         self.notify_asynchronously(WorkerType::ComputeNode, operation, info);
     }
 
-    /// To notify all the `worker_type` sender
-    pub async fn notify_all_node(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(WorkerType::Generic, operation, info).await
-    }
-
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
         let mut core_guard = self.core.lock().await;
         core_guard.local_senders.retain(|sender| {
@@ -151,6 +143,7 @@ impl NotificationManager {
             WorkerType::Frontend => core_guard.compute_senders.remove(&worker_key),
             WorkerType::ComputeNode => core_guard.frontend_senders.remove(&worker_key),
             WorkerType::Compactor => core_guard.compactor_senders.remove(&worker_key),
+            WorkerType::RiseCtl => core_guard.risectl_senders.remove(&worker_key),
             _ => unreachable!(),
         };
     }
@@ -167,6 +160,7 @@ impl NotificationManager {
             WorkerType::Frontend => &mut core_guard.frontend_senders,
             WorkerType::ComputeNode => &mut core_guard.compute_senders,
             WorkerType::Compactor => &mut core_guard.compactor_senders,
+            WorkerType::RiseCtl => &mut core_guard.risectl_senders,
             _ => unreachable!(),
         };
 
@@ -197,6 +191,8 @@ struct NotificationManagerCore {
     compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to compactor nodes.
     compactor_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    /// The notification sender to risectl nodes.
+    risectl_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
 
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
@@ -211,6 +207,7 @@ impl NotificationManagerCore {
             frontend_senders: HashMap::new(),
             compute_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
+            risectl_senders: HashMap::new(),
             local_senders: vec![],
             /// FIXME: see issue #5145, may cause frontend to wait. Refactor after decouple ckpt.
             current_version: 0,
@@ -222,6 +219,7 @@ impl NotificationManagerCore {
             WorkerType::Frontend => &mut self.frontend_senders,
             WorkerType::ComputeNode => &mut self.compute_senders,
             WorkerType::Compactor => &mut self.compactor_senders,
+            WorkerType::RiseCtl => &mut self.risectl_senders,
             _ => unreachable!(),
         };
 
@@ -243,11 +241,5 @@ impl NotificationManagerCore {
                 })
                 .is_ok()
         });
-    }
-
-    fn notify_all(&mut self, operation: Operation, info: &Info) {
-        self.notify(WorkerType::Frontend, operation, info);
-        self.notify(WorkerType::ComputeNode, operation, info);
-        self.notify(WorkerType::Compactor, operation, info);
     }
 }

@@ -215,10 +215,13 @@ mod tests {
         let mut val = b"0"[..].repeat(1 << 10);
         val.extend_from_slice(&compact_task.watermark.to_be_bytes());
 
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id)
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        let compactor = hummock_manager_ref
+            .assign_compaction_task(&compact_task)
             .await
             .unwrap();
+        assert_eq!(compactor.context_id(), worker_node.id);
 
         // assert compact_task
         assert_eq!(compact_task.input_ssts.len(), 128);
@@ -243,7 +246,7 @@ mod tests {
             .clone();
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, Payload::PinnedVersion(version));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
         let table = storage
             .sstable_store()
             .sstable(&output_table, &mut StoreLocalStatistic::default())
@@ -317,10 +320,13 @@ mod tests {
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         compact_task.current_epoch_time = 0;
 
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id)
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        let compactor = hummock_manager_ref
+            .assign_compaction_task(&compact_task)
             .await
             .unwrap();
+        assert_eq!(compactor.context_id(), worker_node.id);
 
         // assert compact_task
         assert_eq!(
@@ -364,7 +370,7 @@ mod tests {
         // 5. storage get back the correct kv after compaction
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, Payload::PinnedVersion(version));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
         let get_val = storage
             .get(
                 &key,
@@ -582,7 +588,6 @@ mod tests {
         )
         .await;
 
-        // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
             ..Default::default()
@@ -600,11 +605,14 @@ mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
 
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id)
+        // 3. pick compactor and assign
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        let compactor = hummock_manager_ref
+            .assign_compaction_task(&compact_task)
             .await
             .unwrap();
-
+        assert_eq!(compactor.context_id(), worker_node.id);
         // assert compact_task
         assert_eq!(
             compact_task
@@ -616,11 +624,11 @@ mod tests {
             kv_count
         );
 
-        // 3. compact
+        // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
-        // 4. get the latest version and check
+        // 5. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
         let mut tables_from_version = vec![];
         version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
@@ -641,7 +649,7 @@ mod tests {
         }
         assert_eq!((kv_count / 2) as u32, key_count);
 
-        // 5. get compact task and there should be none
+        // 6. get compact task and there should be none
         let compact_task = hummock_manager_ref
             .get_compact_task(StaticCompactionGroupId::StateDefault.into())
             .await
@@ -652,9 +660,9 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, Payload::PinnedVersion(version));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
 
-        // 6. scan kv to check key table_id
+        // 7. scan kv to check key table_id
         let scan_result = storage
             .scan::<_, Vec<u8>>(
                 None,
@@ -762,10 +770,13 @@ mod tests {
         )]);
         compact_task.current_epoch_time = epoch;
 
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id)
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        let compactor = hummock_manager_ref
+            .assign_compaction_task(&compact_task)
             .await
             .unwrap();
+        assert_eq!(compactor.context_id(), worker_node.id);
 
         // assert compact_task
         assert_eq!(
@@ -814,7 +825,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, Payload::PinnedVersion(version));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -931,10 +942,13 @@ mod tests {
         //     HashMap::from_iter([(existing_table_id, TableOption { ttl: 0 })]);
         compact_task.current_epoch_time = epoch;
 
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id)
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        let compactor = hummock_manager_ref
+            .assign_compaction_task(&compact_task)
             .await
             .unwrap();
+        assert_eq!(compactor.context_id(), worker_node.id);
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
@@ -974,7 +988,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, Payload::PinnedVersion(version));
+            .try_update_pinned_version(Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);

@@ -1748,7 +1748,7 @@ mod tests {
         fn append(&mut self, data_chunk: &DataChunk) -> Result<()> {
             ensure!(self.array_builders.len() == data_chunk.dimension());
             for idx in 0..self.array_builders.len() {
-                self.array_builders[idx].append_array(data_chunk.column_at(idx).array_ref())?;
+                self.array_builders[idx].append_array(data_chunk.column_at(idx).array_ref());
             }
             self.array_len += data_chunk.capacity();
 
@@ -1759,8 +1759,8 @@ mod tests {
             let columns = self
                 .array_builders
                 .into_iter()
-                .map(|array_builder| array_builder.finish().map(|arr| Column::new(Arc::new(arr))))
-                .try_collect()?;
+                .map(|b| Column::new(Arc::new(b.finish())))
+                .collect();
 
             Ok(DataChunk::new(columns, self.array_len))
         }
