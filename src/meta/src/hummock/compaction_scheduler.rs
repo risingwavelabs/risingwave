@@ -303,12 +303,10 @@ mod tests {
     use assert_matches::assert_matches;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::CompactionGroupId;
-    
 
     use crate::hummock::compaction_scheduler::{CompactionRequestChannel, ScheduleStatus};
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::hummock::CompactionScheduler;
-    
 
     #[tokio::test]
     async fn test_pick_and_assign() {

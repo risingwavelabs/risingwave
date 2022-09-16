@@ -24,7 +24,7 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
-use risingwave_common::util::compress::{compress_data, decompress_data};
+use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
@@ -119,7 +119,7 @@ pub(crate) fn rebalance_actor_vnode(
     actors_to_remove: &BTreeSet<ActorId>,
     actors_to_create: &BTreeSet<ActorId>,
 ) -> HashMap<ActorId, Bitmap> {
-    assert!(actors.len() > actors_to_remove.len());
+    assert!(actors.len() >= actors_to_remove.len());
 
     let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
     assert!(target_actor_count > 0);
@@ -213,6 +213,16 @@ pub(crate) fn rebalance_actor_vnode(
             remain -= 1;
         }
     }
+
+    // consume the rest `remain`
+    for balance in &mut created_balances {
+        if remain > 0 {
+            balance.balance -= 1;
+            remain -= 1;
+        }
+    }
+
+    assert_eq!(remain, 0);
 
     let mut v: VecDeque<_> = removed_balances
         .chain(rest_balances)
@@ -878,34 +888,8 @@ where
                                 data,
                             })
                         } else {
-                            let mut vnode_mapping: Vec<ParallelUnitId> =
-                                decompress_data(&original_indices, &data);
-
                             let updated_bitmap = fragment_updated_bitmap.get(&fragment_id).unwrap();
-
-                            for (actor_id, parallel_unit_id) in actors_after_reschedule {
-                                if let Some(bitmap) = updated_bitmap.get(actor_id) {
-                                    for (idx, x) in vnode_mapping.iter_mut().enumerate() {
-                                        if bitmap.is_set(idx).unwrap() {
-                                            *x = *parallel_unit_id;
-                                        }
-                                    }
-                                }
-                            }
-
-                            let actor_mapping = vnode_mapping
-                                .iter()
-                                .map(|parallel_unit_id| {
-                                    parallel_unit_to_actor_after_reschedule[parallel_unit_id]
-                                })
-                                .collect_vec();
-
-                            let (original_indices, data) = compress_data(&actor_mapping);
-
-                            Some(ActorMapping {
-                                original_indices,
-                                data,
-                            })
+                            Some(actor_mapping_from_bitmaps(updated_bitmap))
                         }
                     }
                 }
@@ -1187,22 +1171,7 @@ where
                             updated_bitmap.get(&downstream_fragment_id)
                         {
                             // if downstream scale in/out
-                            let mut raw = vec![0 as ActorId; VIRTUAL_NODE_COUNT];
-
-                            for (actor_id, bitmap) in downstream_updated_bitmap {
-                                for (idx, pos) in raw.iter_mut().enumerate() {
-                                    if bitmap.is_set(idx).unwrap() {
-                                        *pos = *actor_id;
-                                    }
-                                }
-                            }
-
-                            let (original_indices, data) = compress_data(&raw);
-
-                            *mapping = ActorMapping {
-                                original_indices,
-                                data,
-                            }
+                            *mapping = actor_mapping_from_bitmaps(downstream_updated_bitmap)
                         }
                     }
                 }
@@ -1210,6 +1179,24 @@ where
         }
 
         Ok(())
+    }
+}
+
+fn actor_mapping_from_bitmaps(bitmaps: &HashMap<ActorId, Bitmap>) -> ActorMapping {
+    let mut raw = vec![0 as ActorId; VIRTUAL_NODE_COUNT];
+
+    for (actor_id, bitmap) in bitmaps {
+        for (idx, pos) in raw.iter_mut().enumerate() {
+            if bitmap.is_set(idx).unwrap() {
+                *pos = *actor_id;
+            }
+        }
+    }
+    let (original_indices, data) = compress_data(&raw);
+
+    ActorMapping {
+        original_indices,
+        data,
     }
 }
 
@@ -1221,11 +1208,15 @@ mod tests {
     use maplit::btreeset;
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+    use risingwave_common::util::compress::decompress_data;
     use risingwave_pb::common::ParallelUnit;
-    use risingwave_pb::stream_plan::StreamActor;
+    use risingwave_pb::stream_plan::{ActorMapping, StreamActor};
 
     use crate::model::ActorId;
+    use crate::stream::scale::actor_mapping_from_bitmaps;
     use crate::stream::{build_vnode_mapping, rebalance_actor_vnode, vnode_mapping_to_bitmaps};
+
+    const TARGET_PARALLEL_UNIT_COUNT: u32 = 12;
 
     fn build_fake_actors(info: &[(ActorId, ParallelUnitId)]) -> Vec<StreamActor> {
         let parallel_units = info
@@ -1283,9 +1274,45 @@ mod tests {
     }
 
     #[test]
-    fn test_rebalance_empty() {
-        let parallel_units = (0..5).map(|i| (i, i)).collect_vec();
+    fn test_actor_mapping_from_bitmaps() {
+        let parallel_units = (0..TARGET_PARALLEL_UNIT_COUNT)
+            .map(|i| (i, i))
+            .collect_vec();
         let actors = build_fake_actors(&parallel_units);
+
+        let bitmaps: HashMap<_, _> = actors
+            .into_iter()
+            .map(|actor| {
+                (
+                    actor.actor_id as ActorId,
+                    Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
+                )
+            })
+            .collect();
+
+        let ActorMapping {
+            original_indices,
+            data,
+        } = actor_mapping_from_bitmaps(&bitmaps);
+
+        let raw = decompress_data(&original_indices, &data);
+
+        for (actor_id, bitmap) in &bitmaps {
+            for (idx, value) in raw.iter().enumerate() {
+                if bitmap.is_set(idx).unwrap() {
+                    assert_eq!(*value, *actor_id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_rebalance_empty() {
+        let actors = build_fake_actors(
+            &(0..TARGET_PARALLEL_UNIT_COUNT)
+                .map(|i| (i, i))
+                .collect_vec(),
+        );
 
         // empty input
         let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &BTreeSet::new());
@@ -1294,52 +1321,87 @@ mod tests {
 
     #[test]
     fn test_rebalance_scale_in() {
-        let parallel_units = (0..12).map(|i| (i, i)).collect_vec();
-        let actors = build_fake_actors(&parallel_units);
+        let actors = build_fake_actors(
+            &(0..TARGET_PARALLEL_UNIT_COUNT)
+                .map(|i| (i, i))
+                .collect_vec(),
+        );
 
         // remove 1
         let actors_to_remove = btreeset! {0};
         let result = rebalance_actor_vnode(&actors, &actors_to_remove, &BTreeSet::new());
-        assert_eq!(result.len(), parallel_units.len() - actors_to_remove.len());
+        assert_eq!(result.len(), actors.len() - actors_to_remove.len());
         check_bitmaps(&result);
         check_affinity_for_scale_in(result.get(&(1 as ActorId)).unwrap(), &actors[1]);
 
         // remove 11
         let actors_to_remove = btreeset! {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
         let result = rebalance_actor_vnode(&actors, &actors_to_remove, &BTreeSet::new());
-        assert_eq!(result.len(), parallel_units.len() - actors_to_remove.len());
+        assert_eq!(result.len(), actors.len() - actors_to_remove.len());
         check_bitmaps(&result);
     }
 
     #[test]
     fn test_rebalance_scale_out() {
-        let parallel_units = (0..4).map(|i| (i, i)).collect_vec();
-        let actors = build_fake_actors(&parallel_units);
+        let actors = build_fake_actors(
+            &(0..TARGET_PARALLEL_UNIT_COUNT)
+                .map(|i| (i, i))
+                .collect_vec(),
+        );
 
         // add 1
-        let actors_to_add = btreeset! {4};
+        let actors_to_add = btreeset! {TARGET_PARALLEL_UNIT_COUNT};
         let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &actors_to_add);
-        assert_eq!(result.len(), parallel_units.len() + actors_to_add.len());
+        assert_eq!(result.len(), actors.len() + actors_to_add.len());
         check_bitmaps(&result);
 
-        let parallel_units = (0..5).map(|i| (i, i)).collect_vec();
-        let actors = build_fake_actors(&parallel_units);
+        let actors = build_fake_actors(
+            &(0..TARGET_PARALLEL_UNIT_COUNT)
+                .map(|i| (i, i))
+                .collect_vec(),
+        );
         // add 2
-        let actors_to_add = btreeset! {5, 6};
+        let actors_to_add = btreeset! {TARGET_PARALLEL_UNIT_COUNT, TARGET_PARALLEL_UNIT_COUNT+1};
         let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &actors_to_add);
-        assert_eq!(result.len(), parallel_units.len() + actors_to_add.len());
+        assert_eq!(result.len(), actors.len() + actors_to_add.len());
+        check_bitmaps(&result);
+    }
+
+    #[test]
+    fn test_rebalance_scale_in_then_out() {
+        let actors = build_fake_actors(
+            &(0..TARGET_PARALLEL_UNIT_COUNT)
+                .map(|i| (i, i))
+                .collect_vec(),
+        );
+
+        // remove 11
+        let actors_to_remove = btreeset! {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+        let result = rebalance_actor_vnode(&actors, &actors_to_remove, &BTreeSet::new());
+        assert_eq!(result.len(), actors.len() - actors_to_remove.len());
+        check_bitmaps(&result);
+
+        let parallel_units = (0..1).map(|i| (i, i)).collect_vec();
+        let actors = build_fake_actors(&parallel_units);
+
+        // add 11
+        let actors_to_add = btreeset! {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+        let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &actors_to_add);
+        assert_eq!(result.len(), actors.len() + actors_to_add.len());
         check_bitmaps(&result);
     }
 
     #[test]
     fn test_rebalance_migration() {
-        let num_actors = 20;
-        let parallel_units = (0..num_actors).map(|i| (i, i)).collect_vec();
-        let actors = build_fake_actors(&parallel_units);
+        let actors = build_fake_actors(
+            &(0..TARGET_PARALLEL_UNIT_COUNT)
+                .map(|i| (i, i))
+                .collect_vec(),
+        );
 
-        for idx in 0..num_actors {
+        for idx in 0..TARGET_PARALLEL_UNIT_COUNT {
             let actors_to_remove = btreeset! {idx as ActorId};
-            let actors_to_add = btreeset! {num_actors};
+            let actors_to_add = btreeset! {TARGET_PARALLEL_UNIT_COUNT};
             let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
 
             assert_eq!(
@@ -1360,11 +1422,14 @@ mod tests {
             }
         }
 
-        let parallel_units = (0..5).map(|i| (i, i)).collect_vec();
-        let actors = build_fake_actors(&parallel_units);
+        let actors = build_fake_actors(
+            &(0..TARGET_PARALLEL_UNIT_COUNT)
+                .map(|i| (i, i))
+                .collect_vec(),
+        );
 
         let actors_to_remove = btreeset! {0, 1};
-        let actors_to_add = btreeset! {5, 6};
+        let actors_to_add = btreeset! {TARGET_PARALLEL_UNIT_COUNT, TARGET_PARALLEL_UNIT_COUNT+1};
         let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
 
         assert_eq!(
@@ -1376,12 +1441,15 @@ mod tests {
     }
 
     #[test]
-    fn test_rebalance_remove_add() {
-        let parallel_units = (0..5).map(|i| (i, i)).collect_vec();
-        let actors = build_fake_actors(&parallel_units);
+    fn test_rebalance_scale() {
+        let actors = build_fake_actors(
+            &(0..TARGET_PARALLEL_UNIT_COUNT)
+                .map(|i| (i, i))
+                .collect_vec(),
+        );
 
         let actors_to_remove = btreeset! {0};
-        let actors_to_add = btreeset! {5, 6};
+        let actors_to_add = btreeset! {TARGET_PARALLEL_UNIT_COUNT, TARGET_PARALLEL_UNIT_COUNT+1};
         let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
 
         assert_eq!(
@@ -1391,7 +1459,7 @@ mod tests {
         check_bitmaps(&result);
 
         let actors_to_remove = btreeset! {0, 1};
-        let actors_to_add = btreeset! {5};
+        let actors_to_add = btreeset! {TARGET_PARALLEL_UNIT_COUNT};
         let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
 
         assert_eq!(
@@ -1404,7 +1472,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rebalance_remove_add_max() {
+    fn test_rebalance_scale_real() {
         let parallel_units = (0..(VIRTUAL_NODE_COUNT - 1) as ActorId)
             .map(|i| (i, i))
             .collect_vec();

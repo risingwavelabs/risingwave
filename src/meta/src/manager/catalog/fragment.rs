@@ -636,23 +636,11 @@ where
                         }
 
                         if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
-                            let ActorMapping {
-                                original_indices,
-                                data,
-                            } = actor_mapping;
-
-                            let parallel_unit_data = data
-                                .iter()
-                                .map(|actor_id| {
-                                    *actor_to_parallel_unit.get(actor_id).unwrap() as ParallelUnitId
-                                })
-                                .collect_vec();
-
-                            *vnode_mapping = ParallelUnitMapping {
+                            *vnode_mapping = actor_mapping_to_vnode_mapping(
                                 fragment_id,
-                                original_indices: original_indices.clone(),
-                                data: parallel_unit_data,
-                            }
+                                &actor_to_parallel_unit,
+                                actor_mapping,
+                            )
                         }
                     }
 
@@ -840,5 +828,27 @@ where
         }
 
         Ok(info)
+    }
+}
+
+fn actor_mapping_to_vnode_mapping(
+    fragment_id: FragmentId,
+    actor_to_parallel_unit: &HashMap<ActorId, ParallelUnitId>,
+    actor_mapping: &ActorMapping,
+) -> ParallelUnitMapping {
+    let ActorMapping {
+        original_indices,
+        data,
+    } = actor_mapping;
+
+    let parallel_unit_data = data
+        .iter()
+        .map(|actor_id| *actor_to_parallel_unit.get(actor_id).unwrap() as ParallelUnitId)
+        .collect_vec();
+
+    ParallelUnitMapping {
+        fragment_id,
+        original_indices: original_indices.clone(),
+        data: parallel_unit_data,
     }
 }

@@ -19,7 +19,7 @@ use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -482,19 +482,10 @@ where
                             .collect::<HashMap<_, _>>();
 
                         // Transform the mapping of parallel unit to the mapping of actor.
-                        let ParallelUnitMapping {
-                            original_indices,
-                            data,
-                            ..
-                        } = downstream_vnode_mapping;
-                        let data = data
-                            .iter()
-                            .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
-                            .collect_vec();
-                        dispatcher.hash_mapping = Some(ActorMapping {
-                            original_indices: original_indices.clone(),
-                            data,
-                        });
+                        dispatcher.hash_mapping = Some(vnode_mapping_to_actor_mapping(
+                            downstream_vnode_mapping,
+                            parallel_unit_actor_map,
+                        ));
                     }
                 }
             }
@@ -745,6 +736,28 @@ where
         Ok(())
     }
 }
+
+fn vnode_mapping_to_actor_mapping(
+    vnode_mapping: &ParallelUnitMapping,
+    parallel_unit_actor_map: HashMap<ParallelUnitId, ActorId>,
+) -> ActorMapping {
+    let ParallelUnitMapping {
+        original_indices,
+        data,
+        ..
+    } = vnode_mapping;
+
+    let data = data
+        .iter()
+        .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
+        .collect_vec();
+
+    ActorMapping {
+        original_indices: original_indices.clone(),
+        data,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
