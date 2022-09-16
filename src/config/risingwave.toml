@@ -20,6 +20,7 @@ meta_cache_capacity_mb = 1024
 compactor_memory_limit_mb = 5120
 
 [storage.file_cache]
-capacity = 1073741824                 # 1 GiB
-total_buffer_capacity = 134217728     # 128 MiB
-cache_file_fallocate_unit = 100663296 # 96 MiB
+capacity_mb = 1024
+total_buffer_capacity_mb = 128
+cache_file_fallocate_unit_mb = 512
+cache_meta_fallocate_unit_mb = 16

@@ -62,6 +62,7 @@ where
 }
 
 /// Options shared by all meta service instances
+#[derive(Clone)]
 pub struct MetaOpts {
     pub enable_recovery: bool,
     pub barrier_interval: Duration,

@@ -66,13 +66,13 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
 }
 
 #[derive(Clone)]
-pub struct TTLCompactionFilter {
+pub struct TtlCompactionFilter {
     table_id_to_ttl: HashMap<u32, u32>,
     expire_epoch: u64,
     last_table_and_ttl: Option<(u32, u64)>,
 }
 
-impl CompactionFilter for TTLCompactionFilter {
+impl CompactionFilter for TtlCompactionFilter {
     fn should_delete(&mut self, key: &[u8]) -> bool {
         pub use risingwave_common::util::epoch::Epoch;
         let (table_id, epoch) = extract_table_id_and_epoch(key);
@@ -101,7 +101,7 @@ impl CompactionFilter for TTLCompactionFilter {
     }
 }
 
-impl TTLCompactionFilter {
+impl TtlCompactionFilter {
     pub fn new(table_id_to_ttl: HashMap<u32, u32>, expire: u64) -> Self {
         Self {
             table_id_to_ttl,

@@ -12,21 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(target_os = "linux")]
-mod analyze;
-#[cfg(target_os = "linux")]
-mod bench;
-#[cfg(target_os = "linux")]
-mod rate;
-#[cfg(target_os = "linux")]
-mod utils;
-
-#[tokio::main]
-async fn main() {
-    if !cfg!(target_os = "linux") {
-        panic!("only support linux")
-    }
-
-    #[cfg(target_os = "linux")]
-    bench::run().await;
-}
+#[cfg(all(test, feature = "sync_point"))]
+mod tests;
