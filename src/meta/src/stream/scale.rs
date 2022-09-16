@@ -165,6 +165,16 @@ pub(crate) fn rebalance_actor_vnode(
         builder
     };
 
+    let (prev_expected, _) = VIRTUAL_NODE_COUNT.div_rem(&actors.len());
+
+    let prev_remain = removed
+        .iter()
+        .map(|(_, bitmap)| {
+            assert!(bitmap.num_high_bits() >= prev_expected);
+            bitmap.num_high_bits() - prev_expected
+        })
+        .sum::<usize>();
+
     removed.sort_by(order_by_bitmap_desc);
     rest.sort_by(order_by_bitmap_desc);
 
@@ -195,6 +205,7 @@ pub(crate) fn rebalance_actor_vnode(
     for balance in created_balances
         .iter_mut()
         .rev()
+        .take(prev_remain)
         .chain(rest_balances.iter_mut())
     {
         if remain > 0 {
@@ -1322,19 +1333,32 @@ mod tests {
 
     #[test]
     fn test_rebalance_migration() {
-        let parallel_units = (0..4).map(|i| (i, i)).collect_vec();
+        let num_actors = 20;
+        let parallel_units = (0..num_actors).map(|i| (i, i)).collect_vec();
         let actors = build_fake_actors(&parallel_units);
 
-        let actors_to_remove = btreeset! {0};
-        let actors_to_add = btreeset! {4};
-        let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
+        for idx in 0..num_actors {
+            let actors_to_remove = btreeset! {idx as ActorId};
+            let actors_to_add = btreeset! {num_actors};
+            let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
 
-        assert_eq!(
-            result.len(),
-            actors.len() - actors_to_remove.len() + actors_to_add.len()
-        );
+            assert_eq!(
+                result.len(),
+                actors.len() - actors_to_remove.len() + actors_to_add.len()
+            );
 
-        check_bitmaps(&result);
+            check_bitmaps(&result);
+
+            for actor in &actors {
+                if actor.actor_id == idx {
+                    continue;
+                }
+
+                let target_bitmap = result.get(&actor.actor_id).unwrap();
+                let prev_bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
+                assert!(prev_bitmap.eq(target_bitmap));
+            }
+        }
 
         let parallel_units = (0..5).map(|i| (i, i)).collect_vec();
         let actors = build_fake_actors(&parallel_units);
