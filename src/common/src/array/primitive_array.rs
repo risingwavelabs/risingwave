@@ -144,7 +144,7 @@ impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
     pub fn from_slice(data: &[Option<T>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i).unwrap();
+            builder.append(*i);
         }
         builder.finish()
     }
@@ -248,7 +248,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         }
     }
 
-    fn append(&mut self, value: Option<T>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<T>) {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -259,15 +259,13 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
                 self.data.push(T::default());
             }
         }
-        Ok(())
     }
 
-    fn append_array(&mut self, other: &PrimitiveArray<T>) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &PrimitiveArray<T>) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
         self.data.extend_from_slice(&other.data);
-        Ok(())
     }
 
     fn finish(self) -> PrimitiveArray<T> {
@@ -286,7 +284,7 @@ mod tests {
     fn helper_test_builder<T: PrimitiveArrayItemType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());
         for d in data {
-            builder.append(d).unwrap();
+            builder.append(d);
         }
         builder.finish()
     }

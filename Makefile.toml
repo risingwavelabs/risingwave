@@ -649,10 +649,25 @@ extend = "slt"
 args = ["${@}", "./e2e_test/batch/**/*.slt"]
 description = "Run all batch e2e tests"
 
+[tasks.slt-generated]
+category = "RiseDev - SQLLogicTest"
+extend = "slt"
+args = ["${@}", "./e2e_test/generated/**/*.slt"]
+description = "Run all generated e2e tests"
+
 [tasks.slt-all]
 category = "RiseDev - SQLLogicTest"
-run_task = { name = ["slt-streaming", "slt-batch"] }
-description = "Run all batch and streaming e2e tests"
+run_task = { name = ["slt-streaming", "slt-batch", "slt-generated"] }
+description = "Run all e2e tests"
+
+[tasks.docslt]
+category = "RiseDev - SQLLogicTest"
+description = "Extract SQL examples written in SQLLogicTest syntax from Rust doc comments"
+script = '''
+#!/bin/bash
+set -e
+cargo run --bin risedev-docslt -- "$@"
+'''
 
 [tasks.compose]
 category = "RiseDev - Compose"

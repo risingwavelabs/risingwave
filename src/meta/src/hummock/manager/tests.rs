@@ -105,7 +105,6 @@ async fn test_unpin_snapshot_before() {
 #[tokio::test]
 async fn test_hummock_compaction_task() {
     let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
     let sst_num = 2;
 
     // No compaction task available.
@@ -138,10 +137,13 @@ async fn test_hummock_compaction_task() {
         .await
         .unwrap()
         .unwrap();
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+    compactor_manager.add_compactor(worker_node.id, u64::MAX);
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
+    assert_eq!(compactor.context_id(), worker_node.id);
     assert_eq!(
         compact_task
             .get_input_ssts()
@@ -154,12 +156,12 @@ async fn test_hummock_compaction_task() {
 
     // Cancel the task and succeed.
     assert!(hummock_manager
-        .cancel_compact_task(&mut compact_task)
+        .cancel_compact_task(&mut compact_task, TaskStatus::ManualCanceled)
         .await
         .unwrap());
     // Cancel a non-existent task and succeed.
     assert!(hummock_manager
-        .cancel_compact_task(&mut compact_task)
+        .cancel_compact_task(&mut compact_task, TaskStatus::ManualCanceled)
         .await
         .unwrap());
 
@@ -169,8 +171,8 @@ async fn test_hummock_compaction_task() {
         .await
         .unwrap()
         .unwrap();
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
@@ -178,12 +180,12 @@ async fn test_hummock_compaction_task() {
     compact_task.set_task_status(TaskStatus::Success);
 
     assert!(hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .report_compact_task(compactor.context_id(), &compact_task)
         .await
         .unwrap());
     // Finish the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .report_compact_task(compactor.context_id(), &compact_task)
         .await
         .unwrap());
 }
@@ -797,13 +799,13 @@ async fn test_trigger_manual_compaction() {
 
     {
         let option = ManualCompactionOption::default();
-        // to check no compactor
+        // to check no compaction task
         let result = hummock_manager
             .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
 
         assert_eq!(
-            "trigger_manual_compaction No compactor is available. compaction_group 2",
+            "trigger_manual_compaction No compaction_task is available. compaction_group 2",
             result.err().unwrap().to_string()
         );
     }
@@ -811,17 +813,8 @@ async fn test_trigger_manual_compaction() {
     // No compaction task available.
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
     let receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
-    {
-        let option = ManualCompactionOption::default();
-        let result = hummock_manager
-            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
-            .await;
-        assert_eq!(
-            "trigger_manual_compaction No compaction_task is available. compaction_group 2",
-            result.err().unwrap().to_string()
-        );
-    }
 
+    // Assign
     let _ = add_test_tables(&hummock_manager, context_id).await;
     {
         // to check compactor send task fail
@@ -920,10 +913,11 @@ async fn test_hummock_compaction_task_heartbeat() {
         .await
         .unwrap()
         .unwrap();
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
+
     assert_eq!(
         compact_task
             .get_input_ssts()
@@ -934,9 +928,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     );
     assert_eq!(compact_task.get_task_id(), 2);
     // send task
-    compactor_manager
-        .random_compactor()
-        .unwrap()
+    compactor
         .send_task(Task::CompactTask(compact_task.clone()))
         .await
         .unwrap();
@@ -953,7 +945,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     }
 
     // Cancel the task immediately and succeed.
-    compact_task.set_task_status(TaskStatus::Failed);
+    compact_task.set_task_status(TaskStatus::ExecuteFailed);
 
     assert!(hummock_manager
         .report_compact_task(context_id, &compact_task)
@@ -966,15 +958,13 @@ async fn test_hummock_compaction_task_heartbeat() {
         .await
         .unwrap()
         .unwrap();
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
     // send task
-    compactor_manager
-        .random_compactor()
-        .unwrap()
+    compactor
         .send_task(Task::CompactTask(compact_task.clone()))
         .await
         .unwrap();
@@ -983,7 +973,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
 
     // Cancel the task after heartbeat has triggered and fail.
-    compact_task.set_task_status(TaskStatus::Failed);
+    compact_task.set_task_status(TaskStatus::ExecuteFailed);
     assert!(!hummock_manager
         .report_compact_task(context_id, &compact_task)
         .await
@@ -1039,8 +1029,8 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         .await
         .unwrap()
         .unwrap();
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
     assert_eq!(
@@ -1053,9 +1043,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     );
     assert_eq!(compact_task.get_task_id(), 2);
     // send task
-    compactor_manager
-        .random_compactor()
-        .unwrap()
+    compactor
         .send_task(Task::CompactTask(compact_task.clone()))
         .await
         .unwrap();
