@@ -235,7 +235,7 @@ fn infer_type_for_special(
             };
             let left_ele_type = left_ele_type_opt.ok_or_else(|| {
                 ErrorCode::BindError(format!(
-                    "Cannot prepend {} to {}.",
+                    "Cannot append {} to {}",
                     right_type, left_type
                 ))
             })?;
@@ -291,7 +291,7 @@ fn infer_type_for_special(
             };
             let right_ele_type = right_ele_type_opt.ok_or_else(|| {
                 ErrorCode::BindError(format!(
-                    "Cannot append {} to {}.",
+                    "Cannot prepend {} to {}",
                     right_type, left_type
                 ))
             })?;
