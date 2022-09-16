@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use lazy_static::lazy_static;
+use std::sync::LazyLock;
+
 use regex::Regex;
 
 pub const RW_TABLE_FUNCTION_NAME: &str = "rw_table";
@@ -33,8 +34,7 @@ pub fn generate_internal_table_name_with_type(
 }
 
 pub fn valid_table_name(table_name: &str) -> bool {
-    lazy_static! {
-        static ref INTERNAL_TABLE_NAME: Regex = Regex::new(r"__internal_.*_\d+").unwrap();
-    }
+    static INTERNAL_TABLE_NAME: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"__internal_.*_\d+").unwrap());
     !INTERNAL_TABLE_NAME.is_match(table_name)
 }

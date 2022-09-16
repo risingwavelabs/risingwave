@@ -18,10 +18,9 @@ use std::future::Future;
 use std::iter::Fuse;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use lazy_static::lazy_static;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
@@ -197,9 +196,7 @@ impl MemoryStateStore {
     }
 
     pub fn shared() -> Self {
-        lazy_static! {
-            static ref STORE: MemoryStateStore = MemoryStateStore::new();
-        }
+        static STORE: LazyLock<MemoryStateStore> = LazyLock::new(MemoryStateStore::new);
         STORE.clone()
     }
 }

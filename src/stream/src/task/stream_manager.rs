@@ -42,9 +42,8 @@ use crate::task::{
 };
 
 #[cfg(test)]
-lazy_static::lazy_static! {
-    pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
-}
+pub static LOCAL_TEST_ADDR: std::sync::LazyLock<HostAddr> =
+    std::sync::LazyLock::new(|| "127.0.0.1:2333".parse().unwrap());
 
 pub type ActorHandle = JoinHandle<()>;
 
