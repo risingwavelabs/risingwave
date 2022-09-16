@@ -529,6 +529,7 @@ impl LocalStreamManagerCore {
             executor_id,
             input_pos,
             self.streaming_metrics.clone(),
+            self.config.developer.enable_executor_row_count,
         );
         Ok(executor)
     }
@@ -561,6 +562,7 @@ impl LocalStreamManagerCore {
         executor_id: u64,
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
+        enable_executor_row_count: bool,
     ) -> BoxedExecutor {
         WrapperExecutor::new(
             executor,
@@ -568,6 +570,7 @@ impl LocalStreamManagerCore {
             actor_id,
             executor_id,
             streaming_metrics,
+            enable_executor_row_count,
         )
         .boxed()
     }

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_pb::plan_common::{ColumnOrder, StorageTableDesc};
 
 use super::{ColumnDesc, ColumnId, TableId};
@@ -66,5 +68,14 @@ impl TableDesc {
             dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
             retention_seconds: self.retention_seconds,
         }
+    }
+
+    /// Helper function to create a mapping from `column id` to `column index`
+    pub fn get_id_to_op_idx_mapping(&self) -> HashMap<ColumnId, usize> {
+        let mut id_to_idx = HashMap::new();
+        self.columns.iter().enumerate().for_each(|(idx, c)| {
+            id_to_idx.insert(c.column_id, idx);
+        });
+        id_to_idx
     }
 }

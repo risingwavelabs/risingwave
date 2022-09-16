@@ -54,9 +54,9 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
     for not_null in bitmap.iter() {
         if not_null {
             let v = R::read(&mut cursor)?;
-            builder.append(Some(v))?;
+            builder.append(Some(v));
         } else {
-            builder.append(None)?;
+            builder.append(None);
         }
     }
     let arr = builder.finish();
@@ -131,9 +131,9 @@ macro_rules! read_one_value_array {
                 let mut cursor = Cursor::new(buf);
                 for not_null in bitmap.iter() {
                     if not_null {
-                        builder.append(Some([<read_ $type:snake>](&mut cursor)?))?;
+                        builder.append(Some([<read_ $type:snake>](&mut cursor)?));
                     } else {
-                        builder.append(None)?;
+                        builder.append(None);
                     }
                 }
                 let arr = builder.finish();
@@ -194,9 +194,9 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
                 )
             })?;
             let v = R::read(buf.as_slice())?;
-            builder.append(Some(v))?;
+            builder.append(Some(v));
         } else {
-            builder.append(None)?;
+            builder.append(None);
         }
     }
     let arr = builder.finish();

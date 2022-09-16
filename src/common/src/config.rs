@@ -85,6 +85,9 @@ pub struct StreamingConfig {
 
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
+
+    #[serde(default)]
+    pub developer: DeveloperConfig,
 }
 
 impl Default for StreamingConfig {
@@ -196,6 +199,22 @@ pub struct FileCacheConfig {
 }
 
 impl Default for FileCacheConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeveloperConfig {
+    /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
+    /// and might affect the prometheus performance. If you only need actor input and output
+    /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
+    #[serde(default = "default::developer_enable_executor_row_count")]
+    pub enable_executor_row_count: bool,
+}
+
+impl Default for DeveloperConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -315,6 +334,10 @@ mod default {
 
     pub fn max_sub_compaction() -> u32 {
         4
+    }
+
+    pub fn developer_enable_executor_row_count() -> bool {
+        false
     }
 }
 

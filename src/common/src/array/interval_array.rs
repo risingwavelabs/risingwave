@@ -30,7 +30,7 @@ mod tests {
         let mut array_builder = IntervalArrayBuilder::new(cardinality);
         for _ in 0..cardinality {
             let v = IntervalUnit::from_ymd(1, 0, 0);
-            array_builder.append(Some(v)).unwrap();
+            array_builder.append(Some(v));
         }
         let ret_arr = array_builder.finish();
         for v in ret_arr.iter().flatten() {
