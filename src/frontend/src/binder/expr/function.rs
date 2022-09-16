@@ -202,7 +202,7 @@ impl Binder {
                         "Too many/few arguments for pg_catalog.pg_get_userbyid()".into(),
                     )
                     .into())
-                }
+                };
             }
             "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
             // internal

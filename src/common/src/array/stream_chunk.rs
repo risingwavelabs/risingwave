@@ -110,17 +110,13 @@ impl StreamChunk {
         for (op, row) in rows {
             ops.push(*op);
             for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
-                builder.append_datum(datum)?;
+                builder.append_datum(datum);
             }
         }
 
-        let new_arrays = array_builders
+        let new_columns = array_builders
             .into_iter()
             .map(|builder| builder.finish())
-            .collect::<ArrayResult<Vec<_>>>()?;
-
-        let new_columns = new_arrays
-            .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
         Ok(StreamChunk::new(ops, new_columns, None))
@@ -295,6 +291,9 @@ impl fmt::Debug for StreamChunk {
 /// Test utilities for [`StreamChunk`].
 pub trait StreamChunkTestExt {
     fn from_pretty(s: &str) -> Self;
+
+    /// Validate the `StreamChunk` layout.
+    fn valid(&self) -> bool;
 }
 
 impl StreamChunkTestExt for StreamChunk {
@@ -399,9 +398,7 @@ impl StreamChunkTestExt for StreamChunk {
                     }
                     _ => panic!("invalid data type"),
                 };
-                builder
-                    .append_datum(&datum)
-                    .expect("failed to append datum");
+                builder.append_datum(&datum);
             }
             let visible = match token.next() {
                 None | Some("//") => true,
@@ -412,7 +409,7 @@ impl StreamChunkTestExt for StreamChunk {
         }
         let columns = array_builders
             .into_iter()
-            .map(|builder| Column::new(Arc::new(builder.finish().unwrap())))
+            .map(|builder| Column::new(Arc::new(builder.finish())))
             .collect();
         let visibility = if visibility.iter().all(|b| *b) {
             None
@@ -420,6 +417,16 @@ impl StreamChunkTestExt for StreamChunk {
             Some(Bitmap::from_iter(visibility))
         };
         StreamChunk::new(ops, columns, visibility)
+    }
+
+    fn valid(&self) -> bool {
+        let len = self.ops.len();
+        let data = &self.data;
+        data.vis().len() == len
+            && data
+                .columns()
+                .iter()
+                .all(|col| col.array_ref().len() == len)
     }
 }
 

@@ -18,7 +18,7 @@ use risingwave_common::types::DataType;
 use super::Rule;
 use crate::expr::{ExprType, WindowFunctionType};
 use crate::optimizer::plan_node::{
-    LogicalFilter, LogicalProject, LogicalTopN, PlanTreeNodeUnary, PlanWindowFunction,
+    LogicalFilter, LogicalTopN, PlanTreeNodeUnary, PlanWindowFunction,
 };
 use crate::optimizer::property::{FieldOrder, Order};
 use crate::planner::LIMIT_ALL_COUNT;
@@ -29,7 +29,7 @@ use crate::PlanRef;
 /// ```sql
 /// SELECT .. from
 ///   (SELECT .., ROW_NUMBER() OVER(PARTITION BY .. ORDER BY ..) rank from ..)
-/// WHERE rank < ..;
+/// WHERE rank [ < | <= | > | >= | = ] ..;
 /// ```
 pub struct OverAggToTopNRule;
 
@@ -41,30 +41,23 @@ impl OverAggToTopNRule {
 
 impl Rule for OverAggToTopNRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let project_upper = plan.as_logical_project()?;
-        let plan = project_upper.input();
+        let project = plan.as_logical_project()?;
+        let plan = project.input();
         let filter = plan.as_logical_filter()?;
         let plan = filter.input();
-        let project_lower = plan.as_logical_project()?;
-        let plan = project_lower.input();
+        // The filter is directly on top of the over agg after predicate pushdown.
         let over_agg = plan.as_logical_over_agg()?;
         let input = over_agg.input();
 
-        // The position of the window function in project_lower
-        let window_func_pos = {
-            let over_agg_len = over_agg.schema().len();
-            project_lower.exprs().iter().position(|e| {
-                e.as_input_ref()
-                    .map(|i| i.index() == over_agg_len - 1)
-                    .unwrap_or(false)
-            })?
-        };
+        let over_agg_len = over_agg.schema().len();
+        let window_func_pos = over_agg_len - 1;
 
-        if project_upper.exprs().iter().any(|expr| {
-            expr.collect_input_refs(project_lower.schema().len())
+        if project.exprs().iter().any(|expr| {
+            expr.collect_input_refs(over_agg_len)
                 .contains(window_func_pos)
         }) {
             // TopN with ranking output is not supported yet.
+            tracing::error!("TopN with ranking output is not supported yet.");
             return None;
         }
 
@@ -78,31 +71,50 @@ impl Rule for OverAggToTopNRule {
 
         let (rank_pred, other_pred) = {
             let predicate = filter.predicate();
-            let mut rank_col = FixedBitSet::with_capacity(project_lower.schema().len());
+            let mut rank_col = FixedBitSet::with_capacity(over_agg_len);
             rank_col.set(window_func_pos, true);
             predicate.clone().split_disjoint(&rank_col)
         };
 
-        // TODO: support multiple complex rank predicates. Currently only support rank<N
+        // TODO: support multiple complex rank predicates.
+        // Currently rank [ < | <= | > | >= ] N is used to implement group topn.
+        // While rank = 1 is used to implement deduplication.
         let (limit, offset) = {
             if rank_pred.conjunctions.len() != 1 {
+                tracing::error!("Multiple complex rank predicates is not supported yet.");
                 return None;
             }
-            let (input_ref, cmp, v) = rank_pred.conjunctions[0].as_comparison_const()?;
-            assert_eq!(input_ref.index, window_func_pos);
-            let v = v
-                .cast_implicit(DataType::Int64)
-                .ok()?
-                .eval_row_const()
-                .ok()??;
-            let v = *v.as_int64();
-            // Note: rank functions start from 1
-            match cmp {
-                ExprType::LessThanOrEqual => (v.max(0) as usize, 0),
-                ExprType::LessThan => ((v - 1).max(0) as usize, 0),
-                ExprType::GreaterThan => (LIMIT_ALL_COUNT, v.max(0) as usize),
-                ExprType::GreaterThanOrEqual => (LIMIT_ALL_COUNT, (v - 1).max(0) as usize),
-                _ => unreachable!(),
+            if let Some((input_ref, cmp, v)) = rank_pred.conjunctions[0].as_comparison_const() {
+                assert_eq!(input_ref.index, window_func_pos);
+                let v = v
+                    .cast_implicit(DataType::Int64)
+                    .ok()?
+                    .eval_row_const()
+                    .ok()??;
+                let v = *v.as_int64();
+                // Note: rank functions start from 1
+                match cmp {
+                    ExprType::LessThanOrEqual => (v.max(0) as usize, 0),
+                    ExprType::LessThan => ((v - 1).max(0) as usize, 0),
+                    ExprType::GreaterThan => (LIMIT_ALL_COUNT, v.max(0) as usize),
+                    ExprType::GreaterThanOrEqual => (LIMIT_ALL_COUNT, (v - 1).max(0) as usize),
+                    _ => unreachable!(),
+                }
+            } else if let Some((input_ref, v)) = rank_pred.conjunctions[0].as_eq_const() {
+                assert_eq!(input_ref.index, window_func_pos);
+                let v = v
+                    .cast_implicit(DataType::Int64)
+                    .ok()?
+                    .eval_row_const()
+                    .ok()??;
+                let v = *v.as_int64();
+                if v == 1 {
+                    (1, 0)
+                } else {
+                    return None;
+                }
+            } else {
+                return None;
             }
         };
 
@@ -122,12 +134,7 @@ impl Rule for OverAggToTopNRule {
             partition_by.iter().map(|i| i.index).collect(),
         )
         .into();
-        let project_lower = {
-            let mut project_lower_exprs = project_lower.exprs().clone();
-            project_lower_exprs.pop();
-            LogicalProject::create(topn, project_lower_exprs)
-        };
-        let filter = LogicalFilter::create(project_lower, other_pred);
-        Some(project_upper.clone_with_input(filter).into())
+        let filter = LogicalFilter::create(topn, other_pred);
+        Some(project.clone_with_input(filter).into())
     }
 }

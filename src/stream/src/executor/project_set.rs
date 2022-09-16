@@ -161,20 +161,20 @@ impl ProjectSetExecutor {
                         };
                         ret_ops.extend(vec![op; max_tf_len]);
                         for i in 0..max_tf_len {
-                            projected_row_id_builder.append(Some(i as i64))?;
+                            projected_row_id_builder.append(Some(i as i64));
                         }
 
                         for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
                             match item {
                                 Either::Left(array_ref) => {
-                                    builder.append_array(&array_ref)?;
+                                    builder.append_array(&array_ref);
                                     for _ in 0..(max_tf_len - array_ref.len()) {
-                                        builder.append_null()?;
+                                        builder.append_null();
                                     }
                                 }
                                 Either::Right(datum_ref) => {
                                     for _ in 0..max_tf_len {
-                                        builder.append_datum_ref(datum_ref)?;
+                                        builder.append_datum_ref(datum_ref);
                                     }
                                 }
                             }
@@ -183,11 +183,11 @@ impl ProjectSetExecutor {
 
                     let mut columns = Vec::with_capacity(self.select_list.len() + 1);
                     let projected_row_id: ArrayRef =
-                        Arc::new(projected_row_id_builder.finish()?.into());
+                        Arc::new(projected_row_id_builder.finish().into());
                     let cardinality = projected_row_id.len();
                     columns.push(Column::new(projected_row_id));
                     for builder in builders {
-                        columns.push(Column::new(Arc::new(builder.finish()?)))
+                        columns.push(Column::new(Arc::new(builder.finish())))
                     }
 
                     let chunk = DataChunk::new(columns, cardinality);

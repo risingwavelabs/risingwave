@@ -73,8 +73,8 @@ impl Expression for VnodeExpression {
         let mut builder = I16ArrayBuilder::new(input.capacity());
         hash_values
             .into_iter()
-            .try_for_each(|h| builder.append(Some(h.to_vnode() as i16)))?;
-        Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
+            .for_each(|h| builder.append(Some(h.to_vnode() as i16)));
+        Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

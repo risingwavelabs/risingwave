@@ -161,6 +161,7 @@ impl StreamTableScan {
                 // The merge node should be empty
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::Merge(Default::default())),
+                    identity: "Upstream".into(),
                     ..Default::default()
                 },
                 ProstStreamPlan {
@@ -199,7 +200,10 @@ impl StreamTableScan {
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,
-            identity: format!("{}", self),
+            identity: {
+                let s = format!("{}", self);
+                s.replace("StreamTableScan", "Chain")
+            },
             append_only: self.append_only(),
         }
     }

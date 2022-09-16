@@ -41,6 +41,7 @@
 #![feature(is_some_with)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
+#![feature(once_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
@@ -138,10 +139,6 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value = "604800")]
     min_sst_retention_time_sec: u64,
 
-    /// Compaction scheduler retries compactor selection with this interval.
-    #[clap(long, default_value = "5")]
-    compactor_selection_retry_interval_sec: u64,
-
     /// The spin interval when collecting global GC watermark in hummock
     #[clap(long, default_value = "5")]
     collect_gc_watermark_spin_interval_sec: u64,
@@ -211,7 +208,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 in_flight_barrier_nums,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
                 min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
-                compactor_selection_retry_interval_sec: opts.compactor_selection_retry_interval_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,

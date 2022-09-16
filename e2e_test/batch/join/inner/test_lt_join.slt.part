@@ -6,10 +6,6 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-# create table ... as ... not working
-# statement ok
-# create table a AS SELECT i FROM range(1, 2001, 1) t1(i)
-
 statement ok
 create table a (i int);
 

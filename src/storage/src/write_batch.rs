@@ -93,15 +93,6 @@ where
         Ok(())
     }
 
-    /// Ingests this batch into the associated state store, without being persisted.
-    pub async fn replicate_remote(mut self) -> StorageResult<()> {
-        self.preprocess()?;
-        self.store
-            .replicate_batch(self.batch, self.write_options)
-            .await?;
-        Ok(())
-    }
-
     /// Creates a [`KeySpaceWriteBatch`] with the given `prefix`, which automatically prepends the
     /// prefix when writing.
     pub fn prefixify(self, keyspace: &'a Keyspace<S>) -> KeySpaceWriteBatch<'a, S> {

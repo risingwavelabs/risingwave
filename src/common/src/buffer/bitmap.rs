@@ -109,6 +109,20 @@ impl BitmapBuilder {
         self
     }
 
+    pub fn pop(&mut self) -> Option<()> {
+        if self.len == 0 {
+            return None;
+        }
+        let mut rem = self.len % 8;
+        if rem == 0 {
+            self.head = self.data.pop().unwrap();
+            rem = 8;
+        }
+        self.head &= !(1 << (rem - 1));
+        self.len -= 1;
+        Some(())
+    }
+
     pub fn append_bitmap(&mut self, other: &Bitmap) -> &mut Self {
         for bit in other.iter() {
             self.append(bit);
@@ -558,5 +572,34 @@ mod tests {
 
         let b = b.finish();
         assert_eq!(b.bits.to_vec(), &[0b0000_0001, 0b0000_0110]);
+    }
+
+    #[test]
+    fn test_bitmap_pop() {
+        let mut b = BitmapBuilder::zeroed(7);
+
+        {
+            b.append(true);
+            assert!(b.is_set(b.len() - 1));
+            b.pop();
+            assert!(!b.is_set(b.len() - 1));
+        }
+
+        {
+            b.append(false);
+            assert!(!b.is_set(b.len() - 1));
+            b.pop();
+            assert!(!b.is_set(b.len() - 1));
+        }
+
+        {
+            b.append(true);
+            b.append(false);
+            assert!(!b.is_set(b.len() - 1));
+            b.pop();
+            assert!(b.is_set(b.len() - 1));
+            b.pop();
+            assert!(!b.is_set(b.len() - 1));
+        }
     }
 }

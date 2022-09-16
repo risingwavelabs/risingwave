@@ -86,14 +86,14 @@ impl ValuesExecutor {
                 for row in self.rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                         let out = expr.eval(&one_row_chunk)?;
-                        builder.append_array(&out)?;
+                        builder.append_array(&out);
                     }
                 }
 
-                let columns = array_builders
+                let columns: Vec<_> = array_builders
                     .into_iter()
-                    .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-                    .try_collect()?;
+                    .map(|b| Column::new(Arc::new(b.finish())))
+                    .collect();
 
                 let chunk = DataChunk::new(columns, chunk_size);
 
