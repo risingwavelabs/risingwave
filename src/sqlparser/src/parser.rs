@@ -2908,19 +2908,18 @@ impl Parser {
         } else {
             let name = self.parse_object_name()?;
             // Postgres,table-valued functions:
-            let (args, order_by) = if self.consume_token(&Token::LParen) {
-                self.parse_optional_args()?
+            if self.consume_token(&Token::LParen) {
+                let (args, order_by) = self.parse_optional_args()?;
+                // Table-valued functions do not support ORDER BY, should return error if it appears
+                if !order_by.is_empty() {
+                    return parser_err!("Table-valued functions do not support ORDER BY clauses");
+                }
+                let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
+                Ok(TableFactor::TableFunction { name, alias, args })
             } else {
-                (vec![], vec![])
-            };
-
-            // Table-valued functions do not support ORDER BY, should return error if it appears
-            if !order_by.is_empty() {
-                return parser_err!("Table-valued functions do not support ORDER BY clauses");
+                let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
+                Ok(TableFactor::Table { name, alias })
             }
-
-            let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-            Ok(TableFactor::Table { name, alias, args })
         }
     }
 
