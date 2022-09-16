@@ -203,6 +203,17 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         }
     }
 
+    fn pop(&mut self) -> Option<()> {
+        if self.bitmap.pop().is_some() {
+            self.offset.pop().unwrap();
+            let end = self.offset.last().unwrap();
+            self.data.truncate(*end);
+            Some(())
+        } else {
+            None
+        }
+    }
+
     fn finish(self) -> Utf8Array {
         Utf8Array {
             bitmap: (self.bitmap).finish(),
