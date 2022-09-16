@@ -110,13 +110,14 @@ impl CompactionPicker for LevelCompactionPicker {
                 if level_handlers[0].is_level_pending_compact(level) {
                     break;
                 }
+                // This break is optional. We can include overlapping sub-level actually.
                 if level.level_type() != LevelType::Nonoverlapping {
                     break;
                 }
                 l0_total_file_size += level.total_file_size;
                 input_levels.push(InputLevel {
                     level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
+                    level_type: level.level_type,
                     table_infos: level.table_infos.clone(),
                 });
             }
