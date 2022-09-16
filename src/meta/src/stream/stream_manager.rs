@@ -103,9 +103,6 @@ pub struct GlobalStreamManager<S: MetaStore> {
     /// Maintains streaming sources from external system like kafka
     source_manager: SourceManagerRef<S>,
 
-    /// Schedules streaming actors into compute nodes
-    scheduler: Scheduler<S>,
-
     /// Client Pool to stream service on compute nodes
     pub(crate) client_pool: StreamClientPoolRef,
 
@@ -128,7 +125,6 @@ where
         compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> MetaResult<Self> {
         Ok(Self {
-            scheduler: Scheduler::new(cluster_manager.clone()),
             fragment_manager,
             barrier_scheduler,
             cluster_manager,
@@ -374,7 +370,11 @@ where
         // Schedule actors to parallel units. `locations` will record the parallel unit that an
         // actor is scheduled to, and the worker node this parallel unit is on.
         let mut locations = {
-            // List all running worker nodes.
+            // List all running worker nodes and the parallel units.
+            //
+            // It's possible that the cluster configuration has been changed after we resolve the
+            // stream graph, so the scheduling is fallible and the client may need to retry.
+            // TODO: refactor to use a consistent snapshot of cluster configuration.
             let workers = self
                 .cluster_manager
                 .list_worker_node(
@@ -385,9 +385,11 @@ where
             if workers.is_empty() {
                 bail!("no available compute node in the cluster");
             }
+            let parallel_units = self.cluster_manager.list_active_parallel_units().await;
 
-            // Create empty locations.
+            // Create empty locations and the scheduler.
             let mut locations = ScheduledLocations::with_workers(workers);
+            let scheduler = Scheduler::new(parallel_units);
 
             // Schedule each fragment(actors) to nodes except chain, recorded in `locations`.
             // Vnode mapping in fragment will be filled in as well.
@@ -395,7 +397,7 @@ where
             for fragment_id in topological_order {
                 let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
                 if !chain_fragment_upstream_table_map.contains_key(&fragment_id) {
-                    self.scheduler.schedule(fragment, &mut locations).await?;
+                    scheduler.schedule(fragment, &mut locations)?;
                 }
             }
 
@@ -1041,7 +1043,7 @@ mod tests {
         let services = MockServices::start("127.0.0.1", 12333).await?;
 
         let table_id = TableId::new(0);
-        let actors = make_mview_stream_actors(&table_id, 5);
+        let actors = make_mview_stream_actors(&table_id, 4);
 
         let mut fragments = BTreeMap::default();
         fragments.insert(
@@ -1104,8 +1106,8 @@ mod tests {
             .fragment_manager
             .get_table_actor_ids(&table_id)
             .await?;
-        assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
-        assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
+        assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
+        assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
 
         services.stop().await;
         Ok(())
@@ -1116,7 +1118,7 @@ mod tests {
         let services = MockServices::start("127.0.0.1", 12334).await?;
 
         let table_id = TableId::new(0);
-        let actors = make_mview_stream_actors(&table_id, 5);
+        let actors = make_mview_stream_actors(&table_id, 4);
 
         let mut fragments = BTreeMap::default();
         fragments.insert(
@@ -1178,8 +1180,8 @@ mod tests {
             .fragment_manager
             .get_table_actor_ids(&table_id)
             .await?;
-        assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
-        assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
+        assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
+        assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
 
         // test drop materialized_view
         // the table_fragments will be deleted when barrier_manager run_command DropMaterializedView
@@ -1212,7 +1214,7 @@ mod tests {
         let services = MockServices::start("127.0.0.1", 12335).await.unwrap();
 
         let table_id = TableId::new(0);
-        let actors = make_mview_stream_actors(&table_id, 5);
+        let actors = make_mview_stream_actors(&table_id, 4);
 
         let mut fragments = BTreeMap::default();
         fragments.insert(
@@ -1278,8 +1280,8 @@ mod tests {
             .get_table_actor_ids(&table_id)
             .await
             .unwrap();
-        assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
-        assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
+        assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
+        assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
         let notify = Arc::new(Notify::new());
         let notify1 = notify.clone();
 
@@ -1301,7 +1303,7 @@ mod tests {
             .select_table_fragments_by_table_id(&table_id)
             .await
             .unwrap();
-        assert_eq!(table_fragments.actor_ids(), (0..5).collect_vec());
+        assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
         services
