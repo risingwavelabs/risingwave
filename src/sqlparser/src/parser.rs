@@ -402,7 +402,7 @@ impl Parser {
                 }),
                 Keyword::ROW => self.parse_row_expr(),
                 Keyword::ARRAY => Ok(Expr::Array(
-                    self.parse_token_wrapped_exprs_zeroable(&Token::LBracket, &Token::RBracket)?,
+                    self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
                 )),
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
                     parser_err!(format!("syntax error at or near \"{w}\""))
@@ -2283,41 +2283,14 @@ impl Parser {
     }
 
     pub fn parse_row_expr(&mut self) -> Result<Expr, ParserError> {
-        if self.consume_token(&Token::LParen) {
-            if self.consume_token(&Token::RParen) {
-                Ok(Expr::Row(vec![]))
-            } else {
-                self.prev_token();
-                Ok(Expr::Row(self.parse_token_wrapped_exprs(
-                    &Token::LParen,
-                    &Token::RParen,
-                )?))
-            }
-        } else {
-            self.expected("(", self.peek_token())
-        }
-    }
-
-    /// Parse a comma-separated list from a wrapped expression
-    pub fn parse_token_wrapped_exprs(
-        &mut self,
-        left: &Token,
-        right: &Token,
-    ) -> Result<Vec<Expr>, ParserError> {
-        if self.consume_token(left) {
-            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-            self.expect_token(right)?;
-            Ok(exprs)
-        } else {
-            self.expected(
-                format!("an array of expressions in {} and {}", left, right).as_str(),
-                self.peek_token(),
-            )
-        }
+        Ok(Expr::Row(self.parse_token_wrapped_exprs(
+            &Token::LParen,
+            &Token::RParen,
+        )?))
     }
 
     /// Parse a comma-separated list (maybe empty) from a wrapped expression
-    pub fn parse_token_wrapped_exprs_zeroable(
+    pub fn parse_token_wrapped_exprs(
         &mut self,
         left: &Token,
         right: &Token,
@@ -2332,10 +2305,7 @@ impl Parser {
             };
             Ok(exprs)
         } else {
-            self.expected(
-                format!("an array of expressions in {} and {}", left, right).as_str(),
-                self.peek_token(),
-            )
+            self.expected(left.to_string().as_str(), self.peek_token())
         }
     }
 
