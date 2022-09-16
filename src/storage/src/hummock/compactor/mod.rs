@@ -148,7 +148,7 @@ impl Compactor {
             Ok(tracker_id) => tracker_id,
             Err(err) => {
                 tracing::warn!("Failed to track pending SST id. {:#?}", err);
-                return TaskStatus::Failed;
+                return TaskStatus::TrackSstIdFailed;
             }
         };
         let sstable_id_manager_clone = context.sstable_id_manager.clone();
@@ -252,7 +252,7 @@ impl Compactor {
             tokio::select! {
                 _ = &mut shutdown_rx => {
                     tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
-                    task_status = TaskStatus::Failed;
+                    task_status = TaskStatus::ManualCanceled;
                     break;
                 }
                 future_result = buffered.next() => {
@@ -261,7 +261,7 @@ impl Compactor {
                             output_ssts.push((split_index, ssts));
                         }
                         Some(Ok(Err(e))) => {
-                            task_status = TaskStatus::Failed;
+                            task_status = TaskStatus::ExecuteFailed;
                             tracing::warn!(
                                 "Compaction task {} failed with error: {:#?}",
                                 compact_task.task_id,
@@ -270,7 +270,7 @@ impl Compactor {
                             break;
                         }
                         Some(Err(e)) => {
-                            task_status = TaskStatus::Failed;
+                            task_status = TaskStatus::JoinHandleFailed;
                             tracing::warn!(
                                 "Compaction task {} failed with join handle error: {:#?}",
                                 compact_task.task_id,

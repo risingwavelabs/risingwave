@@ -87,7 +87,7 @@ pub trait TableIter: Send {
             match self.next_row().await? {
                 Some(row) => {
                     for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
-                        builder.append_datum(&datum)?;
+                        builder.append_datum(&datum);
                     }
                     row_count += 1;
                 }
