@@ -68,7 +68,7 @@ impl SourceStreamChunkBuilder {
             self.op_builder,
             self.builders
                 .into_iter()
-                .map(|builder| { Column::new(Arc::new(builder.finish())) })
+                .map(|builder| Column::new(Arc::new(builder.finish())))
                 .collect(),
             None,
         )
