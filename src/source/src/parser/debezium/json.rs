@@ -161,7 +161,7 @@ mod test {
             let writer = builder.row_writer();
             parser.parse(payload, writer).unwrap();
         }
-        let chunk = builder.finish().unwrap();
+        let chunk = builder.finish();
         chunk
             .rows()
             .map(|(op, row_ref)| (op, row_ref.to_owned_row()))

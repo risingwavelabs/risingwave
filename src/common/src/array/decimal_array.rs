@@ -170,6 +170,10 @@ impl ArrayBuilder for DecimalArrayBuilder {
         self.data.extend_from_slice(&other.data);
     }
 
+    fn pop(&mut self) -> Option<()> {
+        self.data.pop().map(|_| self.bitmap.pop().unwrap())
+    }
+
     fn finish(self) -> DecimalArray {
         DecimalArray {
             bitmap: self.bitmap.finish(),
