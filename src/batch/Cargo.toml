@@ -19,7 +19,6 @@ fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
-lazy_static = "1"
 memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"
 num-traits = "0.2"

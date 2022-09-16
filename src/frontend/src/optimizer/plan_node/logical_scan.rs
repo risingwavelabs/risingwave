@@ -223,28 +223,34 @@ impl LogicalScan {
         &self.predicate
     }
 
+    /// get the Mapping of columnIndex from internal column index to output column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::with_remaining_columns(
+            &self.output_col_idx,
+            self.table_desc().columns.len(),
+        )
+    }
+
     /// Return indices of fields the output is ordered by and
     /// corresponding direction
     pub fn get_out_column_index_order(&self) -> Order {
-        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
-        Order::new(
+        let id_to_tb_idx = self.table_desc.get_id_to_op_idx_mapping();
+        let order = Order::new(
             self.table_desc
                 .order_key
                 .iter()
-                .filter_map(|order| {
-                    let out_idx = id_to_op_idx
+                .map(|order| {
+                    let idx = id_to_tb_idx
                         .get(&self.table_desc.columns[order.column_idx].column_id)
-                        .copied();
-                    match out_idx {
-                        Some(idx) => match order.order_type {
-                            OrderType::Ascending => Some(FieldOrder::ascending(idx)),
-                            OrderType::Descending => Some(FieldOrder::descending(idx)),
-                        },
-                        None => None,
+                        .unwrap();
+                    match order.order_type {
+                        OrderType::Ascending => FieldOrder::ascending(*idx),
+                        OrderType::Descending => FieldOrder::descending(*idx),
                     }
                 })
                 .collect(),
-        )
+        );
+        self.i2o_col_mapping().rewrite_provided_order(&order)
     }
 
     /// The mapped distribution key of the scan operator.

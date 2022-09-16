@@ -161,20 +161,20 @@ impl ProjectSetExecutor {
                         };
                         ret_ops.extend(vec![op; max_tf_len]);
                         for i in 0..max_tf_len {
-                            projected_row_id_builder.append(Some(i as i64))?;
+                            projected_row_id_builder.append(Some(i as i64));
                         }
 
                         for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
                             match item {
                                 Either::Left(array_ref) => {
-                                    builder.append_array(&array_ref)?;
+                                    builder.append_array(&array_ref);
                                     for _ in 0..(max_tf_len - array_ref.len()) {
-                                        builder.append_null()?;
+                                        builder.append_null();
                                     }
                                 }
                                 Either::Right(datum_ref) => {
                                     for _ in 0..max_tf_len {
-                                        builder.append_datum_ref(datum_ref)?;
+                                        builder.append_datum_ref(datum_ref);
                                     }
                                 }
                             }
