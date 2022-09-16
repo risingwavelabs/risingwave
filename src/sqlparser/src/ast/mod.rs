@@ -138,12 +138,6 @@ impl From<&str> for Ident {
     }
 }
 
-impl ParseTo for Ident {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
-        parser.parse_identifier()
-    }
-}
-
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.quote_style {
