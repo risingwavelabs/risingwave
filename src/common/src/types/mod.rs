@@ -303,8 +303,7 @@ impl DataType {
     }
 
     pub fn is_scalar(&self) -> bool {
-        match self {
-            DataType::Boolean
+        matches!(self, DataType::Boolean
             | DataType::Int16
             | DataType::Int32
             | DataType::Int64
@@ -316,9 +315,7 @@ impl DataType {
             | DataType::Timestamp
             | DataType::Timestampz
             | DataType::Time
-            | DataType::Interval => true,
-            _ => false, 
-        }
+            | DataType::Interval)
     }
 
     /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
