@@ -43,6 +43,16 @@ pub trait CompactionSchedulePolicy: Send + Sync {
         max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>>;
 
+    /// Make sure the compactor with `context_id` will not be scheduled until it resubscribes.
+    /// Retain the state related to `context_id` if the implementation is stateful.
+    ///
+    /// Note: It is allowed to pause a non-existent compactor.
+    fn pause_compactor(&mut self, context_id: HummockContextId);
+
+    /// Make sure the compactor with `context_id` will never be scheduled again. Remove any internal
+    /// state related to `context_id` if the implementation is stateful.
+    ///
+    /// Note: It is allowed to remove a non-existent compactor.
     fn remove_compactor(&mut self, context_id: HummockContextId);
 
     fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>>;
@@ -50,8 +60,7 @@ pub trait CompactionSchedulePolicy: Send + Sync {
     /// Notify the policy of the assignment of a compaction task to adjust the next compactor to
     /// schedule.
     ///
-    /// It is possible that the compactor with `context_id` does not exist. An error will be
-    /// returned in this case.
+    /// An error will be returned if `context_id` is removed.
     fn assign_compact_task(
         &mut self,
         context_id: HummockContextId,
@@ -60,6 +69,9 @@ pub trait CompactionSchedulePolicy: Send + Sync {
 
     /// Notify the policy of the completion of a compaction task to adjust the next compactor
     /// to schedule.
+    ///
+    /// It's ok if `context_id` does not exist, because a compactor might be removed after it has
+    /// reported a task.
     fn report_compact_task(&mut self, context_id: HummockContextId, compact_task: &CompactTask);
 
     fn compactor_num(&self) -> usize;
@@ -138,6 +150,10 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         rx
     }
 
+    fn pause_compactor(&mut self, context_id: HummockContextId) {
+        self.remove_compactor(context_id);
+    }
+
     fn remove_compactor(&mut self, context_id: HummockContextId) {
         self.compactors.retain(|c| *c != context_id);
         self.compactor_map.remove(&context_id);
@@ -184,7 +200,7 @@ pub struct ScoredPolicy {
     //
     // That is to say `score_to_compactor` should be a subset of `compactor_to_score`.
     score_to_compactor: BTreeMap<(Score, HummockContextId), Arc<Compactor>>,
-    compactor_to_score: HashMap<HummockContextId, Score>,
+    context_id_to_score: HashMap<HummockContextId, Score>,
 }
 
 impl ScoredPolicy {
@@ -201,7 +217,7 @@ impl ScoredPolicy {
         });
         Self {
             score_to_compactor: BTreeMap::new(),
-            compactor_to_score,
+            context_id_to_score: compactor_to_score,
         }
     }
 
@@ -221,14 +237,12 @@ impl ScoredPolicy {
         let new_score = old_score + Self::calculate_score_delta(compact_task);
         debug_assert!(new_score >= 0);
 
-        // The element must exist.
-        let compactor = self
-            .score_to_compactor
-            .remove(&(old_score, context_id))
-            .unwrap();
-        self.score_to_compactor
-            .insert((new_score, context_id), compactor);
-        *self.compactor_to_score.get_mut(&context_id).unwrap() = new_score;
+        if let Some(compactor) = self.score_to_compactor.remove(&(old_score, context_id)) {
+            self.score_to_compactor
+                .insert((new_score, context_id), compactor);
+        }
+
+        *self.context_id_to_score.get_mut(&context_id).unwrap() = new_score;
     }
 
     fn calculate_score_delta(compact_task: &CompactTask) -> Score {
@@ -278,7 +292,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         // If `context_id` already exists, we only need to update the task channel.
-        let score = self.compactor_to_score.entry(context_id).or_insert(0);
+        let score = self.context_id_to_score.entry(context_id).or_insert(0);
         self.score_to_compactor.insert(
             (*score, context_id),
             Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
@@ -286,18 +300,22 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         rx
     }
 
-    fn remove_compactor(&mut self, context_id: HummockContextId) {
-        if let Some(pending_bytes) = self.compactor_to_score.remove(&context_id) {
+    fn pause_compactor(&mut self, context_id: HummockContextId) {
+        if let Some(pending_bytes) = self.context_id_to_score.get(&context_id) {
             self.score_to_compactor
-                .remove(&(pending_bytes, context_id))
-                .unwrap();
+                .remove(&(*pending_bytes, context_id));
+        }
+    }
+
+    fn remove_compactor(&mut self, context_id: HummockContextId) {
+        if let Some(pending_bytes) = self.context_id_to_score.remove(&context_id) {
+            self.score_to_compactor.remove(&(pending_bytes, context_id));
         }
     }
 
     fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
-        if let Some(score) = self.compactor_to_score.get(&context_id) {
-            let compactor = self.score_to_compactor.get(&(*score, context_id));
-            Some(compactor.unwrap().clone())
+        if let Some(score) = self.context_id_to_score.get(&context_id) {
+            self.score_to_compactor.get(&(*score, context_id)).cloned()
         } else {
             None
         }
@@ -308,7 +326,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         context_id: HummockContextId,
         compact_task: &CompactTask,
     ) -> Result<()> {
-        if let Some(score) = self.compactor_to_score.get(&context_id) {
+        if let Some(score) = self.context_id_to_score.get(&context_id) {
             self.update_compactor_score(context_id, *score, compact_task);
             Ok(())
         } else {
@@ -318,7 +336,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
 
     fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask) {
         debug_assert_ne!(task.task_status(), TaskStatus::Pending);
-        if let Some(score) = self.compactor_to_score.get(&context_id) {
+        if let Some(score) = self.context_id_to_score.get(&context_id) {
             self.update_compactor_score(context_id, *score, task);
         }
     }
@@ -525,7 +543,7 @@ mod tests {
 
         let mut policy = ScoredPolicy::new_with_task_assignment(&existing_assignments);
         assert_eq!(policy.score_to_compactor.len(), 0);
-        assert_eq!(policy.compactor_to_score.len(), existing_tasks.len());
+        assert_eq!(policy.context_id_to_score.len(), existing_tasks.len());
 
         // No compactor available.
         assert!(policy.next_idle_compactor(&HashMap::new()).is_none());
@@ -534,29 +552,38 @@ mod tests {
         // Adding existing compactor does not change score.
         policy.add_compactor(0, u64::MAX);
         assert_eq!(policy.score_to_compactor.len(), 1);
-        assert_eq!(policy.compactor_to_score.len(), existing_tasks.len());
-        assert_eq!(*policy.compactor_to_score.get(&0).unwrap(), 1);
+        assert_eq!(policy.context_id_to_score.len(), existing_tasks.len());
+        assert_eq!(*policy.context_id_to_score.get(&0).unwrap(), 1);
     }
 
     #[tokio::test]
-    async fn test_scored_add_remove_compactor() {
+    async fn test_scored_add_pause_remove_compactor() {
         let mut policy = ScoredPolicy::new_for_test();
         // No compactors by default.
-        assert_eq!(policy.compactor_to_score.len(), 0);
+        assert_eq!(policy.context_id_to_score.len(), 0);
+        assert_eq!(policy.score_to_compactor.len(), 0);
+
+        policy.add_compactor(1, u64::MAX);
+        assert_eq!(policy.context_id_to_score.len(), 1);
+        assert_eq!(policy.score_to_compactor.len(), 1);
+        let _receiver_2 = policy.add_compactor(2, u64::MAX);
+        assert_eq!(policy.context_id_to_score.len(), 2);
+        assert_eq!(policy.score_to_compactor.len(), 2);
+
+        policy.remove_compactor(2);
+        assert_eq!(policy.context_id_to_score.len(), 1);
+        assert_eq!(policy.score_to_compactor.len(), 1);
+
+        policy.pause_compactor(1);
+        assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 0);
 
         let mut receiver = policy.add_compactor(1, u64::MAX);
-        assert_eq!(policy.compactor_to_score.len(), 1);
-        assert_eq!(policy.score_to_compactor.len(), 1);
-        let _receiver_2 = policy.add_compactor(2, u64::MAX);
-        assert_eq!(policy.compactor_to_score.len(), 2);
-        assert_eq!(policy.score_to_compactor.len(), 2);
-        policy.remove_compactor(2);
-        assert_eq!(policy.compactor_to_score.len(), 1);
+        assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 1);
 
         // Pending bytes are initialized correctly.
-        assert_eq!(*policy.compactor_to_score.get(&1).unwrap(), 0);
+        assert_eq!(*policy.context_id_to_score.get(&1).unwrap(), 0);
         assert!(policy.score_to_compactor.contains_key(&(0, 1)));
 
         // No compact task there.
@@ -582,7 +609,7 @@ mod tests {
         assert_eq!(received_compact_task, task);
 
         policy.remove_compactor(compactor.context_id());
-        assert_eq!(policy.compactor_to_score.len(), 0);
+        assert_eq!(policy.context_id_to_score.len(), 0);
         assert_eq!(policy.score_to_compactor.len(), 0);
         drop(compactor);
         assert!(matches!(
@@ -614,7 +641,7 @@ mod tests {
             .assign_compact_task(compactor.context_id(), &task1)
             .unwrap();
         assert_eq!(compactor.context_id(), 0);
-        assert_eq!(*policy.compactor_to_score.get(&0).unwrap(), 5);
+        assert_eq!(*policy.context_id_to_score.get(&0).unwrap(), 5);
         assert!(policy.score_to_compactor.contains_key(&(5, 0)));
 
         // (0, 1), (0, 2), (5, 0).
@@ -623,7 +650,7 @@ mod tests {
             .assign_compact_task(compactor.context_id(), &task2)
             .unwrap();
         assert_eq!(compactor.context_id(), 1);
-        assert_eq!(*policy.compactor_to_score.get(&1).unwrap(), 10);
+        assert_eq!(*policy.context_id_to_score.get(&1).unwrap(), 10);
         assert!(policy.score_to_compactor.contains_key(&(10, 1)));
 
         // (0, 2), (5, 0), (10, 1).
@@ -632,13 +659,13 @@ mod tests {
             .assign_compact_task(compactor.context_id(), &task3)
             .unwrap();
         assert_eq!(compactor.context_id(), 2);
-        assert_eq!(*policy.compactor_to_score.get(&2).unwrap(), 7);
+        assert_eq!(*policy.context_id_to_score.get(&2).unwrap(), 7);
         assert!(policy.score_to_compactor.contains_key(&(10, 1)));
 
         // (5, 0), (7, 2), (10, 1).
         task2.set_task_status(TaskStatus::Success);
         policy.report_compact_task(1, &task2);
-        assert_eq!(*policy.compactor_to_score.get(&1).unwrap(), 0);
+        assert_eq!(*policy.context_id_to_score.get(&1).unwrap(), 0);
         assert!(policy.score_to_compactor.contains_key(&(0, 1)));
 
         // (0, 1), (5, 0), (7, 2).
@@ -647,7 +674,7 @@ mod tests {
             .assign_compact_task(compactor.context_id(), &task4)
             .unwrap();
         assert_eq!(compactor.context_id(), 1);
-        assert_eq!(*policy.compactor_to_score.get(&1).unwrap(), 1);
+        assert_eq!(*policy.context_id_to_score.get(&1).unwrap(), 1);
         assert!(policy.score_to_compactor.contains_key(&(1, 1)));
     }
 

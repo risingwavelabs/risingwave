@@ -110,7 +110,7 @@ impl StreamChunk {
         for (op, row) in rows {
             ops.push(*op);
             for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
-                builder.append_datum(datum)?;
+                builder.append_datum(datum);
             }
         }
 
@@ -395,9 +395,7 @@ impl StreamChunkTestExt for StreamChunk {
                     }
                     _ => panic!("invalid data type"),
                 };
-                builder
-                    .append_datum(&datum)
-                    .expect("failed to append datum");
+                builder.append_datum(&datum);
             }
             let visible = match token.next() {
                 None | Some("//") => true,

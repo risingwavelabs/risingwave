@@ -30,7 +30,7 @@ pub type Notification = Result<SubscribeResponse, Status>;
 pub type NotificationManagerRef = Arc<NotificationManager>;
 pub type NotificationVersion = u64;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum LocalNotification {
     WorkerNodeIsDeleted(WorkerNode),
     CompactionTaskNeedCancel(CompactTask),
