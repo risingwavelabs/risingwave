@@ -40,7 +40,6 @@ use crate::monitor::StoreLocalStatistic;
 pub async fn compact(
     context: Arc<Context>,
     payload: UploadTaskPayload,
-    sst_watermark_epoch: HummockEpoch,
 ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
     for uncommitted_list in payload {
@@ -65,14 +64,12 @@ pub async fn compact(
     for (id, group_payload) in grouped_payload {
         let id_copy = id;
         futures.push(
-            compact_shared_buffer(context.clone(), group_payload, sst_watermark_epoch).map_ok(
-                move |results| {
-                    results
-                        .into_iter()
-                        .map(move |result| (id_copy, result))
-                        .collect_vec()
-                },
-            ),
+            compact_shared_buffer(context.clone(), group_payload).map_ok(move |results| {
+                results
+                    .into_iter()
+                    .map(move |result| (id_copy, result))
+                    .collect_vec()
+            }),
         );
     }
     // Note that the output is reordered compared with input `payload`.
@@ -88,7 +85,6 @@ pub async fn compact(
 async fn compact_shared_buffer(
     context: Arc<Context>,
     payload: UploadTaskPayload,
-    sst_watermark_epoch: HummockEpoch,
 ) -> HummockResult<Vec<SstableInfo>> {
     let mut start_user_keys = payload
         .iter()
@@ -186,7 +182,6 @@ async fn compact_shared_buffer(
             split_index,
             key_range,
             context.clone(),
-            sst_watermark_epoch,
             sub_compaction_sstable_size as usize,
         );
         let iter = build_ordered_merge_iter::<ForwardIter>(
@@ -262,19 +257,11 @@ impl SharedBufferCompactRunner {
         split_index: usize,
         key_range: KeyRange,
         context: Arc<Context>,
-        sst_watermark_epoch: HummockEpoch,
         sub_compaction_sstable_size: usize,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.options.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
-        let compactor = Compactor::new(
-            context,
-            options,
-            key_range,
-            CachePolicy::Fill,
-            false,
-            sst_watermark_epoch,
-        );
+        let compactor = Compactor::new(context, options, key_range, CachePolicy::Fill, false, 0);
         Self {
             compactor,
             split_index,

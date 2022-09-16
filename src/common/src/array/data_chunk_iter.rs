@@ -278,12 +278,14 @@ impl Row {
     /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    pub fn serialize(&self) -> value_encoding::Result<Vec<u8>> {
+
+    pub fn serialize(&self, value_indices: &[usize]) -> Vec<u8> {
         let mut result = vec![];
-        for cell in &self.0 {
-            serialize_datum(cell, &mut result);
+        for value_idx in value_indices {
+            serialize_datum(&self.0[*value_idx], &mut result);
         }
-        Ok(result)
+
+        result
     }
 
     /// Serialize part of the row into memcomparable bytes.
@@ -394,7 +396,8 @@ mod tests {
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
-        let bytes = row.serialize().unwrap();
+        let value_indices = (0..9).collect_vec();
+        let bytes = row.serialize(&value_indices);
         assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 16 + 16 + 9);
         let de = RowDeserializer::new(vec![
             Ty::Varchar,

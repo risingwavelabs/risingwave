@@ -39,7 +39,7 @@ use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
-    serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
+    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -96,6 +96,8 @@ pub struct StateTable<S: StateStore> {
     /// an optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution
     pub vnode_col_idx_in_pk: Option<usize>,
+
+    value_indices: Vec<usize>,
 }
 
 /// init Statetable
@@ -157,8 +159,6 @@ impl<S: StateStore> StateTable<S> {
             .collect();
         let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, order_types);
 
-        let data_types = table_columns.iter().map(|c| c.data_type.clone()).collect();
-
         let Distribution {
             dist_key_indices,
             vnodes,
@@ -177,7 +177,16 @@ impl<S: StateStore> StateTable<S> {
                 let vnode_col_idx = vnode_col_idx.index as usize;
                 pk_indices.iter().position(|&i| vnode_col_idx == i)
             });
+        let value_indices = table_catalog
+            .value_indices
+            .iter()
+            .map(|val| *val as usize)
+            .collect_vec();
 
+        let data_types = value_indices
+            .iter()
+            .map(|idx| table_columns[*idx].data_type.clone())
+            .collect();
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -191,6 +200,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
             disable_sanity_check: false,
             vnode_col_idx_in_pk,
+            value_indices,
         }
     }
 
@@ -202,6 +212,7 @@ impl<S: StateStore> StateTable<S> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
     ) -> Self {
+        let value_indices = (0..columns.len()).collect_vec();
         Self::new_with_distribution(
             store,
             table_id,
@@ -209,6 +220,27 @@ impl<S: StateStore> StateTable<S> {
             order_types,
             pk_indices,
             Distribution::fallback(),
+            value_indices,
+        )
+    }
+
+    /// Create a state table with given `value_indices`, used for unit tests.
+    pub fn new_without_distribution_partial(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        value_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution(
+            store,
+            table_id,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+            value_indices,
         )
     }
 
@@ -224,6 +256,7 @@ impl<S: StateStore> StateTable<S> {
             dist_key_indices,
             vnodes,
         }: Distribution,
+        value_indices: Vec<usize>,
     ) -> Self {
         let keyspace = Keyspace::table_root(store, &table_id);
 
@@ -235,7 +268,10 @@ impl<S: StateStore> StateTable<S> {
             .collect();
         let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, order_types);
 
-        let data_types = table_columns.iter().map(|c| c.data_type.clone()).collect();
+        let data_types = value_indices
+            .iter()
+            .map(|idx| table_columns[*idx].data_type.clone())
+            .collect();
         let dist_key_in_pk_indices = dist_key_indices
             .iter()
             .map(|&di| {
@@ -263,6 +299,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: Default::default(),
             disable_sanity_check: false,
             vnode_col_idx_in_pk: None,
+            value_indices,
         }
     }
 
@@ -399,12 +436,14 @@ impl<S: StateStore> StateTable<S> {
     fn handle_mem_table_error(&self, e: MemTableError) {
         match e {
             MemTableError::Conflict { key, prev, new } => {
-                let key = self.pk_deserializer.deserialize(&key).unwrap();
+                let (vnode, key) = deserialize_pk_with_vnode(&key, &self.pk_deserializer).unwrap();
                 panic!(
-                    "mem-table operation conflicts! key: {:?}, prev: {}, new: {}",
+                    "mem-table operation conflicts! table_id: {}, vnode: {}, key: {:?}, prev: {}, new: {}",
+                    self.keyspace.table_id(),
+                    vnode,
                     &key,
-                    Self::pretty_row_op(&prev, self.data_types.as_ref()),
-                    Self::pretty_row_op(&new, self.data_types.as_ref())
+                    Self::pretty_row_op(&prev, self.data_types.as_ref(),),
+                    Self::pretty_row_op(&new, self.data_types.as_ref(),),
                 )
             }
         }
@@ -412,33 +451,31 @@ impl<S: StateStore> StateTable<S> {
 
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
-    pub fn insert(&mut self, value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, value: Row) {
         let pk = value.by_indices(self.pk_indices());
 
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = value.serialize().map_err(err)?;
+        let value_bytes = value.serialize(&self.value_indices);
         self.mem_table
             .insert(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
-        Ok(())
     }
 
     /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
-    pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, old_value: Row) {
         let pk = old_value.by_indices(self.pk_indices());
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = old_value.serialize().map_err(err)?;
+        let value_bytes = old_value.serialize(&self.value_indices);
         self.mem_table
             .delete(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
-        Ok(())
     }
 
     /// Update a row. The old and new value should have the same pk.
-    pub fn update(&mut self, old_value: Row, new_value: Row) -> StorageResult<()> {
+    pub fn update(&mut self, old_value: Row, new_value: Row) {
         let old_pk = old_value.by_indices(self.pk_indices());
         let new_pk = new_value.by_indices(self.pk_indices());
         debug_assert_eq!(old_pk, new_pk);
@@ -449,12 +486,13 @@ impl<S: StateStore> StateTable<S> {
             self.compute_vnode_by_pk(&new_pk),
         );
 
-        let old_value_bytes = old_value.serialize().map_err(err)?;
-        let new_value_bytes = new_value.serialize().map_err(err)?;
         self.mem_table
-            .update(new_key_bytes, old_value_bytes, new_value_bytes)
+            .update(
+                new_key_bytes,
+                old_value.serialize(&self.value_indices),
+                new_value.serialize(&self.value_indices),
+            )
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
-        Ok(())
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
@@ -715,6 +753,7 @@ where
                         RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
                             let row = streaming_deserialize(&self.data_types, row_bytes.as_ref())
                                 .map_err(err)?;
+
                             yield Cow::Owned(row)
                         }
                         _ => {}
@@ -738,6 +777,7 @@ where
                                     let row =
                                         streaming_deserialize(&self.data_types, row_bytes.as_ref())
                                             .map_err(err)?;
+
                                     yield Cow::Owned(row);
                                 }
                                 RowOp::Delete(_) => {}
@@ -747,12 +787,12 @@ where
                                         old_row_bytes.as_ref(),
                                     )
                                     .map_err(err)?;
-
                                     let new_row = streaming_deserialize(
                                         &self.data_types,
                                         new_row_bytes.as_ref(),
                                     )
                                     .map_err(err)?;
+
                                     debug_assert!(old_row == old_row_in_storage);
 
                                     yield Cow::Owned(new_row);
@@ -824,7 +864,8 @@ impl<S: StateStore> StorageIterInner<S> {
             .await?
         {
             let row = streaming_deserialize(&self.data_types, value.as_ref()).map_err(err)?;
-            yield (key.to_vec(), row)
+
+            yield (key.to_vec(), row);
         }
     }
 }

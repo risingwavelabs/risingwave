@@ -84,7 +84,7 @@ mod tests {
                 Some(count) => overlay_for(s, new_sub_str, start, count, writer),
             }
             .unwrap();
-            let array = guard.into_inner().finish().unwrap();
+            let array = guard.into_inner().finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

@@ -24,6 +24,8 @@ pub type StateTableId = u32;
 /// SSTs belong to.
 #[derive(FromPrimitive)]
 pub enum StaticCompactionGroupId {
+    /// Create a new compaction group.
+    NewCompactionGroup = 0,
     /// All shared buffer local compaction task goes to here. Meta service will never see this
     /// value. Note that currently we've restricted the compaction task's input by `via
     /// compact_shared_buffer_by_compaction_group`
@@ -32,6 +34,8 @@ pub enum StaticCompactionGroupId {
     StateDefault = 2,
     /// All MVs goes to here.
     MaterializedView = 3,
+    /// Larger than any `StaticCompactionGroupId`.
+    END = 4,
 }
 
 impl From<StaticCompactionGroupId> for CompactionGroupId {
@@ -43,9 +47,11 @@ impl From<StaticCompactionGroupId> for CompactionGroupId {
 impl Display for StaticCompactionGroupId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            StaticCompactionGroupId::NewCompactionGroup => write!(f, "NewCompactionGroup"),
             StaticCompactionGroupId::SharedBuffer => write!(f, "SharedBufferGroup"),
             StaticCompactionGroupId::StateDefault => write!(f, "StateGroup"),
             StaticCompactionGroupId::MaterializedView => write!(f, "MVGroup"),
+            StaticCompactionGroupId::END => write!(f, "END"),
         }
     }
 }

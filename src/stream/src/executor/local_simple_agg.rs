@@ -125,7 +125,7 @@ impl LocalSimpleAggExecutor {
                             |(state, builder)| {
                                 let data = state.get_output()?;
                                 trace!("append_datum: {:?}", data);
-                                builder.append_datum(&data)?;
+                                builder.append_datum(&data);
                                 state.reset();
                                 Ok::<_, StreamExecutorError>(())
                             },
@@ -134,7 +134,7 @@ impl LocalSimpleAggExecutor {
                             .into_iter()
                             .map(|builder| {
                                 Ok::<_, StreamExecutorError>(Column::new(Arc::new(
-                                    builder.finish()?,
+                                    builder.finish(),
                                 )))
                             })
                             .try_collect()?;

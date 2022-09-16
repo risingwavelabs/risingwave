@@ -68,7 +68,7 @@ impl SourceStreamChunkBuilder {
             self.op_builder,
             self.builders
                 .into_iter()
-                .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
+                .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()))) })
                 .try_collect()?,
             None,
         ))
@@ -104,7 +104,7 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq(self.builders.iter_mut())
             .try_for_each(|(desc, builder)| -> Result<()> {
                 let datum = if desc.skip_parse { None } else { f(desc)? };
-                builder.append_datum(&datum)?;
+                builder.append_datum(&datum);
                 Ok(())
             })?;
         self.op_builder.push(Op::Insert);
@@ -127,7 +127,7 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq(self.builders.iter_mut())
             .try_for_each(|(desc, builder)| -> Result<()> {
                 let datum = if desc.skip_parse { None } else { f(desc)? };
-                builder.append_datum(&datum)?;
+                builder.append_datum(&datum);
                 Ok(())
             })?;
         self.op_builder.push(Op::Delete);
@@ -155,8 +155,8 @@ impl SourceStreamChunkRowWriter<'_> {
                 } else {
                     f(desc)?
                 };
-                builder.append_datum(&old)?;
-                builder.append_datum(&new)?;
+                builder.append_datum(&old);
+                builder.append_datum(&new);
                 Ok(())
             })?;
         self.op_builder.push(Op::UpdateDelete);

@@ -180,11 +180,11 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone())?;
+                        .insert(ordered_pk_row.clone(), row.clone());
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state.delete(&ordered_pk_row, row.clone())?;
+                    self.managed_state.delete(&ordered_pk_row, row.clone());
                 }
             }
 

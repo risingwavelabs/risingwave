@@ -33,6 +33,7 @@ pub struct TableCatalogBuilder {
     // can remove it later
     stream_key: Vec<usize>,
     properties: WithOptions,
+    _value_indices: Vec<usize>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -102,7 +103,7 @@ impl TableCatalogBuilder {
             id: TableId::placeholder(),
             associated_source_id: None,
             name: String::new(),
-            columns: self.columns,
+            columns: self.columns.clone(),
             order_key: self.order_key,
             stream_key: self.stream_key,
             is_index_on: None,
@@ -113,6 +114,7 @@ impl TableCatalogBuilder {
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
             vnode_col_idx,
+            value_indices: (0..self.columns.len()).collect_vec(),
         }
     }
 

@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{AtomicU64, GenericCounter};
+use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_int_counter_with_registry, HistogramVec, Registry,
+    register_int_counter_vec_with_registry, register_int_counter_with_registry, HistogramVec,
+    Registry,
 };
 use risingwave_common::monitor::Print;
 
@@ -26,6 +27,7 @@ macro_rules! for_all_metrics {
             read_bytes: GenericCounter<AtomicU64>,
             operation_latency: HistogramVec,
             operation_size: HistogramVec,
+            failure_count: GenericCounterVec<AtomicU64>,
         }
     };
 }
@@ -90,17 +92,26 @@ impl ObjectStoreMetrics {
         }
         let bytes_opts = histogram_opts!(
             "object_store_operation_bytes",
-            "size of operation result on object store",
+            "Size of operation result on object store",
             buckets, // max 1952MB
         );
         let operation_size =
             register_histogram_vec_with_registry!(bytes_opts, &["type"], registry).unwrap();
+
+        let failure_count = register_int_counter_vec_with_registry!(
+            "object_store_failure_count",
+            "The number of failures of object store operations",
+            &["type"],
+            registry
+        )
+        .unwrap();
 
         Self {
             write_bytes,
             read_bytes,
             operation_latency,
             operation_size,
+            failure_count,
         }
     }
 
