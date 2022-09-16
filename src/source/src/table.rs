@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::RwLock;
-
 use anyhow::Context;
-use rand::prelude::SliceRandom;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use rand::seq::IteratorRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
-struct TableSourceV2Core {
+struct TableSourceCore {
     /// The senders of the changes channel.
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
@@ -30,23 +30,23 @@ struct TableSourceV2Core {
     changes_txs: Vec<mpsc::UnboundedSender<(StreamChunk, oneshot::Sender<usize>)>>,
 }
 
-/// [`TableSourceV2`] is a special internal source to handle table updates from user,
+/// [`TableSource`] is a special internal source to handle table updates from user,
 /// including insert/delete/update statements via SQL interface.
 ///
 /// Changed rows will be send to the associated "materialize" streaming task, then be written to the
-/// state store. Therefore, [`TableSourceV2`] can be simply be treated as a channel without side
+/// state store. Therefore, [`TableSource`] can be simply be treated as a channel without side
 /// effects.
 #[derive(Debug)]
-pub struct TableSourceV2 {
-    core: RwLock<TableSourceV2Core>,
+pub struct TableSource {
+    core: RwLock<TableSourceCore>,
 
     /// All columns in this table.
     column_descs: Vec<ColumnDesc>,
 }
 
-impl TableSourceV2 {
+impl TableSource {
     pub fn new(column_descs: Vec<ColumnDesc>) -> Self {
-        let core = TableSourceV2Core {
+        let core = TableSourceCore {
             changes_txs: vec![],
         };
 
@@ -61,44 +61,57 @@ impl TableSourceV2 {
     ///
     /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
     /// and the `usize` represents the cardinality of this chunk.
-    pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
-        let tx = {
-            let core = self.core.read().unwrap();
+    pub fn write_chunk(&self, mut chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+        loop {
+            let core = self.core.upgradable_read();
 
             // The `changes_txs` should not be empty normally, since we ensured that the channels
-            // between the `TableSourceV2` and the `SourceExecutor`s are ready before we making the
+            // between the `TableSource` and the `SourceExecutor`s are ready before we making the
             // table catalog visible to the users. However, when we're recovering, it's possible
             // that the streaming executors are not ready when the frontend is able to schedule DML
             // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
             // error instead of asserting here.
             // TODO: may reject DML when streaming executors are not recovered.
-            core.changes_txs
+            let (index, tx) = core
+                .changes_txs
+                .iter()
+                .enumerate()
                 .choose(&mut rand::thread_rng())
-                .context("no available table reader in streaming source executors")?
-                .clone()
-        };
+                .context("no available table reader in streaming source executors")?;
 
-        #[cfg(debug_assertions)]
-        risingwave_common::util::schema_check::schema_check(
-            self.column_descs.iter().map(|c| &c.data_type),
-            chunk.columns(),
-        )
-        .expect("table source write chunk schema check failed");
+            #[cfg(debug_assertions)]
+            risingwave_common::util::schema_check::schema_check(
+                self.column_descs.iter().map(|c| &c.data_type),
+                chunk.columns(),
+            )
+            .expect("table source write chunk schema check failed");
 
-        let (notifier_tx, notifier_rx) = oneshot::channel();
-        tx.send((chunk, notifier_tx))
-            .expect("table reader in streaming source executor closed");
+            let (notifier_tx, notifier_rx) = oneshot::channel();
 
-        Ok(notifier_rx)
+            match tx.send((chunk, notifier_tx)) {
+                Ok(_) => return Ok(notifier_rx),
+
+                // It's possible that the source executor is scaled in or migrated, so the channel
+                // is closed. In this case, we should remove the closed channel and retry.
+                Err(SendError((chunk_, _))) => {
+                    tracing::info!("find one closed table source channel, remove it and retry");
+
+                    chunk = chunk_;
+                    RwLockUpgradableReadGuard::upgrade(core)
+                        .changes_txs
+                        .swap_remove(index);
+                }
+            }
+        }
     }
 }
 
-/// [`TableV2StreamReader`] reads changes from a certain table continuously.
+/// [`TableStreamReader`] reads changes from a certain table continuously.
 /// This struct should be only used for associated materialize task, thus the reader should be
 /// created only once. Further streaming task relying on this table source should follow the
 /// structure of "`MView` on `MView`".
 #[derive(Debug)]
-pub struct TableV2StreamReader {
+pub struct TableStreamReader {
     /// The receiver of the changes channel.
     rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<usize>)>,
 
@@ -106,13 +119,13 @@ pub struct TableV2StreamReader {
     column_indices: Vec<usize>,
 }
 
-impl TableV2StreamReader {
+impl TableStreamReader {
     pub async fn next(&mut self) -> Result<StreamChunk> {
         let (chunk, notifier) = self
             .rx
             .recv()
             .await
-            .expect("TableSourceV2 dropped before associated streaming task terminated");
+            .expect("TableSource dropped before associated streaming task terminated");
 
         // Caveats: this function is an arm of `tokio::select`. We should ensure there's no `await`
         // after here.
@@ -133,10 +146,10 @@ impl TableV2StreamReader {
     }
 }
 
-impl TableSourceV2 {
+impl TableSource {
     /// Create a new stream reader.
     #[expect(clippy::unused_async)]
-    pub async fn stream_reader(&self, column_ids: Vec<ColumnId>) -> Result<TableV2StreamReader> {
+    pub async fn stream_reader(&self, column_ids: Vec<ColumnId>) -> Result<TableStreamReader> {
         let column_indices = column_ids
             .into_iter()
             .map(|id| {
@@ -147,11 +160,11 @@ impl TableSourceV2 {
             })
             .collect();
 
-        let mut core = self.core.write().unwrap();
+        let mut core = self.core.write();
         let (tx, rx) = mpsc::unbounded_channel();
         core.changes_txs.push(tx);
 
-        Ok(TableV2StreamReader { rx, column_indices })
+        Ok(TableStreamReader { rx, column_indices })
     }
 }
 
@@ -169,18 +182,18 @@ mod tests {
 
     use super::*;
 
-    fn new_source() -> TableSourceV2 {
+    fn new_source() -> TableSource {
         let store = MemoryStateStore::new();
         let _keyspace = Keyspace::table_root(store, &Default::default());
 
-        TableSourceV2::new(vec![ColumnDesc::unnamed(
+        TableSource::new(vec![ColumnDesc::unnamed(
             ColumnId::from(0),
             DataType::Int64,
         )])
     }
 
     #[tokio::test]
-    async fn test_table_source_v2() -> Result<()> {
+    async fn test_table_source() -> Result<()> {
         let source = Arc::new(new_source());
         let mut reader = source.stream_reader(vec![ColumnId::from(0)]).await?;
 

@@ -29,6 +29,7 @@ use super::{
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
+use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::session::OptimizerContextRef;
@@ -222,28 +223,34 @@ impl LogicalScan {
         &self.predicate
     }
 
+    /// get the Mapping of columnIndex from internal column index to output column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::with_remaining_columns(
+            &self.output_col_idx,
+            self.table_desc().columns.len(),
+        )
+    }
+
     /// Return indices of fields the output is ordered by and
     /// corresponding direction
     pub fn get_out_column_index_order(&self) -> Order {
-        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
-        Order::new(
+        let id_to_tb_idx = self.table_desc.get_id_to_op_idx_mapping();
+        let order = Order::new(
             self.table_desc
                 .order_key
                 .iter()
-                .filter_map(|order| {
-                    let out_idx = id_to_op_idx
+                .map(|order| {
+                    let idx = id_to_tb_idx
                         .get(&self.table_desc.columns[order.column_idx].column_id)
-                        .copied();
-                    match out_idx {
-                        Some(idx) => match order.order_type {
-                            OrderType::Ascending => Some(FieldOrder::ascending(idx)),
-                            OrderType::Descending => Some(FieldOrder::descending(idx)),
-                        },
-                        None => None,
+                        .unwrap();
+                    match order.order_type {
+                        OrderType::Ascending => FieldOrder::ascending(*idx),
+                        OrderType::Descending => FieldOrder::descending(*idx),
                     }
                 })
                 .collect(),
-        )
+        );
+        self.i2o_col_mapping().rewrite_provided_order(&order)
     }
 
     /// The mapped distribution key of the scan operator.
@@ -474,9 +481,9 @@ impl PredicatePushdown for LogicalScan {
 }
 
 impl LogicalScan {
-    fn to_batch_inner(&self) -> Result<PlanRef> {
+    fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
         if self.predicate.always_true() {
-            Ok(BatchSeqScan::new(self.clone(), vec![]).into())
+            required_order.enforce_if_not_satisfies(BatchSeqScan::new(self.clone(), vec![]).into())
         } else {
             let (scan_ranges, predicate) = self.predicate.clone().split_to_scan_ranges(
                 &self.table_desc.order_column_indices(),
@@ -497,30 +504,79 @@ impl LogicalScan {
                 plan = BatchProject::new(LogicalProject::new(plan, exprs)).into()
             }
             assert_eq!(plan.schema(), self.schema());
-            Ok(plan)
+            required_order.enforce_if_not_satisfies(plan)
+        }
+    }
+
+    // For every index, check if the order of the index satisfies the required_order
+    // If yes, use an index scan
+    fn use_index_scan_if_order_is_satisfied(
+        &self,
+        required_order: &Order,
+    ) -> Option<Result<PlanRef>> {
+        if required_order.field_order.is_empty() {
+            return None;
+        }
+
+        let index = self.indexes().iter().find(|idx| {
+            Order {
+                field_order: idx
+                    .index_item
+                    .iter()
+                    .map(|idx_item| FieldOrder {
+                        index: idx_item.index,
+                        direct: Asc,
+                    })
+                    .collect(),
+            }
+            .satisfies(required_order)
+        })?;
+
+        let p2s_mapping = index.primary_to_secondary_mapping();
+        if self
+            .required_col_idx()
+            .iter()
+            .all(|x| p2s_mapping.contains_key(x))
+        {
+            let index_scan = self.to_index_scan(
+                &index.name,
+                index.index_table.table_desc().into(),
+                p2s_mapping,
+            );
+            Some(index_scan.to_batch())
+        } else {
+            None
         }
     }
 }
 
 impl ToBatch for LogicalScan {
     fn to_batch(&self) -> Result<PlanRef> {
-        // index selection
+        self.to_batch_with_order_required(&Order::any())
+    }
+
+    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
         if !self.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
             if let Some(applied) = index_selection_rule.apply(self.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
-                    return scan.to_batch();
+                    return required_order.enforce_if_not_satisfies(scan.to_batch().unwrap());
                 } else if let Some(join) = applied.as_logical_join() {
                     // index lookup join
-                    return join.to_batch_lookup_join();
+                    return required_order
+                        .enforce_if_not_satisfies(join.to_batch_lookup_join().unwrap());
                 } else {
                     unreachable!();
                 }
+            } else {
+                // Try to make use of index if it satisfies the required order
+                if let Some(plan_ref) = self.use_index_scan_if_order_is_satisfied(required_order) {
+                    return plan_ref;
+                }
             }
         }
-
-        self.to_batch_inner()
+        self.to_batch_inner_with_required(required_order)
     }
 }
 

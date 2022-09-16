@@ -35,6 +35,7 @@ use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
 };
 use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::SourceChangeSplitMutation;
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
@@ -345,8 +346,9 @@ pub(crate) fn fetch_source_fragments(
 ) {
     for fragment in table_fragments.fragments() {
         for actor in &fragment.actors {
-            if let Some(source_id) =
-                TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+            if let Some(source_id) = TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
+                .filter(|s| s.source_type() == SourceType::Source)
+                .map(|s| s.source_id)
             {
                 source_fragments
                     .entry(source_id)
@@ -359,7 +361,7 @@ pub(crate) fn fetch_source_fragments(
     }
 }
 
-// todo use min heap to optimize
+/// TODO: use min heap to optimize
 fn diff_splits(
     mut prev_actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     discovered_splits: &BTreeMap<SplitId, SplitImpl>,

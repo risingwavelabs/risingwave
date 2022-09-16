@@ -140,11 +140,12 @@ where
         }))
     }
 
+    #[cfg_attr(coverage, no_coverage)]
     async fn reschedule(
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        self.ddl_lock.write().await;
+        let _guard = self.ddl_lock.write().await;
 
         let req = request.into_inner();
 

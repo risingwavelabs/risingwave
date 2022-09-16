@@ -25,14 +25,10 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ExecutorInfo, Message, MessageStream};
 use crate::task::ActorId;
 
-/// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries and
-/// might affect the prometheus performance. If you only need actor input and output rows data, see
-/// `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
-const ENABLE_EXECUTOR_ROW_COUNT: bool = false;
-
 /// Streams wrapped by `trace` will print data passing in the stream graph to stdout.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn trace(
+    enable_executor_row_count: bool,
     info: Arc<ExecutorInfo>,
     input_pos: usize,
     actor_id: ActorId,
@@ -57,7 +53,7 @@ pub async fn trace(
     while let Some(message) = input.next().in_span(span()).await.transpose()? {
         if let Message::Chunk(chunk) = &message {
             if chunk.cardinality() > 0 {
-                if ENABLE_EXECUTOR_ROW_COUNT {
+                if enable_executor_row_count {
                     metrics
                         .executor_row_count
                         .with_label_values(&[&actor_id_string, &executor_id_string])
@@ -74,6 +70,7 @@ pub async fn trace(
 /// Streams wrapped by `metrics` will update actor metrics.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn metrics(
+    enable_executor_row_count: bool,
     actor_id: ActorId,
     executor_id: u64,
     metrics: Arc<StreamingMetrics>,
@@ -84,7 +81,7 @@ pub async fn metrics(
     pin_mut!(input);
 
     while let Some(message) = input.next().await.transpose()? {
-        if ENABLE_EXECUTOR_ROW_COUNT {
+        if enable_executor_row_count {
             if let Message::Chunk(chunk) = &message {
                 if chunk.cardinality() > 0 {
                     metrics

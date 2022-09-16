@@ -92,6 +92,7 @@ pub fn query(sql: &str, canonical: &str) -> Query {
 
 /// Ensures that `sql` parses as a single [Select], and is not modified
 /// after a serialization round-trip.
+#[track_caller]
 pub fn verified_only_select(query: &str) -> Select {
     match verified_query(query).body {
         SetExpr::Select(s) => *s,

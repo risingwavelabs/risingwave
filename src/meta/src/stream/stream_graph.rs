@@ -15,7 +15,7 @@
 use std::collections::hash_map::HashMap;
 use std::collections::{BTreeMap, VecDeque};
 use std::ops::{Deref, Range};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
@@ -33,7 +33,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::CreateMaterializedViewContext;
-use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use crate::manager::{DatabaseId, IdCategory, IdGeneratorManagerRef, SchemaId};
 use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::MetaResult;
@@ -552,8 +552,14 @@ impl StreamGraphBuilder {
                         if let Some(table) = &mut node.left_table {
                             update_table(table, "HashJoinLeft");
                         }
+                        if let Some(table) = &mut node.left_degree_table {
+                            update_table(table, "HashJoinDegreeLeft");
+                        }
                         if let Some(table) = &mut node.right_table {
                             update_table(table, "HashJoinRight");
+                        }
+                        if let Some(table) = &mut node.right_degree_table {
+                            update_table(table, "HashJoinDegreeRight");
                         }
                     }
 
@@ -624,11 +630,15 @@ impl StreamGraphBuilder {
                     _ => {}
                 }
 
-                for (idx, input) in stream_node.input.iter().enumerate() {
-                    match input.get_node_body()? {
-                        NodeBody::Exchange(_) => {
+                for (input, new_input) in stream_node
+                    .input
+                    .iter()
+                    .zip_eq(new_stream_node.input.iter_mut())
+                {
+                    *new_input = match input.get_node_body()? {
+                        NodeBody::Exchange(e) => {
                             assert!(!input.get_fields().is_empty());
-                            new_stream_node.input[idx] = StreamNode {
+                            StreamNode {
                                 input: vec![],
                                 stream_key: input.stream_key.clone(),
                                 node_body: Some(NodeBody::Merge(MergeNode {
@@ -636,27 +646,24 @@ impl StreamGraphBuilder {
                                         .remove(&input.get_operator_id())
                                         .expect("failed to find upstream actor id for given exchange node").as_global_ids(),
                                     upstream_fragment_id: upstream_fragment_id.get(&input.get_operator_id()).unwrap().as_global_id(),
+                                    upstream_dispatcher_type: e.get_strategy()?.r#type,
                                     fields: input.get_fields().clone(),
                                 })),
                                 fields: input.get_fields().clone(),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
                                 append_only: input.append_only,
-                            };
+                            }
                         }
-                        NodeBody::Chain(_) => {
-                            new_stream_node.input[idx] = self.resolve_chain_node(input)?;
-                        }
-                        _ => {
-                            new_stream_node.input[idx] = self.build_inner(
-                                ctx,
-                                input,
-                                actor_id,
-                                fragment_id,
-                                upstream_actor_id,
-                                upstream_fragment_id,
-                            )?;
-                        }
+                        NodeBody::Chain(_) => self.resolve_chain_node(input)?,
+                        _ => self.build_inner(
+                            ctx,
+                            input,
+                            actor_id,
+                            fragment_id,
+                            upstream_actor_id,
+                            upstream_fragment_id,
+                        )?,
                     }
                 }
                 Ok(new_stream_node)
@@ -684,6 +691,7 @@ impl StreamGraphBuilder {
                 node_body: Some(NodeBody::Merge(MergeNode {
                     upstream_actor_id: vec![],
                     upstream_fragment_id: 0,
+                    upstream_dispatcher_type: DispatcherType::NoShuffle as _,
                     fields: chain_node.upstream_fields.clone(),
                 })),
                 fields: chain_node.upstream_fields.clone(),
@@ -767,23 +775,40 @@ impl ActorGraphBuilder {
 
     pub fn fill_mview_id(&mut self, table: &mut Table) {
         // Fill in the correct mview id for stream node.
-        fn fill_mview_id(stream_node: &mut StreamNode, mview_id: u32) -> usize {
+        struct FillIdContext {
+            database_id: DatabaseId,
+            schema_id: SchemaId,
+            table_id: TableId,
+            fragment_id: FragmentId,
+        }
+        fn fill_mview_id_inner(stream_node: &mut StreamNode, ctx: &FillIdContext) -> usize {
             let mut mview_count = 0;
             if let NodeBody::Materialize(materialize_node) = stream_node.node_body.as_mut().unwrap()
             {
-                materialize_node.table_id = mview_id;
-                materialize_node.table.as_mut().unwrap().id = mview_id;
+                materialize_node.table_id = ctx.table_id.table_id;
+                materialize_node.table.as_mut().unwrap().id = ctx.table_id.table_id;
+                materialize_node.table.as_mut().unwrap().database_id = ctx.database_id;
+                materialize_node.table.as_mut().unwrap().schema_id = ctx.schema_id;
+                materialize_node.table.as_mut().unwrap().fragment_id = ctx.fragment_id;
                 mview_count += 1;
             }
             for input in &mut stream_node.input {
-                mview_count += fill_mview_id(input, mview_id);
+                mview_count += fill_mview_id_inner(input, ctx);
             }
             mview_count
         }
 
         let mut mview_count = 0;
         for fragment in self.fragment_graph.fragments_mut().values_mut() {
-            let delta = fill_mview_id(fragment.node.as_mut().unwrap(), table.id);
+            let delta = fill_mview_id_inner(
+                fragment.node.as_mut().unwrap(),
+                &FillIdContext {
+                    database_id: table.database_id,
+                    schema_id: table.schema_id,
+                    table_id: table.id.into(),
+                    fragment_id: fragment.fragment_id,
+                },
+            );
             mview_count += delta;
             if delta != 0 {
                 table.fragment_id = fragment.fragment_id
@@ -870,7 +895,9 @@ impl ActorGraphBuilder {
                             FragmentDistributionType::Hash
                         } as i32,
                         actors,
+                        // Will be filled in `Scheduler::schedule` later.
                         vnode_mapping: None,
+                        // Will be filled in `record_internal_state_tables` later.
                         state_table_ids: vec![],
                     },
                 )
@@ -1016,61 +1043,54 @@ impl ActorGraphBuilder {
         stream_node: &StreamNode,
         fragment: &mut Fragment,
     ) -> MetaResult<()> {
-        match stream_node.get_node_body()? {
+        let table_ids = match stream_node.get_node_body()? {
             NodeBody::Materialize(node) => {
-                let table_id = node.get_table_id();
-                fragment.state_table_ids.push(table_id);
+                vec![node.get_table_id()]
             }
             NodeBody::Source(node) => {
-                fragment.state_table_ids.push(node.state_table_id);
+                vec![node.state_table_id]
             }
             NodeBody::Arrange(node) => {
-                let table_id = node.table.as_ref().unwrap().id;
-                fragment.state_table_ids.push(table_id);
+                vec![node.table.as_ref().unwrap().id]
             }
-            NodeBody::HashAgg(node) => {
-                for table in &node.internal_tables {
-                    fragment.state_table_ids.push(table.id);
-                }
-            }
-            NodeBody::GlobalSimpleAgg(node) => {
-                for table in &node.internal_tables {
-                    fragment.state_table_ids.push(table.id);
-                }
-            }
+            NodeBody::HashAgg(node) => node
+                .internal_tables
+                .iter()
+                .map(|table| table.id)
+                .collect_vec(),
+            NodeBody::GlobalSimpleAgg(node) => node
+                .internal_tables
+                .iter()
+                .map(|table| table.id)
+                .collect_vec(),
             NodeBody::HashJoin(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.left_table.as_ref().unwrap().id);
-                fragment
-                    .state_table_ids
-                    .push(node.right_table.as_ref().unwrap().id);
+                vec![
+                    node.left_table.as_ref().unwrap().id,
+                    node.left_degree_table.as_ref().unwrap().id,
+                    node.right_table.as_ref().unwrap().id,
+                    node.right_degree_table.as_ref().unwrap().id,
+                ]
             }
             NodeBody::DynamicFilter(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.left_table.as_ref().unwrap().id);
-                fragment
-                    .state_table_ids
-                    .push(node.right_table.as_ref().unwrap().id);
+                vec![
+                    node.left_table.as_ref().unwrap().id,
+                    node.right_table.as_ref().unwrap().id,
+                ]
             }
             NodeBody::AppendOnlyTopN(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.table.as_ref().unwrap().id);
+                vec![node.table.as_ref().unwrap().id]
             }
             NodeBody::GroupTopN(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.table.as_ref().unwrap().id);
+                vec![node.table.as_ref().unwrap().id]
             }
             NodeBody::TopN(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.table.as_ref().unwrap().id);
+                vec![node.table.as_ref().unwrap().id]
             }
-            _ => {}
-        }
+            _ => {
+                vec![]
+            }
+        };
+        fragment.state_table_ids.extend(table_ids);
         let input_nodes = stream_node.get_input();
         for input_node in input_nodes {
             Self::record_internal_state_tables(input_node, fragment)?;
@@ -1154,9 +1174,6 @@ impl StreamFragmentGraph {
         &self,
         fragment_id: GlobalFragmentId,
     ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
-        lazy_static::lazy_static! {
-            static ref EMPTY_HASHMAP: HashMap<GlobalFragmentId, StreamFragmentEdge> = HashMap::new();
-        }
         self.downstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
 
@@ -1164,9 +1181,9 @@ impl StreamFragmentGraph {
         &self,
         fragment_id: GlobalFragmentId,
     ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
-        lazy_static::lazy_static! {
-            static ref EMPTY_HASHMAP: HashMap<GlobalFragmentId, StreamFragmentEdge> = HashMap::new();
-        }
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
 }
+
+static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
+    LazyLock::new(HashMap::new);

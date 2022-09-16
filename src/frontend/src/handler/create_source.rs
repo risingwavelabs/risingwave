@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
@@ -62,7 +63,13 @@ pub(crate) fn make_prost_source(
             )?;
         }
 
-        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &schema_name)?
+            .id();
+        (db_id, schema_id)
     };
 
     Ok(ProstSource {
@@ -153,17 +160,31 @@ pub async fn handle_create_source(
             columns,
             pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
         },
-        SourceSchema::DebeziumJson => StreamSourceInfo {
-            properties: with_properties.clone(),
-            row_format: RowFormatType::DebeziumJson as i32,
-            row_schema_location: "".to_string(),
-            row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
-            columns,
-            pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
-        },
+        SourceSchema::DebeziumJson => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+            StreamSourceInfo {
+                properties: with_properties.clone(),
+                row_format: RowFormatType::DebeziumJson as i32,
+                row_schema_location: "".to_string(),
+                row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
+                columns,
+                pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
+            }
+        }
     };
 
     let session = context.session_ctx.clone();
+    {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (schema_name, name) = Binder::resolve_table_name(stmt.source_name.clone())?;
+        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+    }
     let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {

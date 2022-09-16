@@ -14,11 +14,10 @@
 
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_connector::source::{
@@ -31,7 +30,7 @@ use tokio::task::JoinHandle;
 
 use crate::common::SourceChunkBuilder;
 use crate::monitor::SourceMetrics;
-use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState};
+use crate::{SourceColumnDesc, SourceParserImpl, SourceStreamChunkBuilder, StreamChunkWithState};
 
 #[derive(Clone, Debug)]
 pub struct SourceContext {
@@ -48,9 +47,7 @@ impl SourceContext {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref DEFAULT_SPLIT_ID: SplitId = "None".into();
-}
+static DEFAULT_SPLIT_ID: LazyLock<SplitId> = LazyLock::new(|| "None".into());
 
 struct InnerConnectorSourceReader {
     reader: SplitReaderImpl,
@@ -191,27 +188,29 @@ impl ConnectorSourceReader {
     pub async fn next(&mut self) -> Result<StreamChunkWithState> {
         let batch = self.message_rx.recv().await.unwrap()?;
 
-        let mut events = Vec::with_capacity(batch.len());
         let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
+
+        let mut builder =
+            SourceStreamChunkBuilder::with_capacity(self.columns.clone(), batch.len());
 
         for msg in batch {
             if let Some(content) = msg.payload {
                 split_offset_mapping.insert(msg.split_id, msg.offset);
-                match self.parser.parse(content.as_ref(), &self.columns) {
+                let writer = builder.row_writer();
+                match self.parser.parse(content.as_ref(), writer) {
                     Err(e) => {
                         tracing::warn!("message parsing failed {}, skipping", e.to_string());
                         continue;
                     }
-                    Ok(result) => events.push(result),
+                    Ok(_guard) => {}
                 }
             }
         }
 
-        let columns = Self::build_columns(&self.columns, events.iter().flat_map(|e| &e.rows))?;
-        let ops = events.into_iter().flat_map(|e| e.ops).collect();
+        let chunk = builder.finish();
 
         Ok(StreamChunkWithState {
-            chunk: StreamChunk::new(ops, columns, None),
+            chunk,
             split_offset_mapping: Some(split_offset_mapping),
         })
     }

@@ -124,10 +124,10 @@ impl<S: StateStore> SourceExecutor<S> {
         let row_ids = self.row_id_generator.next_batch(len).await;
 
         for row_id in row_ids {
-            builder.append(Some(row_id)).unwrap();
+            builder.append(Some(row_id));
         }
 
-        builder.finish().unwrap().into()
+        builder.finish().into()
     }
 
     /// Generate a row ID column according to ops.
@@ -138,19 +138,15 @@ impl<S: StateStore> SourceExecutor<S> {
         for i in 0..len {
             // Only refill row_id for insert operation.
             if ops.get(i) == Some(&Op::Insert) {
-                builder
-                    .append(Some(self.row_id_generator.next().await))
-                    .unwrap();
+                builder.append(Some(self.row_id_generator.next().await));
             } else {
-                builder
-                    .append(Some(
-                        i64::try_from(column.array_ref().datum_at(i).unwrap()).unwrap(),
-                    ))
-                    .unwrap();
+                builder.append(Some(
+                    i64::try_from(column.array_ref().datum_at(i).unwrap()).unwrap(),
+                ));
             }
         }
 
-        Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
+        Column::new(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
     async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
@@ -222,10 +218,10 @@ impl<S: StateStore> SourceExecutor<S> {
         state: ConnectorState,
     ) -> StreamExecutorResult<Box<SourceStreamReaderImpl>> {
         let reader = match self.source_desc.source.as_ref() {
-            SourceImpl::TableV2(t) => t
+            SourceImpl::Table(t) => t
                 .stream_reader(self.column_ids.clone())
                 .await
-                .map(SourceStreamReaderImpl::TableV2),
+                .map(SourceStreamReaderImpl::Table),
             SourceImpl::Connector(c) => c
                 .stream_reader(
                     state,
@@ -249,6 +245,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .stack_trace("source_recv_first_barrier")
             .await
             .unwrap();
+
+        // If the first barrier is configuration change, then the source executor must be newly
+        // created, and we should start with the paused state.
+        let start_with_paused = barrier.is_update();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
             if let Mutation::Add { splits, .. } = mutation.as_ref() {
@@ -287,6 +287,9 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
+        if start_with_paused {
+            stream.pause_source();
+        }
 
         yield Message::Barrier(barrier);
 
@@ -380,7 +383,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     // Refill row id column for source.
                     chunk = match self.source_desc.source.as_ref() {
                         SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true).await,
-                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false).await,
+                        SourceImpl::Table(_) => self.refill_row_id_column(chunk, false).await,
                     };
 
                     self.metrics
@@ -539,7 +542,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table_v2().unwrap();
+            let table_source = source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
@@ -664,7 +667,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table_v2().unwrap();
+            let table_source = source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 

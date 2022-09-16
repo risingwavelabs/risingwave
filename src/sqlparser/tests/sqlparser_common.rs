@@ -1738,7 +1738,6 @@ fn parse_bad_constraint() {
 fn run_explain_analyze(query: &str, expected_analyze: bool, expected_options: ExplainOptions) {
     match one_statement_parses_to(query, "") {
         Statement::Explain {
-            describe_alias: _,
             analyze,
             statement,
             options,
@@ -1807,7 +1806,7 @@ fn parse_explain_analyze_with_simple_select() {
         ExplainOptions {
             trace: true,
             verbose: true,
-            explain_type: ExplainType::DistSQL,
+            explain_type: ExplainType::DistSql,
         },
     );
     run_explain_analyze(
@@ -1816,7 +1815,7 @@ fn parse_explain_analyze_with_simple_select() {
         ExplainOptions {
             trace: false,
             verbose: true,
-            explain_type: ExplainType::DistSQL,
+            explain_type: ExplainType::DistSql,
         },
     );
     run_explain_analyze(
@@ -1825,7 +1824,7 @@ fn parse_explain_analyze_with_simple_select() {
         ExplainOptions {
             trace: false,
             verbose: true,
-            explain_type: ExplainType::DistSQL,
+            explain_type: ExplainType::DistSql,
         },
     );
 }
@@ -2680,11 +2679,11 @@ fn parse_derived_tables() {
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
-    let sql = "SELECT * FROM (((SELECT 1)))";
+    let sql = "SELECT * FROM (SELECT 1)";
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
-    let sql = "SELECT * FROM t NATURAL JOIN (((SELECT 1)))";
+    let sql = "SELECT * FROM t NATURAL JOIN (SELECT 1)";
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
@@ -3347,9 +3346,6 @@ fn parse_start_transaction() {
     }
 
     verified_stmt("START TRANSACTION");
-    one_statement_parses_to("BEGIN", "START TRANSACTION");
-    one_statement_parses_to("BEGIN WORK", "START TRANSACTION");
-    one_statement_parses_to("BEGIN TRANSACTION", "START TRANSACTION");
 
     verified_stmt("START TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
     verified_stmt("START TRANSACTION ISOLATION LEVEL READ COMMITTED");
@@ -3384,6 +3380,13 @@ fn parse_start_transaction() {
         ParserError::ParserError("Expected transaction mode, found: EOF".to_string()),
         res.unwrap_err()
     );
+}
+
+#[test]
+fn parse_begin() {
+    one_statement_parses_to("BEGIN", "BEGIN");
+    one_statement_parses_to("BEGIN WORK", "BEGIN");
+    one_statement_parses_to("BEGIN TRANSACTION", "BEGIN");
 }
 
 #[test]

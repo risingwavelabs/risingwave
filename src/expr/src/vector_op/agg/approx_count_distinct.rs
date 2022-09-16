@@ -146,7 +146,10 @@ impl Aggregator for ApproxCountDistinct {
         let result = self.calculate_result();
         self.registers = [0; NUM_OF_REGISTERS];
         match builder {
-            ArrayBuilderImpl::Int64(b) => b.append(Some(result)).map_err(Into::into),
+            ArrayBuilderImpl::Int64(b) => {
+                b.append(Some(result));
+                Ok(())
+            }
             _ => bail!("Unexpected builder for count(*)."),
         }
     }
@@ -171,12 +174,7 @@ mod tests {
             lhs.push(Some(i));
         }
 
-        let col1 = Column::new(
-            I32Array::from_slice(&lhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
-
+        let col1 = Column::new(Arc::new(I32Array::from_slice(&lhs).into()));
         DataChunk::new(vec![col1], size)
     }
 
@@ -196,7 +194,7 @@ mod tests {
             agg.output(&mut builder).unwrap();
         }
 
-        let array = builder.finish().unwrap();
+        let array = builder.finish();
         assert_eq!(array.len(), 3);
     }
 
@@ -215,7 +213,7 @@ mod tests {
             agg.output(&mut builder).unwrap();
         }
 
-        let array = builder.finish().unwrap();
+        let array = builder.finish();
         assert_eq!(array.len(), 3);
     }
 }

@@ -315,7 +315,7 @@ impl TestCase {
                     query,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, query).await?;
+                    create_mv::handle_create_mv(context, name, *query).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(context, drop_statement.object_name).await?;
@@ -437,9 +437,8 @@ impl TestCase {
                 let stream_plan = match create_mv::gen_create_mv_plan(
                     &session,
                     context,
-                    Box::new(q),
+                    q,
                     ObjectName(vec!["test".into()]),
-                    false,
                 ) {
                     Ok((stream_plan, _table)) => stream_plan,
                     Err(err) => {

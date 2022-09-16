@@ -27,7 +27,7 @@ type JoinEntryStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
 #[expect(dead_code)]
 type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
-/// We manages a `BTreeMap` in memory for all entries belonging to a join key.
+/// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
 ///
 /// If a `JoinEntryState` exists for a join key, the all records under this
@@ -112,6 +112,7 @@ impl EstimateSize for JoinEntryState {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::array::*;
     use risingwave_common::types::ScalarImpl;
 
@@ -133,10 +134,12 @@ mod tests {
 
         for row_ref in data_chunk.rows() {
             let row: Row = row_ref.into();
+            let value_indices = (0..row.0.len() - 1).collect_vec();
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
-            let pk = Row(pk);
+            // Pk is only a `i64` here, so encoding method does not matter.
+            let pk = Row(pk).serialize(&value_indices);
             let join_row = JoinRow { row, degree: 0 };
-            managed_state.insert(pk, join_row.encode().unwrap());
+            managed_state.insert(pk, join_row.encode());
         }
 
         for ((_, matched_row), (d1, d2)) in managed_state

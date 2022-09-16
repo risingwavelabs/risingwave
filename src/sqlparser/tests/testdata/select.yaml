@@ -63,3 +63,9 @@
 
 - input: SELECT * FROM t FETCH FIRST ROWS WITH TIES
   error_msg: "sql parser error: WITH TIES cannot be specified without ORDER BY clause"
+
+- input: select * from (select 1 from 1);
+  error_msg: "sql parser error: Expected identifier, found: 1"
+
+- input: select * from (select * from tumble(t, x, interval '10' minutes))
+  error_msg: "sql parser error: Expected ), found: minutes"

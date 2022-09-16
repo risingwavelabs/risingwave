@@ -24,7 +24,7 @@
     select pg_catalog.pg_get_userbyid(1)
   logical_plan: |
     LogicalProject { exprs: [pg_user.name] }
-      LogicalJoin { type: LeftOuter, on: true, output: all }
+      LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalProject { exprs: [pg_user.name] }
           LogicalFilter { predicate: (1:Int32 = pg_user.usesysid) }

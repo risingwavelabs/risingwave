@@ -80,7 +80,7 @@ impl StreamNode for StreamTopN {
                 self.logical
                     .infer_internal_table_catalog(None)
                     .with_id(state.gen_table_id_wrapped())
-                    .to_state_table_prost(),
+                    .to_internal_table_prost(),
             ),
         };
         if self.input().append_only() {
