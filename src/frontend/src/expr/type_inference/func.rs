@@ -283,34 +283,41 @@ fn infer_type_for_special(
             })?;
 
             // cast to restrictive type or return error
-            let res_type = least_restrictive(*right_ele_type.clone(), left_type.clone());
-            let result: Result<DataType> = match res_type {
-                Ok(ele_type) => {
-                    // TODO: Write this as a function
-                    let array_type = DataType::List {
-                        datatype: Box::new(ele_type.clone()),
-                    };
-
-                    let inputs_owned = std::mem::take(inputs);
-                    *inputs = inputs_owned
-                        .into_iter()
-                        .map(|input| {
-                            if input.return_type().is_scalar() {
-                                return input.cast_implicit(ele_type.clone());
-                            }
-                            input.cast_implicit(array_type.clone())
-                        })
-                        .try_collect()?;
-                    Ok(array_type)
-                },
-                Err(_) => Err(ErrorCode::BindError(format!(
-                    "Cannot prepend {} to {}",
+            let common_ele_type = least_restrictive(*right_ele_type.clone(), left_type.clone());
+            if common_ele_type.is_err() {
+                return Err(ErrorCode::BindError(format!(
+                    "unable to find least restrictive type between {} and {}",
                     left_type, right_type
                 ))
-                .into()),
+                .into());
+            }
+
+            // found common type
+            let common_ele_type = common_ele_type.unwrap();
+            let array_type = DataType::List {
+                datatype: Box::new(common_ele_type.clone()),
             };
-            match result {
-                Ok(val) => Ok(Some(val)), 
+
+            // cast inputs to common type
+            let try_cast_inputs  = || -> Result<()> {
+                let inputs_owned = std::mem::take(inputs);
+                // *inputs = 
+                let tmp = inputs_owned
+                    .into_iter()
+                    .map(|input| {
+                        if input.return_type().is_scalar() {
+                            return input.cast_implicit(common_ele_type.clone());
+                        }
+                        input.cast_implicit(array_type.clone())
+                    })
+                    .try_collect()?;
+                Ok(())
+            }();
+
+            // array_type is result
+
+            match try_cast_inputs {
+                Ok(_) => Ok(Some(array_type)), 
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot prepend {} to {}",
                     left_type, right_type
