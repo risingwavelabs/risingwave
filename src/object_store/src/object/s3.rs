@@ -252,12 +252,14 @@ impl StreamingUploader for S3StreamingUploader {
         if self.upload_id.is_none() {
             debug_assert!(self.join_handles.is_empty());
             if self.buf.is_empty() {
+                debug_assert_eq!(self.not_uploaded_len, 0);
                 Err(ObjectError::internal("upload empty object"))
             } else {
                 self.client
                     .put_object()
                     .bucket(&self.bucket)
                     .body(get_upload_body(self.buf))
+                    .content_length(self.not_uploaded_len as i64)
                     .key(&self.key)
                     .send()
                     .await?;
