@@ -111,13 +111,13 @@ impl TaskService for BatchServiceImpl {
         } = req.into_inner();
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
-        let context = ComputeNodeContext::new(self.env.clone(), TaskId::from(&task_id));
+        let context = ComputeNodeContext::new_for_local(self.env.clone());
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
             plan,
             task_id
         );
-        let task = BatchTaskExecution::new(&task_id, plan, context, epoch)?;
+        let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
         let task = Arc::new(task);
 
         if let Err(e) = task.clone().async_execute().await {

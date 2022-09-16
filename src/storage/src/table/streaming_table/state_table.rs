@@ -35,7 +35,7 @@ use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
 use risingwave_pb::catalog::Table;
 use tracing::trace;
 
-use super::mem_table::{MemTable, RowOp};
+use super::mem_table::{MemTable, MemTableIter, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
@@ -97,7 +97,7 @@ pub struct StateTable<S: StateStore> {
     /// hash distribution
     pub vnode_col_idx_in_pk: Option<usize>,
 
-    _value_indices: Vec<usize>,
+    value_indices: Vec<usize>,
 }
 
 /// init Statetable
@@ -159,8 +159,6 @@ impl<S: StateStore> StateTable<S> {
             .collect();
         let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, order_types);
 
-        let data_types = table_columns.iter().map(|c| c.data_type.clone()).collect();
-
         let Distribution {
             dist_key_indices,
             vnodes,
@@ -179,11 +177,16 @@ impl<S: StateStore> StateTable<S> {
                 let vnode_col_idx = vnode_col_idx.index as usize;
                 pk_indices.iter().position(|&i| vnode_col_idx == i)
             });
-        let _value_indices = table_catalog
+        let value_indices = table_catalog
             .value_indices
             .iter()
             .map(|val| *val as usize)
             .collect_vec();
+
+        let data_types = value_indices
+            .iter()
+            .map(|idx| table_columns[*idx].data_type.clone())
+            .collect();
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -197,7 +200,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
             disable_sanity_check: false,
             vnode_col_idx_in_pk,
-            _value_indices,
+            value_indices,
         }
     }
 
@@ -209,6 +212,7 @@ impl<S: StateStore> StateTable<S> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
     ) -> Self {
+        let value_indices = (0..columns.len()).collect_vec();
         Self::new_with_distribution(
             store,
             table_id,
@@ -216,6 +220,27 @@ impl<S: StateStore> StateTable<S> {
             order_types,
             pk_indices,
             Distribution::fallback(),
+            value_indices,
+        )
+    }
+
+    /// Create a state table with given `value_indices`, used for unit tests.
+    pub fn new_without_distribution_partial(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        value_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution(
+            store,
+            table_id,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+            value_indices,
         )
     }
 
@@ -231,6 +256,7 @@ impl<S: StateStore> StateTable<S> {
             dist_key_indices,
             vnodes,
         }: Distribution,
+        value_indices: Vec<usize>,
     ) -> Self {
         let keyspace = Keyspace::table_root(store, &table_id);
 
@@ -242,7 +268,10 @@ impl<S: StateStore> StateTable<S> {
             .collect();
         let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, order_types);
 
-        let data_types = table_columns.iter().map(|c| c.data_type.clone()).collect();
+        let data_types = value_indices
+            .iter()
+            .map(|idx| table_columns[*idx].data_type.clone())
+            .collect();
         let dist_key_in_pk_indices = dist_key_indices
             .iter()
             .map(|&di| {
@@ -257,7 +286,6 @@ impl<S: StateStore> StateTable<S> {
                     })
             })
             .collect_vec();
-        let _value_indices = (0..table_columns.len()).collect_vec();
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -271,7 +299,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: Default::default(),
             disable_sanity_check: false,
             vnode_col_idx_in_pk: None,
-            _value_indices,
+            value_indices,
         }
     }
 
@@ -414,8 +442,8 @@ impl<S: StateStore> StateTable<S> {
                     self.keyspace.table_id(),
                     vnode,
                     &key,
-                    Self::pretty_row_op(&prev, self.data_types.as_ref()),
-                    Self::pretty_row_op(&new, self.data_types.as_ref())
+                    Self::pretty_row_op(&prev, self.data_types.as_ref(),),
+                    Self::pretty_row_op(&new, self.data_types.as_ref(),),
                 )
             }
         }
@@ -428,7 +456,7 @@ impl<S: StateStore> StateTable<S> {
 
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = value.serialize();
+        let value_bytes = value.serialize(&self.value_indices);
         self.mem_table
             .insert(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -440,7 +468,7 @@ impl<S: StateStore> StateTable<S> {
         let pk = old_value.by_indices(self.pk_indices());
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        let value_bytes = old_value.serialize();
+        let value_bytes = old_value.serialize(&self.value_indices);
         self.mem_table
             .delete(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -459,7 +487,11 @@ impl<S: StateStore> StateTable<S> {
         );
 
         self.mem_table
-            .update(new_key_bytes, old_value.serialize(), new_value.serialize())
+            .update(
+                new_key_bytes,
+                old_value.serialize(&self.value_indices),
+                new_value.serialize(&self.value_indices),
+            )
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
@@ -617,6 +649,36 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
+        let (mem_table_iter, storage_iter_stream) = self.iter_inner(pk_prefix, epoch).await?;
+        let storage_iter = storage_iter_stream.into_stream();
+        Ok(
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
+                .into_stream()
+                .map(|pk_row| pk_row.map(|(_, row)| row)),
+        )
+    }
+
+    /// This function scans rows from the relational table with specific `pk_prefix`, return both
+    /// key and value.
+    pub async fn iter_key_and_val<'a>(
+        &'a self,
+        pk_prefix: &'a Row,
+        epoch: u64,
+    ) -> StorageResult<RowStreamWithPk<'a, S>> {
+        let (mem_table_iter, storage_iter_stream) = self.iter_inner(pk_prefix, epoch).await?;
+        let storage_iter = storage_iter_stream.into_stream();
+
+        Ok(
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
+                .into_stream(),
+        )
+    }
+
+    pub async fn iter_inner<'a>(
+        &'a self,
+        pk_prefix: &'a Row,
+        epoch: u64,
+    ) -> StorageResult<(MemTableIter, StorageIterInner<S>)> {
         let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);
@@ -660,17 +722,14 @@ impl<S: StateStore> StateTable<S> {
                 self.data_types.clone(),
             )
             .await?
-            .into_stream()
         };
-
-        Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
-                .into_stream(),
-        )
+        Ok((mem_table_iter, storage_iter))
     }
 }
 
 pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
+pub type RowStreamWithPk<'a, S: StateStore> =
+    impl Stream<Item = StorageResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>>;
 
 struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
@@ -699,7 +758,7 @@ where
     /// This function scans kv pairs from the `shared_storage` and
     /// memory(`mem_table`) with optional pk_bounds. If a record exist in both `shared_storage` and
     /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
-    #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
+    #[try_stream(ok = (Cow<'a, Vec<u8>>, Cow<'a, Row>), error = StorageError)]
     async fn into_stream(self) {
         let storage_iter = self.storage_iter.peekable();
         pin_mut!(storage_iter);
@@ -711,17 +770,18 @@ where
                 (None, None) => break,
                 // The mem table side has come to an end, return data from the shared storage.
                 (Some(_), None) => {
-                    let (_, row) = storage_iter.next().await.unwrap()?;
-                    yield Cow::Owned(row)
+                    let (pk, row) = storage_iter.next().await.unwrap()?;
+                    yield (Cow::Owned(pk), Cow::Owned(row))
                 }
                 // The stream side has come to an end, return data from the mem table.
                 (None, Some(_)) => {
-                    let (_, row_op) = mem_table_iter.next().unwrap();
+                    let (pk, row_op) = mem_table_iter.next().unwrap();
                     match row_op {
                         RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
                             let row = streaming_deserialize(&self.data_types, row_bytes.as_ref())
                                 .map_err(err)?;
-                            yield Cow::Owned(row)
+
+                            yield (Cow::Borrowed(pk), Cow::Owned(row))
                         }
                         _ => {}
                     }
@@ -730,21 +790,22 @@ where
                     match storage_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
                             // yield data from storage
-                            let (_, row) = storage_iter.next().await.unwrap()?;
-                            yield Cow::Owned(row);
+                            let (pk, row) = storage_iter.next().await.unwrap()?;
+                            yield (Cow::Owned(pk), Cow::Owned(row));
                         }
                         Ordering::Equal => {
                             // both memtable and storage contain the key, so we advance both
                             // iterators and return the data in memory.
 
-                            let (_, row_op) = mem_table_iter.next().unwrap();
+                            let (pk, row_op) = mem_table_iter.next().unwrap();
                             let (_, old_row_in_storage) = storage_iter.next().await.unwrap()?;
                             match row_op {
                                 RowOp::Insert(row_bytes) => {
                                     let row =
                                         streaming_deserialize(&self.data_types, row_bytes.as_ref())
                                             .map_err(err)?;
-                                    yield Cow::Owned(row);
+
+                                    yield (Cow::Borrowed(pk), Cow::Owned(row));
                                 }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update((old_row_bytes, new_row_bytes)) => {
@@ -753,21 +814,21 @@ where
                                         old_row_bytes.as_ref(),
                                     )
                                     .map_err(err)?;
-
                                     let new_row = streaming_deserialize(
                                         &self.data_types,
                                         new_row_bytes.as_ref(),
                                     )
                                     .map_err(err)?;
+
                                     debug_assert!(old_row == old_row_in_storage);
 
-                                    yield Cow::Owned(new_row);
+                                    yield (Cow::Borrowed(pk), Cow::Owned(new_row));
                                 }
                             }
                         }
                         Ordering::Greater => {
                             // yield data from mem table
-                            let (_, row_op) = mem_table_iter.next().unwrap();
+                            let (pk, row_op) = mem_table_iter.next().unwrap();
 
                             match row_op {
                                 RowOp::Insert(row_bytes) => {
@@ -775,7 +836,7 @@ where
                                         streaming_deserialize(&self.data_types, row_bytes.as_ref())
                                             .map_err(err)?;
 
-                                    yield Cow::Owned(row);
+                                    yield (Cow::Borrowed(pk), Cow::Owned(row));
                                 }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update(_) => unreachable!(
@@ -794,7 +855,7 @@ where
     }
 }
 
-struct StorageIterInner<S: StateStore> {
+pub struct StorageIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
     /// Data type of each column, used for deserializing the row.
@@ -830,7 +891,8 @@ impl<S: StateStore> StorageIterInner<S> {
             .await?
         {
             let row = streaming_deserialize(&self.data_types, value.as_ref()).map_err(err)?;
-            yield (key.to_vec(), row)
+
+            yield (key.to_vec(), row);
         }
     }
 }

@@ -110,10 +110,14 @@ impl CompactionPicker for LevelCompactionPicker {
                 if level_handlers[0].is_level_pending_compact(level) {
                     break;
                 }
+                // This break is optional. We can include overlapping sub-level actually.
+                if level.level_type() != LevelType::Nonoverlapping {
+                    break;
+                }
                 l0_total_file_size += level.total_file_size;
                 input_levels.push(InputLevel {
                     level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
+                    level_type: level.level_type,
                     table_infos: level.table_infos.clone(),
                 });
             }
@@ -190,6 +194,7 @@ impl LevelCompactionPicker {
         ]
     }
 }
+
 #[cfg(test)]
 pub mod tests {
     use itertools::Itertools;
@@ -197,8 +202,9 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_with_overlap, generate_level, generate_table, push_table_level0,
-        push_tables_level0,
+        generate_l0_nonoverlapping_sublevels, generate_l0_overlapping_sublevels, generate_level,
+        generate_table, push_table_level0_nonoverlapping, push_table_level0_overlapping,
+        push_tables_level0_nonoverlapping,
     };
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::{CompactionMode, TierCompactionPicker};
@@ -243,10 +249,9 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos[0].id, 1);
         ret.add_pending_task(0, &mut levels_handler);
 
-        // no conflict with the last job but we do not allow compact higher level to l1 when there
-        // is a pending task.
-        push_table_level0(&mut levels, generate_table(6, 1, 100, 200, 2));
-        push_table_level0(&mut levels, generate_table(7, 1, 301, 333, 4));
+        // Cannot pick because sub-level[0] is pending.
+        push_table_level0_nonoverlapping(&mut levels, generate_table(6, 1, 100, 200, 2));
+        push_table_level0_nonoverlapping(&mut levels, generate_table(7, 1, 301, 333, 4));
         assert!(picker.pick_compaction(&levels, &levels_handler).is_none());
 
         levels.l0.as_mut().unwrap().sub_levels[0]
@@ -265,52 +270,21 @@ pub mod tests {
         assert_eq!(ret.input_levels[3].table_infos.len(), 4);
         ret.add_pending_task(1, &mut levels_handler);
 
-        // the first idle table in L0 is table 6 and its conflict with the last job so we can not
-        // pick table 7.
-        let picker = LevelCompactionPicker::new(
-            1,
-            Arc::new(CompactionConfigBuilder::new().build()),
-            Arc::new(RangeOverlapStrategy::default()),
-        );
-        push_table_level0(&mut levels, generate_table(8, 1, 199, 233, 3));
+        // Cannot pick because no idle table in sub-level[0]. (And sub-level[0] is pending
+        // actually).
+        push_table_level0_overlapping(&mut levels, generate_table(8, 1, 199, 233, 3));
         let ret = picker.pick_compaction(&levels, &levels_handler);
         assert!(ret.is_none());
 
-        // compact L0 to L0
-        let config = CompactionConfigBuilder::new()
-            .level0_tier_compact_file_number(2)
-            .build();
-        let picker =
-            TierCompactionPicker::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
-        push_table_level0(&mut levels, generate_table(9, 1, 100, 400, 3));
-        let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
-        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 9);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 8);
-        ret.add_pending_task(2, &mut levels_handler);
-
+        // Don't pick overlapping sub-level 8
         levels_handler[0].remove_task(1);
-        levels
-            .l0
-            .as_mut()
-            .unwrap()
-            .sub_levels
-            .retain(|level| level.table_infos[0].id < 7);
-        push_tables_level0(
-            &mut levels,
-            vec![
-                generate_table(10, 1, 100, 200, 3),
-                generate_table(11, 1, 201, 300, 3),
-                generate_table(12, 1, 301, 400, 3),
-            ],
-        );
-        push_table_level0(&mut levels, generate_table(13, 1, 100, 400, 4));
+        levels_handler[1].remove_task(1);
         let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
         assert_eq!(ret.input_levels.len(), 4);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 13);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 3);
-        assert_eq!(ret.input_levels[2].table_infos[0].id, 6);
-        assert_eq!(ret.input_levels[3].table_infos[0].id, 5);
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 7);
+        assert_eq!(ret.input_levels[1].table_infos[0].id, 6);
+        assert_eq!(ret.input_levels[2].table_infos[0].id, 5);
+        assert_eq!(ret.input_levels[3].table_infos.len(), 4);
     }
 
     #[test]
@@ -343,8 +317,8 @@ pub mod tests {
                 total_file_size: 0,
             }),
         };
-        push_tables_level0(&mut levels, vec![generate_table(1, 1, 50, 60, 2)]);
-        push_tables_level0(
+        push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(1, 1, 50, 60, 2)]);
+        push_tables_level0_nonoverlapping(
             &mut levels,
             vec![
                 generate_table(7, 1, 200, 250, 2),
@@ -395,7 +369,7 @@ pub mod tests {
                 total_file_size: 0,
             }),
         };
-        push_tables_level0(
+        push_tables_level0_nonoverlapping(
             &mut levels,
             vec![
                 generate_table(1, 1, 100, 300, 2),
@@ -407,7 +381,7 @@ pub mod tests {
         let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
         ret.add_pending_task(0, &mut levels_handler);
 
-        push_tables_level0(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
+        push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
         let picker =
             TierCompactionPicker::new(picker.config.clone(), picker.overlap_strategy.clone());
         assert!(picker.pick_compaction(&levels, &levels_handler).is_none());
@@ -427,7 +401,7 @@ pub mod tests {
                 total_file_size: 150,
                 sub_level_id: 0,
             }],
-            l0: Some(generate_l0_with_overlap(vec![generate_table(
+            l0: Some(generate_l0_nonoverlapping_sublevels(vec![generate_table(
                 1, 1, 160, 280, 2,
             )])),
         };
@@ -477,7 +451,7 @@ pub mod tests {
                 total_file_size: 0,
                 sub_level_id: 0,
             }],
-            l0: Some(generate_l0_with_overlap(vec![
+            l0: Some(generate_l0_nonoverlapping_sublevels(vec![
                 generate_table(1, 1, 100, 210, 2),
                 generate_table(2, 1, 200, 250, 2),
             ])),
@@ -487,7 +461,7 @@ pub mod tests {
         let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
         ret.add_pending_task(0, &mut levels_handler);
 
-        push_table_level0(&mut levels, generate_table(4, 1, 170, 180, 3));
+        push_table_level0_overlapping(&mut levels, generate_table(4, 1, 170, 180, 3));
         assert!(picker.pick_compaction(&levels, &levels_handler).is_none());
     }
 
@@ -507,9 +481,9 @@ pub mod tests {
                 total_file_size: 590,
                 sub_level_id: 0,
             }],
-            l0: Some(generate_l0_with_overlap(vec![])),
+            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
         };
-        push_tables_level0(
+        push_tables_level0_nonoverlapping(
             &mut levels,
             vec![
                 generate_table(4, 1, 100, 180, 2),
@@ -517,7 +491,7 @@ pub mod tests {
                 generate_table(6, 1, 260, 400, 2),
             ],
         );
-        push_tables_level0(
+        push_tables_level0_nonoverlapping(
             &mut levels,
             vec![
                 generate_table(7, 1, 100, 180, 2),
@@ -548,9 +522,9 @@ pub mod tests {
                 total_file_size: 0,
                 sub_level_id: 0,
             }],
-            l0: Some(generate_l0_with_overlap(vec![])),
+            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
         };
-        push_tables_level0(
+        push_tables_level0_nonoverlapping(
             &mut levels,
             vec![
                 generate_table(4, 1, 100, 180, 2),
@@ -562,5 +536,137 @@ pub mod tests {
         let ret = picker.pick_compaction(&levels, &levels_handler);
         // Skip this compaction because the write amplification is too large.
         assert!(ret.is_none());
+    }
+
+    #[test]
+    fn test_l0_to_l1_break_on_exceed_compaction_size() {
+        let mut l0 = generate_l0_overlapping_sublevels(vec![
+            vec![
+                generate_table(4, 1, 10, 90, 1),
+                generate_table(5, 1, 210, 220, 1),
+            ],
+            vec![generate_table(6, 1, 0, 100000, 1)],
+            vec![generate_table(7, 1, 0, 100000, 1)],
+        ]);
+        // We can set level_type only because the input above is valid.
+        for s in &mut l0.sub_levels {
+            s.level_type = LevelType::Nonoverlapping as i32;
+        }
+        let levels = Levels {
+            l0: Some(l0),
+            levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+        };
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        // Pick with large max_compaction_bytes results all sub levels included in input.
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .max_compaction_bytes(500000)
+                .build(),
+        );
+        // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
+        // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
+        let picker =
+            LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
+        let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 7);
+        assert_eq!(
+            3,
+            ret.input_levels.iter().filter(|l| l.level_idx == 0).count()
+        );
+        assert_eq!(
+            4,
+            ret.input_levels
+                .iter()
+                .filter(|l| l.level_idx == 0)
+                .map(|l| l.table_infos.len())
+                .sum::<usize>()
+        );
+
+        // Pick with small max_compaction_bytes results partial sub levels included in input.
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .max_compaction_bytes(50000)
+                .build(),
+        );
+        let picker =
+            LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
+        let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 6);
+        assert_eq!(
+            2,
+            ret.input_levels.iter().filter(|l| l.level_idx == 0).count()
+        );
+        assert_eq!(
+            3,
+            ret.input_levels
+                .iter()
+                .filter(|l| l.level_idx == 0)
+                .map(|l| l.table_infos.len())
+                .sum::<usize>()
+        );
+    }
+
+    #[test]
+    fn test_l0_to_l1_break_on_pending_sub_level() {
+        let mut l0 = generate_l0_overlapping_sublevels(vec![
+            vec![
+                generate_table(4, 1, 10, 90, 1),
+                generate_table(5, 1, 210, 220, 1),
+            ],
+            vec![generate_table(6, 1, 0, 100000, 1)],
+            vec![generate_table(7, 1, 0, 100000, 1)],
+        ]);
+        // We can set level_type only because the input above is valid.
+        for s in &mut l0.sub_levels {
+            s.level_type = LevelType::Nonoverlapping as i32;
+        }
+        let levels = Levels {
+            l0: Some(l0),
+            levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+        };
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        // Create a pending sub-level.
+        let pending_level = levels.l0.as_ref().unwrap().sub_levels[1].clone();
+        assert_eq!(pending_level.sub_level_id, 1);
+        let tier_task_input = CompactionInput {
+            input_levels: vec![InputLevel {
+                level_idx: 0,
+                level_type: pending_level.level_type,
+                table_infos: pending_level.table_infos.clone(),
+            }],
+            target_level: 0,
+            target_sub_level_id: pending_level.sub_level_id,
+        };
+        assert!(!levels_handler[0].is_level_pending_compact(&pending_level));
+        tier_task_input.add_pending_task(1, &mut levels_handler);
+        assert!(levels_handler[0].is_level_pending_compact(&pending_level));
+
+        // Pick with large max_compaction_bytes results all sub levels included in input.
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .max_compaction_bytes(500000)
+                .build(),
+        );
+
+        // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
+        // But stopped by pending sub-level when trying to include more sub-levels.
+        let picker = LevelCompactionPicker::new(
+            1,
+            config.clone(),
+            Arc::new(RangeOverlapStrategy::default()),
+        );
+        assert!(picker.pick_compaction(&levels, &levels_handler).is_none());
+
+        // Free the pending sub-level.
+        for pending_task_id in &levels_handler[0].pending_tasks_ids() {
+            levels_handler[0].remove_task(*pending_task_id);
+        }
+
+        // No more pending sub-level so we can get a task now.
+        let picker =
+            LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
+        picker.pick_compaction(&levels, &levels_handler).unwrap();
     }
 }

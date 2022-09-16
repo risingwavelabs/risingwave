@@ -55,6 +55,15 @@ impl FragmentManagerCore {
             })
         })
     }
+
+    pub fn all_internal_tables(&self) -> impl Iterator<Item = &u32> + '_ {
+        self.table_fragments.values().flat_map(|table_fragments| {
+            table_fragments
+                .fragments
+                .values()
+                .flat_map(|fragment| fragment.state_table_ids.iter())
+        })
+    }
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.

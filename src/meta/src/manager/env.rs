@@ -62,6 +62,7 @@ where
 }
 
 /// Options shared by all meta service instances
+#[derive(Clone)]
 pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.

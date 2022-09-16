@@ -130,12 +130,12 @@ impl Expression for RegexpMatchExpression {
 
         for (text, vis) in text_arr.iter().zip_eq(input.vis().iter()) {
             if !vis {
-                output.append_null()?;
+                output.append_null();
             } else if let Some(list) = self.match_one(text) {
                 let list_ref = ListRef::ValueRef { val: &list };
-                output.append(Some(list_ref))?;
+                output.append(Some(list_ref));
             } else {
-                output.append_null()?;
+                output.append_null();
             }
         }
 

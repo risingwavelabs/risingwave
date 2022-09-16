@@ -112,8 +112,7 @@ where
                             tracing::info!("Released hummock context {}", worker_node.id);
                             sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
                         },
-                        Some(LocalNotification::CompactionTaskNeedCancel(mut compact_task)) => {
-                            compact_task.set_task_status(risingwave_pb::hummock::compact_task::TaskStatus::Canceled);
+                        Some(LocalNotification::CompactionTaskNeedCancel(compact_task)) => {
                             tokio_retry::RetryIf::spawn(
                                 retry_strategy.clone(),
                                 || async {
@@ -189,100 +188,4 @@ where
         }
     });
     (join_handle, shutdown_tx)
-}
-
-// As we have supported manual full GC in risectl,
-// this auto full GC scheduler is not used for now.
-#[allow(unused)]
-pub fn start_full_gc_scheduler<S>(
-    vacuum: VacuumManagerRef<S>,
-    interval: Duration,
-    sst_retention_time: Duration,
-) -> (JoinHandle<()>, Sender<()>)
-where
-    S: MetaStore,
-{
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
-        let mut min_trigger_interval = tokio::time::interval(interval);
-        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        min_trigger_interval.tick().await;
-        loop {
-            tokio::select! {
-                _ = min_trigger_interval.tick() => {},
-                _ = &mut shutdown_rx => {
-                    tracing::info!("Full GC scheduler is stopped");
-                    return;
-                }
-            }
-            if let Err(err) = vacuum.start_full_gc(sst_retention_time).await {
-                tracing::warn!("Full GC error {:#?}", err);
-            }
-        }
-    });
-    (join_handle, shutdown_tx)
-}
-
-#[cfg(all(test, feature = "sync_point"))]
-mod tests {
-    use std::time::Duration;
-
-    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_pb::common::WorkerNode;
-    use serial_test::serial;
-
-    use crate::hummock::start_local_notification_receiver;
-    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
-    use crate::manager::LocalNotification;
-
-    #[tokio::test]
-    #[serial("sync_point")]
-    async fn test_local_notification_receiver() {
-        sync_point::reset();
-
-        let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-        let context_id = worker_node.id;
-        let (join_handle, shutdown_sender) = start_local_notification_receiver(
-            hummock_manager.clone(),
-            hummock_manager.compactor_manager_ref_for_test(),
-            env.notification_manager_ref(),
-        )
-        .await;
-
-        // Test cancel compaction task
-        let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-        let task = hummock_manager
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 1);
-        env.notification_manager()
-            .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(task))
-            .await;
-        sync_point::wait_timeout(
-            "AFTER_CANCEL_COMPACTION_TASK_ASYNC",
-            Duration::from_secs(10),
-        )
-        .await
-        .unwrap();
-        assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 0);
-
-        // Test release hummock contexts
-        env.notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(WorkerNode {
-                id: context_id,
-                ..Default::default()
-            }))
-            .await;
-        sync_point::wait_timeout(
-            "AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC",
-            Duration::from_secs(10),
-        )
-        .await
-        .unwrap();
-
-        shutdown_sender.send(()).unwrap();
-        join_handle.await.unwrap();
-    }
 }

@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_stack_trace::{StackTraceManager, StackTraceReport};
-use futures::Future;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
@@ -43,15 +42,13 @@ use crate::task::{
 };
 
 #[cfg(test)]
-lazy_static::lazy_static! {
-    pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
-}
+pub static LOCAL_TEST_ADDR: std::sync::LazyLock<HostAddr> =
+    std::sync::LazyLock::new(|| "127.0.0.1:2333".parse().unwrap());
 
 pub type ActorHandle = JoinHandle<()>;
 
 pub struct LocalStreamManagerCore {
     /// Runtime for the streaming actors.
-    #[cfg(not(madsim))]
     runtime: &'static tokio::runtime::Runtime,
 
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
@@ -385,24 +382,20 @@ impl LocalStreamManagerCore {
         config: StreamingConfig,
         enable_async_stack_trace: bool,
     ) -> Self {
-        #[cfg(not(madsim))]
-        let runtime = {
-            let mut builder = tokio::runtime::Builder::new_multi_thread();
-            if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
-                builder.worker_threads(worker_threads_num);
-            }
-            builder
-                .thread_name("risingwave-streaming-actor")
-                .enable_all()
-                .build()
-                .unwrap()
-        };
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+        if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
+            builder.worker_threads(worker_threads_num);
+        }
+        let runtime = builder
+            .thread_name("risingwave-streaming-actor")
+            .enable_all()
+            .build()
+            .unwrap();
 
         Self {
             // Leak the runtime to avoid runtime shutting-down in the main async context.
             // TODO: may manually shutdown the runtime after we implement graceful shutdown for
             // stream manager.
-            #[cfg(not(madsim))]
             runtime: Box::leak(Box::new(runtime)),
             handles: HashMap::new(),
             context: Arc::new(context),
@@ -514,6 +507,7 @@ impl LocalStreamManagerCore {
             executor_id,
             input_pos,
             self.streaming_metrics.clone(),
+            self.config.developer.enable_executor_row_count,
         );
         Ok(executor)
     }
@@ -546,6 +540,7 @@ impl LocalStreamManagerCore {
         executor_id: u64,
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
+        enable_executor_row_count: bool,
     ) -> BoxedExecutor {
         WrapperExecutor::new(
             executor,
@@ -553,21 +548,9 @@ impl LocalStreamManagerCore {
             actor_id,
             executor_id,
             streaming_metrics,
+            enable_executor_row_count,
         )
         .boxed()
-    }
-
-    /// Spawn a task using the actor runtime. Fallback to the main runtime if `madsim` is enabled.
-    #[inline(always)]
-    fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        #[cfg(not(madsim))]
-        return self.runtime.spawn(future);
-        #[cfg(madsim)]
-        return tokio::spawn(future);
     }
 
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
@@ -618,14 +601,14 @@ impl LocalStreamManagerCore {
                     None => actor,
                 };
                 let instrumented = monitor.instrument(traced);
-                self.spawn(instrumented)
+                self.runtime.spawn(instrumented)
             };
             self.handles.insert(actor_id, handle);
 
             let actor_id_str = actor_id.to_string();
 
             let metrics = self.streaming_metrics.clone();
-            let actor_monitor_task = self.spawn(async move {
+            let actor_monitor_task = self.runtime.spawn(async move {
                 loop {
                     metrics
                         .actor_execution_time
