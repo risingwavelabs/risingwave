@@ -35,6 +35,7 @@ pub fn gen_create_mv_plan(
     context: OptimizerContextRef,
     query: Query,
     name: ObjectName,
+    is_independent_compaction_group: bool,
 ) -> Result<(PlanRef, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(name)?;
     check_schema_writable(&schema_name)?;
@@ -87,6 +88,12 @@ pub fn gen_create_mv_plan(
     plan_root.set_required_dist(RequiredDist::Any);
     let materialize = plan_root.gen_create_mv_plan(table_name)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
+    if is_independent_compaction_group {
+        table.properties.insert(
+            String::from("independent_compaction_group"),
+            String::from("1"),
+        );
+    }
     let plan: PlanRef = materialize.into();
     table.owner = session.user_id();
 
@@ -107,10 +114,12 @@ pub async fn handle_create_mv(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
+    let is_independent_compaction_group;
     let (table, graph) = {
         {
             let catalog_reader = session.env().catalog_reader().read_guard();
             let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
+            is_independent_compaction_group = table_name.ends_with("_al");
             catalog_reader.check_relation_name_duplicated(
                 session.database(),
                 &schema_name,
@@ -118,7 +127,13 @@ pub async fn handle_create_mv(
             )?;
         }
 
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
+        let (plan, table) = gen_create_mv_plan(
+            &session,
+            context.into(),
+            query,
+            name,
+            is_independent_compaction_group,
+        )?;
         let graph = build_graph(plan);
 
         (table, graph)

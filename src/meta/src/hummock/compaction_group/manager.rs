@@ -201,7 +201,8 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .collect_vec();
         guard
             .unregister(&to_unregister, self.env.meta_store())
-            .await
+            .await?;
+        guard.purge_stale_groups(self.env.meta_store()).await
     }
 
     pub async fn internal_table_ids_by_compaction_group_id(
@@ -371,6 +372,26 @@ impl CompactionGroupManagerInner {
         for table_id in table_ids {
             self.index.remove(table_id);
         }
+        Ok(())
+    }
+
+    async fn purge_stale_groups<S: MetaStore>(&mut self, meta_store: &S) -> Result<()> {
+        let compaction_group_ids = self.compaction_groups.keys().cloned().collect_vec();
+        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        for compaction_group_id in compaction_group_ids {
+            let compaction_group = compaction_groups
+                .get_mut(compaction_group_id)
+                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
+            if compaction_group_id > StaticCompactionGroupId::END as CompactionGroupId
+                && compaction_group.member_table_ids.is_empty()
+            {
+                compaction_groups.remove(compaction_group_id);
+            }
+        }
+        let mut trx = Transaction::default();
+        compaction_groups.apply_to_txn(&mut trx)?;
+        meta_store.txn(trx).await?;
+        compaction_groups.commit();
         Ok(())
     }
 
