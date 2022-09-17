@@ -20,6 +20,7 @@ mod stream_graph;
 mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
+mod test_scale;
 
 pub use mapping::*;
 pub use scale::*;

@@ -486,7 +486,7 @@ where
                         // Transform the mapping of parallel unit to the mapping of actor.
                         dispatcher.hash_mapping = Some(parallel_unit_mapping_to_actor_mapping(
                             downstream_vnode_mapping,
-                            parallel_unit_actor_map,
+                            &parallel_unit_actor_map,
                         ));
                     }
                 }

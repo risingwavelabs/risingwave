@@ -86,14 +86,14 @@ pub(crate) fn actor_mapping_from_bitmaps(bitmaps: &HashMap<ActorId, Bitmap>) -> 
 }
 
 pub(crate) fn parallel_unit_mapping_to_actor_mapping(
-    vnode_mapping: &ParallelUnitMapping,
-    parallel_unit_to_actor_map: HashMap<ParallelUnitId, ActorId>,
+    parallel_unit_mapping: &ParallelUnitMapping,
+    parallel_unit_to_actor_map: &HashMap<ParallelUnitId, ActorId>,
 ) -> ActorMapping {
     let ParallelUnitMapping {
         original_indices,
         data,
         ..
-    } = vnode_mapping;
+    } = parallel_unit_mapping;
 
     let actor_data = data
         .iter()
