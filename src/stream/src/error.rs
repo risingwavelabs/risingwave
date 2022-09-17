@@ -15,7 +15,6 @@
 use std::backtrace::Backtrace;
 
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::TrackingIssue;
 use risingwave_expr::ExprError;
 use risingwave_pb::ProstFieldNotFound;
 use risingwave_storage::error::StorageError;
@@ -40,17 +39,8 @@ enum Inner {
     #[error("Executor error: {0}")]
     Executor(Box<StreamExecutorError>),
 
-    #[error("Feature is not yet implemented: {0}, {1}")]
-    NotImplemented(String, TrackingIssue),
-
     #[error(transparent)]
     Internal(anyhow::Error),
-}
-
-impl StreamError {
-    pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
-        Inner::NotImplemented(error.into(), issue.into()).into()
-    }
 }
 
 #[derive(thiserror::Error)]
@@ -76,25 +66,28 @@ impl std::fmt::Debug for StreamError {
     }
 }
 
-/// Storage error.
+// Storage transaction error; ...
 impl From<StorageError> for StreamError {
     fn from(s: StorageError) -> Self {
         Inner::Storage(s).into()
     }
 }
 
+// Build expression error; ...
 impl From<ExprError> for StreamError {
     fn from(error: ExprError) -> Self {
         Inner::Expression(error).into()
     }
 }
 
+// Chunk compaction error; ProtoBuf ser/de error; ...
 impl From<ArrayError> for StreamError {
     fn from(error: ArrayError) -> Self {
         Inner::Array(error).into()
     }
 }
 
+// Executor runtime error; ...
 impl From<StreamExecutorError> for StreamError {
     fn from(error: StreamExecutorError) -> Self {
         Inner::Executor(Box::new(error)).into()
@@ -110,7 +103,7 @@ impl From<ProstFieldNotFound> for StreamError {
     }
 }
 
-/// Internal error.
+// Internal error.
 impl From<anyhow::Error> for StreamError {
     fn from(a: anyhow::Error) -> Self {
         Inner::Internal(a).into()
@@ -119,7 +112,7 @@ impl From<anyhow::Error> for StreamError {
 
 impl From<StreamError> for tonic::Status {
     fn from(error: StreamError) -> Self {
-        // Do not encode the backtrace to RPC error.
+        // Only encode the error message without the backtrace.
         tonic::Status::internal(error.inner.to_string())
     }
 }
