@@ -93,9 +93,9 @@ impl InsertExecutor {
             if let Some(row_id_index) = row_id_index {
                 let mut builder = I64ArrayBuilder::new(len);
                 for _ in 0..len {
-                    builder.append_null()?
+                    builder.append_null();
                 }
-                columns.insert(row_id_index, Column::from(builder.finish()?))
+                columns.insert(row_id_index, Column::from(builder.finish()))
             }
 
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
@@ -114,9 +114,9 @@ impl InsertExecutor {
         // create ret value
         {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
-            array_builder.append(Some(rows_inserted as i64))?;
+            array_builder.append(Some(rows_inserted as i64));
 
-            let array = array_builder.finish()?;
+            let array = array_builder.finish();
             let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
             yield ret_chunk

@@ -17,7 +17,7 @@ use std::iter::once;
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -42,7 +42,7 @@ use tokio::task::JoinHandle;
 use tokio_retry::strategy::jitter;
 use tracing::{error, info};
 
-use super::local_version::{LocalVersion, PinnedVersion, ReadVersion};
+use super::local_version::{LocalVersion, PinVersionAction, PinnedVersion, ReadVersion};
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use super::SstableStoreRef;
@@ -176,7 +176,7 @@ impl LocalVersionManager {
         sstable_id_manager: SstableIdManagerRef,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Arc<LocalVersionManager> {
-        let (version_unpin_worker_tx, version_unpin_worker_rx) =
+        let (pinned_version_manager_tx, pinned_version_manager_rx) =
             tokio::sync::mpsc::unbounded_channel();
         let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
 
@@ -191,7 +191,10 @@ impl LocalVersionManager {
         let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
 
         let local_version_manager = Arc::new(LocalVersionManager {
-            local_version: RwLock::new(LocalVersion::new(pinned_version, version_unpin_worker_tx)),
+            local_version: RwLock::new(LocalVersion::new(
+                pinned_version,
+                pinned_version_manager_tx,
+            )),
             worker_context: WorkerContext {
                 version_update_notifier_tx,
             },
@@ -217,9 +220,8 @@ impl LocalVersionManager {
         });
 
         // Unpin unused version.
-        tokio::spawn(LocalVersionManager::start_unpin_worker(
-            Arc::downgrade(&local_version_manager),
-            version_unpin_worker_rx,
+        tokio::spawn(LocalVersionManager::start_pinned_version_worker(
+            pinned_version_manager_rx,
             hummock_meta_client,
         ));
 
@@ -529,7 +531,8 @@ impl LocalVersionManager {
         let uncommitted_ssts = self
             .run_sync_upload_task(task_payload, new_sync_epoch)
             .await?;
-        tracing::info!(
+        // TODO: may change it to `info` when we don't sync at every epoch
+        tracing::trace!(
             "sync epoch {} finished. Task size {}",
             new_sync_epoch,
             sync_size
@@ -604,9 +607,8 @@ impl LocalVersionManager {
 
 // concurrent worker thread of `LocalVersionManager`
 impl LocalVersionManager {
-    async fn start_unpin_worker(
-        local_version_manager_weak: Weak<LocalVersionManager>,
-        mut rx: UnboundedReceiver<HummockVersionId>,
+    async fn start_pinned_version_worker(
+        mut rx: UnboundedReceiver<PinVersionAction>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) {
         let min_execute_interval = Duration::from_millis(1000);
@@ -620,6 +622,9 @@ impl LocalVersionManager {
         let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
         min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut need_unpin = false;
+
+        let mut version_ids_in_use: BTreeMap<u64, usize> = BTreeMap::new();
+
         // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
         loop {
             min_execute_interval_tick.tick().await;
@@ -627,9 +632,17 @@ impl LocalVersionManager {
             let mut versions_to_unpin = vec![];
             'collect: loop {
                 match rx.try_recv() {
-                    Ok(version) => {
-                        versions_to_unpin.push(version);
-                    }
+                    Ok(version_action) => match version_action {
+                        PinVersionAction::Pin(version_id) => {
+                            version_ids_in_use
+                                .entry(version_id)
+                                .and_modify(|counter| *counter += 1)
+                                .or_insert(1);
+                        }
+                        PinVersionAction::Unpin(version_id) => {
+                            versions_to_unpin.push(version_id);
+                        }
+                    },
                     Err(err) => match err {
                         TryRecvError::Empty => {
                             break 'collect;
@@ -647,37 +660,43 @@ impl LocalVersionManager {
             if !need_unpin {
                 continue;
             }
-            let local_version_manager = match local_version_manager_weak.upgrade() {
-                None => {
-                    tracing::info!("Shutdown hummock unpin worker");
-                    return;
-                }
-                Some(local_version_manager) => local_version_manager,
-            };
-            let unpin_before = {
-                let mut local_version = local_version_manager.local_version.write();
-                for version in &versions_to_unpin {
-                    local_version.version_ids_in_use.remove(version);
-                }
-                *local_version.version_ids_in_use.first().unwrap()
-            };
 
-            // 2. Call unpin RPC, including versions failed to unpin in previous RPC calls.
-            match hummock_meta_client.unpin_version_before(unpin_before).await {
-                Ok(_) => {
-                    versions_to_unpin.clear();
-                    need_unpin = false;
-                    retry_backoff = get_backoff_strategy();
+            for version in &versions_to_unpin {
+                match version_ids_in_use.get_mut(version) {
+                    Some(counter) => {
+                        *counter -= 1;
+                        if *counter == 0 {
+                            version_ids_in_use.remove(version);
+                        }
+                    }
+                    None => tracing::warn!("version {} to unpin dose not exist", version),
                 }
-                Err(err) => {
-                    let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
-                    tracing::warn!(
-                        "Failed to unpin version {:?}. Will retry after about {} milliseconds",
-                        err,
-                        retry_after.as_millis()
-                    );
-                    tokio::time::sleep(retry_after).await;
+            }
+
+            match version_ids_in_use.first_entry() {
+                Some(unpin_before) => {
+                    // 2. Call unpin RPC, including versions failed to unpin in previous RPC calls.
+                    match hummock_meta_client
+                        .unpin_version_before(*unpin_before.key())
+                        .await
+                    {
+                        Ok(_) => {
+                            versions_to_unpin.clear();
+                            need_unpin = false;
+                            retry_backoff = get_backoff_strategy();
+                        }
+                        Err(err) => {
+                            let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
+                            tracing::warn!(
+                            "Failed to unpin version {:?}. Will retry after about {} milliseconds",
+                            err,
+                            retry_after.as_millis()
+                        );
+                            tokio::time::sleep(retry_after).await;
+                        }
+                    }
                 }
+                None => tracing::warn!("version_ids_in_use is empty!"),
             }
         }
     }
