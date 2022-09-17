@@ -25,7 +25,7 @@ use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNod
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, FragmentType, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor, StreamNode};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
@@ -33,6 +33,7 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
+use crate::stream::actor_mapping_to_parallel_unit_mapping;
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {
@@ -649,7 +650,7 @@ where
                         }
 
                         if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
-                            *vnode_mapping = actor_mapping_to_vnode_mapping(
+                            *vnode_mapping = actor_mapping_to_parallel_unit_mapping(
                                 fragment_id,
                                 &actor_to_parallel_unit,
                                 actor_mapping,
@@ -850,27 +851,5 @@ where
         }
 
         Ok(info)
-    }
-}
-
-fn actor_mapping_to_vnode_mapping(
-    fragment_id: FragmentId,
-    actor_to_parallel_unit: &HashMap<ActorId, ParallelUnitId>,
-    actor_mapping: &ActorMapping,
-) -> ParallelUnitMapping {
-    let ActorMapping {
-        original_indices,
-        data,
-    } = actor_mapping;
-
-    let parallel_unit_data = data
-        .iter()
-        .map(|actor_id| *actor_to_parallel_unit.get(actor_id).unwrap() as ParallelUnitId)
-        .collect_vec();
-
-    ParallelUnitMapping {
-        fragment_id,
-        original_indices: original_indices.clone(),
-        data: parallel_unit_data,
     }
 }

@@ -24,7 +24,6 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
-use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
@@ -44,7 +43,7 @@ use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::GlobalStreamManager;
+use crate::stream::{actor_mapping_from_bitmaps, GlobalStreamManager};
 use crate::MetaResult;
 
 #[derive(Debug)]
@@ -1179,24 +1178,6 @@ where
         }
 
         Ok(())
-    }
-}
-
-fn actor_mapping_from_bitmaps(bitmaps: &HashMap<ActorId, Bitmap>) -> ActorMapping {
-    let mut raw = vec![0 as ActorId; VIRTUAL_NODE_COUNT];
-
-    for (actor_id, bitmap) in bitmaps {
-        for (idx, pos) in raw.iter_mut().enumerate() {
-            if bitmap.is_set(idx).unwrap() {
-                *pos = *actor_id;
-            }
-        }
-    }
-    let (original_indices, data) = compress_data(&raw);
-
-    ActorMapping {
-        original_indices,
-        data,
     }
 }
 
