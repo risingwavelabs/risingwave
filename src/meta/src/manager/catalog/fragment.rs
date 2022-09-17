@@ -526,9 +526,12 @@ where
             to_remove: &HashSet<ActorId>,
             to_create: &[ActorId],
         ) {
-            for actor_id in actors.iter() {
-                assert!(!to_create.contains(actor_id));
-                assert!(to_remove.contains(actor_id));
+            let actor_id_set: HashSet<_> = actors.iter().copied().collect();
+            for actor_id in to_create {
+                assert!(!actor_id_set.contains(actor_id));
+            }
+            for actor_id in to_remove {
+                assert!(actor_id_set.contains(actor_id));
             }
 
             actors.drain_filter(|actor_id| to_remove.contains(actor_id));
