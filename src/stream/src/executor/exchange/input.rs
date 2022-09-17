@@ -26,6 +26,7 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc::Receiver;
 
+use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
@@ -225,7 +226,7 @@ pub(crate) fn new_input(
     fragment_id: FragmentId,
     upstream_actor_id: ActorId,
     upstream_fragment_id: FragmentId,
-) -> Result<BoxedInput> {
+) -> StreamResult<BoxedInput> {
     let upstream_addr = context
         .get_actor_info(&upstream_actor_id)?
         .get_host()?

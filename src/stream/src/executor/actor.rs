@@ -25,6 +25,7 @@ use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
 use super::StreamConsumer;
+use crate::error::StreamResult;
 use crate::executor::Epoch;
 use crate::task::{ActorId, SharedContext};
 
@@ -86,7 +87,7 @@ where
         }
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(self) -> StreamResult<()> {
         let span_name = format!("actor_poll_{:03}", self.id);
         let mut span = {
             let mut span = Span::enter_with_local_parent("actor_poll");

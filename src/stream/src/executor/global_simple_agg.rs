@@ -25,6 +25,7 @@ use risingwave_storage::StateStore;
 use super::aggregation::agg_call_filter_res;
 use super::*;
 use crate::common::StateTableColumnMapping;
+use crate::error::StreamResult;
 use crate::executor::aggregation::{
     generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
@@ -97,11 +98,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         executor_id: u64,
         mut state_tables: Vec<StateTable<S>>,
         state_table_col_mappings: Vec<Vec<usize>>,
-    ) -> Result<Self> {
+    ) -> StreamResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
 
-        // // TODO: enable sanity check for globle simple agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
+        // TODO: enable sanity check for globle simple agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
         for state_table in &mut state_tables {
             state_table.disable_sanity_check();
         }

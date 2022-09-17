@@ -17,11 +17,12 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_stack_trace::{StackTraceManager, StackTraceReport};
 use futures::Future;
 use itertools::Itertools;
 use parking_lot::Mutex;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -34,6 +35,7 @@ use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
+use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
@@ -191,7 +193,7 @@ impl LocalStreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<()> {
+    ) -> StreamResult<()> {
         let core = self.core.lock();
         let timer = core
             .streaming_metrics
@@ -228,7 +230,7 @@ impl LocalStreamManager {
         result
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> Result<(Vec<LocalSstableInfo>, bool)> {
+    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<(Vec<LocalSstableInfo>, bool)> {
         let timer = self
             .core
             .lock()
@@ -262,7 +264,7 @@ impl LocalStreamManager {
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
     /// this barrier is finished.
     #[cfg(test)]
-    pub fn send_barrier_for_test(&self, barrier: &Barrier) -> Result<()> {
+    pub fn send_barrier_for_test(&self, barrier: &Barrier) -> StreamResult<()> {
         use std::iter::empty;
 
         let core = self.core.lock();
@@ -277,7 +279,7 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    pub fn drop_actor(&self, actors: &[ActorId]) -> Result<()> {
+    pub fn drop_actor(&self, actors: &[ActorId]) -> StreamResult<()> {
         let mut core = self.core.lock();
         for id in actors {
             core.drop_actor(*id);
@@ -287,7 +289,7 @@ impl LocalStreamManager {
     }
 
     /// Force stop all actors on this worker.
-    pub async fn stop_all_actors(&self, barrier: &Barrier) -> Result<()> {
+    pub async fn stop_all_actors(&self, barrier: &Barrier) -> StreamResult<()> {
         let (actor_ids_to_send, actor_ids_to_collect) = {
             let core = self.core.lock();
             let actor_ids_to_send = core.context.lock_barrier_manager().all_senders();
@@ -309,7 +311,7 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
+    pub fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver<Message>> {
         let core = self.core.lock();
         core.context.take_receiver(&ids)
     }
@@ -318,13 +320,13 @@ impl LocalStreamManager {
         &self,
         actors: &[stream_plan::StreamActor],
         hanging_channels: &[stream_service::HangingChannel],
-    ) -> Result<()> {
+    ) -> StreamResult<()> {
         let mut core = self.core.lock();
         core.update_actors(actors, hanging_channels)
     }
 
     /// This function was called while [`LocalStreamManager`] exited.
-    pub async fn wait_all(self) -> Result<()> {
+    pub async fn wait_all(self) -> StreamResult<()> {
         let handles = self.core.lock().take_all_handles()?;
         for (_id, handle) in handles {
             handle.await.unwrap();
@@ -334,14 +336,14 @@ impl LocalStreamManager {
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn update_actor_info(&self, actor_infos: &[ActorInfo]) -> Result<()> {
+    pub fn update_actor_info(&self, actor_infos: &[ActorInfo]) -> StreamResult<()> {
         let mut core = self.core.lock();
         core.update_actor_info(actor_infos)
     }
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
+    pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> StreamResult<()> {
         let mut core = self.core.lock();
         core.build_actors(actors, env)
     }
@@ -436,7 +438,7 @@ impl LocalStreamManagerCore {
         input: BoxedExecutor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
-    ) -> Result<impl StreamConsumer> {
+    ) -> StreamResult<impl StreamConsumer> {
         let dispatcher_impls = dispatchers
             .iter()
             .map(|dispatcher| DispatcherImpl::new(&self.context, actor_id, dispatcher))
@@ -462,7 +464,7 @@ impl LocalStreamManagerCore {
         store: impl StateStore,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
         // The node with no input must be a `get_receive_message`
@@ -526,7 +528,7 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(
                 fragment_id,
@@ -570,15 +572,16 @@ impl LocalStreamManagerCore {
         return tokio::spawn(future);
     }
 
-    fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
+    fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> StreamResult<()> {
         for &actor_id in actors {
             let actor = self.actors.remove(&actor_id).unwrap();
             let actor_context = ActorContext::create(actor_id);
             let vnode_bitmap = actor
-                .get_vnode_bitmap()
-                .ok()
+                .vnode_bitmap
+                .as_ref()
                 .map(|b| b.try_into())
-                .transpose()?;
+                .transpose()
+                .context("failed to decode vnode bitmap")?;
             let executor = self.create_nodes(
                 actor.fragment_id,
                 actor.get_nodes()?,
@@ -681,34 +684,33 @@ impl LocalStreamManagerCore {
         Ok(())
     }
 
-    pub fn take_all_handles(&mut self) -> Result<HashMap<ActorId, ActorHandle>> {
+    pub fn take_all_handles(&mut self) -> StreamResult<HashMap<ActorId, ActorHandle>> {
         Ok(std::mem::take(&mut self.handles))
     }
 
-    pub fn remove_actor_handles(&mut self, actor_ids: &[ActorId]) -> Result<Vec<ActorHandle>> {
+    pub fn remove_actor_handles(
+        &mut self,
+        actor_ids: &[ActorId],
+    ) -> StreamResult<Vec<ActorHandle>> {
         actor_ids
             .iter()
             .map(|actor_id| {
-                self.handles.remove(actor_id).ok_or_else(|| {
-                    RwError::from(ErrorCode::InternalError(format!(
-                        "No such actor with actor id:{}",
-                        actor_id
-                    )))
-                })
+                self.handles
+                    .remove(actor_id)
+                    .ok_or_else(|| anyhow!("No such actor with actor id:{}", actor_id).into())
             })
-            .collect::<Result<Vec<_>>>()
+            .try_collect()
     }
 
-    fn update_actor_info(&mut self, new_actor_infos: &[ActorInfo]) -> Result<()> {
+    fn update_actor_info(&mut self, new_actor_infos: &[ActorInfo]) -> StreamResult<()> {
         let mut actor_infos = self.context.actor_infos.write();
         for actor in new_actor_infos {
             let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
             if let Some(prev_actor) = ret && actor != &prev_actor{
-                return Err(ErrorCode::InternalError(format!(
+                bail!(
                     "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()
-                ))
-                .into());
+                );
             }
         }
         Ok(())
@@ -743,7 +745,7 @@ impl LocalStreamManagerCore {
         &mut self,
         actors: &[stream_plan::StreamActor],
         hanging_channels: &[stream_service::HangingChannel],
-    ) -> Result<()> {
+    ) -> StreamResult<()> {
         for actor in actors {
             self.actors
                 .try_insert(actor.get_actor_id(), actor.clone())
@@ -779,13 +781,7 @@ impl LocalStreamManagerCore {
                     self.context
                         .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
                 }
-                _ => {
-                    return Err(ErrorCode::InternalError(format!(
-                        "hanging channel must be from local to remote: {:?}",
-                        hanging_channel,
-                    ))
-                    .into())
-                }
+                _ => bail!("hanging channel must be from local to remote: {hanging_channel:?}"),
             }
         }
         Ok(())

@@ -31,6 +31,7 @@ use super::managed_state::top_n::ManagedTopNState;
 use super::top_n::{generate_executor_pk_indices_info, TopNCache};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::error::StreamResult;
 
 pub type GroupTopNExecutor<S> = TopNExecutorWrapper<InnerGroupTopNExecutorNew<S>>;
 
@@ -45,7 +46,7 @@ impl<S: StateStore> GroupTopNExecutor<S> {
         key_indices: Vec<usize>,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
 
@@ -113,7 +114,7 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
         key_indices: Vec<usize>,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
 

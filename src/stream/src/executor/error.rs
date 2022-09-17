@@ -27,7 +27,7 @@ use risingwave_storage::error::StorageError;
 use super::Barrier;
 
 #[derive(thiserror::Error, Debug)]
-enum StreamExecutorErrorInner {
+enum Inner {
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
@@ -65,24 +65,24 @@ enum StreamExecutorErrorInner {
 }
 
 impl StreamExecutorError {
-    pub fn serde_error(error: impl Error) -> Self {
-        StreamExecutorErrorInner::SerdeError(error.into()).into()
+    fn serde_error(error: impl Error) -> Self {
+        Inner::SerdeError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> Self {
-        StreamExecutorErrorInner::ChannelClosed(name.into()).into()
+        Inner::ChannelClosed(name.into()).into()
     }
 
     pub fn align_barrier(expected: Barrier, received: Barrier) -> Self {
-        StreamExecutorErrorInner::AlignBarrier(expected.into(), received.into()).into()
+        Inner::AlignBarrier(expected.into(), received.into()).into()
     }
 
     pub fn connector_error(error: impl Error) -> Self {
-        StreamExecutorErrorInner::ConnectorError(error.into()).into()
+        Inner::ConnectorError(error.into()).into()
     }
 
     pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
-        StreamExecutorErrorInner::NotImplemented(error.into(), issue.into()).into()
+        Inner::NotImplemented(error.into(), issue.into()).into()
     }
 }
 
@@ -90,7 +90,7 @@ impl StreamExecutorError {
 #[error("{inner}")]
 pub struct StreamExecutorError {
     #[from]
-    inner: StreamExecutorErrorInner,
+    inner: Inner,
     backtrace: Backtrace,
 }
 
@@ -116,27 +116,27 @@ impl std::fmt::Debug for StreamExecutorError {
 /// Storage error.
 impl From<StorageError> for StreamExecutorError {
     fn from(s: StorageError) -> Self {
-        StreamExecutorErrorInner::Storage(s).into()
+        Inner::Storage(s).into()
     }
 }
 
 /// Chunk operation error.
 impl From<ArrayError> for StreamExecutorError {
     fn from(e: ArrayError) -> Self {
-        StreamExecutorErrorInner::EvalError(Either::Left(e)).into()
+        Inner::EvalError(Either::Left(e)).into()
     }
 }
 
 impl From<ExprError> for StreamExecutorError {
     fn from(e: ExprError) -> Self {
-        StreamExecutorErrorInner::EvalError(Either::Right(e)).into()
+        Inner::EvalError(Either::Right(e)).into()
     }
 }
 
 /// Internal error.
 impl From<anyhow::Error> for StreamExecutorError {
     fn from(a: anyhow::Error) -> Self {
-        StreamExecutorErrorInner::Internal(a).into()
+        Inner::Internal(a).into()
     }
 }
 
@@ -146,10 +146,15 @@ impl From<memcomparable::Error> for StreamExecutorError {
         Self::serde_error(m)
     }
 }
+impl From<ValueEncodingError> for StreamExecutorError {
+    fn from(e: ValueEncodingError) -> Self {
+        Self::serde_error(e)
+    }
+}
 
 impl From<RpcError> for StreamExecutorError {
     fn from(e: RpcError) -> Self {
-        StreamExecutorErrorInner::RpcError(e).into()
+        Inner::RpcError(e).into()
     }
 }
 
@@ -167,15 +172,9 @@ impl From<ConnectorError> for StreamExecutorError {
     }
 }
 
-impl From<ValueEncodingError> for StreamExecutorError {
-    fn from(e: ValueEncodingError) -> Self {
-        StreamExecutorErrorInner::SerdeError(Box::new(e)).into()
-    }
-}
-
 impl From<SinkError> for StreamExecutorError {
     fn from(e: SinkError) -> Self {
-        StreamExecutorErrorInner::SinkError(e).into()
+        Inner::SinkError(e).into()
     }
 }
 

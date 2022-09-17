@@ -27,6 +27,7 @@ use super::aggregation::{
 };
 use super::error::StreamExecutorError;
 use super::*;
+use crate::error::StreamResult;
 
 pub struct LocalSimpleAggExecutor {
     ctx: ActorContextRef,
@@ -157,7 +158,7 @@ impl LocalSimpleAggExecutor {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
         let info = ExecutorInfo {
             schema,
@@ -191,7 +192,7 @@ mod tests {
     use crate::executor::{Executor, LocalSimpleAggExecutor};
 
     #[tokio::test]
-    async fn test_no_chunk() -> Result<()> {
+    async fn test_no_chunk() {
         let schema = schema_test_utils::ii();
         let (mut tx, source) = MockSource::channel(schema, vec![2]);
         tx.push_barrier(1, false);
@@ -207,13 +208,16 @@ mod tests {
             filter: None,
         }];
 
-        let simple_agg = Box::new(LocalSimpleAggExecutor::new(
-            ActorContext::create(123),
-            Box::new(source),
-            agg_calls,
-            vec![],
-            1,
-        )?);
+        let simple_agg = Box::new(
+            LocalSimpleAggExecutor::new(
+                ActorContext::create(123),
+                Box::new(source),
+                agg_calls,
+                vec![],
+                1,
+            )
+            .unwrap(),
+        );
         let mut simple_agg = simple_agg.execute();
 
         assert_matches!(
@@ -228,12 +232,10 @@ mod tests {
             simple_agg.next().await.unwrap().unwrap(),
             Message::Barrier { .. }
         );
-
-        Ok(())
     }
 
     #[tokio::test]
-    async fn test_local_simple_agg() -> Result<()> {
+    async fn test_local_simple_agg() {
         let schema = schema_test_utils::iii();
         let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk\
         tx.push_barrier(1, false);
@@ -281,13 +283,16 @@ mod tests {
             },
         ];
 
-        let simple_agg = Box::new(LocalSimpleAggExecutor::new(
-            ActorContext::create(123),
-            Box::new(source),
-            agg_calls,
-            vec![],
-            1,
-        )?);
+        let simple_agg = Box::new(
+            LocalSimpleAggExecutor::new(
+                ActorContext::create(123),
+                Box::new(source),
+                agg_calls,
+                vec![],
+                1,
+            )
+            .unwrap(),
+        );
         let mut simple_agg = simple_agg.execute();
 
         // Consume the init barrier
@@ -315,7 +320,5 @@ mod tests {
                 + -1 0 0"
             )
         );
-
-        Ok(())
     }
 }

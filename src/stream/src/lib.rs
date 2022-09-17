@@ -53,6 +53,7 @@
 extern crate tracing;
 
 mod common;
+pub mod error;
 pub mod executor;
 mod from_proto;
 pub mod task;

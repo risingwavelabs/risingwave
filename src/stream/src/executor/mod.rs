@@ -41,6 +41,7 @@ use risingwave_pb::stream_plan::{
 };
 use smallvec::SmallVec;
 
+use crate::error::StreamResult;
 use crate::task::ActorId;
 
 mod actor;
@@ -90,7 +91,7 @@ pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
-pub use error::StreamExecutorResult;
+pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::GlobalSimpleAggExecutor;
@@ -608,7 +609,7 @@ pub async fn expect_first_barrier(
 
 /// `StreamConsumer` is the last step in an actor.
 pub trait StreamConsumer: Send + 'static {
-    type BarrierStream: Stream<Item = Result<Barrier>> + Send;
+    type BarrierStream: Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream;
 }

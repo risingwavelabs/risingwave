@@ -23,7 +23,7 @@ impl ExecutorBuilder for ExpandExecutorBuilder {
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let expand_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Expand)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let pk_indices = params.pk_indices;

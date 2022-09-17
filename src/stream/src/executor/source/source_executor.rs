@@ -33,6 +33,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::reader::SourceReaderStream;
+use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::source::state::SourceStateHandler;
@@ -93,7 +94,7 @@ impl<S: StateStore> SourceExecutor<S> {
         _op_info: String,
         streaming_metrics: Arc<StreamingMetrics>,
         expected_barrier_latency_ms: u64,
-    ) -> Result<Self> {
+    ) -> StreamResult<Self> {
         // Using vnode range start for row id generator.
         let vnode_id = vnodes.next_set_bit(0).unwrap_or(0);
         Ok(Self {
@@ -743,14 +744,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_split_change_mutation() -> Result<()> {
+    async fn test_split_change_mutation() {
         let stream_source_info = mock_stream_source_info();
         let source_table_id = TableId::default();
         let source_manager = Arc::new(MemSourceManager::default());
 
         source_manager
             .create_source(&source_table_id, stream_source_info)
-            .await?;
+            .await
+            .unwrap();
 
         let get_schema = |column_ids: &[ColumnId], source_desc: &SourceDesc| {
             let mut fields = Vec::with_capacity(column_ids.len());
@@ -765,7 +767,7 @@ mod tests {
             Schema::new(fields)
         };
 
-        let source_desc = source_manager.get_source(&source_table_id)?;
+        let source_desc = source_manager.get_source(&source_table_id).unwrap();
         let mem_state_store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(mem_state_store.clone(), &TableId::from(0x2333));
         let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
@@ -790,7 +792,8 @@ mod tests {
             "SourceExecutor".to_string(),
             Arc::new(StreamingMetrics::unused()),
             u64::MAX,
-        )?;
+        )
+        .unwrap();
 
         let mut materialize = MaterializeExecutor::new_for_test(
             Box::new(source_exec),
@@ -863,7 +866,8 @@ mod tests {
         // there must exist state for new add partition
         source_state_handler
             .restore_states("3-1".to_string().into(), curr_epoch + 1)
-            .await?
+            .await
+            .unwrap()
             .unwrap();
 
         let chunk_2 = (materialize.next().await.unwrap().unwrap())
@@ -902,6 +906,5 @@ mod tests {
         let pause_barrier =
             Barrier::new_test_barrier(curr_epoch + 3).with_mutation(Mutation::Resume);
         barrier_tx.send(pause_barrier).unwrap();
-        Ok(())
     }
 }

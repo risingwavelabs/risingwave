@@ -29,7 +29,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let lookup = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Lookup)?;
 
         let [stream, arrangement]: [_; 2] = params.input.try_into().unwrap();
