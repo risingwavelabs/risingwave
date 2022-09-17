@@ -43,8 +43,12 @@ where
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerConfig {
+    /// The interval for periodic heartbeat from worker to the meta service.
     #[serde(default = "default::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
+
+    #[serde(default = "default::connection_pool_size")]
+    pub connection_pool_size: u16,
 }
 
 impl Default for ServerConfig {
@@ -56,8 +60,15 @@ impl Default for ServerConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BatchConfig {
-    // #[serde(default = "default::chunk_size")]
-    // pub chunk_size: u32,
+    /// Not used.
+    #[cfg(any())]
+    #[serde(default = "default::chunk_size")]
+    pub chunk_size: u32,
+
+    /// The thread number of the batch task runtime in the compute node. The default value is
+    /// decided by `tokio`.
+    #[serde(default)]
+    pub worker_threads_num: Option<usize>,
 }
 
 impl Default for BatchConfig {
@@ -69,17 +80,30 @@ impl Default for BatchConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StreamingConfig {
-    // #[serde(default = "default::chunk_size")]
-    // pub chunk_size: u32,
+    /// Not used.
+    #[cfg(any())]
+    #[serde(default = "default::chunk_size")]
+    pub chunk_size: u32,
+
+    /// The interval of periodic checkpointing.
     #[serde(default = "default::checkpoint_interval_ms")]
     pub checkpoint_interval_ms: u32,
 
+    /// The maximum number of barriers in-flight in the compute nodes.
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
+    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
+    /// fragment on one parallel unit per compute node.
+    #[serde(default)]
+    pub minimal_scheduling: bool,
+
+    /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[serde(default = "default::worker_node_parallelism")]
     pub worker_node_parallelism: usize,
 
+    /// The thread number of the streaming actor runtime in the compute node. The default value is
+    /// decided by `tokio`.
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
 
@@ -221,6 +245,10 @@ mod default {
 
     pub fn heartbeat_interval_ms() -> u32 {
         1000
+    }
+
+    pub fn connection_pool_size() -> u16 {
+        16
     }
 
     #[expect(dead_code)]

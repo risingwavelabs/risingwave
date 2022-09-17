@@ -193,8 +193,12 @@ pub struct ConnectorSourceWorkerHandle {
 
 pub struct SourceManagerCore<S: MetaStore> {
     pub fragment_manager: FragmentManagerRef<S>,
+
+    /// Managed source loops
     pub managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
+    /// Fragments associated with each source
     pub source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+    /// Splits assigned per actor, persistent in `MetaStore`
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
@@ -221,8 +225,8 @@ where
         let table_frags = self.fragment_manager.list_table_fragments().await?;
         let mut frag_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
         for table_frag in table_frags {
-            for (frag_id, mut frag) in table_frag.fragments {
-                let mut actors = frag.actors.iter_mut().map(|x| x.actor_id).collect_vec();
+            for (frag_id, frag) in table_frag.fragments {
+                let mut actors = frag.actors.iter().map(|x| x.actor_id).collect_vec();
                 frag_actors
                     .entry(frag_id)
                     .or_insert(vec![])
@@ -304,28 +308,24 @@ where
 
     pub fn drop_diff(
         &mut self,
-        source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
-        actor_splits: Option<HashSet<ActorId>>,
+        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        actor_splits: &HashSet<ActorId>,
     ) {
-        if let Some(source_fragments) = source_fragments {
-            for (source_id, fragment_ids) in source_fragments {
-                if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
-                    let managed_fragment_ids = entry.get_mut();
-                    for fragment_id in &fragment_ids {
-                        managed_fragment_ids.remove(fragment_id);
-                    }
+        for (source_id, fragment_ids) in source_fragments {
+            if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
+                let managed_fragment_ids = entry.get_mut();
+                for fragment_id in &fragment_ids {
+                    managed_fragment_ids.remove(fragment_id);
+                }
 
-                    if managed_fragment_ids.is_empty() {
-                        entry.remove();
-                    }
+                if managed_fragment_ids.is_empty() {
+                    entry.remove();
                 }
             }
         }
 
-        if let Some(actor_splits) = actor_splits {
-            for actor_id in actor_splits {
-                self.actor_splits.remove(&actor_id);
-            }
+        for actor_id in actor_splits {
+            self.actor_splits.remove(actor_id);
         }
     }
 
@@ -458,25 +458,22 @@ where
 
     pub async fn drop_update(
         &self,
-        source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
-        actor_splits: Option<HashSet<ActorId>>,
+        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        actor_splits: HashSet<ActorId>,
     ) -> MetaResult<()> {
         {
             let mut core = self.core.lock().await;
-            core.drop_diff(source_fragments, actor_splits.clone());
+            core.drop_diff(source_fragments, &actor_splits);
         }
 
         let mut trx = Transaction::default();
-        if let Some(actor_ids) = actor_splits {
-            for actor_id in actor_ids {
-                let source_actor_info = SourceActorInfo {
-                    actor_id,
-                    ..Default::default()
-                };
-                source_actor_info.delete_in_transaction(&mut trx)?;
-            }
+        for actor_id in actor_splits {
+            let source_actor_info = SourceActorInfo {
+                actor_id,
+                ..Default::default()
+            };
+            source_actor_info.delete_in_transaction(&mut trx)?;
         }
-
         self.env.meta_store().txn(trx).await.map_err(Into::into)
     }
 
@@ -664,26 +661,24 @@ where
             handle.handle.abort();
         }
 
-        if core.source_fragments.contains_key(&source_id) {
+        assert!(
+            !core.source_fragments.contains_key(&source_id),
+            "dropping source {}, but associated fragments still exists",
+            source_id
+        );
+
+        // Unregister afterwards and is safeguarded by
+        // CompactionGroupManager::purge_stale_members.
+        if let Err(e) = self
+            .compaction_group_manager
+            .unregister_source(source_id)
+            .await
+        {
             tracing::warn!(
-                "dropping source {}, but associated fragments still exists",
-                source_id
+                "Failed to unregister source {}. It will be unregistered eventually.\n{:#?}",
+                source_id,
+                e
             );
-            core.source_fragments.remove(&source_id);
-        } else {
-            // Unregister afterwards and is safeguarded by
-            // CompactionGroupManager::purge_stale_members.
-            if let Err(e) = self
-                .compaction_group_manager
-                .unregister_source(source_id)
-                .await
-            {
-                tracing::warn!(
-                    "Failed to unregister source {}. It will be unregistered eventually.\n{:#?}",
-                    source_id,
-                    e
-                );
-            }
         }
 
         Ok(())

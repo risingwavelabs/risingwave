@@ -19,6 +19,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
+use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::meta::subscribe_response::Operation;
@@ -477,11 +479,18 @@ where
         };
 
         let table_ids_cnt = fragment_graph.table_ids_cnt;
-        let parallel_degree = self.cluster_manager.get_parallel_unit_count().await;
+        let default_parallelism = if self.env.opts.minimal_scheduling {
+            self.cluster_manager
+                .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+                .await
+                .len()
+        } else {
+            self.cluster_manager.get_active_parallel_unit_count().await
+        };
         let mut actor_graph_builder = ActorGraphBuilder::new(
             self.env.id_gen_manager_ref(),
             fragment_graph,
-            parallel_degree as u32,
+            default_parallelism as u32,
             &mut ctx,
         )
         .await?;
