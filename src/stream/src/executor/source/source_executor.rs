@@ -124,7 +124,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let row_ids = self.row_id_generator.next_batch(len).await;
 
         for row_id in row_ids {
-            builder.append(Some(row_id)).unwrap();
+            builder.append(Some(row_id));
         }
 
         builder.finish().into()
@@ -138,15 +138,11 @@ impl<S: StateStore> SourceExecutor<S> {
         for i in 0..len {
             // Only refill row_id for insert operation.
             if ops.get(i) == Some(&Op::Insert) {
-                builder
-                    .append(Some(self.row_id_generator.next().await))
-                    .unwrap();
+                builder.append(Some(self.row_id_generator.next().await));
             } else {
-                builder
-                    .append(Some(
-                        i64::try_from(column.array_ref().datum_at(i).unwrap()).unwrap(),
-                    ))
-                    .unwrap();
+                builder.append(Some(
+                    i64::try_from(column.array_ref().datum_at(i).unwrap()).unwrap(),
+                ));
             }
         }
 

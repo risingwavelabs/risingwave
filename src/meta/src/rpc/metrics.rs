@@ -78,14 +78,14 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_duration_seconds",
             "barrier latency",
-            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
             "meta_barrier_wait_commit_duration_seconds",
             "barrier_wait_commit_latency",
-            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
         let barrier_wait_commit_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -93,7 +93,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_send_duration_seconds",
             "barrier send latency",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
+            exponential_buckets(0.001, 2.0, 19).unwrap() // max 262s
         );
         let barrier_send_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -143,7 +143,7 @@ impl MetaMetrics {
         let compact_frequency = register_int_counter_vec_with_registry!(
             "storage_level_compact_frequency",
             "num of compactions from each level to next level",
-            &["group", "result"],
+            &["compactor", "group", "result"],
             registry
         )
         .unwrap();

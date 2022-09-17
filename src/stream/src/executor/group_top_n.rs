@@ -182,28 +182,31 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
                 Op::Insert | Op::UpdateInsert => {
                     self.managed_state
                         .insert(ordered_pk_row.clone(), row.clone());
+                    self.caches.get_mut(&pk_prefix.0).unwrap().insert(
+                        ordered_pk_row,
+                        row,
+                        &mut res_ops,
+                        &mut res_rows,
+                    );
                 }
 
                 Op::Delete | Op::UpdateDelete => {
                     self.managed_state.delete(&ordered_pk_row, row.clone());
+                    self.caches
+                        .get_mut(&pk_prefix.0)
+                        .unwrap()
+                        .delete(
+                            Some(&pk_prefix),
+                            &mut self.managed_state,
+                            ordered_pk_row,
+                            row,
+                            epoch,
+                            &mut res_ops,
+                            &mut res_rows,
+                        )
+                        .await?;
                 }
             }
-
-            // update the corresponding rows in the group cache.
-            self.caches
-                .get_mut(&pk_prefix.0)
-                .unwrap()
-                .update(
-                    Some(&pk_prefix),
-                    &mut self.managed_state,
-                    op,
-                    ordered_pk_row,
-                    row,
-                    epoch,
-                    &mut res_ops,
-                    &mut res_rows,
-                )
-                .await?;
         }
 
         generate_output(res_rows, res_ops, &self.schema)

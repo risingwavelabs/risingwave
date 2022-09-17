@@ -22,6 +22,9 @@ use super::version_cmp::VersionedComparator;
 pub struct KeyRange {
     pub left: Bytes,
     pub right: Bytes,
+    // FIXME: Note that currently `inf` is not always correctly set throughout the codebase,
+    // e.g. there is usage like KeyRange::new(Bytes::new(), Bytes::new()).
+    // It doesn't affect correctness only because we don't use `inf` anywhere for now.
     pub inf: bool,
 }
 

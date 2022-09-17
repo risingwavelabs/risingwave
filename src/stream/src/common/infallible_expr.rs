@@ -32,9 +32,9 @@ pub trait InfallibleExpression: Expression {
             for row in input.rows_with_holes() {
                 if let Some(row) = row {
                     let datum = self.eval_row_infallible(&row.to_owned_row(), &on_err);
-                    array_builder.append_datum(&datum).unwrap();
+                    array_builder.append_datum(&datum);
                 } else {
-                    array_builder.append_null().unwrap();
+                    array_builder.append_null();
                 }
             }
             Arc::new(array_builder.finish())

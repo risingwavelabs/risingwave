@@ -9,7 +9,6 @@ chrono = "0.4"
 clap = { version = "3", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
-lazy_static = "1"
 libtest-mimic = "0.5"
 paste = "1"
 rand = { version = "0.8", features = ["small_rng"] }

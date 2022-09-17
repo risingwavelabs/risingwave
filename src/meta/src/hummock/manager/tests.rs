@@ -156,12 +156,12 @@ async fn test_hummock_compaction_task() {
 
     // Cancel the task and succeed.
     assert!(hummock_manager
-        .cancel_compact_task(&mut compact_task)
+        .cancel_compact_task(&mut compact_task, TaskStatus::ManualCanceled)
         .await
         .unwrap());
     // Cancel a non-existent task and succeed.
     assert!(hummock_manager
-        .cancel_compact_task(&mut compact_task)
+        .cancel_compact_task(&mut compact_task, TaskStatus::ManualCanceled)
         .await
         .unwrap());
 
@@ -945,7 +945,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     }
 
     // Cancel the task immediately and succeed.
-    compact_task.set_task_status(TaskStatus::Failed);
+    compact_task.set_task_status(TaskStatus::ExecuteFailed);
 
     assert!(hummock_manager
         .report_compact_task(context_id, &compact_task)
@@ -973,7 +973,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
 
     // Cancel the task after heartbeat has triggered and fail.
-    compact_task.set_task_status(TaskStatus::Failed);
+    compact_task.set_task_status(TaskStatus::ExecuteFailed);
     assert!(!hummock_manager
         .report_compact_task(context_id, &compact_task)
         .await
@@ -1077,9 +1077,6 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 async fn test_extend_ssts_to_delete() {
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    hummock_manager
-        .compactor_manager
-        .add_compactor(context_id, u64::MAX);
     let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
     let max_committed_sst_id = sst_infos
         .iter()
