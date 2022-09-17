@@ -15,7 +15,7 @@
 use std::backtrace::Backtrace;
 
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
+use risingwave_common::error::TrackingIssue;
 use risingwave_expr::ExprError;
 use risingwave_pb::ProstFieldNotFound;
 use risingwave_storage::error::StorageError;

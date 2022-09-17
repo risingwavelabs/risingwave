@@ -25,7 +25,6 @@ use parking_lot::Mutex;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;

@@ -182,7 +182,6 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
-    use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::AggKind;
 

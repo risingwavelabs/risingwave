@@ -16,7 +16,7 @@ use std::backtrace::Backtrace;
 
 use either::Either;
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
+use risingwave_common::error::{BoxedError, Error, TrackingIssue};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
@@ -155,13 +155,6 @@ impl From<ValueEncodingError> for StreamExecutorError {
 impl From<RpcError> for StreamExecutorError {
     fn from(e: RpcError) -> Self {
         Inner::RpcError(e).into()
-    }
-}
-
-/// Always convert [`StreamExecutorError`] to stream error variant of [`RwError`].
-impl From<StreamExecutorError> for RwError {
-    fn from(h: StreamExecutorError) -> Self {
-        ErrorCode::StreamError(h.into()).into()
     }
 }
 

@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 

@@ -23,7 +23,6 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_common::error::Result;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::source::{ConnectorState, SplitId, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
@@ -457,7 +456,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_table_source() -> Result<()> {
+    async fn test_table_source() {
         let table_id = TableId::default();
 
         let rowid_type = DataType::Int64;
@@ -490,13 +489,10 @@ mod tests {
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
         let source_manager = MemSourceManager::default();
-        source_manager.create_table_source(
-            &table_id,
-            table_columns,
-            row_id_index,
-            pk_column_ids,
-        )?;
-        let source_desc = source_manager.get_source(&table_id)?;
+        source_manager
+            .create_table_source(&table_id, table_columns, row_id_index, pk_column_ids)
+            .unwrap();
+        let source_desc = source_manager.get_source(&table_id).unwrap();
         let source = source_desc.clone().source;
 
         let chunk1 = StreamChunk::from_pretty(
@@ -583,12 +579,10 @@ mod tests {
                 U+ 6 6 world",
             )
         );
-
-        Ok(())
     }
 
     #[tokio::test]
-    async fn test_table_dropped() -> Result<()> {
+    async fn test_table_dropped() {
         let table_id = TableId::default();
 
         let rowid_type = DataType::Int64;
@@ -621,13 +615,10 @@ mod tests {
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
         let source_manager = MemSourceManager::default();
-        source_manager.create_table_source(
-            &table_id,
-            table_columns,
-            row_id_index,
-            pk_column_ids,
-        )?;
-        let source_desc = source_manager.get_source(&table_id)?;
+        source_manager
+            .create_table_source(&table_id, table_columns, row_id_index, pk_column_ids)
+            .unwrap();
+        let source_desc = source_manager.get_source(&table_id).unwrap();
         let source = source_desc.clone().source;
 
         // Prepare test data chunks
@@ -684,8 +675,6 @@ mod tests {
         write_chunk(chunk.clone());
         executor.next().await.unwrap().unwrap();
         write_chunk(chunk);
-
-        Ok(())
     }
 
     fn mock_stream_source_info() -> StreamSourceInfo {

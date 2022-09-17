@@ -19,7 +19,6 @@ use async_stack_trace::{SpanValue, StackTrace};
 use futures::pin_mut;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
-use risingwave_common::error::Result;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
 
@@ -34,7 +33,7 @@ use crate::task::{ActorId, SharedContext};
 pub struct ActorContext {
     pub id: ActorId,
 
-    /// TODO: report errors and prompt the user.
+    // TODO: report errors and prompt the user.
     pub errors: Mutex<HashMap<String, Vec<ExprError>>>,
 }
 

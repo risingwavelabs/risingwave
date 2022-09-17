@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use anyhow::anyhow;
 use async_stack_trace::{SpanValue, StackTrace};
 use async_trait::async_trait;
-use risingwave_common::error::Result;
 use risingwave_common::util::addr::is_local_address;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::Sender;

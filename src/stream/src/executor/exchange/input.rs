@@ -21,7 +21,6 @@ use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
 use risingwave_common::bail;
-use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc::Receiver;
