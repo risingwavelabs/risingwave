@@ -43,6 +43,7 @@ enum Inner {
     Internal(anyhow::Error),
 }
 
+/// Error type for streaming tasks.
 #[derive(thiserror::Error)]
 #[error("{inner}")]
 pub struct StreamError {

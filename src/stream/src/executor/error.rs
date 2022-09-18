@@ -86,6 +86,7 @@ impl StreamExecutorError {
     }
 }
 
+/// Error type for streaming executors.
 #[derive(thiserror::Error)]
 #[error("{inner}")]
 pub struct StreamExecutorError {
