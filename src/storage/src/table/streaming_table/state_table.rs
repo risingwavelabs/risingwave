@@ -667,7 +667,8 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
     ) -> StorageResult<RowStream<'a, S>> {
-        let (mem_table_iter, storage_iter_stream) = self.iter_inner(pk_prefix, epoch).await?;
+        let (mem_table_iter, storage_iter_stream) =
+            self.iter_inner(pk_prefix, self.epoch()).await?;
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
@@ -681,9 +682,9 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter_key_and_val<'a>(
         &'a self,
         pk_prefix: &'a Row,
-        epoch: u64,
     ) -> StorageResult<RowStreamWithPk<'a, S>> {
-        let (mem_table_iter, storage_iter_stream) = self.iter_inner(pk_prefix, epoch).await?;
+        let (mem_table_iter, storage_iter_stream) =
+            self.iter_inner(pk_prefix, self.epoch()).await?;
         let storage_iter = storage_iter_stream.into_stream();
 
         Ok(
@@ -733,7 +734,7 @@ impl<S: StateStore> StateTable<S> {
                 &self.keyspace,
                 prefix_hint,
                 encoded_key_range_with_vnode,
-                self.get_read_option(self.epoch()),
+                self.get_read_option(epoch),
                 self.data_types.clone(),
             )
             .await?
