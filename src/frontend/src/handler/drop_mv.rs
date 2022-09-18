@@ -67,7 +67,7 @@ pub async fn handle_drop_mv(
         if !valid_table_name(&table_name) {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Cannot drop an internal table.".to_owned(),
-            )))
+            )));
         }
 
         table.id()
