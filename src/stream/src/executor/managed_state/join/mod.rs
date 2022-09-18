@@ -400,29 +400,23 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
         let key = key.clone().deserialize(self.join_key_data_types.iter())?;
 
-        let table_iter_fut = self.state.table.iter_with_pk_prefix(&key);
+        let table_iter_fut = self.state.table.iter_key_and_val(&key);
 
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let degree_table_iter_fut = self.degree_state.table.iter_with_pk_prefix(&key);
+            let degree_table_iter_fut = self.degree_state.table.iter_key_and_val(&key);
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
 
             // We need this because ttl may remove some entries from table but leave the entries
             // with the same stream key in degree table.
-            let zipped_iter = zip_by_order_key(
-                table_iter,
-                &self.state.pk_indices,
-                degree_table_iter,
-                &self.degree_state.pk_indices,
-            );
+            let zipped_iter = zip_by_order_key(table_iter, degree_table_iter);
 
             #[for_await]
             for row_and_degree in zipped_iter {
                 let (row, degree) = row_and_degree?;
-                debug_assert_eq!(degree.size(), self.degree_state.order_key_indices.len() + 1);
                 let pk = row
                     .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
                 let degree_i64 = degree
@@ -441,7 +435,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for row in table_iter {
-                let row = row?;
+                let row = row?.1;
                 let pk = row
                     .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
                 entry_state.insert(pk, JoinRow::new(row.into_owned(), 0).encode());

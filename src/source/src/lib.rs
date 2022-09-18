@@ -30,6 +30,7 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
+#![feature(result_option_inspect)]
 #![feature(once_cell)]
 
 use std::collections::HashMap;

@@ -110,6 +110,20 @@ impl ArrayBuilder for ListArrayBuilder {
         self.len += other.len();
     }
 
+    fn pop(&mut self) -> Option<()> {
+        if self.bitmap.pop().is_some() {
+            let start = self.offsets.pop().unwrap();
+            let end = *self.offsets.last().unwrap();
+            self.len -= 1;
+            for _ in end..start {
+                self.value.pop().unwrap()
+            }
+            Some(())
+        } else {
+            None
+        }
+    }
+
     fn finish(self) -> ListArray {
         ListArray {
             bitmap: self.bitmap.finish(),
@@ -664,6 +678,59 @@ mod tests {
         let builder = arr.create_builder(0).unwrap();
         let arr2 = try_match_expand!(builder.finish(), ArrayImpl::List).unwrap();
         assert_eq!(arr.array_meta(), arr2.array_meta());
+    }
+
+    #[test]
+    fn test_builder_pop() {
+        use crate::array::*;
+
+        {
+            let mut builder = ListArrayBuilder::with_meta(
+                1,
+                ArrayMeta::List {
+                    datatype: Box::new(DataType::Int32),
+                },
+            );
+            let val = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+            builder.append(Some(ListRef::ValueRef { val: &val }));
+            assert!(builder.pop().is_some());
+            assert!(builder.pop().is_none());
+            let arr = builder.finish();
+            assert!(arr.is_empty());
+        }
+
+        {
+            let meta = ArrayMeta::List {
+                datatype: Box::new(DataType::List {
+                    datatype: Box::new(DataType::Int32),
+                }),
+            };
+            let mut builder = ListArrayBuilder::with_meta(2, meta);
+            let val1 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+            let val2 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+            let list1 = ListValue::new(vec![Some(val1.into()), Some(val2.into())]);
+            builder.append(Some(ListRef::ValueRef { val: &list1 }));
+
+            let val3 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+            let val4 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+            let list2 = ListValue::new(vec![Some(val3.into()), Some(val4.into())]);
+
+            builder.append(Some(ListRef::ValueRef { val: &list2 }));
+
+            assert!(builder.pop().is_some());
+
+            let arr = builder.finish();
+            assert_eq!(arr.len(), 1);
+
+            let val = arr.value_at(0).unwrap();
+
+            let datums = val
+                .values_ref()
+                .into_iter()
+                .map(ToOwnedDatum::to_owned_datum)
+                .collect_vec();
+            assert_eq!(datums, list1.values.to_vec());
+        }
     }
 
     #[test]

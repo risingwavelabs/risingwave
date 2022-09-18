@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_response::StatementType::{ABORT, BEGIN, START_TRANSACTION};
+use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
@@ -196,7 +196,8 @@ pub async fn handle(
             create_index::handle_create_index(context, name, table_name, columns.to_vec(), include)
                 .await
         }
-        // Ignore `StartTransaction` and `Abort` temporarily.Its not final implementation.
+        // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
+        // final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.
         // 2. Some client e.g. psycopg2 will use this statement.
         // TODO: Track issues #2595 #2541
@@ -204,13 +205,20 @@ pub async fn handle(
             START_TRANSACTION,
             "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
-        // BEGIN is similar to START TRANSACTION.
         Statement::BEGIN { .. } => Ok(PgResponse::empty_result_with_notice(
             BEGIN,
             "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         Statement::Abort { .. } => Ok(PgResponse::empty_result_with_notice(
             ABORT,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        Statement::Commit { .. } => Ok(PgResponse::empty_result_with_notice(
+            COMMIT,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        Statement::Rollback { .. } => Ok(PgResponse::empty_result_with_notice(
+            ROLLBACK,
             "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         _ => {

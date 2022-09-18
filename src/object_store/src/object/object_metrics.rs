@@ -70,7 +70,7 @@ impl ObjectStoreMetrics {
         let latency_opts = histogram_opts!(
             "object_store_operation_latency",
             "Total latency of operation on object store",
-            exponential_buckets(0.0001, 2.0, 21).unwrap(), // max 104s
+            exponential_buckets(0.001, 2.0, 22).unwrap(), // max 209s
         );
         let operation_latency =
             register_histogram_vec_with_registry!(latency_opts, &["media_type", "type"], registry)
