@@ -373,19 +373,48 @@ message TriggerFullGCResponse {
   common.Status status = 1;
 }
 
-message GetVersionDeltasRequest {
+message ListVersionDeltasRequest {
   uint64 start_id = 1;
-  uint32 num_epochs = 2;
+  uint32 num_limit = 2;
 }
 
-message GetVersionDeltasResponse {
+message ListVersionDeltasResponse {
   HummockVersionDeltas version_deltas = 1;
+}
+
+message ResetCurrentVersionRequest {}
+
+message ResetCurrentVersionResponse {
+  HummockVersion old_version = 1;
+}
+
+message ReplayVersionDeltaRequest {
+  uint64 version_delta_id = 1;
+}
+
+message ReplayVersionDeltaResponse {
+  uint64 version_id = 1;
+  uint64 max_committed_epoch = 2;
+  repeated uint64 modified_compaction_groups = 3;
+}
+
+message TriggerCompactionDeterministicRequest {
+  uint64 version_id = 1;
+  repeated uint64 compaction_groups = 2;
+}
+
+message TriggerCompactionDeterministicResponse {
+  repeated HummockVersion versions = 1;
 }
 
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
-  rpc GetVersionDeltas(GetVersionDeltasRequest) returns (GetVersionDeltasResponse);
+  rpc ResetCurrentVersion(ResetCurrentVersionRequest) returns (ResetCurrentVersionResponse);
+  rpc ListVersionDeltas(ListVersionDeltasRequest) returns (ListVersionDeltasResponse);
+  rpc ReplayVersionDelta(ReplayVersionDeltaRequest) returns (ReplayVersionDeltaResponse);
+  rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
+
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);

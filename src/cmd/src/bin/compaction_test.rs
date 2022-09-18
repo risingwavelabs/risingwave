@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_rpc_client::HummockMetaClient;
+#![cfg_attr(coverage, feature(no_coverage))]
 
-use crate::common::MetaServiceOpts;
+use tikv_jemallocator::Jemalloc;
 
-pub async fn list_version_deltas(start_id: u64, num_epochs: u32) -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
-    let resp = meta_client
-        .list_version_deltas(start_id, num_epochs)
-        .await?;
-    println!("{:#?}", resp.version_deltas);
-    Ok(())
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
+#[cfg_attr(coverage, no_coverage)]
+fn main() {
+    use clap::StructOpt;
+
+    let opts = risingwave_compaction_test::CompactionTestOpts::parse();
+
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+
+    risingwave_rt::main_okk(risingwave_compaction_test::start(opts))
 }

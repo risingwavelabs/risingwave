@@ -10,6 +10,7 @@ static-link = ["workspace-static-link"]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 log = { version = "0.4", features = ["release_max_level_info"] }
+risingwave_compaction_test = { path = "../storage/compaction_test" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
 risingwave_ctl = { path = "../ctl" }
@@ -50,3 +51,7 @@ path = "src/bin/compactor.rs"
 [[bin]]
 name = "risectl"
 path = "src/bin/ctl.rs"
+
+[[bin]]
+name = "compaction-test"
+path = "src/bin/compaction_test.rs"

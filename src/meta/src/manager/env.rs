@@ -70,6 +70,7 @@ pub struct MetaOpts {
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
     pub in_flight_barrier_nums: usize,
+    pub enable_vacuum: bool,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
@@ -90,6 +91,7 @@ impl Default for MetaOpts {
             checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
+            enable_vacuum: false,
             vacuum_interval_sec: 30,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             collect_gc_watermark_spin_interval_sec: 5,

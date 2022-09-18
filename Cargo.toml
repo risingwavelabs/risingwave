@@ -25,6 +25,7 @@ members = [
   "src/storage/compactor",
   "src/storage/hummock_sdk",
   "src/storage/hummock_test",
+  "src/storage/compaction_test",
   "src/stream",
   "src/test_runner",
   "src/tests/regress",

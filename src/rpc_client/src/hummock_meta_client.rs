@@ -14,7 +14,8 @@
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::{
-    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
+    SstIdRange,
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
@@ -28,11 +29,21 @@ use crate::error::Result;
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
     async fn get_current_version(&self) -> Result<HummockVersion>;
-    async fn get_version_deltas(
+    async fn reset_current_version(&self) -> Result<HummockVersion>;
+    async fn replay_version_delta(
+        &self,
+        version_delta_id: HummockVersionId,
+    ) -> Result<(HummockVersionId, HummockEpoch, Vec<CompactionGroupId>)>;
+    async fn list_version_deltas(
         &self,
         start_id: u64,
-        num_epochs: u32,
+        num_limit: u32,
     ) -> Result<HummockVersionDeltas>;
+    async fn trigger_compaction_deterministic(
+        &self,
+        version_id: HummockVersionId,
+        compaction_groups: Vec<CompactionGroupId>,
+    ) -> Result<Vec<HummockVersion>>;
     async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
     async fn unpin_snapshot(&self) -> Result<()>;
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;

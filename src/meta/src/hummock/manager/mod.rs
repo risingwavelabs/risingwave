@@ -44,13 +44,14 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
+use crate::hummock::compaction_scheduler::{CompactionSchedulerChannelRef, ScheduleStatus};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::CompactorManagerRef;
@@ -88,7 +89,14 @@ pub struct HummockManager<S: MetaStore> {
     metrics: Arc<MetaMetrics>,
 
     // `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
-    compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
+    compaction_scheduler: parking_lot::RwLock<Option<CompactionSchedulerChannelRef>>,
+
+    side_compaction_sched_channel: parking_lot::RwLock<Option<CompactionSchedulerChannelRef>>,
+    compaction_sched_status_rx: tokio::sync::Mutex<Option<UnboundedReceiver<ScheduleStatus>>>,
+    compaction_finish_channel: (
+        UnboundedSender<HummockVersion>,
+        tokio::sync::Mutex<UnboundedReceiver<HummockVersion>>,
+    ),
 
     compactor_manager: CompactorManagerRef,
 }
@@ -176,6 +184,7 @@ where
         compaction_group_manager: CompactionGroupManagerRef<S>,
         compactor_manager: CompactorManagerRef,
     ) -> Result<HummockManager<S>> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HummockVersion>();
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -190,6 +199,9 @@ where
             cluster_manager,
             compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
+            side_compaction_sched_channel: parking_lot::RwLock::new(None),
+            compaction_sched_status_rx: tokio::sync::Mutex::new(None),
+            compaction_finish_channel: (tx, tokio::sync::Mutex::new(rx)),
             compactor_manager,
             max_committed_epoch: AtomicU64::new(0),
             max_current_epoch: AtomicU64::new(0),
@@ -342,6 +354,7 @@ where
             .store(redo_state.max_committed_epoch, Ordering::Relaxed);
         self.max_current_epoch
             .fetch_max(redo_state.max_committed_epoch, Ordering::Relaxed);
+
         versioning_guard.current_version = redo_state;
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
@@ -633,7 +646,7 @@ where
             let current_version = &mut versioning.current_version;
             let mut hummock_version_deltas =
                 BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-            let version_delta = apply_version_delta(
+            let version_delta = gen_version_delta(
                 &mut hummock_version_deltas,
                 current_version,
                 &compact_task,
@@ -911,7 +924,7 @@ where
             let current_version = &mut versioning.current_version;
             let mut hummock_version_deltas =
                 BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-            let version_delta = apply_version_delta(
+            let version_delta = gen_version_delta(
                 &mut hummock_version_deltas,
                 current_version,
                 compact_task,
@@ -927,6 +940,12 @@ where
             )?;
 
             current_version.apply_version_delta(&version_delta);
+
+            // Compaction success, send the new version to channel
+            self.compaction_finish_channel
+                .0
+                .send(current_version.clone())
+                .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))?;
 
             self.env
                 .notification_manager()
@@ -1312,10 +1331,10 @@ where
     }
 
     /// Get version deltas from meta store
-    pub async fn get_version_deltas(
+    pub async fn list_version_deltas(
         &self,
         start_id: u64,
-        num_epochs: u32,
+        num_limit: u32,
     ) -> Result<HummockVersionDeltas> {
         let ordered_version_deltas: BTreeMap<_, _> =
             HummockVersionDelta::list(self.env.meta_store())
@@ -1328,7 +1347,7 @@ where
             .into_iter()
             .filter(|(id, _)| *id >= start_id)
             .map(|(_, v)| v)
-            .take(num_epochs as _)
+            .take(num_limit as _)
             .collect();
         Ok(HummockVersionDeltas { version_deltas })
     }
@@ -1338,8 +1357,97 @@ where
         read_lock!(self, versioning).await
     }
 
-    pub fn set_compaction_scheduler(&self, sender: CompactionRequestChannelRef) {
-        *self.compaction_scheduler.write() = Some(sender);
+    /// Reset current version to empty
+    #[named]
+    pub async fn reset_current_version(&self) -> Result<HummockVersion> {
+        // Reset current version to empty
+        let init_version = HummockVersion {
+            id: FIRST_VERSION_ID,
+            levels: Default::default(),
+            max_committed_epoch: INVALID_EPOCH,
+            safe_epoch: INVALID_EPOCH,
+        };
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let old_version = versioning_guard.current_version.clone();
+        versioning_guard.current_version = init_version;
+        Ok(old_version)
+    }
+
+    /// Replay a version delta to current hummock version.
+    /// Returns the `version_id`, `max_committed_epoch` of the new version and the modified
+    /// compaction groups
+    #[named]
+    pub async fn replay_version_delta(
+        &self,
+        version_delta_id: HummockVersionId,
+    ) -> Result<(HummockVersionId, HummockEpoch, Vec<CompactionGroupId>)> {
+        let result = HummockVersionDelta::select(self.env.meta_store(), &version_delta_id).await?;
+        // the version delta must exist
+        assert!(result.is_some());
+
+        let mut version_delta = result.unwrap();
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        // ensure the version id is ascending after replay
+        version_delta.id = std::cmp::max(versioning_guard.current_version.id, version_delta.id) + 1;
+        versioning_guard
+            .current_version
+            .apply_version_delta(&version_delta);
+        assert!(versioning_guard.current_version.id > version_delta.id);
+
+        let compaction_group_ids = version_delta.level_deltas.keys().cloned().collect_vec();
+        let version_id = versioning_guard.current_version.id;
+        let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
+        Ok((version_id, max_committed_epoch, compaction_group_ids))
+    }
+
+    /// Triggers compacitons to specified compaction groups.
+    pub async fn trigger_compaction_deterministic(
+        &self,
+        base_version_id: HummockVersionId,
+        compaction_groups: Vec<CompactionGroupId>,
+    ) -> Result<Vec<HummockVersion>> {
+        let old_version = self.get_current_version().await;
+        assert_eq!(base_version_id, old_version.id);
+
+        for compaction_group in compaction_groups {
+            self.try_sched_compaction_deterministic(compaction_group)?;
+        }
+        let mut new_versions = vec![];
+        let mut mutex_guard = self.compaction_sched_status_rx.lock().await;
+        if let Some(rx) = mutex_guard.as_mut() {
+            loop {
+                match rx.recv().await {
+                    Some(sched_status) => {
+                        if sched_status == ScheduleStatus::Ok {
+                            let mut guard = self.compaction_finish_channel.1.lock().await;
+                            if let Some(version) = guard.recv().await {
+                                // When compaction finish the version id of will increase
+                                assert!(version.id > old_version.id);
+                                new_versions.push(version);
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
+        }
+        new_versions.sort_by_key(|version| version.id);
+        Ok(new_versions)
+    }
+
+    pub async fn init_compaction_scheduler(
+        &self,
+        sched_channel: CompactionSchedulerChannelRef,
+        side_sched_channel: Option<CompactionSchedulerChannelRef>,
+        status_rx: UnboundedReceiver<ScheduleStatus>,
+    ) {
+        *self.compaction_scheduler.write() = Some(sched_channel);
+        *self.side_compaction_sched_channel.write() = side_sched_channel;
+        *self.compaction_sched_status_rx.lock().await = Some(status_rx);
     }
 
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.
@@ -1376,11 +1484,24 @@ where
         Ok(())
     }
 
+    fn try_sched_compaction_deterministic(
+        &self,
+        compaction_group: CompactionGroupId,
+    ) -> Result<bool> {
+        if let Some(sender) = self.side_compaction_sched_channel.read().as_ref() {
+            sender
+                .try_sched_compaction(compaction_group)
+                .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Sends a compaction request to compaction scheduler.
     pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> Result<bool> {
         if let Some(sender) = self.compaction_scheduler.read().as_ref() {
             sender
-                .try_send(compaction_group)
+                .try_sched_compaction(compaction_group)
                 .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))
         } else {
             Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
@@ -1503,7 +1624,7 @@ where
     }
 }
 
-fn apply_version_delta<'a>(
+fn gen_version_delta<'a>(
     txn: &mut BTreeMapTransaction<'a, HummockVersionId, HummockVersionDelta>,
     old_version: &HummockVersion,
     compact_task: &CompactTask,

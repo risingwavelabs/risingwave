@@ -4231,6 +4231,7 @@ dependencies = [
  "clap 3.2.17",
  "log",
  "madsim-tokio",
+ "risingwave_compaction_test",
  "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
@@ -4338,6 +4339,32 @@ dependencies = [
  "risingwave_rpc_client",
  "tower",
  "tower-http",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_compaction_test"
+version = "0.1.11"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap 3.2.17",
+ "madsim-tokio",
+ "madsim-tonic",
+ "parking_lot 0.12.1",
+ "prometheus",
+ "risingwave_common",
+ "risingwave_common_service",
+ "risingwave_hummock_sdk",
+ "risingwave_object_store",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "risingwave_storage",
+ "serde",
+ "tokio-retry",
+ "tokio-stream",
+ "toml",
  "tracing",
  "workspace-hack",
 ]

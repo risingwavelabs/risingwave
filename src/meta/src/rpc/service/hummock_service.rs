@@ -90,16 +90,56 @@ where
         }))
     }
 
-    async fn get_version_deltas(
+    async fn reset_current_version(
         &self,
-        request: Request<GetVersionDeltasRequest>,
-    ) -> Result<Response<GetVersionDeltasResponse>, Status> {
+        _request: Request<ResetCurrentVersionRequest>,
+    ) -> Result<Response<ResetCurrentVersionResponse>, Status> {
+        let old_version = self.hummock_manager.reset_current_version().await?;
+        Ok(Response::new(ResetCurrentVersionResponse {
+            old_version: Some(old_version),
+        }))
+    }
+
+    async fn replay_version_delta(
+        &self,
+        request: Request<ReplayVersionDeltaRequest>,
+    ) -> Result<Response<ReplayVersionDeltaResponse>, Status> {
+        let req = request.into_inner();
+        let (version_id, max_committed_epoch, compaction_groups) = self
+            .hummock_manager
+            .replay_version_delta(req.version_delta_id)
+            .await?;
+        Ok(Response::new(ReplayVersionDeltaResponse {
+            version_id,
+            max_committed_epoch,
+            modified_compaction_groups: compaction_groups,
+        }))
+    }
+
+    async fn trigger_compaction_deterministic(
+        &self,
+        request: Request<TriggerCompactionDeterministicRequest>,
+    ) -> Result<Response<TriggerCompactionDeterministicResponse>, Status> {
+        let req = request.into_inner();
+        let versions = self
+            .hummock_manager
+            .trigger_compaction_deterministic(req.version_id, req.compaction_groups)
+            .await?;
+        Ok(Response::new(TriggerCompactionDeterministicResponse {
+            versions,
+        }))
+    }
+
+    async fn list_version_deltas(
+        &self,
+        request: Request<ListVersionDeltasRequest>,
+    ) -> Result<Response<ListVersionDeltasResponse>, Status> {
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .get_version_deltas(req.start_id, req.num_epochs)
+            .list_version_deltas(req.start_id, req.num_limit)
             .await?;
-        let resp = GetVersionDeltasResponse {
+        let resp = ListVersionDeltasResponse {
             version_deltas: Some(version_deltas),
         };
         Ok(Response::new(resp))

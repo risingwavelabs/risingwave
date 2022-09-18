@@ -129,6 +129,9 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     dangerous_max_idle_secs: Option<u64>,
 
+    #[clap(long)]
+    enable_vacuum: bool,
+
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     #[clap(long, default_value = "30")]
     vacuum_interval_sec: u64,
@@ -205,6 +208,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 checkpoint_interval,
                 max_idle_ms,
                 in_flight_barrier_nums,
+                enable_vacuum: opts.enable_vacuum,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
                 min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
