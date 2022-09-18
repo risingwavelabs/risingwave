@@ -195,7 +195,6 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
                             &mut self.managed_state,
                             ordered_pk_row,
                             row,
-                            epoch,
                             &mut res_ops,
                             &mut res_rows,
                         )
