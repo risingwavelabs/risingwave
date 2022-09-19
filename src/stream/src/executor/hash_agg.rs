@@ -26,7 +26,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
-use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -223,7 +223,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let (data_chunk, ops) = chunk.into_parts();
 
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
-        let hash_codes = data_chunk.get_hash_values(key_indices, CRC32FastBuilder)?;
+        let hash_codes = data_chunk.get_hash_values(key_indices, Crc32FastBuilder);
         let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
         let capacity = data_chunk.capacity();
         let (columns, vis) = data_chunk.into_parts();
