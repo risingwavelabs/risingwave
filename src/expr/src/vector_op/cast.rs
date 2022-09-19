@@ -55,20 +55,26 @@ pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
 
 #[inline]
 fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
-    let res =
-        SpeedDateTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))?;
-    let date = NaiveDate::from_ymd(
-        res.date.year as i32,
-        res.date.month as u32,
-        res.date.day as u32,
-    );
-    let time = NaiveTime::from_hms_micro(
-        res.time.hour as u32,
-        res.time.minute as u32,
-        res.time.second as u32,
-        res.time.microsecond as u32,
-    );
-    Ok(NaiveDateTime::new(date, time))
+    if let Ok(res) = SpeedDateTime::parse_str(s) {
+        let date = NaiveDate::from_ymd(
+            res.date.year as i32,
+            res.date.month as u32,
+            res.date.day as u32,
+        );
+        let time = NaiveTime::from_hms_micro(
+            res.time.hour as u32,
+            res.time.minute as u32,
+            res.time.second as u32,
+            res.time.microsecond as u32,
+        );
+        Ok(NaiveDateTime::new(date, time))
+    } else {
+        let res =
+            SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))?;
+        let date = NaiveDate::from_ymd(res.year as i32, res.month as u32, res.day as u32);
+        let time = NaiveTime::from_hms_micro(0, 0, 0, 0);
+        Ok(NaiveDateTime::new(date, time))
+    }
 }
 
 #[inline]
