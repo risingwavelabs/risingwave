@@ -744,15 +744,6 @@ impl Session for SessionImpl {
         &self.user_authenticator
     }
 
-    async fn cancel_running_queries(&self) {
-        // self.env.query_manager.
-        // let mut write_guard = self.env.query_manager.query_executions_map.lock().await;
-        // for sender in (*write_guard).values_mut() {
-        //     sender.abort().await;
-        // }
-        // write_guard.clear();
-    }
-
     fn id(&self) -> SessionId {
         self.id
     }

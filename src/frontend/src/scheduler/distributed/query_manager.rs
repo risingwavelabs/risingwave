@@ -126,14 +126,18 @@ impl QueryManager {
     }
 
     pub fn cancel_queries_in_session(&self, session_id: SessionId) {
-        let mut write_guard = self.query_executions_map.lock().unwrap();
+        let write_guard = self.query_executions_map.lock().unwrap();
         let values_iter = write_guard.values();
         for query in values_iter {
-            let query = query.clone();
-            // spawn a task to abort. Avoid await point in this function.
-            tokio::spawn(async move { query.abort().await });
+            // Query manager may have queries from different sessions.
+            if query.session_id == session_id {
+                let query = query.clone();
+                // spawn a task to abort. Avoid await point in this function.
+                tokio::spawn(async move { query.abort().await });
+            }
         }
-        (*write_guard).retain(|_, query| query.session_id == session_id);
+
+        // Note that just like normal query ends we do not explicitly delete.
     }
 
     pub fn add_query(&self, query_id: QueryId, query_execution: Arc<QueryExecution>) {

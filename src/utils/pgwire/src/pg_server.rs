@@ -52,7 +52,6 @@ pub trait Session: Send + Sync {
         sql: &str,
     ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
     fn user_authenticator(&self) -> &UserAuthenticator;
-    async fn cancel_running_queries(&self);
 
     fn id(&self) -> SessionId;
 }
@@ -189,10 +188,6 @@ mod tests {
                 PgFieldDescriptor::new("".to_string(), TypeOid::Varchar,);
                 count
             ])
-        }
-
-        async fn cancel_running_queries(&self) {
-            unreachable!("Do not expect mock session to cancel running queries");
         }
 
         fn id(&self) -> SessionId {
