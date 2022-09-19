@@ -86,6 +86,7 @@ fn do_parse_json_value(column: &ColumnDesc, v: &Value) -> Result<ScalarImpl> {
     Ok(v)
 }
 
+#[inline]
 pub(crate) fn json_parse_value(column: &ColumnDesc, value: Option<&Value>) -> Result<Datum> {
     match value {
         None | Some(Value::Null) => Ok(None),
@@ -145,6 +146,7 @@ fn do_parse_simd_json_value(column: &ColumnDesc, v: &BorrowedValue) -> Result<Sc
     target_feature = "neon",
     target_feature = "simd128"
 ))]
+#[inline]
 pub(crate) fn simd_json_parse_value(
     column: &ColumnDesc,
     value: Option<&BorrowedValue>,
