@@ -119,6 +119,8 @@ pub async fn handle_create_mv(
         {
             let catalog_reader = session.env().catalog_reader().read_guard();
             let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
+            // This is temporary. MVs whose name ends with "_al" will have dedicate dedicated
+            // compaction groups, respectively.
             is_independent_compaction_group = table_name.ends_with("_al");
             catalog_reader.check_relation_name_duplicated(
                 session.database(),

@@ -587,8 +587,9 @@ mod tests {
                 .map(|cg| cg.member_table_ids.len())
                 .sum::<usize>()
         };
+        let group_number = || async { compaction_group_manager.compaction_groups().await.len() };
         assert_eq!(registered_number().await, 0);
-        let table_properties = HashMap::from([(
+        let mut table_properties = HashMap::from([(
             String::from(PROPERTIES_RETENTION_SECOND_KEY),
             String::from("300"),
         )]);
@@ -658,5 +659,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(registered_number().await, 1);
+
+        // Test `StaticCompactionGroupId::NewCompactionGroup` in `register_table_fragments`
+        assert_eq!(group_number().await, 2);
+        table_properties.insert(
+            String::from("independent_compaction_group"),
+            String::from("1"),
+        );
+        compaction_group_manager
+            .register_table_fragments(&table_fragment_1, &table_properties)
+            .await
+            .unwrap();
+        assert_eq!(registered_number().await, 5);
+        assert_eq!(group_number().await, 6);
     }
 }
