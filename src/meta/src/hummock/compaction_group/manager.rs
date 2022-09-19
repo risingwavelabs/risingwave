@@ -672,5 +672,13 @@ mod tests {
             .unwrap();
         assert_eq!(registered_number().await, 5);
         assert_eq!(group_number().await, 6);
+
+        // Test `StaticCompactionGroupId::NewCompactionGroup` in `unregister_table_fragments`
+        compaction_group_manager
+            .unregister_table_fragments(&table_fragment_1)
+            .await
+            .unwrap();
+        assert_eq!(registered_number().await, 1);
+        assert_eq!(group_number().await, 2);
     }
 }
