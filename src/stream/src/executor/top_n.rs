@@ -27,6 +27,7 @@ use super::error::StreamExecutorResult;
 use super::managed_state::top_n::ManagedTopNState;
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::error::StreamResult;
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -42,7 +43,7 @@ impl<S: StateStore> TopNExecutor<S> {
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
 
@@ -229,7 +230,6 @@ impl TopNCache {
         managed_state: &mut ManagedTopNState<S>,
         ordered_pk_row: OrderedRow,
         row: Row,
-        epoch: u64,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<Row>,
     ) -> StreamExecutorResult<()> {
@@ -249,7 +249,6 @@ impl TopNCache {
                         &mut self.high,
                         self.middle.last_key_value().unwrap().0,
                         self.high_capacity,
-                        epoch,
                     )
                     .await?;
             }
@@ -284,7 +283,6 @@ impl TopNCache {
                             &mut self.high,
                             self.middle.last_key_value().unwrap().0,
                             self.high_capacity,
-                            epoch,
                         )
                         .await?;
                 }
@@ -342,7 +340,7 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
 
@@ -372,11 +370,7 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
 
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
-    async fn apply_chunk(
-        &mut self,
-        chunk: StreamChunk,
-        epoch: u64,
-    ) -> StreamExecutorResult<StreamChunk> {
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.cache.limit);
         let mut res_rows = Vec::with_capacity(self.cache.limit);
 
@@ -403,7 +397,6 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                             &mut self.managed_state,
                             ordered_pk_row,
                             row,
-                            epoch,
                             &mut res_ops,
                             &mut res_rows,
                         )
@@ -432,8 +425,9 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
     }
 
     async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+        self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(None, &mut self.cache, epoch)
+            .init_topn_cache(None, &mut self.cache)
             .await
     }
 }

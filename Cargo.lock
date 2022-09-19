@@ -4844,6 +4844,7 @@ dependencies = [
  "madsim-tonic",
  "moka",
  "paste",
+ "rand 0.8.5",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",

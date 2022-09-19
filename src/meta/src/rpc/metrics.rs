@@ -62,6 +62,9 @@ pub struct MetaMetrics {
     pub hummock_manager_real_process_time: HistogramVec,
 
     pub time_after_last_observation: AtomicU64,
+
+    /// The number of workers in the cluster.
+    pub worker_num: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -78,14 +81,14 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_duration_seconds",
             "barrier latency",
-            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
             "meta_barrier_wait_commit_duration_seconds",
             "barrier_wait_commit_latency",
-            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
         let barrier_wait_commit_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -93,7 +96,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_send_duration_seconds",
             "barrier send latency",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
+            exponential_buckets(0.001, 2.0, 19).unwrap() // max 262s
         );
         let barrier_send_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -175,6 +178,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let worker_num = register_int_gauge_vec_with_registry!(
+            "worker_num",
+            "number of nodes in the cluster",
+            &["worker_type"],
+            registry,
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -195,6 +206,8 @@ impl MetaMetrics {
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
+
+            worker_num,
         }
     }
 

@@ -117,7 +117,7 @@ impl TaskService for BatchServiceImpl {
             plan,
             task_id
         );
-        let task = BatchTaskExecution::new(&task_id, plan, context, epoch)?;
+        let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
         let task = Arc::new(task);
 
         if let Err(e) = task.clone().async_execute().await {

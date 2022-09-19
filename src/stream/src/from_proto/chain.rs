@@ -23,7 +23,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         node: &StreamNode,
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Chain)?;
         let [mview, snapshot]: [_; 2] = params.input.try_into().unwrap();
 

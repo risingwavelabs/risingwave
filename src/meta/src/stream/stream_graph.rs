@@ -1026,9 +1026,7 @@ impl ActorGraphBuilder {
             }
         }
 
-        let ret = state
-            .fragment_actors
-            .insert(fragment_id, actor_ids.to_vec());
+        let ret = state.fragment_actors.insert(fragment_id, actor_ids);
         assert!(
             ret.is_none(),
             "fragment {:?} already processed",

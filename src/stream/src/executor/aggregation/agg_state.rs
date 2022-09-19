@@ -45,13 +45,9 @@ impl<S: StateStore> Debug for AggState<S> {
 pub const ROW_COUNT_COLUMN: usize = 0;
 
 impl<S: StateStore> AggState<S> {
-    pub async fn row_count(
-        &mut self,
-        epoch: u64,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<i64> {
+    pub async fn row_count(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<i64> {
         Ok(self.managed_states[ROW_COUNT_COLUMN]
-            .get_output(epoch, state_table)
+            .get_output(state_table)
             .await?
             .map(|x| *x.as_int64())
             .unwrap_or(0))
@@ -78,7 +74,6 @@ impl<S: StateStore> AggState<S> {
     /// After calling this function, `self.is_dirty()` will return `true`.
     pub async fn may_mark_as_dirty(
         &mut self,
-        epoch: u64,
         state_tables: &[StateTable<S>],
     ) -> StreamExecutorResult<()> {
         if self.is_dirty() {
@@ -87,7 +82,7 @@ impl<S: StateStore> AggState<S> {
 
         let mut outputs = vec![];
         for (state, state_table) in self.managed_states.iter_mut().zip_eq(state_tables.iter()) {
-            outputs.push(state.get_output(epoch, state_table).await?);
+            outputs.push(state.get_output(state_table).await?);
         }
         self.prev_states = Some(outputs);
         Ok(())
@@ -101,16 +96,13 @@ impl<S: StateStore> AggState<S> {
         &mut self,
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
-        epoch: u64,
         state_tables: &[StateTable<S>],
     ) -> StreamExecutorResult<usize> {
         if !self.is_dirty() {
             return Ok(0);
         }
 
-        let row_count = self
-            .row_count(epoch, &state_tables[ROW_COUNT_COLUMN])
-            .await?;
+        let row_count = self.row_count(&state_tables[ROW_COUNT_COLUMN]).await?;
         let prev_row_count = self.prev_row_count();
 
         trace!(
@@ -137,7 +129,7 @@ impl<S: StateStore> AggState<S> {
                     .zip_eq(self.managed_states.iter_mut())
                     .zip_eq(state_tables.iter())
                 {
-                    let data = state.get_output(epoch, state_table).await?;
+                    let data = state.get_output(state_table).await?;
                     trace!("append_datum (0 -> N): {:?}", &data);
                     builder.append_datum(&data);
                 }
@@ -171,7 +163,7 @@ impl<S: StateStore> AggState<S> {
                     self.managed_states.iter_mut(),
                     state_tables.iter(),
                 )) {
-                    let cur_state = cur_state.get_output(epoch, state_table).await?;
+                    let cur_state = cur_state.get_output(state_table).await?;
                     trace!(
                         "append_datum (N -> N): prev = {:?}, cur = {:?}",
                         prev_state,
