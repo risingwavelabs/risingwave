@@ -24,7 +24,7 @@ use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
-use risingwave_hummock_sdk::{can_concat, HummockEpoch, HummockReadEpoch};
+use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 use tracing::log::warn;
 
@@ -634,8 +634,7 @@ impl StateStore for HummockStorage {
 }
 
 impl HummockStorage {
-    #[cfg(any(test, feature = "test"))]
-    pub async fn seal_and_sync_epoch(&self, epoch: HummockEpoch) -> StorageResult<SyncResult> {
+    pub async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
         self.seal_epoch(epoch, true);
         self.sync(epoch).await
     }
