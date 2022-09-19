@@ -28,7 +28,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
 use super::managed_state::top_n::ManagedTopNState;
-use super::top_n::{generate_executor_pk_indices_info, TopNCache};
+use super::top_n::{generate_executor_pk_indices_info, TopNCache, TopNCacheWithoutTies};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 use crate::error::StreamResult;
@@ -95,7 +95,7 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore> {
     group_by: Vec<usize>,
 
     /// group key -> cache for this group
-    caches: HashMap<Vec<Datum>, TopNCache>,
+    caches: HashMap<Vec<Datum>, TopNCacheWithoutTies>,
 
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -165,7 +165,7 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
             match entry {
                 Occupied(_) => {}
                 Vacant(entry) => {
-                    let mut topn_cache = TopNCache::new(self.offset, self.limit);
+                    let mut topn_cache = TopNCacheWithoutTies::new(self.offset, self.limit);
                     self.managed_state
                         .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
                         .await?;

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, Row, StreamChunk};
@@ -31,9 +32,9 @@ use crate::error::StreamResult;
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
-pub type TopNExecutor<S> = TopNExecutorWrapper<InnerTopNExecutorNew<S>>;
+pub type TopNExecutor<S, C> = TopNExecutorWrapper<InnerTopNExecutorNew<S, C>>;
 
-impl<S: StateStore> TopNExecutor<S> {
+impl<S: StateStore> TopNExecutor<S, TopNCacheWithoutTies> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,
@@ -43,7 +44,7 @@ impl<S: StateStore> TopNExecutor<S> {
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamResult<Self> {
+    ) -> StreamResult<TopNExecutor<S, TopNCacheWithoutTies>> {
         let info = input.info();
         let schema = input.schema().clone();
 
@@ -53,7 +54,7 @@ impl<S: StateStore> TopNExecutor<S> {
                 info,
                 schema,
                 order_pairs,
-                offset_and_limit,
+                TopNCacheWithoutTies::new(offset_and_limit.0, offset_and_limit.1),
                 pk_indices,
                 executor_id,
                 key_indices,
@@ -63,7 +64,37 @@ impl<S: StateStore> TopNExecutor<S> {
     }
 }
 
-pub struct InnerTopNExecutorNew<S: StateStore> {
+impl<S: StateStore> TopNExecutor<S, TopNCacheWithTies> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_ties(
+        input: Box<dyn Executor>,
+        order_pairs: Vec<OrderPair>,
+        offset_and_limit: (usize, usize),
+        pk_indices: PkIndices,
+        executor_id: u64,
+        key_indices: Vec<usize>,
+        state_table: StateTable<S>,
+    ) -> StreamResult<TopNExecutor<S, TopNCacheWithTies>> {
+        let info = input.info();
+        let schema = input.schema().clone();
+
+        Ok(TopNExecutorWrapper {
+            input,
+            inner: InnerTopNExecutorNew::new(
+                info,
+                schema,
+                order_pairs,
+                TopNCacheWithTies::new(offset_and_limit.0, offset_and_limit.1),
+                pk_indices,
+                executor_id,
+                key_indices,
+                state_table,
+            )?,
+        })
+    }
+}
+
+pub struct InnerTopNExecutorNew<S: StateStore, C: TopNCache> {
     info: ExecutorInfo,
 
     /// Schema of the executor.
@@ -82,7 +113,7 @@ pub struct InnerTopNExecutorNew<S: StateStore> {
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
-    cache: TopNCache,
+    cache: C,
 
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -91,7 +122,49 @@ pub struct InnerTopNExecutorNew<S: StateStore> {
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
-pub struct TopNCache {
+#[async_trait]
+pub trait TopNCache: Send + 'static {
+    fn new(offset: usize, limit: usize) -> Self;
+    fn limit(&self) -> usize;
+
+    /// Insert input row to corresponding cache range according to its order key.
+    ///
+    /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
+    /// used to generate messages to be sent to downstream operators.
+    fn insert(
+        &mut self,
+        ordered_pk_row: OrderedRow,
+        row: Row,
+        res_ops: &mut Vec<Op>,
+        res_rows: &mut Vec<Row>,
+    );
+
+    /// Delete input row from the cache.
+    ///
+    /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
+    /// used to generate messages to be sent to downstream operators.
+    ///
+    /// Because we may need to add data from the state table to `self.high` during the delete
+    /// operation, we need to pass in `pk_prefix`, `epoch` and `managed_state` to do a prefix
+    /// scan of the state table.
+    #[allow(clippy::too_many_arguments)]
+    async fn delete<S: StateStore>(
+        &mut self,
+        pk_prefix: Option<&Row>,
+        managed_state: &mut ManagedTopNState<S>,
+        ordered_pk_row: OrderedRow,
+        row: Row,
+        res_ops: &mut Vec<Op>,
+        res_rows: &mut Vec<Row>,
+    ) -> StreamExecutorResult<()>;
+
+    async fn init<S: StateStore>(
+        &mut self,
+        managed_state: &ManagedTopNState<S>,
+    ) -> StreamExecutorResult<()>;
+}
+
+pub struct TopNCacheWithoutTies {
     /// Rows in the range `[0, offset)`
     pub low: BTreeMap<OrderedRow, Row>,
     /// Rows in the range `[offset, offset+limit)`
@@ -104,19 +177,7 @@ pub struct TopNCache {
     pub limit: usize,
 }
 
-impl TopNCache {
-    pub fn new(offset: usize, limit: usize) -> Self {
-        assert!(limit != 0);
-        Self {
-            low: BTreeMap::new(),
-            middle: BTreeMap::new(),
-            high: BTreeMap::new(),
-            high_capacity: (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR,
-            offset,
-            limit,
-        }
-    }
-
+impl TopNCacheWithoutTies {
     pub fn is_low_cache_full(&self) -> bool {
         debug_assert!(self.low.len() <= self.offset);
         let full = self.low.len() == self.offset;
@@ -146,12 +207,34 @@ impl TopNCache {
         }
         full
     }
+}
 
-    /// Insert input row to corresponding cache range according to its order key.
-    ///
-    /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
-    /// used to generate messages to be sent to downstream operators.
-    pub fn insert(
+#[async_trait]
+impl TopNCache for TopNCacheWithoutTies {
+    fn new(offset: usize, limit: usize) -> Self {
+        assert!(limit != 0);
+        Self {
+            low: BTreeMap::new(),
+            middle: BTreeMap::new(),
+            high: BTreeMap::new(),
+            high_capacity: (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR,
+            offset,
+            limit,
+        }
+    }
+
+    fn limit(&self) -> usize {
+        self.limit
+    }
+
+    async fn init<S: StateStore>(
+        &mut self,
+        managed_state: &ManagedTopNState<S>,
+    ) -> StreamExecutorResult<()> {
+        managed_state.init_topn_cache(None, self).await
+    }
+
+    fn insert(
         &mut self,
         ordered_pk_row: OrderedRow,
         row: Row,
@@ -215,16 +298,7 @@ impl TopNCache {
         }
     }
 
-    /// Delete input row from the cache.
-    ///
-    /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
-    /// used to generate messages to be sent to downstream operators.
-    ///
-    /// Because we may need to add data from the state table to `self.high` during the delete
-    /// operation, we need to pass in `pk_prefix`, `epoch` and `managed_state` to do a prefix
-    /// scan of the state table.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn delete<S: StateStore>(
+    async fn delete<S: StateStore>(
         &mut self,
         pk_prefix: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
@@ -301,6 +375,274 @@ impl TopNCache {
     }
 }
 
+pub struct TopNCacheWithTies {
+    /// Rows in the range `[0, offset)`
+    pub low: BTreeMap<OrderedRow, BTreeSet<Row>>,
+    /// Rows in the range `[offset, offset+limit)`
+    pub middle: BTreeMap<OrderedRow, BTreeSet<Row>>,
+    /// Rows in the range `[offset+limit, offset+limit+high_capacity)`
+    pub high: BTreeMap<OrderedRow, BTreeSet<Row>>,
+    pub high_capacity: usize,
+    pub offset: usize,
+    /// Assumption: `limit != 0`
+    pub limit: usize,
+}
+
+impl TopNCacheWithTies {
+    pub fn is_low_cache_full(&self) -> bool {
+        debug_assert!(self.low.len() <= self.offset);
+        let full = self.low.len() == self.offset;
+        if !full {
+            debug_assert!(self.middle.is_empty());
+            debug_assert!(self.high.is_empty());
+        }
+        full
+    }
+
+    pub fn is_middle_cache_full(&self) -> bool {
+        debug_assert!(self.middle.len() <= self.limit);
+        let full = self.middle.len() == self.limit;
+        if full {
+            debug_assert!(self.is_low_cache_full());
+        } else {
+            debug_assert!(self.high.is_empty());
+        }
+        full
+    }
+
+    pub fn is_high_cache_full(&self) -> bool {
+        debug_assert!(self.high.len() <= self.high_capacity);
+        let full = self.high.len() == self.high_capacity;
+        if full {
+            debug_assert!(self.is_middle_cache_full());
+        }
+        full
+    }
+}
+
+#[async_trait]
+impl TopNCache for TopNCacheWithTies {
+    fn new(offset: usize, limit: usize) -> Self {
+        assert!(limit != 0);
+        Self {
+            low: BTreeMap::new(),
+            middle: BTreeMap::new(),
+            high: BTreeMap::new(),
+            high_capacity: (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR,
+            offset,
+            limit,
+        }
+    }
+
+    fn limit(&self) -> usize {
+        self.limit
+    }
+
+    async fn init<S: StateStore>(
+        &mut self,
+        managed_state: &ManagedTopNState<S>,
+    ) -> StreamExecutorResult<()> {
+        managed_state.init_topn_cache_with_ties(None, self).await
+    }
+
+    fn insert(
+        &mut self,
+        ordered_pk_row: OrderedRow,
+        row: Row,
+        res_ops: &mut Vec<Op>,
+        res_rows: &mut Vec<Row>,
+    ) {
+        if !self.is_low_cache_full() {
+            self.low.entry(ordered_pk_row).or_default().insert(row);
+            return;
+        } else if let Entry::Occupied(mut s) = self.low.entry(ordered_pk_row.clone()) {
+            s.get_mut().insert(row);
+            return;
+        }
+        // The row is not in low
+
+        let rows = [row].into_iter().collect();
+        let elem_to_compare_with_middle =
+            if let Some(low_last) = self.low.last_entry()
+                && ordered_pk_row <= *low_last.key() {
+                // Take the last element of `cache.low` and insert input row to it.
+                let low_last = low_last.remove_entry();
+                self.low.insert(ordered_pk_row, rows);
+                low_last
+            } else {
+                (ordered_pk_row, rows)
+            };
+
+        if !self.is_middle_cache_full() {
+            self.middle
+                .entry(elem_to_compare_with_middle.0)
+                .or_default()
+                .extend(elem_to_compare_with_middle.1.clone());
+            elem_to_compare_with_middle.1.into_iter().for_each(|row| {
+                res_ops.push(Op::Insert);
+                res_rows.push(row);
+            });
+            return;
+        } else if let Entry::Occupied(mut s) =
+            self.middle.entry(elem_to_compare_with_middle.0.clone())
+        {
+            s.get_mut().extend(elem_to_compare_with_middle.1.clone());
+            elem_to_compare_with_middle.1.into_iter().for_each(|row| {
+                res_ops.push(Op::Insert);
+                res_rows.push(row);
+            });
+            return;
+        }
+        // The row is not in middle
+
+        let elem_to_compare_with_high = {
+            let middle_last = self.middle.last_entry().unwrap();
+            if elem_to_compare_with_middle.0 <= *middle_last.key() {
+                // If the row in the range of [offset, offset+limit), the largest row in
+                // `cache.middle` needs to be moved to `cache.high`
+                let res = middle_last.remove_entry();
+                res.1.clone().into_iter().for_each(|row| {
+                    res_ops.push(Op::Delete);
+                    res_rows.push(row);
+                });
+                elem_to_compare_with_middle
+                    .1
+                    .clone()
+                    .into_iter()
+                    .for_each(|row| {
+                        res_ops.push(Op::Insert);
+                        res_rows.push(row);
+                    });
+                self.middle
+                    .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
+                res
+            } else {
+                elem_to_compare_with_middle
+            }
+        };
+
+        if !self.is_high_cache_full() {
+            self.high
+                .entry(elem_to_compare_with_high.0)
+                .or_default()
+                .extend(elem_to_compare_with_high.1);
+        } else if let Entry::Occupied(mut s) = self.high.entry(elem_to_compare_with_high.0.clone())
+        {
+            s.get_mut().extend(elem_to_compare_with_high.1);
+        } else {
+            let high_last = self.high.last_entry().unwrap();
+            if elem_to_compare_with_high.0 <= *high_last.key() {
+                high_last.remove_entry();
+                self.high
+                    .insert(elem_to_compare_with_high.0, elem_to_compare_with_high.1);
+            }
+        }
+    }
+
+    async fn delete<S: StateStore>(
+        &mut self,
+        pk_prefix: Option<&Row>,
+        managed_state: &mut ManagedTopNState<S>,
+        ordered_pk_row: OrderedRow,
+        row: Row,
+        res_ops: &mut Vec<Op>,
+        res_rows: &mut Vec<Row>,
+    ) -> StreamExecutorResult<()> {
+        if self.is_middle_cache_full() && ordered_pk_row > *self.middle.last_key_value().unwrap().0
+        {
+            // The row is in high
+            let mut entry = match self.high.entry(ordered_pk_row) {
+                Entry::Occupied(e) => e,
+                Entry::Vacant(_) => unreachable!("Deleting a non-existing row"),
+            };
+            entry.get_mut().remove(&row);
+            if entry.get().is_empty() {
+                entry.remove_entry();
+            }
+        } else if self.is_low_cache_full()
+            && (self.offset == 0 || ordered_pk_row > *self.low.last_key_value().unwrap().0)
+        {
+            // The row is in mid
+            // Try to fill the high cache if it is empty
+            if self.high.is_empty() {
+                managed_state
+                    .fill_cache_with_ties(
+                        pk_prefix,
+                        &mut self.high,
+                        self.middle.last_key_value().unwrap().0,
+                        self.high_capacity,
+                    )
+                    .await?;
+            }
+
+            let mut entry = match self.middle.entry(ordered_pk_row) {
+                Entry::Occupied(e) => e,
+                Entry::Vacant(_) => unreachable!("Deleting a non-existing row"),
+            };
+            entry.get_mut().remove(&row);
+            if entry.get().is_empty() {
+                entry.remove_entry();
+            }
+            res_ops.push(Op::Delete);
+            res_rows.push(row.clone());
+
+            // Bring one element, if any, from high cache to middle cache
+            if !self.high.is_empty() {
+                let high_first = self.high.pop_first().unwrap();
+                high_first.1.clone().into_iter().for_each(|row| {
+                    res_ops.push(Op::Insert);
+                    res_rows.push(row);
+                });
+                self.middle.insert(high_first.0, high_first.1);
+            }
+        } else {
+            // The row is in low
+            let mut entry = match self.low.entry(ordered_pk_row) {
+                Entry::Occupied(e) => e,
+                Entry::Vacant(_) => unreachable!("Deleting a non-existing row"),
+            };
+            entry.get_mut().remove(&row);
+            if entry.get().is_empty() {
+                entry.remove_entry();
+            }
+
+            // Bring one element, if any, from middle cache to low cache
+            if !self.middle.is_empty() {
+                let middle_first = self.middle.pop_first().unwrap();
+                middle_first.1.clone().into_iter().for_each(|row| {
+                    res_ops.push(Op::Insert);
+                    res_rows.push(row);
+                });
+                self.low.insert(middle_first.0, middle_first.1);
+
+                // Try to fill the high cache if it is empty
+                if self.high.is_empty() {
+                    managed_state
+                        .fill_cache_with_ties(
+                            pk_prefix,
+                            &mut self.high,
+                            self.middle.last_key_value().unwrap().0,
+                            self.high_capacity,
+                        )
+                        .await?;
+                }
+
+                // Bring one element, if any, from high cache to middle cache
+                if !self.high.is_empty() {
+                    let high_first = self.high.pop_first().unwrap();
+                    high_first.1.clone().into_iter().for_each(|row| {
+                        res_ops.push(Op::Insert);
+                        res_rows.push(row);
+                    });
+                    self.middle.insert(high_first.0, high_first.1);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 pub fn generate_executor_pk_indices_info(
     order_pairs: &[OrderPair],
     pk_indices: PkIndicesRef,
@@ -329,13 +671,13 @@ pub fn generate_executor_pk_indices_info(
     )
 }
 
-impl<S: StateStore> InnerTopNExecutorNew<S> {
+impl<S: StateStore, C: TopNCache> InnerTopNExecutorNew<S, C> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
         schema: Schema,
         order_pairs: Vec<OrderPair>,
-        offset_and_limit: (usize, usize),
+        cache: C,
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
@@ -347,8 +689,6 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
 
-        let num_offset = offset_and_limit.0;
-        let num_limit = offset_and_limit.1;
         let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
 
         Ok(Self {
@@ -362,17 +702,17 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit),
+            cache,
             key_indices,
         })
     }
 }
 
 #[async_trait]
-impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
+impl<S: StateStore, C: TopNCache> TopNExecutorBase for InnerTopNExecutorNew<S, C> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
-        let mut res_ops = Vec::with_capacity(self.cache.limit);
-        let mut res_rows = Vec::with_capacity(self.cache.limit);
+        let mut res_ops = Vec::with_capacity(self.cache.limit());
+        let mut res_rows = Vec::with_capacity(self.cache.limit());
 
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
@@ -426,9 +766,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
 
     async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
-        self.managed_state
-            .init_topn_cache(None, &mut self.cache)
-            .await
+        self.cache.init(&self.managed_state).await
     }
 }
 
@@ -459,10 +797,10 @@ mod tests {
         let chunk2 = StreamChunk::from_pretty(
             "  I I
             +  7 6
-            - 3 2
-            - 1 0
+            -  3 2
+            -  1 0
             +  5 7
-            - 2 1
+            -  2 1
             + 11 8",
         );
         let chunk3 = StreamChunk::from_pretty(
@@ -474,8 +812,8 @@ mod tests {
         );
         let chunk4 = StreamChunk::from_pretty(
             "  I  I
-            - 5  7
-            - 6  9
+            -  5  7
+            -  6  9
             - 11  8",
         );
         vec![chunk1, chunk2, chunk3, chunk4]
@@ -872,10 +1210,10 @@ mod tests {
             StreamChunk::from_pretty(
                 "  I I
                 +  7 6
-                - 7 6
-                - 8 5
+                -  7 6
+                -  8 5
                 +  8 5
-                - 8 5
+                -  8 5
                 + 11 8"
             )
         );
@@ -903,9 +1241,9 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I  I
-                - 8  5
+                -  8  5
                 + 12 10
-                - 9  4
+                -  9  4
                 + 13 11
                 - 11  8
                 + 14 12"
@@ -974,7 +1312,7 @@ mod tests {
                 "  I I I I
                 +  1 9 1 1003
                 +  9 8 1 1004
-                - 9 8 1 1004
+                -  9 8 1 1004
                 +  1 1 4 1001",
             ),
         );
@@ -984,7 +1322,7 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
-                - 5 1 4 1002
+                -  5 1 4 1002
                 +  1 0 2 1006",
             )
         );
@@ -1077,7 +1415,7 @@ mod tests {
                 "  I I I I
                 +  1 9 1 1003
                 +  9 8 1 1004
-                - 9 8 1 1004
+                -  9 8 1 1004
                 +  1 1 4 1001",
             ),
         );
@@ -1087,7 +1425,7 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
-                - 5 1 4 1002
+                -  5 1 4 1002
                 +  1 0 2 1006",
             )
         );

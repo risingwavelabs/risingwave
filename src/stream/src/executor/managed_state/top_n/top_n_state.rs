@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::Row;
@@ -22,7 +22,7 @@ use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
-use crate::executor::top_n::TopNCache;
+use crate::executor::top_n::{TopNCacheWithTies, TopNCacheWithoutTies};
 
 pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
@@ -72,8 +72,8 @@ impl<S: StateStore> ManagedTopNState<S> {
         TopNStateRow::new(pk_ordered, row)
     }
 
-    /// This function will return the rows in the range of [`offset`, `offset` + `limit`),
-    /// if `pk_prefix` is None, it will can rows from the relational table from the very beginning,
+    /// This function will return the rows in the range `[offset, offset + limit)`,
+    /// if `pk_prefix` is None, it will scan rows from the relational table from the very beginning,
     /// else it will scan rows from the relational table begin with specific `pk_prefix`.
     /// if `num_limit` is None, it will scan with no limit.
     /// this function only used in tests
@@ -128,10 +128,36 @@ impl<S: StateStore> ManagedTopNState<S> {
         Ok(())
     }
 
+    pub async fn fill_cache_with_ties(
+        &self,
+        pk_prefix: Option<&Row>,
+        cache: &mut BTreeMap<OrderedRow, BTreeSet<Row>>,
+        start_key: &OrderedRow,
+        cache_size_limit: usize,
+    ) -> StreamExecutorResult<()> {
+        let state_table_iter = iter_state_table(&self.state_table, pk_prefix).await?;
+        pin_mut!(state_table_iter);
+        while let Some(item) = state_table_iter.next().await {
+            // Note(bugen): should first compare with start key before constructing TopNStateRow.
+            let topn_row = self.get_topn_row(item?.into_owned());
+            if topn_row.ordered_key <= *start_key {
+                continue;
+            }
+            cache
+                .entry(topn_row.ordered_key)
+                .or_default()
+                .insert(topn_row.row);
+            if cache.len() == cache_size_limit {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     pub async fn init_topn_cache(
         &self,
         pk_prefix: Option<&Row>,
-        topn_cache: &mut TopNCache,
+        topn_cache: &mut TopNCacheWithoutTies,
     ) -> StreamExecutorResult<()> {
         assert!(topn_cache.low.is_empty());
         assert!(topn_cache.middle.is_empty());
@@ -165,6 +191,63 @@ impl<S: StateStore> ManagedTopNState<S> {
         while let Some(item) = state_table_iter.next().await {
             let topn_row = self.get_topn_row(item?.into_owned());
             topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+            if topn_cache.high.len() == topn_cache.high_capacity {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn init_topn_cache_with_ties(
+        &self,
+        pk_prefix: Option<&Row>,
+        topn_cache: &mut TopNCacheWithTies,
+    ) -> StreamExecutorResult<()> {
+        assert!(topn_cache.low.is_empty());
+        assert!(topn_cache.middle.is_empty());
+        assert!(topn_cache.high.is_empty());
+
+        let state_table_iter = iter_state_table(&self.state_table, pk_prefix).await?;
+        pin_mut!(state_table_iter);
+        if topn_cache.offset > 0 {
+            while let Some(item) = state_table_iter.next().await {
+                let topn_row = self.get_topn_row(item?.into_owned());
+                topn_cache
+                    .low
+                    .entry(topn_row.ordered_key)
+                    .or_default()
+                    .insert(topn_row.row);
+                if topn_cache.low.len() == topn_cache.offset {
+                    break;
+                }
+            }
+        }
+
+        assert!(topn_cache.limit > 0, "topn cache limit should always > 0");
+        while let Some(item) = state_table_iter.next().await {
+            let topn_row = self.get_topn_row(item?.into_owned());
+            topn_cache
+                .middle
+                .entry(topn_row.ordered_key)
+                .or_default()
+                .insert(topn_row.row);
+            if topn_cache.middle.len() == topn_cache.limit {
+                break;
+            }
+        }
+
+        assert!(
+            topn_cache.high_capacity > 0,
+            "topn cache high_capacity should always > 0"
+        );
+        while let Some(item) = state_table_iter.next().await {
+            let topn_row = self.get_topn_row(item?.into_owned());
+            topn_cache
+                .high
+                .entry(topn_row.ordered_key)
+                .or_default()
+                .insert(topn_row.row);
             if topn_cache.high.len() == topn_cache.high_capacity {
                 break;
             }

@@ -22,11 +22,10 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
 use super::managed_state::top_n::ManagedTopNState;
-use super::top_n::TopNCache;
+use super::top_n::{generate_executor_pk_indices_info, TopNCache, TopNCacheWithoutTies};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 use crate::error::StreamResult;
-use crate::executor::top_n::generate_executor_pk_indices_info;
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -84,7 +83,7 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
-    cache: TopNCache,
+    cache: TopNCacheWithoutTies,
 
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -124,7 +123,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit),
+            cache: TopNCacheWithoutTies::new(num_offset, num_limit),
             key_indices,
         })
     }
