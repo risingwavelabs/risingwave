@@ -20,7 +20,6 @@ risedev:
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
     - use: compute-node
-      enable-in-memory-kv-state-backend: true
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.

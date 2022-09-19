@@ -122,7 +122,7 @@ fn create_arrangement(
         ],
     );
 
-    Box::new(MaterializeExecutor::new_for_test(
+    Box::new(MaterializeExecutor::for_test(
         Box::new(source),
         memory_state_store,
         table_id,

@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
 use crate::array::Row;
 use crate::types::{Datum, ScalarImpl, VirtualNode};
-use crate::util::hash_util::CRC32FastBuilder;
+use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::serialize_datum;
 
 /// See also [`ScanRangeProst`]
@@ -102,7 +102,7 @@ impl ScanRange {
 
         let pk_prefix_value = Row(self.eq_conds.clone());
         let vnode = pk_prefix_value
-            .hash_by_indices(&dist_key_in_pk_indices, &CRC32FastBuilder {})
+            .hash_by_indices(&dist_key_in_pk_indices, &Crc32FastBuilder {})
             .to_vnode();
         Some(vnode)
     }
@@ -138,7 +138,7 @@ mod tests {
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
         ])
-        .hash_by_indices(&[0, 1], &CRC32FastBuilder {})
+        .hash_by_indices(&[0, 1], &Crc32FastBuilder {})
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }
@@ -164,7 +164,7 @@ mod tests {
             Some(ScalarImpl::from(514)),
             Some(ScalarImpl::from(114514)),
         ])
-        .hash_by_indices(&[2, 1], &CRC32FastBuilder {})
+        .hash_by_indices(&[2, 1], &Crc32FastBuilder {})
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }

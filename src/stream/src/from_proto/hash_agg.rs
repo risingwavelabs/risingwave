@@ -15,6 +15,7 @@
 //! Global Streaming Hash Aggregators
 
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -22,6 +23,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use super::agg_call::build_agg_call_from_prost;
 use super::*;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
 use crate::task::LruManagerRef;
 
@@ -35,8 +37,9 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     pk_indices: PkIndices,
     executor_id: u64,
     state_tables: Vec<StateTable<S>>,
-    lru_manager: Option<LruManagerRef>,
     state_table_col_mappings: Vec<Vec<usize>>,
+    lru_manager: Option<LruManagerRef>,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -52,8 +55,9 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.executor_id,
             args.key_indices,
             args.state_tables,
-            args.lru_manager,
             args.state_table_col_mappings,
+            args.lru_manager,
+            args.metrics,
         )?
         .boxed())
     }
@@ -103,8 +107,9 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
             state_tables,
-            lru_manager: stream.context.lru_manager.clone(),
             state_table_col_mappings,
+            lru_manager: stream.context.lru_manager.clone(),
+            metrics: params.executor_stats,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }

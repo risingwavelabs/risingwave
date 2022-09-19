@@ -107,7 +107,7 @@ pub struct SstableBuilder<W: SstableWriter> {
 }
 
 impl<W: SstableWriter> SstableBuilder<W> {
-    pub fn new_for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
+    pub fn for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
         Self::new(
             sstable_id,
             writer,
@@ -325,7 +325,7 @@ pub(super) mod tests {
             compression_algorithm: CompressionAlgorithm::None,
         };
 
-        let b = SstableBuilder::new_for_test(0, mock_sst_writer(&opt), opt);
+        let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
 
         b.finish().unwrap();
     }
@@ -333,7 +333,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn test_basic() {
         let opt = default_builder_opt_for_test();
-        let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opt), opt);
+        let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)))
