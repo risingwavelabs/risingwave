@@ -20,6 +20,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
 use super::notifier::Notifier;
+use crate::barrier::notifier::NotifierCheckpointBarrier;
 use crate::model::ActorId;
 
 type CreateMviewEpoch = Epoch;
@@ -83,7 +84,7 @@ impl Progress {
 #[derive(Default)]
 pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the epoch.
-    progress_map: HashMap<CreateMviewEpoch, (Progress, Vec<Notifier>)>,
+    progress_map: HashMap<CreateMviewEpoch, (Progress, Vec<NotifierCheckpointBarrier>)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the chain node.
     actor_map: HashMap<ActorId, CreateMviewEpoch>,
@@ -99,11 +100,15 @@ impl CreateMviewProgressTracker {
         ddl_epoch: Epoch,
         actors: impl IntoIterator<Item = ActorId>,
         notifiers: impl IntoIterator<Item = Notifier>,
-    ) -> Vec<Notifier> {
+    ) -> Vec<NotifierCheckpointBarrier> {
+        let notifiers = notifiers
+            .into_iter()
+            .map(Notifier::take_finished_checkpoint_barrier)
+            .collect();
         let actors = actors.into_iter().collect_vec();
         if actors.is_empty() {
             // The command can be finished immediately.
-            return notifiers.into_iter().collect();
+            return notifiers;
         }
 
         for &actor in &actors {
@@ -111,7 +116,6 @@ impl CreateMviewProgressTracker {
         }
 
         let progress = Progress::new(actors);
-        let notifiers = notifiers.into_iter().collect();
         let old = self.progress_map.insert(ddl_epoch, (progress, notifiers));
         assert!(old.is_none());
         vec![]
@@ -119,7 +123,10 @@ impl CreateMviewProgressTracker {
 
     /// Update the progress of `actor` according to the Prost struct. If all actors in this MV have
     /// finished, `notify_finished` will be called on registered notifiers.
-    pub fn update(&mut self, progress: &CreateMviewProgress) -> Option<Vec<Notifier>> {
+    pub fn update(
+        &mut self,
+        progress: &CreateMviewProgress,
+    ) -> Option<Vec<NotifierCheckpointBarrier>> {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
             panic!("no tracked progress for actor {}, is it already finished?", actor);

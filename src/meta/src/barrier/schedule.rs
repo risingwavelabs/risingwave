@@ -23,7 +23,6 @@ use tokio::sync::{oneshot, watch, RwLock};
 
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
-use crate::barrier::notifier::NotifierCollected;
 use crate::hummock::HummockManagerRef;
 use crate::manager::META_NODE_ID;
 use crate::storage::MetaStore;
@@ -98,16 +97,10 @@ impl<S: MetaStore> BarrierScheduler<S> {
     /// ignored, if exists.
     pub async fn wait_for_next_barrier_to_collect(&self, checkpoint: bool) -> MetaResult<()> {
         let (tx, rx) = oneshot::channel();
-        let notifier = if checkpoint {
-            Notifier {
-                collected: Some(NotifierCollected::CollectedCheckpointBarrier(tx)),
-                ..Default::default()
-            }
-        } else {
-            Notifier {
-                collected: Some(NotifierCollected::CollectedBarrier(tx)),
-                ..Default::default()
-            }
+        let notifier = Notifier {
+            collected: Some(tx),
+            checkpoint,
+            ..Default::default()
         };
         self.attach_notifiers(once(notifier)).await;
         rx.await.unwrap()
@@ -138,8 +131,9 @@ impl<S: MetaStore> BarrierScheduler<S> {
             scheduleds.push((
                 command,
                 once(Notifier {
-                    collected: Some(NotifierCollected::CollectedCheckpointBarrier(collect_tx)),
+                    collected: Some(collect_tx),
                     finished: Some(finish_tx),
+                    checkpoint: true,
                     ..Default::default()
                 })
                 .collect(),
@@ -225,9 +219,7 @@ impl ScheduledBarriers {
         let mut queue = self.inner.queue.write().await;
         while let Some((_, notifiers)) = queue.pop_front() {
             notifiers.into_iter().for_each(|notify| {
-                notify.notify_checkpoint_barrier_collection_failed(
-                    anyhow!("Scheduled barrier abort.").into(),
-                )
+                notify.notify_collected_failed(anyhow!("Scheduled barrier abort.").into())
             })
         }
     }

@@ -35,7 +35,6 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_rpc_client::StreamClientPoolRef;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -43,6 +42,7 @@ use uuid::Uuid;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
+use crate::barrier::notifier::NotifierCheckpointBarrier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
@@ -71,10 +71,8 @@ type Scheduled = (Command, Vec<Notifier>);
 /// Post-processing information for barriers.
 struct CheckpointPost<S: MetaStore> {
     command_contexts: Arc<CommandContext<S>>,
-    /// The tx about collected with checkpoint.
-    collect_notifiers: Vec<Option<oneshot::Sender<MetaResult<()>>>>,
-    /// After create MV finishes, we need to notify `finish_rx`
-    finish_notifiers: Vec<Notifier>,
+    /// Get notified when we collect a barrier(checkpoint = true)
+    notifiers: Vec<NotifierCheckpointBarrier>,
 }
 
 /// Changes to the actors to be sent or collected after this command is committed.
@@ -292,20 +290,11 @@ where
             changes_vec.push(checkpoint_post.command_contexts.command.changes());
             checkpoint_post.command_contexts.post_collect().await?;
 
-            // Notify about collected first.
+            // Notify about collected and finished.
             checkpoint_post
-                .collect_notifiers
+                .notifiers
                 .iter_mut()
-                .for_each(|send| {
-                    if let Some(tx) = send.take() {
-                        tx.send(Ok(())).ok();
-                    }
-                });
-            // Then try to finish the barrier for Create MVs.
-            checkpoint_post
-                .finish_notifiers
-                .iter_mut()
-                .for_each(Notifier::notify_finished);
+                .for_each(NotifierCheckpointBarrier::notify_checkpoint_barrier);
         }
         changes_vec
             .into_iter()
@@ -324,13 +313,9 @@ where
             .iter_mut()
         {
             checkpoint_post
-                .collect_notifiers
+                .notifiers
                 .iter_mut()
-                .for_each(|send| {
-                    if let Some(tx) = send.take() {
-                        tx.send(Err(err.clone())).ok();
-                    }
-                });
+                .for_each(|notifier| notifier.notify_chekpoint_barrier_failed(err.clone()));
         }
         self.uncommitted_messages = Default::default();
     }
@@ -680,9 +665,7 @@ where
             if info.nothing_to_do() {
                 let mut notifiers = notifiers;
                 notifiers.iter_mut().for_each(Notifier::notify_to_send);
-                notifiers
-                    .iter_mut()
-                    .for_each(Notifier::notify_checkpoint_barrier_collected);
+                notifiers.iter_mut().for_each(Notifier::notify_collected);
                 continue;
             }
             let prev_epoch = state.in_flight_prev_epoch;
@@ -699,9 +682,8 @@ where
                 .await
                 .unwrap();
             let mut checkpoint = checkpoint_control.try_get_checkpoint();
-            let need_collected_checkpoint = notifiers
-                .iter()
-                .any(Notifier::need_collect_checkpoint_barrier);
+            let need_collected_checkpoint =
+                notifiers.iter().any(Notifier::bound_to_checkpoint_barrier);
             if !matches!(command, Command::Plain(_)) || need_collected_checkpoint {
                 checkpoint = true;
             }
@@ -906,9 +888,9 @@ where
             if let Some(wait_commit_timer) = node.wait_commit_timer {
                 wait_commit_timer.observe_duration();
             }
-            node.notifiers.into_iter().for_each(|notifier| {
-                notifier.notify_checkpoint_barrier_collection_failed(err.clone())
-            });
+            node.notifiers
+                .into_iter()
+                .for_each(|notifier| notifier.notify_collected_failed(err.clone()));
         }
         if self.enable_recovery {
             // If failed, enter recovery mode.
@@ -948,36 +930,33 @@ where
                 let command_ctx = node.command_ctx.clone();
 
                 // Notify about collected without checkpoint.
-                notifiers
-                    .iter_mut()
-                    .for_each(Notifier::notify_barrier_collected);
-                // Save rx about collected with checkpoint to wait a barrier(checkpoint = true)
-                let collect_notifiers_checkpoint = notifiers
-                    .iter_mut()
-                    .map(|notifier| notifier.take_collected_checkpoint_barrier())
-                    .collect_vec();
+                // And save rx about collected with checkpoint to wait a barrier(checkpoint = true)
+                let mut notifiers_checkpoint = vec![];
+                notifiers.iter_mut().for_each(|notifier| {
+                    if notifier.bound_to_checkpoint_barrier() {
+                        notifiers_checkpoint.push(notifier.take_collected_checkpoint_barrier());
+                    } else {
+                        notifier.notify_collected();
+                    }
+                });
 
                 // Save Notify about finished to wait a barrier(checkpoint = true)
                 let actors_to_finish = command_ctx.actors_to_track();
-                let mut finish_notifiers = vec![];
-                finish_notifiers.push(tracker.add(
+                notifiers_checkpoint.append(&mut tracker.add(
                     command_ctx.curr_epoch,
                     actors_to_finish,
                     notifiers,
                 ));
 
                 for progress in resps.iter().flat_map(|r| r.create_mview_progress.clone()) {
-                    if let Some(notifier) = tracker.update(&progress) {
-                        finish_notifiers.push(notifier);
+                    if let Some(mut notifier) = tracker.update(&progress) {
+                        notifiers_checkpoint.append(&mut notifier);
                     }
                 }
-                let finish_notifiers = finish_notifiers.into_iter().flatten().collect_vec();
 
                 // If we need to wait for a barrier (checkpoint) to post-process, we will inject
                 // checkpoint in next barrier.
-                if (!finish_notifiers.is_empty() || !collect_notifiers_checkpoint.is_empty())
-                    && !*checkpoint
-                {
+                if (!notifiers_checkpoint.is_empty()) && !*checkpoint {
                     checkpoint_control.force_checkpoint_in_next_barrier();
                 }
 
@@ -985,8 +964,7 @@ where
                     resps,
                     CheckpointPost {
                         command_contexts: command_ctx,
-                        collect_notifiers: collect_notifiers_checkpoint,
-                        finish_notifiers,
+                        notifiers: notifiers_checkpoint,
                     },
                 );
                 // If no checkpoint, we can't notify collection completion
