@@ -441,6 +441,7 @@ mod tests {
                 distribution_key: vec![],
                 appendonly: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
+                value_indices: vec![0, 1],
             }),
             vec![],
             ctx,

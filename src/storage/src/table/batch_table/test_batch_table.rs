@@ -266,6 +266,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         pk_indices.clone(),
     );
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
+    let value_indices: Vec<usize> = vec![0, 1, 2];
     let mut table = StorageTable::new_partial(
         state_store.clone(),
         TableId::from(0x42),
@@ -275,6 +276,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         pk_indices,
         Distribution::fallback(),
         TableOption::default(),
+        value_indices,
     );
     let epoch: u64 = 0;
 
@@ -333,6 +335,7 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         pk_indices.clone(),
     );
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
+    let value_indices: Vec<usize> = vec![0, 1, 2];
     let table = StorageTable::new_partial(
         state_store.clone(),
         TableId::from(0x42),
@@ -342,6 +345,7 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         pk_indices,
         Distribution::fallback(),
         TableOption::default(),
+        value_indices,
     );
     let epoch: u64 = 0;
 

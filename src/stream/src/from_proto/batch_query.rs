@@ -84,7 +84,11 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
                 None
             },
         };
-
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
         let table = StorageTable::new_partial(
             state_store,
             table_id,
@@ -94,6 +98,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             pk_indices,
             distribution,
             table_option,
+            value_indices,
         );
 
         let schema = table.schema().clone();
