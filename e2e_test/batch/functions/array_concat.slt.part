@@ -136,627 +136,627 @@ select array['abc'] || '123'::varchar;
 query T
 select array[1]::smallint[] || array[1]::smallint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::smallint || array[1]::smallint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::smallint[] || 1::smallint;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::integer[] || array[1]::smallint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::integer || array[1]::smallint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::integer[] || 1::smallint;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::bigint[] || array[1]::smallint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::bigint || array[1]::smallint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::bigint[] || 1::smallint;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::numeric[] || array[1]::smallint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::numeric || array[1]::smallint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::numeric[] || 1::smallint;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::real[] || array[1]::smallint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::real || array[1]::smallint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::real[] || 1::smallint;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::smallint[] || array[1]::integer[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::smallint || array[1]::integer[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::smallint[] || 1::integer;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::integer[] || array[1]::integer[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::integer || array[1]::integer[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::integer[] || 1::integer;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::bigint[] || array[1]::integer[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::bigint || array[1]::integer[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::bigint[] || 1::integer;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::numeric[] || array[1]::integer[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::numeric || array[1]::integer[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::numeric[] || 1::integer;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::real[] || array[1]::integer[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::real || array[1]::integer[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::real[] || 1::integer;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::smallint[] || array[1]::bigint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::smallint || array[1]::bigint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::smallint[] || 1::bigint;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::integer[] || array[1]::bigint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::integer || array[1]::bigint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::integer[] || 1::bigint;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::bigint[] || array[1]::bigint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::bigint || array[1]::bigint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::bigint[] || 1::bigint;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::numeric[] || array[1]::bigint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::numeric || array[1]::bigint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::numeric[] || 1::bigint;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::real[] || array[1]::bigint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::real || array[1]::bigint[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::real[] || 1::bigint;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::smallint[] || array[1]::numeric[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::smallint || array[1]::numeric[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::smallint[] || 1::numeric;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::integer[] || array[1]::numeric[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::integer || array[1]::numeric[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::integer[] || 1::numeric;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::bigint[] || array[1]::numeric[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::bigint || array[1]::numeric[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::bigint[] || 1::numeric;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::numeric[] || array[1]::numeric[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::numeric || array[1]::numeric[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::numeric[] || 1::numeric;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::real[] || array[1]::numeric[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::real || array[1]::numeric[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::real[] || 1::numeric;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::smallint[] || array[1]::real[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::smallint || array[1]::real[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::smallint[] || 1::real;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::integer[] || array[1]::real[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::integer || array[1]::real[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::integer[] || 1::real;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::bigint[] || array[1]::real[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::bigint || array[1]::real[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::bigint[] || 1::real;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::numeric[] || array[1]::real[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::numeric || array[1]::real[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::numeric[] || 1::real;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::real[] || array[1]::real[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select 1::real || array[1]::real[];
 ----
-{1, 1}
+{1,1}
 
 query T
 select array[1]::real[] || 1::real;
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::smallint[], 1::smallint);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::integer[], 1::smallint);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::bigint[], 1::smallint);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::numeric[], 1::smallint);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::real[], 1::smallint);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::smallint[], 1::integer);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::integer[], 1::integer);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::bigint[], 1::integer);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::numeric[], 1::integer);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::real[], 1::integer);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::smallint[], 1::bigint);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::integer[], 1::bigint);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::bigint[], 1::bigint);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::numeric[], 1::bigint);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::real[], 1::bigint);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::smallint[], 1::numeric);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::integer[], 1::numeric);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::bigint[], 1::numeric);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::numeric[], 1::numeric);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::real[], 1::numeric);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::smallint[], 1::real);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::integer[], 1::real);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::bigint[], 1::real);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::numeric[], 1::real);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_append(array[1]::real[], 1::real);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::smallint, array[1]::smallint[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::integer, array[1]::smallint[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::bigint, array[1]::smallint[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::numeric, array[1]::smallint[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::real, array[1]::smallint[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::smallint, array[1]::integer[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::integer, array[1]::integer[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::bigint, array[1]::integer[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::numeric, array[1]::integer[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::real, array[1]::integer[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::smallint, array[1]::bigint[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::integer, array[1]::bigint[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::bigint, array[1]::bigint[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::numeric, array[1]::bigint[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::real, array[1]::bigint[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::smallint, array[1]::numeric[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::integer, array[1]::numeric[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::bigint, array[1]::numeric[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::numeric, array[1]::numeric[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::real, array[1]::numeric[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::smallint, array[1]::real[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::integer, array[1]::real[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::bigint, array[1]::real[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::numeric, array[1]::real[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array_prepend(1::real, array[1]::real[]);
 ----
-{1, 1}
+{1,1}
 
 query T
 select array['2020-01-02 12:34:56 -11:00'::timestamp with time zone::varchar]::timestamp[] || '2020-01-01 12:34:56'::timestamp::date;
