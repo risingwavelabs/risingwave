@@ -228,7 +228,7 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let compute_client_pool = Arc::new(ComputeClientPool::default());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
@@ -236,7 +236,7 @@ impl FrontendEnv {
             catalog_reader.clone(),
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
-        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let client_pool = Arc::new(ComputeClientPool::default());
         Self {
             meta_client,
             catalog_writer,
@@ -295,7 +295,8 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let compute_client_pool =
+            Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
@@ -330,7 +331,7 @@ impl FrontendEnv {
 
         meta_client.activate(&frontend_address).await?;
 
-        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
 
         let registry = prometheus::Registry::new();
         monitor_process(&registry).unwrap();

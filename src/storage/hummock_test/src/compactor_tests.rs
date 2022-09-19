@@ -114,10 +114,7 @@ mod tests {
             new_val.extend_from_slice(&epoch.to_be_bytes());
             storage
                 .ingest_batch(
-                    vec![(
-                        key.clone(),
-                        StorageValue::new_default_put(Bytes::from(new_val)),
-                    )],
+                    vec![(key.clone(), StorageValue::new_put(Bytes::from(new_val)))],
                     WriteOptions {
                         epoch,
                         table_id: Default::default(),
@@ -448,7 +445,7 @@ mod tests {
             });
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
-            local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
+            local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
 
             let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
@@ -574,7 +571,7 @@ mod tests {
             });
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
-            local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
+            local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
 
             let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
@@ -738,7 +735,7 @@ mod tests {
             });
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
-            local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
+            local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
             let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
@@ -906,7 +903,7 @@ mod tests {
             });
 
             let ramdom_key = [key_prefix, &rand::thread_rng().gen::<[u8; 32]>()].concat();
-            local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
+            local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
             let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();

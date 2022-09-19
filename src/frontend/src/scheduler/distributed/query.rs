@@ -397,7 +397,7 @@ mod tests {
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(1024));
+        let compute_client_pool = Arc::new(ComputeClientPool::default());
         let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
         let query_execution = QueryExecution::new(
             ExecutionContext::new(SessionImpl::mock().into()).into(),
