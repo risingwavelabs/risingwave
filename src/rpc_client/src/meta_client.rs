@@ -522,13 +522,13 @@ impl HummockMetaClient for MetaClient {
         &self,
         version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<Vec<HummockVersion>> {
+    ) -> Result<HummockVersionDeltas> {
         let req = TriggerCompactionDeterministicRequest {
             version_id,
             compaction_groups,
         };
         let resp = self.inner.trigger_compaction_deterministic(req).await?;
-        Ok(resp.versions)
+        Ok(resp.versions.unwrap())
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {

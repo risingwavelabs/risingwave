@@ -23,7 +23,7 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::{CompactionGroupId, FIRST_VERSION_ID};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockReadEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -70,10 +70,21 @@ pub async fn compaction_test_serve(
     tracing::info!("Assigned worker id {}", worker_id);
     meta_client.activate(&client_addr).await.unwrap();
 
+    let sub_tasks = vec![MetaClient::start_heartbeat_loop(
+        meta_client.clone(),
+        Duration::from_millis(1000),
+        vec![],
+    )];
+
     // Resets the current hummock version
     let version_before_reset = meta_client.reset_current_version().await?;
+    tracing::info!(
+        "Reseted hummock version id: {}, max_committed_epoch: {}",
+        version_before_reset.id,
+        version_before_reset.max_committed_epoch
+    );
 
-    // Creates a hummock state store
+    // Creates a hummock state store *after* we reset the hummock version
     let storage_config = Arc::new(config.storage.clone());
     let hummock =
         create_hummock_store_with_metrics(&meta_client, storage_config.clone(), &opts).await?;
@@ -84,70 +95,10 @@ pub async fn compaction_test_serve(
         meta_client.clone(),
         client_addr.clone(),
         Box::new(compactor_observer_node),
-        WorkerType::Compactor,
+        WorkerType::RiseCtl,
     )
     .await;
     let observer_join_handle = observer_manager.start().await.unwrap();
-
-    // Replay version deltas from FIRST_VERSION_ID to the version before reset
-    let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
-    let mut replay_count: u64 = 0;
-    for id in FIRST_VERSION_ID..version_before_reset.id {
-        let (version_id, max_committed_epoch, compaction_groups) =
-            meta_client.replay_version_delta(id).await?;
-        replay_count += 1;
-        compaction_groups
-            .into_iter()
-            .map(|c| modified_compaction_groups.insert(c))
-            .count();
-
-        if replay_count % COMPACTION_FREQ == 0 {
-            let expect_result = hummock
-                .scan::<_, Vec<u8>>(
-                    None,
-                    ..,
-                    None,
-                    ReadOptions {
-                        epoch: max_committed_epoch,
-                        table_id: None,
-                        retention_seconds: None,
-                    },
-                )
-                .await?;
-
-            // triger compactions once for each hummock group
-            let new_versions = meta_client
-                .trigger_compaction_deterministic(
-                    version_id,
-                    Vec::from_iter(modified_compaction_groups.into_iter()),
-                )
-                .await?;
-
-            if let Some(latest_version) = new_versions.last() {
-                // compare KVs after compaction finished
-                let actual_result = hummock
-                    .scan::<_, Vec<u8>>(
-                        None,
-                        ..,
-                        None,
-                        ReadOptions {
-                            epoch: latest_version.max_committed_epoch,
-                            table_id: None,
-                            retention_seconds: None,
-                        },
-                    )
-                    .await?;
-
-                check_result(&expect_result, &actual_result);
-            }
-            modified_compaction_groups = HashSet::new();
-        }
-    }
-    let sub_tasks = vec![MetaClient::start_heartbeat_loop(
-        meta_client.clone(),
-        Duration::from_millis(1000),
-        vec![],
-    )];
 
     let (_shutdown_sender, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
@@ -166,6 +117,83 @@ pub async fn compaction_test_serve(
             },
         }
     });
+
+    let local_version_manager = hummock.local_version_manager();
+    // Replay version deltas from FIRST_VERSION_ID to the version before reset
+    let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
+    let mut replay_count: u64 = 0;
+    for id in FIRST_VERSION_ID..version_before_reset.id {
+        let (version_id, max_committed_epoch, compaction_groups) =
+            meta_client.replay_version_delta(id).await?;
+        tracing::info!(
+            "Replayed version delta version_id: {}, max_committed_epoch: {}, compaction_groups: {:?}",
+            version_id,
+            max_committed_epoch,
+            compaction_groups
+        );
+        replay_count += 1;
+
+        compaction_groups
+            .into_iter()
+            .map(|c| modified_compaction_groups.insert(c))
+            .count();
+
+        if replay_count % COMPACTION_FREQ == 0 {
+            local_version_manager
+                .try_wait_epoch(HummockReadEpoch::Committed(max_committed_epoch))
+                .await?;
+
+            let expect_result = hummock
+                .scan::<_, Vec<u8>>(
+                    None,
+                    ..,
+                    None,
+                    ReadOptions {
+                        epoch: max_committed_epoch,
+                        table_id: None,
+                        retention_seconds: None,
+                    },
+                )
+                .await?;
+
+            tracing::info!(
+                "Trigger compaction for compaction_groups: {:?}",
+                modified_compaction_groups,
+            );
+
+            // triger compactions once for each hummock group
+            let new_versions = meta_client
+                .trigger_compaction_deterministic(
+                    version_id,
+                    Vec::from_iter(modified_compaction_groups.into_iter()),
+                )
+                .await?;
+
+            if let Some(latest_version) = new_versions.version_deltas.last() {
+                // compare KVs after compaction finished
+                let actual_result = hummock
+                    .scan::<_, Vec<u8>>(
+                        None,
+                        ..,
+                        None,
+                        ReadOptions {
+                            epoch: latest_version.max_committed_epoch,
+                            table_id: None,
+                            retention_seconds: None,
+                        },
+                    )
+                    .await?;
+
+                tracing::info!(
+                    "Check result for version: id: {}, max_committed_epoch: {}",
+                    latest_version.id,
+                    latest_version.max_committed_epoch,
+                );
+                check_result(&expect_result, &actual_result);
+            }
+            modified_compaction_groups = HashSet::new();
+        }
+    }
 
     tokio::try_join!(join_handle, observer_join_handle)?;
     Ok(())

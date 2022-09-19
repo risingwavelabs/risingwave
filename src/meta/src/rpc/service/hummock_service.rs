@@ -121,12 +121,12 @@ where
         request: Request<TriggerCompactionDeterministicRequest>,
     ) -> Result<Response<TriggerCompactionDeterministicResponse>, Status> {
         let req = request.into_inner();
-        let versions = self
+        let version_deltas = self
             .hummock_manager
             .trigger_compaction_deterministic(req.version_id, req.compaction_groups)
             .await?;
         Ok(Response::new(TriggerCompactionDeterministicResponse {
-            versions,
+            versions: Some(version_deltas),
         }))
     }
 

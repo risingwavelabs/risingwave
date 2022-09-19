@@ -94,8 +94,8 @@ pub struct HummockManager<S: MetaStore> {
     side_compaction_sched_channel: parking_lot::RwLock<Option<CompactionSchedulerChannelRef>>,
     compaction_sched_status_rx: tokio::sync::Mutex<Option<UnboundedReceiver<ScheduleStatus>>>,
     compaction_finish_channel: (
-        UnboundedSender<HummockVersion>,
-        tokio::sync::Mutex<UnboundedReceiver<HummockVersion>>,
+        UnboundedSender<HummockVersionDelta>,
+        tokio::sync::Mutex<UnboundedReceiver<HummockVersionDelta>>,
     ),
 
     compactor_manager: CompactorManagerRef,
@@ -144,6 +144,7 @@ macro_rules! read_lock {
     };
 }
 pub(crate) use read_lock;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::pin_version_response::Payload;
 
 /// Acquire write lock of the lock with `lock_name`.
@@ -184,7 +185,7 @@ where
         compaction_group_manager: CompactionGroupManagerRef<S>,
         compactor_manager: CompactorManagerRef,
     ) -> Result<HummockManager<S>> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HummockVersion>();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HummockVersionDelta>();
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -944,7 +945,7 @@ where
             // Compaction success, send the new version to channel
             self.compaction_finish_channel
                 .0
-                .send(current_version.clone())
+                .send(version_delta.clone())
                 .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))?;
 
             self.env
@@ -1397,6 +1398,15 @@ where
         let compaction_group_ids = version_delta.level_deltas.keys().cloned().collect_vec();
         let version_id = versioning_guard.current_version.id;
         let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
+
+        // notify our testing tool
+        self.env.notification_manager().notify_asynchronously(
+            WorkerType::RiseCtl,
+            Operation::Add,
+            Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                version_deltas: vec![version_delta],
+            }),
+        );
         Ok((version_id, max_committed_epoch, compaction_group_ids))
     }
 
@@ -1405,7 +1415,7 @@ where
         &self,
         base_version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<Vec<HummockVersion>> {
+    ) -> Result<HummockVersionDeltas> {
         let old_version = self.get_current_version().await;
         assert_eq!(base_version_id, old_version.id);
 
@@ -1419,11 +1429,29 @@ where
                 match rx.recv().await {
                     Some(sched_status) => {
                         if sched_status == ScheduleStatus::Ok {
+                            tracing::debug!("Compaction schedule Ok");
                             let mut guard = self.compaction_finish_channel.1.lock().await;
-                            if let Some(version) = guard.recv().await {
+                            if let Some(version_delta) = guard.recv().await {
+                                tracing::debug!(
+                                    "Compaction task finished. version_id: {}, epoch: {}",
+                                    version_delta.id,
+                                    version_delta.max_committed_epoch
+                                );
+
                                 // When compaction finish the version id of will increase
-                                assert!(version.id > old_version.id);
-                                new_versions.push(version);
+                                assert!(version_delta.id > old_version.id);
+                                new_versions.push(version_delta.clone());
+
+                                // notify our testing tool
+                                self.env.notification_manager().notify_asynchronously(
+                                    WorkerType::RiseCtl,
+                                    Operation::Add,
+                                    Info::HummockVersionDeltas(
+                                        risingwave_pb::hummock::HummockVersionDeltas {
+                                            version_deltas: vec![version_delta],
+                                        },
+                                    ),
+                                );
                             }
                         } else {
                             break;
@@ -1436,7 +1464,9 @@ where
             }
         }
         new_versions.sort_by_key(|version| version.id);
-        Ok(new_versions)
+        Ok(HummockVersionDeltas {
+            version_deltas: new_versions,
+        })
     }
 
     pub async fn init_compaction_scheduler(

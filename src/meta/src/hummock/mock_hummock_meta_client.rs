@@ -88,7 +88,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
         _version_id: HummockVersionId,
         _compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<Vec<HummockVersion>> {
+    ) -> Result<HummockVersionDeltas> {
         unimplemented!()
     }
 

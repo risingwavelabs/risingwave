@@ -43,7 +43,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         &self,
         version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<Vec<HummockVersion>>;
+    ) -> Result<HummockVersionDeltas>;
     async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
     async fn unpin_snapshot(&self) -> Result<()>;
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;

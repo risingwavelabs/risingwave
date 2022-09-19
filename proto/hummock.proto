@@ -404,7 +404,7 @@ message TriggerCompactionDeterministicRequest {
 }
 
 message TriggerCompactionDeterministicResponse {
-  repeated HummockVersion versions = 1;
+  HummockVersionDeltas versions = 1;
 }
 
 service HummockManagerService {

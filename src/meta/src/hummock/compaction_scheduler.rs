@@ -50,7 +50,9 @@ pub struct DefaultCompactionSchedulerChannel {
 }
 
 /// A mock channel just swallow all compaction schedule requests
-pub struct MockCompactionSchedulerChannel {}
+pub struct MockCompactionSchedulerChannel {
+    tx: UnboundedSender<CompactionGroupId>,
+}
 
 #[derive(Debug, PartialEq)]
 pub enum ScheduleStatus {
@@ -85,8 +87,8 @@ impl DefaultCompactionSchedulerChannel {
 }
 
 impl MockCompactionSchedulerChannel {
-    pub fn new() -> Self {
-        MockCompactionSchedulerChannel {}
+    pub fn new(tx: UnboundedSender<CompactionGroupId>) -> Self {
+        MockCompactionSchedulerChannel { tx }
     }
 }
 
@@ -153,9 +155,9 @@ where
     pub async fn start(&self, mut shutdown_rx: Receiver<()>, deterministic_mode: bool) {
         let (sched_channel, mut sched_rx, side_sched_channel, mut side_sched_rx) =
             if deterministic_mode {
-                let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
                 let mock_channel: CompactionSchedulerChannelRef =
-                    Arc::new(MockCompactionSchedulerChannel::new());
+                    Arc::new(MockCompactionSchedulerChannel::new(tx));
 
                 let (side_tx, side_rx) =
                     tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
@@ -197,7 +199,8 @@ where
                         }
                     }
                 },
-                res = side_sched_rx.as_mut().unwrap().recv(), if side_sched_rx.is_some() => {
+                // FIXME: handle side_sched_rx is None
+                res = side_sched_rx.as_mut().unwrap().recv(), if deterministic_mode => {
                     match res {
                         Some(compaction_group) => compaction_group,
                         None => {
