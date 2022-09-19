@@ -45,10 +45,10 @@ pub struct CompactionGroupManager<S: MetaStore> {
 impl<S: MetaStore> CompactionGroupManager<S> {
     pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
         let config = CompactionConfigBuilder::new().build();
-        Self::new_with_config(env, config).await
+        Self::with_config(env, config).await
     }
 
-    pub async fn new_with_config(env: MetaSrvEnv<S>, config: CompactionConfig) -> Result<Self> {
+    pub async fn with_config(env: MetaSrvEnv<S>, config: CompactionConfig) -> Result<Self> {
         let instance = Self {
             env,
             inner: RwLock::new(Default::default()),
