@@ -24,7 +24,6 @@ futures-async-stream = "0.2"
 hyper = "0.14"
 iter-chunks = "0.1"
 itertools = "0.10"
-lazy_static = "1"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"

@@ -64,13 +64,20 @@ where
 /// Options shared by all meta service instances
 #[derive(Clone)]
 pub struct MetaOpts {
+    /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
+    /// abnormal cases.
     pub enable_recovery: bool,
+    /// The interval of periodic checkpointing.
     pub checkpoint_interval: Duration,
+    /// The maximum number of barriers in-flight in the compute nodes.
+    pub in_flight_barrier_nums: usize,
+    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
+    /// fragment on one parallel unit per compute node.
+    pub minimal_scheduling: bool,
 
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
-    pub in_flight_barrier_nums: usize,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
@@ -82,6 +89,10 @@ pub struct MetaOpts {
     pub enable_committed_sst_sanity_check: bool,
     /// Schedule compaction for all compaction groups with this interval.
     pub periodic_compaction_interval_sec: u64,
+    /// Interval of reporting the number of nodes in the cluster.
+    pub node_num_monitor_interval_sec: u64,
+    /// Seconds compaction scheduler should stall when there is no available compactor.
+    pub no_available_compactor_stall_sec: u64,
 }
 
 impl Default for MetaOpts {
@@ -89,13 +100,16 @@ impl Default for MetaOpts {
         Self {
             enable_recovery: false,
             checkpoint_interval: Duration::from_millis(250),
-            max_idle_ms: 0,
             in_flight_barrier_nums: 40,
+            minimal_scheduling: false,
+            max_idle_ms: 0,
             vacuum_interval_sec: 30,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             collect_gc_watermark_spin_interval_sec: 5,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
+            node_num_monitor_interval_sec: 10,
+            no_available_compactor_stall_sec: 10,
         }
     }
 }

@@ -110,6 +110,13 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// Append an array to builder.
     fn append_array(&mut self, other: &Self::ArrayType);
 
+    /// Pop an element from the builder.
+    ///
+    /// # Returns
+    ///
+    /// Returns `None` if there is no elements in the builder.
+    fn pop(&mut self) -> Option<()>;
+
     /// Append an element in another array into builder.
     fn append_array_element(&mut self, other: &Self::ArrayType, idx: usize) {
         self.append(other.value_at(idx));
@@ -449,6 +456,12 @@ macro_rules! impl_array_builder {
                 match self {
                     $( Self::$variant_name(inner) => inner.append_array_element(other.into(), idx), )*
                 };
+            }
+
+            pub fn pop(&mut self) -> Option<()> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.pop(), )*
+                }
             }
 
             pub fn finish(self) -> ArrayImpl {

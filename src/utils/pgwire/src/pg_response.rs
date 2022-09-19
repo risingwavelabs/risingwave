@@ -61,6 +61,8 @@ pub enum StatementType {
     // EMPTY is used when query statement is empty (e.g. ";").
     EMPTY,
     BEGIN,
+    COMMIT,
+    ROLLBACK,
 }
 
 impl std::fmt::Display for StatementType {

@@ -145,19 +145,19 @@ steps:
   - label: "release"
     command: "ci/scripts/release.sh"
     if: build.tag != null
-    depends_on: "build"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
+      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
-          run: rw-build-env
+          run: release-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
             - BUILDKITE_TAG
-    timeout_in_minutes: 5
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "release docker image: amd64"

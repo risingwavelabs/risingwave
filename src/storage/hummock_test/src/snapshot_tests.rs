@@ -111,8 +111,8 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_default_put("test")),
-                (Bytes::from("2"), StorageValue::new_default_put("test")),
+                (Bytes::from("1"), StorageValue::new_put("test")),
+                (Bytes::from("2"), StorageValue::new_put("test")),
             ],
             WriteOptions {
                 epoch: epoch1,
@@ -139,9 +139,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_default_delete()),
-                (Bytes::from("3"), StorageValue::new_default_put("test")),
-                (Bytes::from("4"), StorageValue::new_default_put("test")),
+                (Bytes::from("1"), StorageValue::new_delete()),
+                (Bytes::from("3"), StorageValue::new_put("test")),
+                (Bytes::from("4"), StorageValue::new_put("test")),
             ],
             WriteOptions {
                 epoch: epoch2,
@@ -169,9 +169,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("2"), StorageValue::new_default_delete()),
-                (Bytes::from("3"), StorageValue::new_default_delete()),
-                (Bytes::from("4"), StorageValue::new_default_delete()),
+                (Bytes::from("2"), StorageValue::new_delete()),
+                (Bytes::from("3"), StorageValue::new_delete()),
+                (Bytes::from("4"), StorageValue::new_delete()),
             ],
             WriteOptions {
                 epoch: epoch3,
@@ -230,10 +230,10 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_default_put("test")),
-                (Bytes::from("2"), StorageValue::new_default_put("test")),
-                (Bytes::from("3"), StorageValue::new_default_put("test")),
-                (Bytes::from("4"), StorageValue::new_default_put("test")),
+                (Bytes::from("1"), StorageValue::new_put("test")),
+                (Bytes::from("2"), StorageValue::new_put("test")),
+                (Bytes::from("3"), StorageValue::new_put("test")),
+                (Bytes::from("4"), StorageValue::new_put("test")),
             ],
             WriteOptions {
                 epoch,
@@ -301,12 +301,12 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_default_put("test")),
-                (Bytes::from("2"), StorageValue::new_default_put("test")),
-                (Bytes::from("3"), StorageValue::new_default_put("test")),
-                (Bytes::from("4"), StorageValue::new_default_put("test")),
-                (Bytes::from("5"), StorageValue::new_default_put("test")),
-                (Bytes::from("6"), StorageValue::new_default_put("test")),
+                (Bytes::from("1"), StorageValue::new_put("test")),
+                (Bytes::from("2"), StorageValue::new_put("test")),
+                (Bytes::from("3"), StorageValue::new_put("test")),
+                (Bytes::from("4"), StorageValue::new_put("test")),
+                (Bytes::from("5"), StorageValue::new_put("test")),
+                (Bytes::from("6"), StorageValue::new_put("test")),
             ],
             WriteOptions {
                 epoch,
@@ -330,10 +330,10 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("5"), StorageValue::new_default_put("test")),
-                (Bytes::from("6"), StorageValue::new_default_put("test")),
-                (Bytes::from("7"), StorageValue::new_default_put("test")),
-                (Bytes::from("8"), StorageValue::new_default_put("test")),
+                (Bytes::from("5"), StorageValue::new_put("test")),
+                (Bytes::from("6"), StorageValue::new_put("test")),
+                (Bytes::from("7"), StorageValue::new_put("test")),
+                (Bytes::from("8"), StorageValue::new_put("test")),
             ],
             WriteOptions {
                 epoch: epoch + 1,
