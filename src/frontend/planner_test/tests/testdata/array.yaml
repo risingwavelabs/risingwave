@@ -27,16 +27,25 @@
     LogicalProject { exprs: [Array(null:Varchar)] }
       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
-    /* PostgreSQL requires a cast from user for this. But we treat it as varchar[] here. */
     select ARRAY[];
-  logical_plan: |
-    LogicalProject { exprs: [Array] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  binder_error: |-
+    Bind error: cannot determine type of empty array
+    HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
 - sql: |
     select ARRAY[]::int[];
   logical_plan: |
     LogicalProject { exprs: [Array::List { datatype: Int32 }] }
       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    select ARRAY[]::int[][];
+  logical_plan: |
+    LogicalProject { exprs: [Array::List { datatype: List { datatype: Int32 } }] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    select ARRAY[]::int;
+  binder_error: |-
+    Bind error: cannot determine type of empty array
+    HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
 - sql: |
     select array_cat(array[66], array[123]);
   logical_plan: |
