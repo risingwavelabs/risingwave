@@ -147,6 +147,7 @@ mod tests {
             assert_eq!(
                 row.value_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(1.2345.into())))
+            );
             assert_eq!(
                 row.value_at(6).to_owned_datum(),
                 (Some(ScalarImpl::Utf8("varchar".to_string())))
