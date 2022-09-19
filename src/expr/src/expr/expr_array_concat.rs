@@ -329,9 +329,9 @@ impl Expression for ArrayConcatExpression {
             .zip_eq(left_array.iter().zip_eq(right_array.iter()))
         {
             if !vis {
-                builder.append_null()?;
+                builder.append_null();
             } else {
-                builder.append_datum(&self.evaluate(left, right))?;
+                builder.append_datum(&self.evaluate(left, right));
             }
         }
         Ok(Arc::new(builder.finish()))

@@ -98,6 +98,25 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end test (parallel, in-memory) (release mode)"
+    command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
+    depends_on: "build"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - test-collector#v1.0.0:
+          files: "*-junit.xml"
+          format: "junit"
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "end-to-end test (deterministic simulation)"
     command: "timeout 8m ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
@@ -126,19 +145,19 @@ steps:
   - label: "release"
     command: "ci/scripts/release.sh"
     if: build.tag != null
-    depends_on: "build"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
+      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
-          run: rw-build-env
+          run: release-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
             - BUILDKITE_TAG
-    timeout_in_minutes: 5
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "release docker image: amd64"

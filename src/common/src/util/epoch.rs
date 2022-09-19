@@ -14,12 +14,13 @@
 
 use core::fmt;
 use std::cmp::Ordering;
+use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
-lazy_static::lazy_static! {
-    /// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch: 2021-04-01T00:00:00Z.
-    pub static ref UNIX_SINGULARITY_DATE_EPOCH: SystemTime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200);
-}
+/// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch:
+/// 2021-04-01T00:00:00Z.
+pub static UNIX_SINGULARITY_DATE_EPOCH: LazyLock<SystemTime> =
+    LazyLock::new(|| SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200));
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Epoch(pub u64);

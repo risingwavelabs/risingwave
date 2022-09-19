@@ -71,7 +71,7 @@ impl Column {
                 let array = column.array_ref();
                 let mut builder = array.create_builder(cardinality)?;
                 // TODO: use a more efficient way to generate `null_column`.
-                (0..cardinality).try_for_each(|_i| builder.append_null())?;
+                (0..cardinality).for_each(|_i| builder.append_null());
                 Ok::<Column, ArrayError>(Column::new(Arc::new(builder.finish())))
             })
             .try_collect()?;
@@ -127,9 +127,9 @@ mod tests {
         let mut builder = I32ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Some(i as i32)).unwrap();
+                builder.append(Some(i as i32));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -152,9 +152,9 @@ mod tests {
         let mut builder = BoolArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             match i % 3 {
-                0 => builder.append(Some(false)).unwrap(),
-                1 => builder.append(Some(true)).unwrap(),
-                _ => builder.append(None).unwrap(),
+                0 => builder.append(Some(false)),
+                1 => builder.append(Some(true)),
+                _ => builder.append(None),
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -175,9 +175,9 @@ mod tests {
         let mut builder = Utf8ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Some("abc")).unwrap();
+                builder.append(Some("abc"));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -199,9 +199,9 @@ mod tests {
         let mut builder = DecimalArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Decimal::from_usize(i)).unwrap();
+                builder.append(Decimal::from_usize(i));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -224,11 +224,9 @@ mod tests {
         let mut builder = NaiveDateArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder
-                    .append(NaiveDateWrapper::with_days(i as i32).ok())
-                    .unwrap();
+                builder.append(NaiveDateWrapper::with_days(i as i32).ok());
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -254,11 +252,9 @@ mod tests {
         let mut builder = NaiveTimeArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder
-                    .append(NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000).ok())
-                    .unwrap();
+                builder.append(NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000).ok());
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));
@@ -287,10 +283,9 @@ mod tests {
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder
-                    .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok())
-                    .unwrap();
+                    .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok());
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish())));

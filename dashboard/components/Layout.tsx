@@ -118,6 +118,10 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavTitle>Batch</NavTitle>
             <NavButton href="/batch_tasks/">Batch Tasks</NavButton>
           </VStack>
+          <VStack width="full" alignItems="flex-start" px={3}>
+            <NavTitle>Explain</NavTitle>
+            <NavButton href="/explain_distsql/">Distributed Plan</NavButton>
+          </VStack>
           <VStack mb={3}></VStack>
           <NavButton href="/settings/">Settings</NavButton>
         </VStack>
