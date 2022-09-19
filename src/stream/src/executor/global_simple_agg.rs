@@ -136,7 +136,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         _input_schema: &Schema,
         states: &mut Option<AggState<S>>,
         chunk: StreamChunk,
-        epoch: u64,
         state_tables: &mut [StateTable<S>],
         state_table_col_mappings: &[Arc<StateTableColumnMapping>],
     ) -> StreamExecutorResult<()> {
@@ -151,7 +150,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 None,
                 agg_calls,
                 input_pk_indices.to_vec(),
-                epoch,
                 state_tables,
                 state_table_col_mappings,
             )
@@ -161,7 +159,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         let states = states.as_mut().unwrap();
 
         // 2. Mark the state as dirty by filling prev states
-        states.may_mark_as_dirty(epoch, state_tables).await?;
+        states.may_mark_as_dirty(state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
         for ((agg_state, agg_call), state_table) in states
@@ -179,7 +177,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 capacity,
             )?;
             agg_state
-                .apply_chunk(&ops, vis_map.as_ref(), &column_refs, epoch, state_table)
+                .apply_chunk(&ops, vis_map.as_ref(), &column_refs, state_table)
                 .await?;
         }
 
@@ -222,7 +220,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         // --- Retrieve modified states and put the changes into the builders ---
         states
-            .build_changes(&mut builders, &mut new_ops, epoch, state_tables)
+            .build_changes(&mut builders, &mut new_ops, state_tables)
             .await?;
 
         let columns: Vec<Column> = builders
@@ -251,7 +249,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         let mut input = input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
+        for table in &mut state_tables {
+            table.init_epoch(barrier.epoch.prev);
+        }
         let mut epoch = barrier.epoch.curr;
+
         yield Message::Barrier(barrier);
 
         #[for_await]
@@ -267,7 +269,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         &input_schema,
                         &mut states,
                         chunk,
-                        epoch,
                         &mut state_tables,
                         &state_table_col_mappings,
                     )

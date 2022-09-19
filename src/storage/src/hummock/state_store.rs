@@ -599,16 +599,23 @@ impl StateStore for HummockStorage {
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
+            self.seal_epoch(epoch, true);
+            self.await_sync_epoch(epoch).await
+        }
+    }
+
+    fn await_sync_epoch(&self, epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
+        async move {
             let sync_result = self
                 .local_version_manager()
-                .sync_shared_buffer(epoch)
+                .await_sync_shared_buffer(epoch)
                 .await?;
             Ok(sync_result)
         }
     }
 
-    fn seal_epoch(&self, epoch: u64) {
-        self.local_version_manager.seal_epoch(epoch);
+    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+        self.local_version_manager.seal_epoch(epoch, is_checkpoint);
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
