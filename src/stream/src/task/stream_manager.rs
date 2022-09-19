@@ -226,7 +226,7 @@ impl LocalStreamManager {
         result
     }
 
-    pub async fn await_sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
+    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
         let timer = self
             .core
             .lock()
