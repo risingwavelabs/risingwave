@@ -23,6 +23,7 @@ use super::agg_call::build_agg_call_from_prost;
 use super::*;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
+use crate::task::LruManagerRef;
 
 pub struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 
@@ -34,6 +35,7 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     pk_indices: PkIndices,
     executor_id: u64,
     state_tables: Vec<StateTable<S>>,
+    lru_manager: Option<LruManagerRef>,
     state_table_col_mappings: Vec<Vec<usize>>,
 }
 
@@ -50,6 +52,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.executor_id,
             args.key_indices,
             args.state_tables,
+            args.lru_manager,
             args.state_table_col_mappings,
         )?
         .boxed())
@@ -63,7 +66,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashAgg)?;
         let key_indices = node
@@ -100,6 +103,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
             state_tables,
+            lru_manager: stream.context.lru_manager.clone(),
             state_table_col_mappings,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)

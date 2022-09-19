@@ -15,14 +15,15 @@
 use std::collections::BTreeSet;
 
 use risingwave_common::array::{Op, Row, StreamChunk};
-use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::PrecomputedBuildHasher;
 
-use crate::executor::JOIN_CACHE_CAP;
+use crate::task::{LruManagerRef, ExecutorCache, EvictableHashMap};
+
+const JOIN_CACHE_CAP: usize = 1 << 16;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
-    data: EvictableHashMap<Row, BTreeSet<Row>, PrecomputedBuildHasher>,
+    data: ExecutorCache<Row, BTreeSet<Row>, PrecomputedBuildHasher>,
 }
 
 impl LookupCache {
@@ -57,12 +58,20 @@ impl LookupCache {
 
     /// Flush the cache and evict the items.
     pub fn flush(&mut self) {
-        self.data.evict_to_target_cap();
+        self.data.evict();
     }
 
-    pub fn new() -> Self {
-        Self {
-            data: EvictableHashMap::with_hasher(JOIN_CACHE_CAP,  PrecomputedBuildHasher),
-        }
+    pub fn new(lru_manager: Option<LruManagerRef>) -> Self {
+        let cache = if let Some(lru_manager) = lru_manager {
+            ExecutorCache::Managed(
+                lru_manager.create_cache_with_hasher(PrecomputedBuildHasher),
+            )
+        } else {
+            ExecutorCache::Local(EvictableHashMap::with_hasher(
+                JOIN_CACHE_CAP,
+                PrecomputedBuildHasher,
+            ))
+        };
+        Self {data: cache}
     }
 }

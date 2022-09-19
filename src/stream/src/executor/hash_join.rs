@@ -41,9 +41,7 @@ use super::{
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::JoinType::LeftAnti;
 use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
-
-/// Limit number of the cached entries (one per join key) on each side.
-pub const JOIN_CACHE_CAP: usize = 1 << 16;
+use crate::task::LruManagerRef;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -430,6 +428,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
         degree_state_table_r: StateTable<S>,
+        lru_manager: Option<LruManagerRef>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -547,7 +546,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_CAP,
+                    lru_manager.clone(),
                     join_key_data_types_l,
                     state_all_data_types_l.clone(),
                     state_table_l,
@@ -568,7 +567,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_CAP,
+                    lru_manager,
                     join_key_data_types_r,
                     state_all_data_types_r.clone(),
                     state_table_r,
@@ -712,8 +711,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         self.side_r.ht.flush().await?;
 
         // We need to manually evict the cache to the target capacity.
-        self.side_l.ht.evict_to_target_cap();
-        self.side_r.ht.evict_to_target_cap();
+        self.side_l.ht.evict();
+        self.side_r.ht.evict();
 
         Ok(())
     }
@@ -1044,6 +1043,7 @@ mod tests {
             degree_state_l,
             state_r,
             degree_state_r,
+            None,
             false,
             Arc::new(StreamingMetrics::unused()),
         );
@@ -1112,6 +1112,7 @@ mod tests {
             degree_state_l,
             state_r,
             degree_state_r,
+            None,
             true,
             Arc::new(StreamingMetrics::unused()),
         );

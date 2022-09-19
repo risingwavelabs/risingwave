@@ -28,6 +28,7 @@ use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::task::LruManagerRef;
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
@@ -99,6 +100,8 @@ pub struct LookupExecutorParams<S: StateStore> {
     pub arrange_join_key_indices: Vec<usize>,
 
     pub state_table: StateTable<S>,
+
+    pub lru_manager: Option<LruManagerRef>,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -115,6 +118,7 @@ impl<S: StateStore> LookupExecutor<S> {
             schema: output_schema,
             column_mapping,
             state_table,
+            lru_manager,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -210,7 +214,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(),
+            lookup_cache: LookupCache::new(lru_manager),
         }
     }
 

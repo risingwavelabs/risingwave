@@ -203,6 +203,7 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
         opts.enable_async_stack_trace,
+        opts.enable_managed_cache,
     ));
     let source_mgr = Arc::new(MemSourceManager::new(source_metrics));
     let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();

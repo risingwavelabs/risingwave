@@ -15,7 +15,9 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
+use risingwave_common::hash::{
+    calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind,
+};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -24,6 +26,7 @@ use super::*;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};
+use crate::task::LruManagerRef;
 
 pub struct HashJoinExecutorBuilder;
 
@@ -32,7 +35,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
@@ -145,6 +148,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             degree_state_table_l,
             state_table_r,
             degree_state_table_r,
+            lru_manager: stream.context.lru_manager.clone(),
             is_append_only,
             metrics: params.executor_stats,
         };
@@ -173,6 +177,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
     degree_state_table_r: StateTable<S>,
+    lru_manager: Option<LruManagerRef>,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
 }
@@ -200,6 +205,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.degree_state_table_l,
             args.state_table_r,
             args.degree_state_table_r,
+            args.lru_manager,
             args.is_append_only,
             args.metrics,
         )))

@@ -1486,7 +1486,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3495912c9c1ccf2e18976439f4443f3fee0fd61f424ff99fde6a66b15ecb448f"
 dependencies = [
  "cfg-if",
- "hashbrown 0.12.3",
+ "hashbrown",
  "lock_api",
  "parking_lot_core 0.9.3",
 ]
@@ -2107,15 +2107,6 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 
 [[package]]
 name = "hashbrown"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
-dependencies = [
- "ahash",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
@@ -2330,7 +2321,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10a35a97730320ffe8e2d410b5d3b69279b98d2c14bdb8b70ea89ecf7888d41e"
 dependencies = [
  "autocfg",
- "hashbrown 0.12.3",
+ "hashbrown",
 ]
 
 [[package]]
@@ -2652,15 +2643,7 @@ name = "lru"
 version = "0.7.6"
 source = "git+https://github.com/risingwavelabs/lru-rs.git?branch=evict_by_timestamp#ebec276ae8ef921ff1cc4f5013be925ee44e835d"
 dependencies = [
- "hashbrown 0.12.3",
-]
-
-[[package]]
-name = "lru"
-version = "0.7.6"
-source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
-dependencies = [
- "hashbrown 0.11.2",
+ "hashbrown",
 ]
 
 [[package]]
@@ -2669,7 +2652,7 @@ version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e999beba7b6e8345721bd280141ed958096a2e4abdf74f67ff4ce49b4b54e47a"
 dependencies = [
- "hashbrown 0.12.3",
+ "hashbrown",
 ]
 
 [[package]]
@@ -4338,7 +4321,7 @@ dependencies = [
  "humantime",
  "itertools",
  "libc",
- "lru 0.7.6 (git+https://github.com/risingwavelabs/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30)",
+ "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -4580,7 +4563,6 @@ dependencies = [
  "dyn-clone",
  "either",
  "itertools",
- "lru 0.7.8",
  "madsim-tokio",
  "madsim-tonic",
  "md5",
@@ -5090,7 +5072,7 @@ dependencies = [
  "iter-chunks",
  "itertools",
  "local_stats_alloc",
- "lru 0.7.6 (git+https://github.com/risingwavelabs/lru-rs.git?branch=evict_by_timestamp)",
+ "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -6737,7 +6719,7 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
- "hashbrown 0.12.3",
+ "hashbrown",
  "hdrhistogram",
  "hyper",
  "indexmap",

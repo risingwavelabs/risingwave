@@ -84,7 +84,7 @@ pub struct SharedContext {
 
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
 
-    pub(crate) lru_manager: Arc<LruManager>,
+    pub(crate) lru_manager: Option<LruManagerRef>,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -96,18 +96,20 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(addr: HostAddr, config: &StreamingConfig) -> Self {
-        let lru_manager = LruManager::new(
-            config.total_memory_available_bytes,
-            config.checkpoint_interval_ms,
-        );
+    pub fn new(addr: HostAddr, config: &StreamingConfig, enable_managed_cache: bool) -> Self {
+        let create_lru_manager = || {
+            LruManager::new(
+                config.total_memory_available_bytes,
+                config.checkpoint_interval_ms,
+            )
+        };
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new())),
-            lru_manager,
+            lru_manager: enable_managed_cache.then(create_lru_manager),
         }
     }
 
@@ -119,7 +121,7 @@ impl SharedContext {
             addr: LOCAL_TEST_ADDR.clone(),
             compute_client_pool: ComputeClientPool::default(),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new())),
-            lru_manager: LruManager::for_test(),
+            lru_manager: Some(LruManager::for_test()),
         }
     }
 

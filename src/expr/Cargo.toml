@@ -16,7 +16,6 @@ crc32fast = "1"
 dyn-clone = "1"
 either = "1"
 itertools = "0.10"
-lru = "0.7"
 md5 = "0.7.0"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"

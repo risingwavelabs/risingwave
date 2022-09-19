@@ -19,10 +19,91 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use auto_enums::auto_enum;
 use global_stats_alloc::INSTRUMENTED_JEMALLOC;
 use lru::{DefaultHasher, LruCache};
 use risingwave_common::util::epoch::Epoch;
 use tokio::time::sleep;
+
+/// A wrapper for [`LruCache`] which provides manual eviction.
+pub struct EvictableHashMap<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
+    inner: LruCache<K, V, S, A>,
+
+    /// Target capacity to keep when calling `evict_to_target_cap`.
+    target_cap: usize,
+}
+
+impl<K: Hash + Eq, V, A: Clone + Allocator> EvictableHashMap<K, V, DefaultHasher, A> {
+    /// Create a [`EvictableHashMap`] with the given target capacity and allocator.
+    pub fn new_in(target_cap: usize, alloc: A) -> Self {
+        Self::with_hasher_in(target_cap, DefaultHasher::new(), alloc)
+    }
+}
+
+impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> EvictableHashMap<K, V, S, A> {
+    /// Create a [`EvictableHashMap`] with the given target capacity, hasher and allocator.
+    pub fn with_hasher_in(target_cap: usize, hasher: S, alloc: A) -> Self {
+        Self {
+            inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
+            target_cap,
+        }
+    }
+}
+
+impl<K: Hash + Eq, V> EvictableHashMap<K, V> {
+    /// Create a [`EvictableHashMap`] with the given target capacity.
+    pub fn new(target_cap: usize) -> EvictableHashMap<K, V> {
+        EvictableHashMap::with_hasher(target_cap, DefaultHasher::new())
+    }
+}
+
+impl<K: Hash + Eq, V, S: BuildHasher> EvictableHashMap<K, V, S> {
+    /// Create a [`EvictableHashMap`] with the given target capacity and haser.
+    pub fn with_hasher(target_cap: usize, hasher: S) -> Self {
+        Self {
+            inner: LruCache::unbounded_with_hasher(hasher),
+            target_cap,
+        }
+    }
+}
+
+impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> EvictableHashMap<K, V, S, A> {
+    pub fn target_cap(&self) -> usize {
+        self.target_cap
+    }
+
+    /// Evict items in the map and only keep up-to `target_cap` items.
+    pub fn evict_to_target_cap(&mut self) {
+        self.inner.resize(self.target_cap);
+        self.inner.resize(usize::MAX);
+    }
+
+    /// An iterator visiting all values in most-recently used order. The iterator element type is
+    /// &V.
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        self.iter().map(|(_k, v)| v)
+    }
+
+    /// An iterator visiting all values mutably in most-recently used order. The iterator element
+    /// type is &mut V.
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
+        self.iter_mut().map(|(_k, v)| v)
+    }
+}
+
+impl<K, V, S, A: Clone + Allocator> Deref for EvictableHashMap<K, V, S, A> {
+    type Target = LruCache<K, V, S, A>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<K, V, S, A: Clone + Allocator> DerefMut for EvictableHashMap<K, V, S, A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
 
 pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     inner: LruCache<K, V, S, A>,
@@ -70,6 +151,65 @@ pub struct LruManager {
     barrier_interval_ms: u32,
 }
 
+pub type LruManagerRef = Arc<LruManager>;
+
+pub enum ExecutorCache<K, V, S, A: Clone + Allocator = Global> {
+    /// An managed cache. Eviction depends on the node memory usage.
+    Managed(ManagedLruCache<K, V, S, A>),
+    /// An local cache. Eviction depends on local executor cache limit setting.
+    Local(EvictableHashMap<K, V, S, A>),
+}
+
+impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> ExecutorCache<K, V, S, A> {
+    /// Evict epochs lower than the watermark
+    pub fn evict(&mut self) {
+        match self {
+            ExecutorCache::Managed(cache) => cache.evict(),
+            ExecutorCache::Local(cache) => cache.evict_to_target_cap(),
+        }
+    }
+
+    /// An iterator visiting all values in most-recently used order. The iterator element type is
+    /// &V.
+    #[auto_enum(Iterator)]
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        match self {
+            ExecutorCache::Managed(cache) => cache.iter().map(|(_k, v)| v),
+            ExecutorCache::Local(cache) => cache.iter().map(|(_k, v)| v),
+        }
+    }
+
+    /// An iterator visiting all values mutably in most-recently used order. The iterator element
+    /// type is &mut V.
+    #[auto_enum(Iterator)]
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
+        match self {
+            ExecutorCache::Managed(cache) => cache.iter_mut().map(|(_k, v)| v),
+            ExecutorCache::Local(cache) => cache.iter_mut().map(|(_k, v)| v),
+        }
+    }
+}
+
+impl<K, V, S, A: Clone + Allocator> Deref for ExecutorCache<K, V, S, A> {
+    type Target = LruCache<K, V, S, A>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            ExecutorCache::Managed(cache) => &cache.inner,
+            ExecutorCache::Local(cache) => &cache.inner,
+        }
+    }
+}
+
+impl<K, V, S, A: Clone + Allocator> DerefMut for ExecutorCache<K, V, S, A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            ExecutorCache::Managed(cache) => &mut cache.inner,
+            ExecutorCache::Local(cache) => &mut cache.inner,
+        }
+    }
+}
+
 impl LruManager {
     pub fn new(total_memory_available_bytes: usize, barrier_interval_ms: u32) -> Arc<Self> {
         let manager = Arc::new(Self {
@@ -105,7 +245,7 @@ impl LruManager {
         }
     }
 
-    pub fn create_cache<K: Hash + Eq, V, S: BuildHasher>(
+    pub fn create_cache_with_hasher<K: Hash + Eq, V, S: BuildHasher>(
         &self,
         hasher: S,
     ) -> ManagedLruCache<K, V, S> {
@@ -139,9 +279,7 @@ impl LruManager {
             step = if cur_total_bytes_used < mem_threshold_graceful {
                 // Do not evict if the memory usage is lower than `mem_threshold_graceful`
                 0
-            } else if cur_total_bytes_used > mem_threshold_graceful
-                && cur_total_bytes_used < mem_threshold_aggressive
-            {
+            } else if cur_total_bytes_used < mem_threshold_aggressive {
                 // Gracefully evict
                 1
             } else if last_total_bytes_used < cur_total_bytes_used {
@@ -160,5 +298,28 @@ impl LruManager {
 
             self.set_watermark_time(watermark_time);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_len_after_evict() {
+        let target_cap = 114;
+        let items_count = 514;
+        let mut map = EvictableHashMap::new(target_cap);
+
+        for i in 0..items_count {
+            map.put(i, ());
+        }
+        assert_eq!(map.len(), items_count);
+
+        map.evict_to_target_cap();
+        assert_eq!(map.len(), target_cap);
+
+        assert!(map.get(&(items_count - target_cap - 1)).is_none());
+        assert!(map.get(&(items_count - target_cap)).is_some());
     }
 }

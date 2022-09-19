@@ -30,7 +30,6 @@ use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
-use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerializer;
@@ -42,9 +41,14 @@ use self::iter_utils::zip_by_order_key;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::Epoch;
-use crate::task::ActorId;
+use crate::task::{
+    ActorId, EvictableHashMap, ExecutorCache, LruManagerRef, ManagedLruCache,
+};
 
 type DegreeType = u64;
+
+/// Limit number of the cached entries (one per join key) on each side.
+const JOIN_CACHE_CAP: usize = 1 << 16;
 
 pub fn build_degree_row(mut order_key: Row, degree: DegreeType) -> Row {
     let degree_datum = Some(ScalarImpl::Int64(degree as i64));
@@ -179,7 +183,10 @@ pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = JoinEntryState;
 
 type JoinHashMapInner<K> =
-    EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+    ExecutorCache<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+
+pub type JoinManagedCache<K> =
+    ManagedLruCache<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
@@ -218,9 +225,6 @@ impl JoinHashMapMetrics {
 }
 
 pub struct JoinHashMap<K: HashKey, S: StateStore> {
-    /// Allocator
-    #[expect(dead_code)]
-    alloc: SharedStatsAlloc<Global>,
     /// Store the join states.
     // SAFETY: This is a self-referential data structure and the allocator is owned by the struct
     // itself. Use the field is safe iff the struct is constructed with [`moveit`](https://crates.io/crates/moveit)'s way.
@@ -267,7 +271,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        target_cap: usize,
+        lru_manager: Option<LruManagerRef>,
         join_key_data_types: Vec<DataType>,
         state_all_data_types: Vec<DataType>,
         state_table: StateTable<S>,
@@ -300,29 +304,29 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        Self {
-            inner: EvictableHashMap::with_hasher_in(
-                target_cap,
+        let cache = if let Some(lru_manager) = lru_manager {
+            ExecutorCache::Managed(
+                lru_manager.create_cache_with_hasher_in(PrecomputedBuildHasher, alloc),
+            )
+        } else {
+            ExecutorCache::Local(EvictableHashMap::with_hasher_in(
+                JOIN_CACHE_CAP,
                 PrecomputedBuildHasher,
                 alloc.clone(),
-            ),
+            ))
+        };
+
+        Self {
+            inner: cache,
             join_key_data_types,
             null_matched,
             pk_serializer,
             current_epoch: 0,
             state,
             degree_state,
-            alloc,
             need_degree_table,
             metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
-    }
-
-    #[expect(dead_code)]
-    /// Report the bytes used by the join map.
-    // FIXME: Currently, only memory used in the hash map itself is counted.
-    pub fn bytes_in_use(&self) -> usize {
-        self.alloc.bytes_in_use()
     }
 
     pub fn init(&mut self, epoch: Epoch) {

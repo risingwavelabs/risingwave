@@ -24,7 +24,6 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -39,11 +38,12 @@ use crate::executor::aggregation::{
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::task::{LruManagerRef, ExecutorCache, EvictableHashMap};
 
 /// Limit number of cached entries (one per group key)
 const HASH_AGG_CACHE_SIZE: usize = 1 << 16;
 
-type AggStateMap<K, S> = EvictableHashMap<K, Option<Box<AggState<S>>>, PrecomputedBuildHasher>;
+type AggStateMap<K, S> = ExecutorCache<K, Option<Box<AggState<S>>>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -91,6 +91,9 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// Relational state tables for each aggregation calls.
     state_tables: Vec<StateTable<S>>,
 
+    /// Lru manager. `None` when using local lru cache.
+    lru_manager: Option<LruManagerRef>, 
+
     /// State table column mappings for each aggregation calls,
     state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
 }
@@ -123,6 +126,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         executor_id: u64,
         key_indices: Vec<usize>,
         mut state_tables: Vec<StateTable<S>>,
+        lru_manager: Option<LruManagerRef>,
         state_table_col_mappings: Vec<Vec<usize>>,
     ) -> StreamResult<Self> {
         let input_info = input.info();
@@ -145,6 +149,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 agg_calls,
                 key_indices,
                 state_tables,
+                lru_manager,
                 state_table_col_mappings: state_table_col_mappings
                     .into_iter()
                     .map(StateTableColumnMapping::new)
@@ -216,6 +221,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref _input_schema,
             ref schema,
             state_tables,
+            lru_manager: _,
             ref state_table_col_mappings,
             pk_indices: _,
         }: &mut HashAggExecutorExtra<S>,
@@ -401,7 +407,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             assert!(!state_map
                 .values()
                 .any(|state| state.as_ref().unwrap().is_dirty()));
-            state_map.evict_to_target_cap();
+            state_map.evict();
         }
     }
 
@@ -412,8 +418,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } = self;
 
         // The cached states. `HashKey -> (prev_value, value)`.
-        let mut state_map = EvictableHashMap::with_hasher(HASH_AGG_CACHE_SIZE, PrecomputedBuildHasher);
-
+        let mut state_map = if let Some(ref lru_manager) = extra.lru_manager {
+            ExecutorCache::Managed(
+                lru_manager.create_cache_with_hasher(PrecomputedBuildHasher),
+            )
+        } else {
+            ExecutorCache::Local(EvictableHashMap::with_hasher(
+                HASH_AGG_CACHE_SIZE,
+                PrecomputedBuildHasher,
+            ))
+        };
+            
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         for state_table in &mut extra.state_tables {
@@ -504,6 +519,7 @@ mod tests {
             executor_id,
             key_indices,
             state_tables,
+            None,
             state_table_col_mappings,
         )
         .unwrap()
