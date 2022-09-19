@@ -189,7 +189,10 @@ fn infer_type_for_special(
                     } else if left_type == **right_elem_type {
                         Some(right_type.clone())
                     } else {
-                        let common_ele_type = least_restrictive((**left_elem_type).clone(), (**right_elem_type).clone());
+                        let common_ele_type = least_restrictive(
+                            (**left_elem_type).clone(),
+                            (**right_elem_type).clone(),
+                        );
                         if common_ele_type.is_err() {
                             return Err(ErrorCode::BindError(format!(
                                 "Cannot concatenate {} and {}",
@@ -203,7 +206,7 @@ fn infer_type_for_special(
                         let array_type = DataType::List {
                             datatype: Box::new(common_ele_type.clone()),
                         };
-                    
+
                         // try to cast inputs to inputs to common type
                         let inputs_owned = std::mem::take(inputs);
                         *inputs = inputs_owned
@@ -214,7 +217,7 @@ fn infer_type_for_special(
                                 }
                                 input.cast_implicit(array_type.clone())
                             })
-                            .try_collect()?; 
+                            .try_collect()?;
                         Some(array_type)
                     }
                 }
