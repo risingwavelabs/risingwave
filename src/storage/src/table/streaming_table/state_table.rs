@@ -497,8 +497,6 @@ impl<S: StateStore> StateTable<S> {
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
-        tracing::warn!("write chunk: {chunk:?}");
-
         let (chunk, op) = chunk.into_parts();
 
         let mut vnode_and_pks = vec![vec![]; chunk.capacity()];

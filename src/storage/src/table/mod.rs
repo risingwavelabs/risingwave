@@ -131,9 +131,13 @@ fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) ->
         chunk
             .get_hash_values(indices, Crc32FastBuilder {})
             .into_iter()
-            .map(|h| {
+            .zip_eq(chunk.vis().iter())
+            .map(|(h, vis)| {
                 let vnode = h.to_vnode();
-                check_vnode_is_set(vnode, vnodes);
+                // Ignore the invisible rows.
+                if vis {
+                    check_vnode_is_set(vnode, vnodes);
+                }
                 vnode
             })
             .collect()
