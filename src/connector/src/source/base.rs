@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -25,6 +25,7 @@ use prost::Message;
 use risingwave_common::error::ErrorCode;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use crate::source::datagen::{
@@ -189,7 +190,7 @@ pub type ConnectorState = Option<Vec<SplitImpl>>;
 /// Used for acquiring the generated data for [`spawn_data_generation_stream`].
 pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
 
-/// Spawn a **new runtime** in a new thread to run the data generator, returns a channel receiver
+/// Spawn the data generator to a dedicated runtime, returns a channel receiver
 /// for acquiring the generated data. This is used for the [`DatagenSplitReader`] and
 /// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
 pub fn spawn_data_generation_stream(
@@ -198,7 +199,7 @@ pub fn spawn_data_generation_stream(
     const GENERATION_BUFFER: usize = 4;
 
     let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);
-    let future = async move {
+    RUNTIME.spawn(async move {
         pin_mut!(stream);
         while let Some(result) = stream.next().await {
             if generation_tx.send(result).await.is_err() {
@@ -206,27 +207,18 @@ pub fn spawn_data_generation_stream(
                 break;
             }
         }
-    };
-
-    #[cfg(not(madsim))]
-    std::thread::Builder::new()
-        .name("risingwave-data-generation".to_string())
-        .spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(future);
-        })
-        .unwrap();
-
-    // Note: madsim does not support creating multiple runtime, so we just run it in current
-    // runtime.
-    #[cfg(madsim)]
-    tokio::spawn(future);
+    });
 
     generation_rx
 }
+
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .thread_name("risingwave-data-generation")
+        .enable_all()
+        .build()
+        .expect("failed to build data-generation runtime")
+});
 
 #[cfg(test)]
 mod tests {

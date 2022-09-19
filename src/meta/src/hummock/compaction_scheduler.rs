@@ -143,8 +143,15 @@ where
                 }
             };
             sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
-            self.pick_and_assign(compaction_group, request_channel.clone())
+            let status = self
+                .pick_and_assign(compaction_group, request_channel.clone())
                 .await;
+            if let ScheduleStatus::NoAvailableCompactor(_) = status {
+                tokio::time::sleep(Duration::from_secs(
+                    self.env.opts.no_available_compactor_stall_sec,
+                ))
+                .await;
+            }
         }
         tracing::info!("Compaction scheduler is stopped");
     }
@@ -249,7 +256,7 @@ where
                     Error::CompactionTaskAlreadyAssigned(_, _) => {
                         panic!("Compaction scheduler is the only tokio task that can assign task.");
                     }
-                    Error::InvalidContext(context_id) | Error::CompactorUnreachable(context_id) => {
+                    Error::InvalidContext(context_id) => {
                         self.compactor_manager.remove_compactor(context_id);
                         return ScheduleStatus::AssignFailure(compact_task);
                     }
@@ -296,10 +303,12 @@ mod tests {
     use assert_matches::assert_matches;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::CompactionGroupId;
+    use risingwave_pb::hummock::compact_task::TaskStatus;
 
     use crate::hummock::compaction_scheduler::{CompactionRequestChannel, ScheduleStatus};
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::hummock::CompactionScheduler;
+    use crate::manager::LocalNotification;
 
     #[tokio::test]
     async fn test_pick_and_assign() {
@@ -410,14 +419,31 @@ mod tests {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-        let compaction_scheduler =
-            CompactionScheduler::new(env, hummock_manager.clone(), compactor_manager.clone());
+        let compaction_scheduler = CompactionScheduler::new(
+            env.clone(),
+            hummock_manager.clone(),
+            compactor_manager.clone(),
+        );
 
         let (request_tx, _request_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
         let _receiver = compactor_manager.add_compactor(context_id, 1);
+
+        // Pick failure
+        let fp_get_compact_task = "fp_get_compact_task";
+        fail::cfg(fp_get_compact_task, "return").unwrap();
+        assert_eq!(
+            ScheduleStatus::PickFailure,
+            compaction_scheduler
+                .pick_and_assign(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    request_channel.clone()
+                )
+                .await
+        );
+        fail::remove(fp_get_compact_task);
 
         // Assign failed and task cancelled.
         let fp_assign_compaction_task_fail = "assign_compaction_task_fail";
@@ -459,6 +485,50 @@ mod tests {
                 .await,
             ScheduleStatus::NoAvailableCompactor(_)
         );
-        assert_eq!(0, hummock_manager.list_all_tasks_ids().await.len());
+        assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
+        let _receiver = compactor_manager.add_compactor(context_id, 1);
+
+        // Assign failed and task cancellation failed.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        env.notification_manager().insert_local_sender(tx).await;
+        let fp_cancel_compact_task = "fp_cancel_compact_task";
+        fail::cfg(fp_assign_compaction_task_fail, "return").unwrap();
+        fail::cfg(fp_cancel_compact_task, "return").unwrap();
+        assert_matches!(
+            compaction_scheduler
+                .pick_and_assign(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    request_channel.clone()
+                )
+                .await,
+            ScheduleStatus::AssignFailure(_)
+        );
+        fail::remove(fp_assign_compaction_task_fail);
+        fail::remove(fp_cancel_compact_task);
+        assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 1);
+        // Notified to retry cancellation.
+        let mut task_to_cancel = match rx.recv().await.unwrap() {
+            LocalNotification::WorkerNodeIsDeleted(_) => {
+                panic!()
+            }
+            LocalNotification::CompactionTaskNeedCancel(task_to_cancel) => task_to_cancel,
+        };
+        hummock_manager
+            .cancel_compact_task(&mut task_to_cancel, TaskStatus::ManualCanceled)
+            .await
+            .unwrap();
+        assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
+
+        // Succeeded.
+        assert_matches!(
+            compaction_scheduler
+                .pick_and_assign(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    request_channel.clone()
+                )
+                .await,
+            ScheduleStatus::Ok
+        );
+        assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 1);
     }
 }

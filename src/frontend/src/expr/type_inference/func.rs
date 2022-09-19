@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use itertools::{iproduct, Itertools as _};
 use num_integer::Integer as _;
@@ -897,11 +898,7 @@ fn build_type_derive_map() -> FuncSigMap {
     map
 }
 
-lazy_static::lazy_static! {
-    static ref FUNC_SIG_MAP: FuncSigMap = {
-        build_type_derive_map()
-    };
-}
+static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(build_type_derive_map);
 
 /// The table of function signatures.
 pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {

@@ -31,11 +31,7 @@ use crate::executor::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIn
 #[async_trait]
 pub trait TopNExecutorBase: Send + 'static {
     /// Apply the chunk to the dirty state and get the diffs.
-    async fn apply_chunk(
-        &mut self,
-        chunk: StreamChunk,
-        epoch: u64,
-    ) -> StreamExecutorResult<StreamChunk>;
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
 
     /// Flush the buffered chunk to the storage backend.
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()>;
@@ -95,9 +91,9 @@ where
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        let mut epoch = barrier.epoch.curr;
+        self.inner.init(barrier.epoch.prev).await?;
 
-        self.inner.init(epoch).await?;
+        let mut epoch = barrier.epoch.curr;
 
         yield Message::Barrier(barrier);
 
@@ -105,9 +101,7 @@ where
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Chunk(chunk) => {
-                    yield Message::Chunk(self.inner.apply_chunk(chunk, epoch).await?)
-                }
+                Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(epoch).await?;
                     epoch = barrier.epoch.curr;

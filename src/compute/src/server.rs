@@ -21,7 +21,6 @@ use risingwave_batch::executor::BatchTaskMetricsManager;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE};
-use risingwave_common::monitor::node::report_node_process;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -91,7 +90,6 @@ pub async fn compute_node_serve(
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
     monitor_process(&registry).unwrap();
-    report_node_process(&registry).unwrap();
     let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
@@ -198,7 +196,7 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize the managers.
-    let batch_mgr = Arc::new(BatchManager::new());
+    let batch_mgr = Arc::new(BatchManager::new(config.batch.worker_threads_num));
     let stream_mgr = Arc::new(LocalStreamManager::new(
         client_addr.clone(),
         state_store.clone(),
@@ -211,7 +209,7 @@ pub async fn compute_node_serve(
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
-    let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+    let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
     let batch_env = BatchEnvironment::new(
         source_mgr.clone(),
         batch_mgr.clone(),
