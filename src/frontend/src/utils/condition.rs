@@ -15,10 +15,10 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug, Display};
 use std::ops::Bound;
+use std::sync::LazyLock;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
@@ -84,9 +84,7 @@ impl Condition {
     }
 
     pub fn always_false(&self) -> bool {
-        lazy_static! {
-            static ref FALSE: ExprImpl = ExprImpl::literal_bool(false);
-        }
+        static FALSE: LazyLock<ExprImpl> = LazyLock::new(|| ExprImpl::literal_bool(false));
         !self.conjunctions.is_empty() && self.conjunctions.iter().all(|e| *e == *FALSE)
     }
 
