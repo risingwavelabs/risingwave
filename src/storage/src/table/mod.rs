@@ -119,7 +119,10 @@ fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
 
     tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
 
-    check_vnode_is_set(vnode, vnodes);
+    // FIXME: temporary workaround for local agg
+    if !indices.is_empty() {
+        check_vnode_is_set(vnode, vnodes);
+    }
     vnode
 }
 
@@ -135,7 +138,8 @@ fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) ->
             .map(|(h, vis)| {
                 let vnode = h.to_vnode();
                 // Ignore the invisible rows.
-                if vis {
+                // FIXME: temporary workaround for local agg
+                if vis && !indices.is_empty() {
                     check_vnode_is_set(vnode, vnodes);
                 }
                 vnode
