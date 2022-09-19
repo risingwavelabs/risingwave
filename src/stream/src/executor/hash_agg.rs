@@ -348,13 +348,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         metrics
             .agg_lookup_miss_count
             .with_label_values(&[&actor_id_str])
-            .inc_by(lookup_miss_count.load(Ordering::Relaxed));
+            .inc_by(lookup_miss_count.swap(0, Ordering::Relaxed));
         metrics
             .agg_total_lookup_count
             .with_label_values(&[&actor_id_str])
-            .inc_by(total_lookup_count.load(Ordering::Relaxed));
-        lookup_miss_count.store(0, Ordering::Relaxed);
-        total_lookup_count.store(0, Ordering::Relaxed);
+            .inc_by(total_lookup_count.swap(0, Ordering::Relaxed));
         metrics
             .agg_cached_keys
             .with_label_values(&[&actor_id_str])
