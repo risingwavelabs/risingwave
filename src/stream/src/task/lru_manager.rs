@@ -14,6 +14,7 @@
 
 use std::alloc::{Allocator, Global};
 use std::hash::{BuildHasher, Hash};
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,7 +30,39 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     watermark_epoch: Arc<AtomicU64>,
 }
 
-impl<K, V, S, A: Clone + Allocator> ManagedLruCache<K, V, S, A> {}
+impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> ManagedLruCache<K, V, S, A> {
+    /// Evict epochs lower than the watermark
+    pub fn evict(&mut self) {
+        let epoch = self.watermark_epoch.load(Ordering::Relaxed);
+        self.inner.evict_by_epoch(epoch);
+    }
+
+    /// An iterator visiting all values in most-recently used order. The iterator element type is
+    /// &V.
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        self.iter().map(|(_k, v)| v)
+    }
+
+    /// An iterator visiting all values mutably in most-recently used order. The iterator element
+    /// type is &mut V.
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
+        self.iter_mut().map(|(_k, v)| v)
+    }
+}
+
+impl<K, V, S, A: Clone + Allocator> Deref for ManagedLruCache<K, V, S, A> {
+    type Target = LruCache<K, V, S, A>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<K, V, S, A: Clone + Allocator> DerefMut for ManagedLruCache<K, V, S, A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
 
 pub struct LruManager {
     watermark_epoch: Arc<AtomicU64>,
@@ -38,12 +71,27 @@ pub struct LruManager {
 }
 
 impl LruManager {
-    pub fn new(total_memory_available_bytes: usize, barrier_interval_ms: u32) -> Self {
-        Self {
+    pub fn new(total_memory_available_bytes: usize, barrier_interval_ms: u32) -> Arc<Self> {
+        let manager = Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             total_memory_available_bytes,
             barrier_interval_ms,
-        }
+        });
+
+        // Run a backgrond memory monitor
+        tokio::spawn(manager.clone().run());
+
+        manager
+    }
+
+    /// We should not call `run` in unit test.
+    #[cfg(test)]
+    pub fn for_test() -> Arc<Self> {
+        Arc::new(Self {
+            watermark_epoch: Arc::new(0.into()),
+            total_memory_available_bytes: 0,
+            barrier_interval_ms: 0,
+        })
     }
 
     pub fn create_cache_with_hasher_in<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator>(
@@ -53,6 +101,16 @@ impl LruManager {
     ) -> ManagedLruCache<K, V, S, A> {
         ManagedLruCache {
             inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
+            watermark_epoch: self.watermark_epoch.clone(),
+        }
+    }
+
+    pub fn create_cache<K: Hash + Eq, V, S: BuildHasher>(
+        &self,
+        hasher: S,
+    ) -> ManagedLruCache<K, V, S> {
+        ManagedLruCache {
+            inner: LruCache::unbounded_with_hasher(hasher),
             watermark_epoch: self.watermark_epoch.clone(),
         }
     }

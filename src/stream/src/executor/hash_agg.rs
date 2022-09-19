@@ -25,7 +25,7 @@ use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::hash::{HashCode, HashKey};
+use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -41,6 +41,8 @@ use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_
 
 /// Limit number of cached entries (one per group key)
 const HASH_AGG_CACHE_SIZE: usize = 1 << 16;
+
+type AggStateMap<K, S> = EvictableHashMap<K, Option<Box<AggState<S>>>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -216,7 +218,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref state_table_col_mappings,
             pk_indices: _,
         }: &mut HashAggExecutorExtra<S>,
-        state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
+        state_map: &mut AggStateMap<K, S>,
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
@@ -318,7 +320,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref mut state_tables,
             ..
         }: &'a mut HashAggExecutorExtra<S>,
-        state_map: &'a mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
+        state_map: &'a mut AggStateMap<K, S>,
         epoch: u64,
     ) {
         // --- Flush states to the state store ---
@@ -412,7 +414,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } = self;
 
         // The cached states. `HashKey -> (prev_value, value)`.
-        let mut state_map = EvictableHashMap::new(HASH_AGG_CACHE_SIZE);
+        let mut state_map = EvictableHashMap::with_hasher(HASH_AGG_CACHE_SIZE, PrecomputedBuildHasher);
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;

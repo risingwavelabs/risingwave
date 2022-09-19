@@ -365,7 +365,7 @@ impl LocalStreamManagerCore {
         config: StreamingConfig,
         enable_async_stack_trace: bool,
     ) -> Self {
-        let context = SharedContext::new(addr);
+        let context = SharedContext::new(addr, &config);
         Self::new_inner(
             state_store,
             context,

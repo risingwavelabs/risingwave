@@ -2650,6 +2650,14 @@ dependencies = [
 [[package]]
 name = "lru"
 version = "0.7.6"
+source = "git+https://github.com/risingwavelabs/lru-rs.git?branch=evict_by_timestamp#ebec276ae8ef921ff1cc4f5013be925ee44e835d"
+dependencies = [
+ "hashbrown 0.12.3",
+]
+
+[[package]]
+name = "lru"
+version = "0.7.6"
 source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
 dependencies = [
  "hashbrown 0.11.2",
@@ -4330,7 +4338,7 @@ dependencies = [
  "humantime",
  "itertools",
  "libc",
- "lru 0.7.6",
+ "lru 0.7.6 (git+https://github.com/risingwavelabs/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30)",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -5081,7 +5089,7 @@ dependencies = [
  "iter-chunks",
  "itertools",
  "local_stats_alloc",
- "lru 0.7.6",
+ "lru 0.7.6 (git+https://github.com/risingwavelabs/lru-rs.git?branch=evict_by_timestamp)",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",

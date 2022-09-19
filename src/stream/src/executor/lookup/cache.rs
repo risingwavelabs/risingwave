@@ -16,12 +16,13 @@ use std::collections::BTreeSet;
 
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::collection::evictable::EvictableHashMap;
+use risingwave_common::hash::PrecomputedBuildHasher;
 
 use crate::executor::JOIN_CACHE_CAP;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
-    data: EvictableHashMap<Row, BTreeSet<Row>>,
+    data: EvictableHashMap<Row, BTreeSet<Row>, PrecomputedBuildHasher>,
 }
 
 impl LookupCache {
@@ -61,7 +62,7 @@ impl LookupCache {
 
     pub fn new() -> Self {
         Self {
-            data: EvictableHashMap::new(JOIN_CACHE_CAP),
+            data: EvictableHashMap::with_hasher(JOIN_CACHE_CAP,  PrecomputedBuildHasher),
         }
     }
 }

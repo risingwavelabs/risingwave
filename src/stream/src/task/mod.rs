@@ -16,8 +16,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::{Mutex, MutexGuard, RwLock};
+use rdkafka::config;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::common::ActorInfo;
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -31,6 +34,7 @@ mod stream_manager;
 
 pub use barrier_manager::*;
 pub use env::*;
+pub use lru_manager::*;
 pub use stream_manager::*;
 
 /// Default capacity of channel if two actors are on the same node
@@ -80,6 +84,8 @@ pub struct SharedContext {
     pub(crate) compute_client_pool: ComputeClientPool,
 
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
+
+    pub(crate) lru_manager: Arc<LruManager>,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -91,19 +97,31 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(addr: HostAddr) -> Self {
+    pub fn new(addr: HostAddr, config: &StreamingConfig) -> Self {
+        let lru_manager = LruManager::new(
+            config.total_memory_available_bytes,
+            config.checkpoint_interval_ms,
+        );
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::new(u64::MAX),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new())),
+            lru_manager,
         }
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self::new(LOCAL_TEST_ADDR.clone())
+        Self {
+            channel_map: Default::default(),
+            actor_infos: Default::default(),
+            addr: LOCAL_TEST_ADDR.clone(),
+            compute_client_pool: ComputeClientPool::new(u64::MAX),
+            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new())),
+            lru_manager: LruManager::for_test(),
+        }
     }
 
     #[inline]
