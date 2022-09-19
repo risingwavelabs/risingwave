@@ -23,7 +23,7 @@ impl ExecutorBuilder for UnionExecutorBuilder {
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         try_match_expand!(node.get_node_body().unwrap(), NodeBody::Union)?;
         Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
     }

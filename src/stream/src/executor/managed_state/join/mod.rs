@@ -23,6 +23,7 @@ use anyhow::Context;
 use fixedbitset::FixedBitSet;
 use futures::future::try_join;
 use futures_async_stream::for_await;
+use itertools::Itertools;
 pub(super) use join_entry_state::JoinEntryState;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
@@ -40,6 +41,7 @@ use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use self::iter_utils::zip_by_order_key;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::Epoch;
 use crate::task::ActorId;
 
 type DegreeType = u64;
@@ -103,8 +105,9 @@ impl JoinRow {
     }
 
     pub fn encode(&self) -> EncodedJoinRow {
+        let value_indices = (0..self.row.0.len()).collect_vec();
         EncodedJoinRow {
-            row: self.row.serialize(),
+            row: self.row.serialize(&value_indices),
             degree: self.degree,
         }
     }
@@ -169,7 +172,7 @@ impl EstimateSize for EncodedJoinRow {
     }
 }
 
-// Memcomparable encoding.
+/// Memcomparable encoding.
 type PkType = Vec<u8>;
 
 pub type StateValueType = EncodedJoinRow;
@@ -322,6 +325,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.alloc.bytes_in_use()
     }
 
+    pub fn init(&mut self, epoch: Epoch) {
+        self.current_epoch = epoch.curr;
+        self.state.table.init_epoch(epoch.prev);
+        self.degree_state.table.init_epoch(epoch.prev);
+    }
+
     pub fn update_epoch(&mut self, epoch: u64) {
         self.current_epoch = epoch;
     }
@@ -391,35 +400,23 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
         let key = key.clone().deserialize(self.join_key_data_types.iter())?;
 
-        let table_iter_fut = self
-            .state
-            .table
-            .iter_with_pk_prefix(&key, self.current_epoch);
+        let table_iter_fut = self.state.table.iter_key_and_val(&key);
 
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let degree_table_iter_fut = self
-                .degree_state
-                .table
-                .iter_with_pk_prefix(&key, self.current_epoch);
+            let degree_table_iter_fut = self.degree_state.table.iter_key_and_val(&key);
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
 
             // We need this because ttl may remove some entries from table but leave the entries
             // with the same stream key in degree table.
-            let zipped_iter = zip_by_order_key(
-                table_iter,
-                &self.state.pk_indices,
-                degree_table_iter,
-                &self.degree_state.pk_indices,
-            );
+            let zipped_iter = zip_by_order_key(table_iter, degree_table_iter);
 
             #[for_await]
             for row_and_degree in zipped_iter {
                 let (row, degree) = row_and_degree?;
-                debug_assert_eq!(degree.size(), self.degree_state.order_key_indices.len() + 1);
                 let pk = row
                     .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
                 let degree_i64 = degree
@@ -438,7 +435,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for row in table_iter {
-                let row = row?;
+                let row = row?.1;
                 let pk = row
                     .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
                 entry_state.insert(pk, JoinRow::new(row.into_owned(), 0).encode());

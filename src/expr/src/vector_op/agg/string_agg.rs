@@ -103,9 +103,8 @@ impl Aggregator for StringAggUnordered {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
             let res = self.get_result_and_reset();
-            builder
-                .append(res.as_ref().map(|x| x.as_scalar_ref()))
-                .map_err(Into::into)
+            builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+            Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
         }
@@ -226,9 +225,8 @@ impl Aggregator for StringAggOrdered {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
             let res = self.get_result_and_reset();
-            builder
-                .append(res.as_ref().map(|x| x.as_scalar_ref()))
-                .map_err(Into::into)
+            builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+            Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
         }
@@ -274,7 +272,7 @@ mod tests {
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        let output = builder.finish()?;
+        let output = builder.finish();
         let actual = output.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         let expected = "aaa,bbb,ccc,ddd";
@@ -295,7 +293,7 @@ mod tests {
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        let output = builder.finish()?;
+        let output = builder.finish();
         let actual = output.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         let expected = "aaa_cccddd";
@@ -324,7 +322,7 @@ mod tests {
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        let output = builder.finish()?;
+        let output = builder.finish();
         let actual = output.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         let expected = "ccc_bbb_ddd_aaa";

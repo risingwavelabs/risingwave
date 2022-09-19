@@ -39,7 +39,7 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
     type Input = HashAggExecutorDispatcherArgs<S>;
-    type Output = Result<BoxedExecutor>;
+    type Output = StreamResult<BoxedExecutor>;
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Ok(HashAggExecutor::<K, S>::new(
@@ -64,7 +64,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashAgg)?;
         let key_indices = node
             .get_group_key()

@@ -490,7 +490,7 @@ mod test {
             let writer = builder.row_writer();
             avro_parser.parse(&input_data[..], writer).unwrap();
         }
-        let chunk = builder.finish().unwrap();
+        let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
         let row = row.to_owned_row();

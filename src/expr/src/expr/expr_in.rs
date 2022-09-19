@@ -76,12 +76,12 @@ impl Expression for InExpression {
         for (data, vis) in input_array.iter().zip_eq(input.vis().iter()) {
             if vis {
                 let ret = self.exists(&data.to_owned_datum());
-                output_array.append(ret)?;
+                output_array.append(ret);
             } else {
-                output_array.append(None)?;
+                output_array.append(None);
             }
         }
-        Ok(Arc::new(output_array.finish()?.into()))
+        Ok(Arc::new(output_array.finish().into()))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

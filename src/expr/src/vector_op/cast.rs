@@ -279,6 +279,7 @@ macro_rules! for_each_cast {
             { varchar, float64, str_parse },
             { varchar, decimal, str_parse },
             { varchar, boolean, str_to_bool },
+            // `str_to_list` requires `target_elem_type` and is handled elsewhere
 
             { boolean, varchar, general_to_string },
             { int16, varchar, general_to_string },
@@ -292,6 +293,7 @@ macro_rules! for_each_cast {
             { date, varchar, general_to_string },
             { timestamp, varchar, general_to_string },
             { timestampz, varchar, timestampz_to_utc_string },
+            { list, varchar, |x| general_to_string(x) },
 
             { boolean, int32, general_cast },
             { int32, boolean, int32_to_bool },

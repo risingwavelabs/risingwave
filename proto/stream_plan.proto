@@ -251,14 +251,17 @@ message HopWindowNode {
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
   uint32 upstream_fragment_id = 2;
+  // Type of the upstream dispatcher. If there's always one upstream according to this
+  // type, the compute node may use the `ReceiverExecutor` as an optimization.
+  DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. TODO: remove this field.
-  repeated plan_common.Field fields = 3;
+  repeated plan_common.Field fields = 4;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
 // and maybe `DispatcherNode` later.
 message ExchangeNode {
-  DispatchStrategy strategy = 2;
+  DispatchStrategy strategy = 1;
 }
 
 // ChainNode is used for mv on mv.

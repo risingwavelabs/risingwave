@@ -154,7 +154,6 @@ fn parse_update_with_table_alias() {
                             name: Ident::new("u"),
                             columns: vec![]
                         }),
-                        args: vec![],
                     },
                     joins: vec![]
                 },
@@ -323,10 +322,10 @@ fn parse_select_wildcard() {
 
 #[test]
 fn parse_count_wildcard() {
-    verified_only_select("SELECT COUNT(*) FROM Order WHERE id = 10");
+    verified_only_select("SELECT COUNT(*) FROM Orders WHERE id = 10");
 
     verified_only_select(
-        "SELECT COUNT(Employee.*) FROM Order JOIN Employee ON Order.employee = Employee.id",
+        "SELECT COUNT(Employee.*) FROM Orders JOIN Employee ON Orders.employee = Employee.id",
     );
 }
 
@@ -1807,7 +1806,7 @@ fn parse_explain_analyze_with_simple_select() {
         ExplainOptions {
             trace: true,
             verbose: true,
-            explain_type: ExplainType::DistSQL,
+            explain_type: ExplainType::DistSql,
         },
     );
     run_explain_analyze(
@@ -1816,7 +1815,7 @@ fn parse_explain_analyze_with_simple_select() {
         ExplainOptions {
             trace: false,
             verbose: true,
-            explain_type: ExplainType::DistSQL,
+            explain_type: ExplainType::DistSql,
         },
     );
     run_explain_analyze(
@@ -1825,7 +1824,7 @@ fn parse_explain_analyze_with_simple_select() {
         ExplainOptions {
             trace: false,
             verbose: true,
-            explain_type: ExplainType::DistSQL,
+            explain_type: ExplainType::DistSql,
         },
     );
 }
@@ -2173,10 +2172,9 @@ fn parse_delimited_identifiers() {
     );
     // check FROM
     match only(select.from).relation {
-        TableFactor::Table { name, alias, args } => {
+        TableFactor::Table { name, alias } => {
             assert_eq!(vec![Ident::with_quote('"', "a table")], name.0);
             assert_eq!(Ident::with_quote('"', "alias"), alias.unwrap().name);
-            assert!(args.is_empty());
         }
         _ => panic!("Expecting TableFactor::Table"),
     }
@@ -2300,7 +2298,6 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![],
             },
@@ -2308,7 +2305,6 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![],
             }
@@ -2324,13 +2320,11 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1a".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t1b".into()]),
                         alias: None,
-                        args: vec![],
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2339,13 +2333,11 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2a".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t2b".into()]),
                         alias: None,
-                        args: vec![],
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2364,7 +2356,6 @@ fn parse_cross_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new("t2")]),
                 alias: None,
-                args: vec![],
             },
             join_operator: JoinOperator::CrossJoin
         },
@@ -2383,7 +2374,6 @@ fn parse_joins_on() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new(relation.into())]),
                 alias,
-                args: vec![],
             },
             join_operator: f(JoinConstraint::On(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("c1".into())),
@@ -2435,7 +2425,6 @@ fn parse_joins_using() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new(relation.into())]),
                 alias,
-                args: vec![],
             },
             join_operator: f(JoinConstraint::Using(vec!["c1".into()])),
         }
@@ -2479,7 +2468,6 @@ fn parse_natural_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new("t2")]),
                 alias: None,
-                args: vec![],
             },
             join_operator: f(JoinConstraint::Natural),
         }
@@ -2691,11 +2679,11 @@ fn parse_derived_tables() {
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
-    let sql = "SELECT * FROM (((SELECT 1)))";
+    let sql = "SELECT * FROM (SELECT 1)";
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
-    let sql = "SELECT * FROM t NATURAL JOIN (((SELECT 1)))";
+    let sql = "SELECT * FROM t NATURAL JOIN (SELECT 1)";
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
@@ -2717,7 +2705,6 @@ fn parse_derived_tables() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 join_operator: JoinOperator::Inner(JoinConstraint::Natural),
             }],
@@ -3278,7 +3265,7 @@ fn lateral_derived() {
         let lateral_str = if lateral_in { "LATERAL " } else { "" };
         let sql = format!(
             "SELECT * FROM customer LEFT JOIN {}\
-             (SELECT * FROM order WHERE order.customer = customer.id LIMIT 3) AS order ON true",
+             (SELECT * FROM orders WHERE orders.customer = customer.id LIMIT 3) AS orders ON true",
             lateral_str
         );
         let select = verified_only_select(&sql);
@@ -3296,10 +3283,10 @@ fn lateral_derived() {
         } = join.relation
         {
             assert_eq!(lateral_in, lateral);
-            assert_eq!(Ident::new("order"), alias.name);
+            assert_eq!(Ident::new("orders"), alias.name);
             assert_eq!(
                 subquery.to_string(),
-                "SELECT * FROM order WHERE order.customer = customer.id LIMIT 3"
+                "SELECT * FROM orders WHERE orders.customer = customer.id LIMIT 3"
             );
         } else {
             unreachable!()

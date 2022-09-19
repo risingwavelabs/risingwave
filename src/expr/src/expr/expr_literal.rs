@@ -59,7 +59,7 @@ impl Expression for LiteralExpression {
         let builder = &mut array_builder;
         let literal = &self.literal;
         for_all_variants! {array_impl_literal_append, builder, literal, capacity}
-        array_builder.finish().map(Arc::new).map_err(Into::into)
+        Ok(Arc::new(array_builder.finish()))
     }
 
     fn eval_row(&self, _input: &Row) -> Result<Datum> {
@@ -76,7 +76,7 @@ where
     A1: ArrayBuilder,
 {
     for _ in 0..cardinality {
-        a.append(v)?
+        a.append(v)
     }
     Ok(())
 }

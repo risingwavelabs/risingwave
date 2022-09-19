@@ -57,7 +57,6 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::server::StateStoreImpl::HummockStateStore;
 use crate::{ComputeNodeConfig, ComputeNodeOpts};
 
 /// Bootstraps the compute-node.
@@ -123,28 +122,22 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
-    let local_version_manager = match &state_store {
-        HummockStateStore(monitored) => monitored.local_version_manager(),
-        _ => {
-            panic!();
-        }
-    };
-
-    let compute_observer_node =
-        ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
-    let observer_manager = ObserverManager::new(
-        meta_client.clone(),
-        client_addr.clone(),
-        Box::new(compute_observer_node),
-        WorkerType::ComputeNode,
-    )
-    .await;
-
-    let observer_join_handle = observer_manager.start().await.unwrap();
-    join_handle_vec.push(observer_join_handle);
-
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
+        let local_version_manager = storage.local_version_manager();
+        let compute_observer_node =
+            ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
+        let observer_manager = ObserverManager::new(
+            meta_client.clone(),
+            client_addr.clone(),
+            Box::new(compute_observer_node),
+            WorkerType::ComputeNode,
+        )
+        .await;
+
+        let observer_join_handle = observer_manager.start().await.unwrap();
+        join_handle_vec.push(observer_join_handle);
+
         assert!(
             storage
                 .local_version_manager()
@@ -203,7 +196,7 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize the managers.
-    let batch_mgr = Arc::new(BatchManager::new());
+    let batch_mgr = Arc::new(BatchManager::new(config.batch.worker_threads_num));
     let stream_mgr = Arc::new(LocalStreamManager::new(
         client_addr.clone(),
         state_store.clone(),
@@ -216,7 +209,7 @@ pub async fn compute_node_serve(
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
-    let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+    let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
     let batch_env = BatchEnvironment::new(
         source_mgr.clone(),
         batch_mgr.clone(),

@@ -30,6 +30,9 @@ pub mod plan_fragmenter;
 pub use plan_fragmenter::BatchPlanFragmenter;
 mod local;
 pub use local::*;
+
+use crate::scheduler::task_context::FrontendBatchTaskContext;
+
 mod error;
 mod task_context;
 pub mod worker_node_manager;
@@ -53,5 +56,9 @@ impl ExecutionContext {
 
     pub fn session(&self) -> &SessionImpl {
         &self.session
+    }
+
+    pub fn to_batch_task_context(&self) -> FrontendBatchTaskContext {
+        FrontendBatchTaskContext::new(self.session.env().clone(), self.session.auth_context())
     }
 }

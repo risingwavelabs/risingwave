@@ -34,9 +34,11 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::load_config;
 use risingwave_common::error::Result;
+use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_common_service::MetricsManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -55,6 +57,7 @@ use crate::expr::CorrelatedId;
 use crate::handler::handle;
 use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
+use crate::monitor::FrontendMetrics;
 use crate::observer::observer_manager::FrontendObserverNode;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
@@ -206,6 +209,8 @@ pub struct FrontendEnv {
     /// secret_key). When Cancel Request received, find corresponding session and cancel all
     /// running queries.
     sessions_map: SessionMapRef,
+
+    pub frontend_metrics: Arc<FrontendMetrics>,
 }
 
 /// TODO: Find a way to delete session from map when session is closed.
@@ -231,7 +236,7 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let compute_client_pool = Arc::new(ComputeClientPool::default());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
@@ -239,7 +244,7 @@ impl FrontendEnv {
             catalog_reader.clone(),
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
-        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let client_pool = Arc::new(ComputeClientPool::default());
         Self {
             meta_client,
             catalog_writer,
@@ -252,6 +257,7 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             sessions_map: Arc::new(Mutex::new(HashMap::new())),
+            frontend_metrics: Arc::new(FrontendMetrics::for_test()),
         }
     }
 
@@ -297,7 +303,8 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let compute_client_pool =
+            Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
@@ -332,7 +339,18 @@ impl FrontendEnv {
 
         meta_client.activate(&frontend_address).await?;
 
-        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+
+        let registry = prometheus::Registry::new();
+        monitor_process(&registry).unwrap();
+        let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
+
+        if opts.metrics_level > 0 {
+            MetricsManager::boot_metrics_service(
+                opts.prometheus_listener_addr.clone(),
+                Arc::new(registry),
+            );
+        }
 
         Ok((
             Self {
@@ -346,6 +364,7 @@ impl FrontendEnv {
                 hummock_snapshot_manager,
                 server_addr: frontend_address,
                 client_pool,
+                frontend_metrics,
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
             },
             observer_join_handle,
