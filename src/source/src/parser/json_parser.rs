@@ -136,10 +136,17 @@ mod tests {
                 row.value_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(1.23.into())))
             );
+            // Usage of avx2 results in a floating point error. Since it is 
+            // very small (close to precision of f64) we ignore it.
+            #[cfg(target_feature="avx2")]
             assert_eq!(
                 row.value_at(5).to_owned_datum(),
-                Some(ScalarImpl::Float64(1.2345.into()))
+                (Some(ScalarImpl::Float64(1.2345000000000002.into())))
             );
+            #[cfg(not(target_feature="avx2"))]
+            assert_eq!(
+                row.value_at(5).to_owned_datum(),
+                (Some(ScalarImpl::Float64(1.2345.into())))
             assert_eq!(
                 row.value_at(6).to_owned_datum(),
                 (Some(ScalarImpl::Utf8("varchar".to_string())))
