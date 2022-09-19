@@ -492,12 +492,18 @@ impl LocalVersionManager {
         Some((epoch, join_handle))
     }
 
-    /// seal epoch in local version.
-    pub fn seal_epoch(&self, epoch: HummockEpoch) {
-        self.local_version.write().seal_epoch(epoch);
+    #[cfg(any(test, feature = "test"))]
+    pub async fn sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
+        self.seal_epoch(epoch, true);
+        self.await_sync_shared_buffer(epoch).await
     }
 
-    pub async fn sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
+    /// seal epoch in local version.
+    pub fn seal_epoch(&self, epoch: HummockEpoch, is_checkpoint: bool) {
+        self.local_version.write().seal_epoch(epoch, is_checkpoint);
+    }
+
+    pub async fn await_sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
         tracing::trace!("sync epoch {}", epoch);
 
         // Wait all epochs' task that less than epoch.

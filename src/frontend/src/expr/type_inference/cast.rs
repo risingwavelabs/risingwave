@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use itertools::Itertools as _;
 use risingwave_common::error::{ErrorCode, Result};
@@ -105,23 +106,16 @@ fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> b
                 datatype: target_elem,
             },
         ) => cast_ok(source_elem, target_elem, allows),
-        (
-            DataType::Varchar,
-            DataType::List {
-                datatype: target_elem,
-            },
-        ) if target_elem == &Box::new(DataType::Varchar) => true,
-        (
-            DataType::Varchar,
-            DataType::List {
-                datatype: target_elem,
-            },
-        ) => cast_ok(&DataType::Varchar, target_elem, allows),
+        // The automatic casts to string types are treated as assignment casts, while the automatic
+        // casts from string types are explicit-only.
+        // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
+        (DataType::Varchar, DataType::List { datatype: _ }) => CastContext::Explicit <= allows,
+        (DataType::List { datatype: _ }, DataType::Varchar) => CastContext::Assign <= allows,
         _ => false,
     }
 }
 
-fn build_cast_map() -> CastMap {
+pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
     use DataTypeName as T;
 
     // Implicit cast operations in PG are organized in 3 sequences, with the reverse direction being
@@ -167,7 +161,7 @@ fn build_cast_map() -> CastMap {
     m.insert((T::Boolean, T::Int32), CastContext::Explicit);
     m.insert((T::Int32, T::Boolean), CastContext::Explicit);
     m
-}
+});
 
 fn insert_cast_seq(
     m: &mut BTreeMap<(DataTypeName, DataTypeName), CastContext>,
@@ -194,12 +188,6 @@ pub fn cast_map_array() -> Vec<(DataTypeName, DataTypeName, CastContext)> {
         .iter()
         .map(|((src, target), ctx)| (*src, *target, *ctx))
         .collect_vec()
-}
-
-lazy_static::lazy_static! {
-    pub static ref CAST_MAP: CastMap = {
-        build_cast_map()
-    };
 }
 
 #[derive(Clone)]
