@@ -26,27 +26,35 @@ use tokio::sync::Notify;
 
 use crate::hummock::{HummockError, HummockResult};
 
-#[async_trait::async_trait]
-pub trait CompactionGroupClient: Send + Sync + 'static {
-    async fn get_compaction_group_id(
+pub enum CompactionGroupClientImpl {
+    Meta(Arc<MetaCompactionGroupClient>),
+    Dummy(DummyCompactionGroupClient),
+}
+
+impl CompactionGroupClientImpl {
+    pub async fn get_compaction_group_id(
         &self,
         table_id: StateTableId,
-    ) -> HummockResult<CompactionGroupId>;
+    ) -> HummockResult<CompactionGroupId> {
+        match self {
+            CompactionGroupClientImpl::Meta(c) => c.get_compaction_group_id(table_id).await,
+            CompactionGroupClientImpl::Dummy(c) => Ok(c.get_compaction_group_id()),
+        }
+    }
 }
 
 /// `CompactionGroupClientImpl` maintains compaction group metadata cache.
-pub struct CompactionGroupClientImpl {
+pub struct MetaCompactionGroupClient {
     // Lock order: update_notifier before cache
     update_notifier: parking_lot::Mutex<Option<Arc<Notify>>>,
     cache: RwLock<CompactionGroupClientInner>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 }
 
-#[async_trait::async_trait]
-impl CompactionGroupClient for CompactionGroupClientImpl {
+impl MetaCompactionGroupClient {
     /// TODO: cache is synced on need currently. We can refactor it to push based after #3679.
     async fn get_compaction_group_id(
-        &self,
+        self: &Arc<Self>,
         table_id: StateTableId,
     ) -> HummockResult<CompactionGroupId> {
         // The loop executes at most twice.
@@ -81,15 +89,14 @@ impl CompactionGroupClient for CompactionGroupClientImpl {
                 continue;
             }
             // Update cache
-            match self.update().await {
-                Ok(_) => {
-                    self.update_notifier.lock().take().unwrap().notify_one();
-                }
-                Err(err) => {
-                    self.update_notifier.lock().take().unwrap().notify_one();
-                    return Err(HummockError::meta_error(err));
-                }
-            }
+            let this = self.clone();
+            tokio::spawn(async move {
+                let result = this.update().await;
+                this.update_notifier.lock().take().unwrap().notify_one();
+                result
+            })
+            .await
+            .unwrap()?;
         }
         Err(HummockError::compaction_group_error(format!(
             "compaction group not found for table id {}",
@@ -98,7 +105,7 @@ impl CompactionGroupClient for CompactionGroupClientImpl {
     }
 }
 
-impl CompactionGroupClientImpl {
+impl MetaCompactionGroupClient {
     pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>) -> Self {
         Self {
             cache: Default::default(),
@@ -159,12 +166,8 @@ impl DummyCompactionGroupClient {
     }
 }
 
-#[async_trait::async_trait]
-impl CompactionGroupClient for DummyCompactionGroupClient {
-    async fn get_compaction_group_id(
-        &self,
-        _table_id: StateTableId,
-    ) -> HummockResult<CompactionGroupId> {
-        Ok(self.compaction_group_id)
+impl DummyCompactionGroupClient {
+    fn get_compaction_group_id(&self) -> CompactionGroupId {
+        self.compaction_group_id
     }
 }

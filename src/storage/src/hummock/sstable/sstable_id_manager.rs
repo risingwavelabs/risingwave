@@ -61,14 +61,14 @@ impl SstableIdManager {
 
     /// Returns a new SST id.
     /// The id is guaranteed to be monotonic increasing.
-    pub async fn get_new_sst_id(&self) -> HummockResult<HummockSstableId> {
+    pub async fn get_new_sst_id(self: &Arc<Self>) -> HummockResult<HummockSstableId> {
         self.map_next_sst_id(|available_sst_ids| available_sst_ids.get_next_sst_id())
             .await
     }
 
     /// Executes `f` with next SST id.
     /// May fetch new SST ids via RPC.
-    async fn map_next_sst_id<F>(&self, f: F) -> HummockResult<HummockSstableId>
+    async fn map_next_sst_id<F>(self: &Arc<Self>, f: F) -> HummockResult<HummockSstableId>
     where
         F: Fn(&mut SstIdRange) -> Option<HummockSstableId>,
     {
@@ -102,38 +102,41 @@ impl SstableIdManager {
             // Fetch new ids.
             sync_point!("MAP_NEXT_SST_ID.AS_LEADER");
             sync_point!("MAP_NEXT_SST_ID.BEFORE_FETCH");
-            let new_sst_ids = match self
-                .hummock_meta_client
-                .get_new_sst_ids(self.remote_fetch_number)
-                .await
-                .map_err(HummockError::meta_error)
-            {
-                Ok(new_sst_ids) => new_sst_ids,
-                Err(err) => {
-                    self.notifier.lock().take().unwrap().notify_one();
-                    return Err(err);
-                }
-            };
-            sync_point!("MAP_NEXT_SST_ID.AFTER_FETCH");
-            sync_point!("MAP_NEXT_SST_ID.BEFORE_FILL_CACHE");
-            let err = {
-                let mut guard = self.available_sst_ids.lock();
-                let available_sst_ids = guard.deref_mut();
-                let mut err = None;
-                if new_sst_ids.start_id < available_sst_ids.end_id {
-                    err = Some(Err(HummockError::meta_error(format!(
-                        "SST id moves backwards. new {} < old {}",
-                        new_sst_ids.start_id, available_sst_ids.end_id
-                    ))));
-                } else {
-                    *available_sst_ids = new_sst_ids;
-                }
-                err
-            };
-            self.notifier.lock().take().unwrap().notify_one();
-            if let Some(err) = err {
-                return err;
-            }
+            let this = self.clone();
+            tokio::spawn(async move {
+                let new_sst_ids = match this
+                    .hummock_meta_client
+                    .get_new_sst_ids(this.remote_fetch_number)
+                    .await
+                    .map_err(HummockError::meta_error)
+                {
+                    Ok(new_sst_ids) => new_sst_ids,
+                    Err(err) => {
+                        this.notifier.lock().take().unwrap().notify_one();
+                        return Err(err);
+                    }
+                };
+                sync_point!("MAP_NEXT_SST_ID.AFTER_FETCH");
+                sync_point!("MAP_NEXT_SST_ID.BEFORE_FILL_CACHE");
+                // Update local cache.
+                let result = {
+                    let mut guard = this.available_sst_ids.lock();
+                    let available_sst_ids = guard.deref_mut();
+                    if new_sst_ids.start_id < available_sst_ids.end_id {
+                        Err(HummockError::meta_error(format!(
+                            "SST id moves backwards. new {} < old {}",
+                            new_sst_ids.start_id, available_sst_ids.end_id
+                        )))
+                    } else {
+                        *available_sst_ids = new_sst_ids;
+                        Ok(())
+                    }
+                };
+                this.notifier.lock().take().unwrap().notify_one();
+                result
+            })
+            .await
+            .unwrap()?;
         }
     }
 
@@ -142,7 +145,7 @@ impl SstableIdManager {
     /// - Uses given 'epoch' as tracker id if provided.
     /// - Uses a generated tracker id otherwise.
     pub async fn add_watermark_sst_id(
-        &self,
+        self: &Arc<Self>,
         epoch: Option<HummockEpoch>,
     ) -> HummockResult<TrackerId> {
         let tracker_id = match epoch {
