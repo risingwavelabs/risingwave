@@ -13,16 +13,16 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionGroup;
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::Notify;
+use tokio::sync::oneshot;
 
 use crate::hummock::{HummockError, HummockResult};
 
@@ -45,8 +45,8 @@ impl CompactionGroupClientImpl {
 
 /// `CompactionGroupClientImpl` maintains compaction group metadata cache.
 pub struct MetaCompactionGroupClient {
-    // Lock order: update_notifier before cache
-    update_notifier: parking_lot::Mutex<Option<Arc<Notify>>>,
+    // Lock order: wait_queue before cache
+    wait_queue: Mutex<Option<Vec<oneshot::Sender<bool>>>>,
     cache: RwLock<CompactionGroupClientInner>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 }
@@ -57,46 +57,54 @@ impl MetaCompactionGroupClient {
         self: &Arc<Self>,
         table_id: StateTableId,
     ) -> HummockResult<CompactionGroupId> {
-        // The loop executes at most twice.
+        // We wait for cache update for at most twice.
         // For the first time there may already be an inflight RPC when cache miss, whose response
         // may not contain wanted cache entry. For the second time the new RPC must contain
         // wanted cache entry, no matter the RPC is fired by this task or other. Otherwise,
         // the caller is trying to get an inexistent cache entry, which indicates a bug.
-        for _ in 0..2 {
+        let mut wait_counter = 0;
+        while wait_counter <= 2 {
             // 1. Get from cache
             if let Some(id) = self.cache.read().get(&table_id) {
                 return Ok(id);
             }
             // 2. Otherwise either update cache, or wait for previous update if any.
-            let (notify, update) = {
-                let mut guard = self.update_notifier.lock();
+            let waiter = {
+                let mut guard = self.wait_queue.lock();
                 if let Some(id) = self.cache.read().get(&table_id) {
                     return Ok(id);
                 }
-                match guard.deref() {
-                    None => {
-                        let notify = Arc::new(Notify::new());
-                        *guard = Some(notify.clone());
-                        (notify, true)
-                    }
-                    Some(notify) => (notify.clone(), false),
+                let wait_queue = guard.deref_mut();
+                if let Some(wait_queue) = wait_queue {
+                    let (tx, rx) = oneshot::channel();
+                    wait_queue.push(tx);
+                    Some(rx)
+                } else {
+                    *wait_queue = Some(vec![]);
+                    None
                 }
             };
-            if !update {
+            if let Some(waiter) = waiter {
                 // Wait for previous update
-                notify.notified().await;
-                notify.notify_one();
+                if let Ok(success) = waiter.await && success {
+                    wait_counter += 1;
+                }
                 continue;
             }
             // Update cache
             let this = self.clone();
             tokio::spawn(async move {
                 let result = this.update().await;
-                this.update_notifier.lock().take().unwrap().notify_one();
+                let mut guard = this.wait_queue.lock();
+                let wait_queue = guard.deref_mut().take().unwrap();
+                for notify in wait_queue {
+                    let _ = notify.send(result.is_ok());
+                }
                 result
             })
             .await
             .unwrap()?;
+            wait_counter += 1;
         }
         Err(HummockError::compaction_group_error(format!(
             "compaction group not found for table id {}",
@@ -108,9 +116,9 @@ impl MetaCompactionGroupClient {
 impl MetaCompactionGroupClient {
     pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>) -> Self {
         Self {
+            wait_queue: Default::default(),
             cache: Default::default(),
             hummock_meta_client,
-            update_notifier: parking_lot::Mutex::new(None),
         }
     }
 

@@ -15,7 +15,7 @@
 use std::cmp;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, SstIdRange};
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use risingwave_rpc_client::{ExtraInfoSource, HummockMetaClient};
 use sync_point::sync_point;
-use tokio::sync::Notify;
+use tokio::sync::oneshot;
 
 use crate::hummock::{HummockError, HummockResult};
 
@@ -37,8 +37,8 @@ pub type SstableIdManagerRef = Arc<SstableIdManager>;
 /// During full GC, SST in object store with id >= watermark SST id will be excluded from orphan SST
 /// candidate and thus won't be deleted.
 pub struct SstableIdManager {
-    // Lock order: `notifier` before `available_sst_ids`.
-    notifier: Mutex<Option<Arc<Notify>>>,
+    // Lock order: `wait_queue` before `available_sst_ids`.
+    wait_queue: Mutex<Option<Vec<oneshot::Sender<bool>>>>,
     available_sst_ids: Mutex<SstIdRange>,
     remote_fetch_number: u32,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -48,7 +48,7 @@ pub struct SstableIdManager {
 impl SstableIdManager {
     pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>, remote_fetch_number: u32) -> Self {
         Self {
-            notifier: Default::default(),
+            wait_queue: Default::default(),
             available_sst_ids: Mutex::new(SstIdRange::new(
                 HummockSstableId::MIN,
                 HummockSstableId::MIN,
@@ -78,25 +78,25 @@ impl SstableIdManager {
                 return Ok(new_id);
             }
             // 2. Otherwise either fetch new ids, or wait for previous fetch if any.
-            let (notify, to_fetch) = {
-                let mut guard = self.notifier.lock();
+            let waiter = {
+                let mut guard = self.wait_queue.lock();
                 if let Some(new_id) = f(self.available_sst_ids.lock().deref_mut()) {
                     return Ok(new_id);
                 }
-                match guard.deref() {
-                    None => {
-                        let notify = Arc::new(Notify::new());
-                        *guard = Some(notify.clone());
-                        (notify, true)
-                    }
-                    Some(notify) => (notify.clone(), false),
+                let wait_queue = guard.deref_mut();
+                if let Some(wait_queue) = wait_queue {
+                    let (tx, rx) = oneshot::channel();
+                    wait_queue.push(tx);
+                    Some(rx)
+                } else {
+                    *wait_queue = Some(vec![]);
+                    None
                 }
             };
-            if !to_fetch {
+            if let Some(waiter) = waiter {
                 // Wait for previous fetch
                 sync_point!("MAP_NEXT_SST_ID.AS_FOLLOWER");
-                notify.notified().await;
-                notify.notify_one();
+                let _ = waiter.await;
                 continue;
             }
             // Fetch new ids.
@@ -112,7 +112,7 @@ impl SstableIdManager {
                 {
                     Ok(new_sst_ids) => new_sst_ids,
                     Err(err) => {
-                        this.notifier.lock().take().unwrap().notify_one();
+                        this.notify_waiters(false);
                         return Err(err);
                     }
                 };
@@ -132,7 +132,7 @@ impl SstableIdManager {
                         Ok(())
                     }
                 };
-                this.notifier.lock().take().unwrap().notify_one();
+                this.notify_waiters(result.is_ok());
                 result
             })
             .await
@@ -172,6 +172,14 @@ impl SstableIdManager {
             .into_iter()
             .min()
             .unwrap_or(HummockSstableId::MAX)
+    }
+
+    fn notify_waiters(&self, success: bool) {
+        let mut guard = self.wait_queue.lock();
+        let wait_queue = guard.deref_mut().take().unwrap();
+        for notify in wait_queue {
+            let _ = notify.send(success);
+        }
     }
 }
 
