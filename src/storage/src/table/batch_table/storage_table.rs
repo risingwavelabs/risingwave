@@ -125,7 +125,7 @@ impl<S: StateStore> StorageTable<S> {
         )
     }
 
-    pub fn new_for_test(
+    pub fn for_test(
         store: S,
         table_id: TableId,
         columns: Vec<ColumnDesc>,

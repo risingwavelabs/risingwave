@@ -133,7 +133,7 @@ pub fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta) {
-    let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opts), opts);
+    let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice()).unwrap();
     }
@@ -187,7 +187,7 @@ pub async fn gen_test_sstable_inner(
         policy,
     };
     let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
-    let mut b = SstableBuilder::new_for_test(sst_id, writer, opts);
+    let mut b = SstableBuilder::for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice()).unwrap();
     }

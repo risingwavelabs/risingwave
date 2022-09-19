@@ -222,7 +222,7 @@ impl ScoredPolicy {
     }
 
     #[cfg(test)]
-    fn new_for_test() -> Self {
+    fn for_test() -> Self {
         Self {
             ..Default::default()
         }
@@ -558,7 +558,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_scored_add_pause_remove_compactor() {
-        let mut policy = ScoredPolicy::new_for_test();
+        let mut policy = ScoredPolicy::for_test();
         // No compactors by default.
         assert_eq!(policy.context_id_to_score.len(), 0);
         assert_eq!(policy.score_to_compactor.len(), 0);
@@ -620,7 +620,7 @@ mod tests {
 
     #[test]
     fn test_scored_next_compactor() {
-        let mut policy = ScoredPolicy::new_for_test();
+        let mut policy = ScoredPolicy::for_test();
 
         // No compactor available.
         assert!(policy.next_compactor().is_none());
@@ -680,7 +680,7 @@ mod tests {
 
     #[test]
     fn test_scored_next_idle_compactor() {
-        let mut policy = Box::new(ScoredPolicy::new_for_test());
+        let mut policy = Box::new(ScoredPolicy::for_test());
 
         // Add 2 compactors.
         for context_id in 0..2 {

@@ -253,7 +253,7 @@ pub async fn setup_compute_env_with_config(
             .unwrap(),
     );
 
-    let compactor_manager = Arc::new(CompactorManager::new_for_test());
+    let compactor_manager = Arc::new(CompactorManager::for_test());
 
     let hummock_manager = Arc::new(
         HummockManager::new(

@@ -146,7 +146,7 @@ impl CompactorManager {
     }
 
     /// Only used for unit test.
-    pub fn new_for_test() -> Self {
+    pub fn for_test() -> Self {
         Self {
             policy: RwLock::new(Box::new(RoundRobinPolicy::new())),
             task_expiry_seconds: 1,
