@@ -29,6 +29,7 @@ use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
@@ -84,6 +85,39 @@ where
     /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
     pub async fn get_cluster_core_guard(&self) -> RwLockReadGuard<'_, ClusterManagerCore> {
         self.core.read().await
+    }
+
+    pub async fn start_worker_num_monitor(
+        cluster_manager: ClusterManagerRef<S>,
+        interval: Duration,
+        meta_metrics: Arc<MetaMetrics>,
+    ) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            let mut monitor_interval = tokio::time::interval(interval);
+            monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = monitor_interval.tick() => {},
+                    // Shutdown monitor
+                    _ = &mut shutdown_rx => {
+                        return;
+                    }
+                }
+
+                for (worker_type, worker_num) in
+                    cluster_manager.core.read().await.count_worker_node()
+                {
+                    meta_metrics
+                        .worker_num
+                        .with_label_values(&[(worker_type.as_str_name())])
+                        .set(worker_num as i64);
+                }
+            }
+        });
+
+        (join_handle, shutdown_tx)
     }
 
     /// A worker node will immediately register itself to meta when it bootstraps.
@@ -433,6 +467,29 @@ impl ClusterManagerCore {
             .collect()
     }
 
+    fn count_worker_node(&self) -> HashMap<WorkerType, u64> {
+        const MONITORED_WORKER_TYPES: [WorkerType; 3] = [
+            WorkerType::Compactor,
+            WorkerType::ComputeNode,
+            WorkerType::Frontend,
+        ];
+        let mut ret = HashMap::new();
+        self.workers
+            .iter()
+            .map(|(_, worker)| worker.worker_type())
+            .filter(|worker_type| MONITORED_WORKER_TYPES.contains(worker_type))
+            .for_each(|worker_type| {
+                ret.entry(worker_type)
+                    .and_modify(|worker_num| *worker_num += 1)
+                    .or_insert(1);
+            });
+        // Make sure all the monitored worker types exist in the map.
+        for wt in MONITORED_WORKER_TYPES {
+            ret.entry(wt).or_insert(0);
+        }
+        ret
+    }
+
     fn get_active_parallel_unit_count(&self) -> usize {
         self.list_active_parallel_units().len()
     }
@@ -477,6 +534,13 @@ mod tests {
                 .await
                 .unwrap();
         }
+
+        let worker_count_map = cluster_manager.core.read().await.count_worker_node();
+        assert_eq!(
+            *worker_count_map.get(&WorkerType::ComputeNode).unwrap() as usize,
+            worker_count
+        );
+
         let parallel_count = fake_parallelism * worker_count;
         assert_cluster_manager(&cluster_manager, parallel_count).await;
 

@@ -121,7 +121,7 @@ impl BatchTaskContext for ComputeNodeContext {
 
 impl ComputeNodeContext {
     #[cfg(test)]
-    pub fn new_for_test() -> Self {
+    pub fn for_test() -> Self {
         Self {
             env: BatchEnvironment::for_test(),
             task_metrics: None,
