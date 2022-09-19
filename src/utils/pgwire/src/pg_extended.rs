@@ -18,6 +18,7 @@ use std::vec::IntoIter;
 
 use bytes::Bytes;
 use itertools::zip_eq;
+use postgres_types::{FromSql, Type};
 use regex::Regex;
 
 use crate::error::{PsqlError, PsqlResult};
@@ -29,6 +30,10 @@ use crate::types::Row;
 
 /// Parse params according the type description.
 ///
+/// type_description is a list of type oids.
+/// raw_params is a list of raw params.
+/// param_format is format code : false for text, true for binary.
+///
 /// # Example
 ///
 /// ```ignore
@@ -37,20 +42,94 @@ use crate::types::Row;
 /// let params = parse_params(&type_description, &raw_params);
 /// assert_eq!(params, vec!["'A'", "'B'", "'C'"])
 /// ```
-fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> PsqlResult<Vec<String>> {
+fn parse_params(
+    type_description: &[TypeOid],
+    raw_params: &[Bytes],
+    param_format: bool,
+) -> PsqlResult<Vec<String>> {
     assert_eq!(type_description.len(), raw_params.len());
 
     let mut params = Vec::with_capacity(raw_params.len());
-    for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
-        let str = match type_oid {
-            TypeOid::Varchar => format!("'{}'", cstr_to_str(raw_param).unwrap()),
-            _ => {
-                return Err(PsqlError::BindError(
-                    "Unsupported type for parameter".into(),
-                ))
-            }
-        };
-        params.push(str)
+
+    if !param_format {
+        // TEXT FORMAT PARAMS
+        for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
+            let str = match type_oid {
+                TypeOid::Varchar => {
+                    format!("'{}'", cstr_to_str(raw_param).unwrap())
+                }
+                _ => cstr_to_str(raw_param).unwrap().to_string(),
+            };
+            params.push(str)
+        }
+    } else {
+        // BINARY FORMAT PARAMS
+        let place_hodler = Type::ANY;
+        for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
+            let str = match type_oid {
+                TypeOid::Varchar => {
+                    format!("'{}'", cstr_to_str(raw_param).unwrap())
+                }
+                TypeOid::Boolean => {
+                    format!("{}", bool::from_sql(&place_hodler, raw_param).unwrap())
+                }
+                TypeOid::BigInt => {
+                    format!(
+                        "{}::BIGINT",
+                        i64::from_sql(&place_hodler, raw_param).unwrap()
+                    )
+                }
+                TypeOid::SmallInt => {
+                    format!(
+                        "{}::SMALLINT",
+                        i16::from_sql(&place_hodler, raw_param).unwrap()
+                    )
+                }
+                TypeOid::Int => {
+                    format!("{}::INT", i32::from_sql(&place_hodler, raw_param).unwrap())
+                }
+                TypeOid::Float4 => {
+                    format!("{}::REAL", f32::from_sql(&place_hodler, raw_param).unwrap())
+                }
+                TypeOid::Float8 => {
+                    format!(
+                        "{}::DOUBLE PRECISION",
+                        f64::from_sql(&place_hodler, raw_param).unwrap()
+                    )
+                }
+                TypeOid::Date => {
+                    format!(
+                        "'{}'::DATE ",
+                        chrono::NaiveDate::from_sql(&place_hodler, raw_param).unwrap()
+                    )
+                }
+                TypeOid::Time => {
+                    format!(
+                        "'{}'::TIME",
+                        chrono::NaiveTime::from_sql(&place_hodler, raw_param).unwrap()
+                    )
+                }
+                TypeOid::Timestamp => {
+                    format!(
+                        "'{}'::TIMESTAMP ",
+                        chrono::NaiveDateTime::from_sql(&place_hodler, raw_param).unwrap()
+                    )
+                }
+                TypeOid::Decimal => {
+                    format!(
+                        "{}::DECIMAL",
+                        rust_decimal::Decimal::from_sql(&place_hodler, raw_param).unwrap()
+                    )
+                }
+                TypeOid::Timestampz => {
+                    todo!("can't parse timestampz")
+                }
+                TypeOid::Interval => {
+                    todo!("can't parse interval type")
+                }
+            };
+            params.push(str)
+        }
     }
     Ok(params)
 }
@@ -138,6 +217,7 @@ impl PgStatement {
         portal_name: String,
         params: &[Bytes],
         result_format: bool,
+        param_format: bool,
     ) -> PsqlResult<PgPortal> {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
@@ -168,7 +248,7 @@ impl PgStatement {
             .collect();
 
         // 2. Parse params bytes into string form according to type.
-        let params = parse_params(&self.type_description, params)?;
+        let params = parse_params(&self.type_description, params, param_format)?;
 
         // 3. Replace generic params in statement to real value. For example, "SELECT $3, $2, $1" ->
         // "SELECT 'A', 'B', 'C'".
@@ -287,7 +367,7 @@ mod tests {
         {
             let raw_params = vec!["A".into(), "B".into(), "C".into()];
             let type_description = vec![TypeOid::Varchar; 3];
-            let params = parse_params(&type_description, &raw_params).unwrap();
+            let params = parse_params(&type_description, &raw_params, false).unwrap();
 
             let res = replace_params("SELECT $3,$2,$1".to_string(), &[1, 2, 3], &params);
             assert_eq!(res, "SELECT 'C','B','A'");
@@ -315,7 +395,7 @@ mod tests {
                 "K".into(),
             ];
             let type_description = vec![TypeOid::Varchar; 11];
-            let params = parse_params(&type_description, &raw_params).unwrap();
+            let params = parse_params(&type_description, &raw_params, false).unwrap();
 
             let res = replace_params(
                 "SELECT $11,$2,$1;".to_string(),
@@ -341,7 +421,7 @@ mod tests {
                 "L".into(),
             ];
             let type_description = vec![TypeOid::Varchar; 12];
-            let params = parse_params(&type_description, &raw_params).unwrap();
+            let params = parse_params(&type_description, &raw_params, false).unwrap();
 
             let res = replace_params(
                 "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  'He1ll2o',1;".to_string(),
@@ -367,7 +447,7 @@ mod tests {
         {
             let raw_params = vec!["A".into(), "B".into()];
             let type_description = vec![TypeOid::Varchar; 2];
-            let params = parse_params(&type_description, &raw_params).unwrap();
+            let params = parse_params(&type_description, &raw_params, false).unwrap();
 
             let res = replace_params(
                 "INSERT INTO nperson (name,data) VALUES ($1,$2)".to_string(),
