@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -26,7 +27,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         node: &StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Source)?;
         let (sender, barrier_receiver) = unbounded_channel();
         stream
@@ -35,7 +36,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let source_id = TableId::new(node.source_id);
-        let source_desc = params.env.source_manager().get_source(&source_id)?;
+        let source_desc = params
+            .env
+            .source_manager()
+            .get_source(&source_id)
+            .map_err(|_| anyhow!("source {source_id} not found"))?;
 
         let column_ids: Vec<_> = node
             .get_column_ids()

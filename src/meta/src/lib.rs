@@ -41,6 +41,7 @@
 #![feature(is_some_with)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
+#![feature(once_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
@@ -149,6 +150,13 @@ pub struct MetaNodeOpts {
     /// Schedule compaction for all compaction groups with this interval.
     #[clap(long, default_value = "60")]
     pub periodic_compaction_interval_sec: u64,
+
+    /// Seconds compaction scheduler should stall when there is no available compactor.
+    #[clap(long, default_value = "10")]
+    pub no_available_compactor_stall_sec: u64,
+
+    #[clap(long, default_value = "10")]
+    node_num_monitor_interval_sec: u64,
 }
 
 use std::future::Future;
@@ -204,14 +212,17 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
                 barrier_interval,
-                max_idle_ms,
                 in_flight_barrier_nums,
+                minimal_scheduling: meta_config.streaming.minimal_scheduling,
+                max_idle_ms,
                 checkpoint_frequency,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
                 min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
+                no_available_compactor_stall_sec: opts.no_available_compactor_stall_sec,
+                node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
             },
         )
         .await

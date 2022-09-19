@@ -83,9 +83,8 @@ impl<S: StateStore> ManagedTopNState<S> {
         pk_prefix: Option<&Row>,
         offset: usize,
         num_limit: Option<usize>,
-        epoch: u64,
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
-        let state_table_iter = iter_state_table(&self.state_table, epoch, pk_prefix).await?;
+        let state_table_iter = iter_state_table(&self.state_table, pk_prefix).await?;
         pin_mut!(state_table_iter);
 
         // here we don't expect users to have large OFFSET.
@@ -112,9 +111,8 @@ impl<S: StateStore> ManagedTopNState<S> {
         cache: &mut BTreeMap<OrderedRow, Row>,
         start_key: &OrderedRow,
         cache_size_limit: usize,
-        epoch: u64,
     ) -> StreamExecutorResult<()> {
-        let state_table_iter = iter_state_table(&self.state_table, epoch, pk_prefix).await?;
+        let state_table_iter = iter_state_table(&self.state_table, pk_prefix).await?;
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
@@ -134,13 +132,12 @@ impl<S: StateStore> ManagedTopNState<S> {
         &self,
         pk_prefix: Option<&Row>,
         topn_cache: &mut TopNCache,
-        epoch: u64,
     ) -> StreamExecutorResult<()> {
         assert!(topn_cache.low.is_empty());
         assert!(topn_cache.middle.is_empty());
         assert!(topn_cache.high.is_empty());
 
-        let state_table_iter = iter_state_table(&self.state_table, epoch, pk_prefix).await?;
+        let state_table_iter = iter_state_table(&self.state_table, pk_prefix).await?;
         pin_mut!(state_table_iter);
         if topn_cache.offset > 0 {
             while let Some(item) = state_table_iter.next().await {
@@ -196,11 +193,15 @@ mod tests {
     async fn test_managed_top_n_state() {
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let order_types = vec![OrderType::Ascending, OrderType::Ascending];
-        let state_table = create_in_memory_state_table(
-            &[DataType::Varchar, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
-            &[0, 1],
-        );
+        let state_table = {
+            let mut tb = create_in_memory_state_table(
+                &[DataType::Varchar, DataType::Int64],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 1],
+            );
+            tb.init_epoch(0);
+            tb
+        };
         let mut managed_state = ManagedTopNState::new(
             state_table,
             OrderedRowDeserializer::new(data_types, order_types.clone()),
@@ -217,32 +218,22 @@ mod tests {
             .map(|row| OrderedRow::new(row, &order_types))
             .collect::<Vec<_>>();
 
-        let epoch = 1;
         managed_state.insert(ordered_rows[3].clone(), rows[3].clone());
 
         // now ("ab", 4)
-        let valid_rows = managed_state
-            .find_range(None, 0, Some(1), epoch)
-            .await
-            .unwrap();
+        let valid_rows = managed_state.find_range(None, 0, Some(1)).await.unwrap();
 
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
 
         managed_state.insert(ordered_rows[2].clone(), rows[2].clone());
-        let valid_rows = managed_state
-            .find_range(None, 1, Some(1), epoch)
-            .await
-            .unwrap();
+        let valid_rows = managed_state.find_range(None, 1, Some(1)).await.unwrap();
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[2].clone());
 
         managed_state.insert(ordered_rows[1].clone(), rows[1].clone());
 
-        let valid_rows = managed_state
-            .find_range(None, 1, Some(2), epoch)
-            .await
-            .unwrap();
+        let valid_rows = managed_state.find_range(None, 1, Some(2)).await.unwrap();
         assert_eq!(valid_rows.len(), 2);
         assert_eq!(
             valid_rows.first().unwrap().ordered_key,
@@ -259,10 +250,7 @@ mod tests {
         // insert ("abc", 2)
         managed_state.insert(ordered_rows[0].clone(), rows[0].clone());
 
-        let valid_rows = managed_state
-            .find_range(None, 0, Some(3), epoch)
-            .await
-            .unwrap();
+        let valid_rows = managed_state.find_range(None, 0, Some(3)).await.unwrap();
 
         assert_eq!(valid_rows.len(), 3);
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
@@ -274,11 +262,15 @@ mod tests {
     async fn test_managed_top_n_state_fill_cache() {
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let order_types = vec![OrderType::Ascending, OrderType::Ascending];
-        let state_table = create_in_memory_state_table(
-            &[DataType::Varchar, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
-            &[0, 1],
-        );
+        let state_table = {
+            let mut tb = create_in_memory_state_table(
+                &[DataType::Varchar, DataType::Int64],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 1],
+            );
+            tb.init_epoch(0);
+            tb
+        };
         let mut managed_state = ManagedTopNState::new(
             state_table,
             OrderedRowDeserializer::new(data_types, order_types.clone()),
@@ -298,14 +290,13 @@ mod tests {
             .map(|row| OrderedRow::new(row, &order_types))
             .collect::<Vec<_>>();
 
-        let epoch = 1;
         managed_state.insert(ordered_rows[3].clone(), rows[3].clone());
         managed_state.insert(ordered_rows[1].clone(), rows[1].clone());
         managed_state.insert(ordered_rows[2].clone(), rows[2].clone());
         managed_state.insert(ordered_rows[4].clone(), rows[4].clone());
 
         managed_state
-            .fill_cache(None, &mut cache, &ordered_rows[3], 2, epoch)
+            .fill_cache(None, &mut cache, &ordered_rows[3], 2)
             .await
             .unwrap();
         assert_eq!(cache.len(), 2);

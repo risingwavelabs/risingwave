@@ -15,6 +15,7 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
+use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_expr::expr::{build_from_prost, AggKind};
@@ -26,7 +27,7 @@ use crate::executor::aggregation::{AggArgs, AggCall};
 pub fn build_agg_call_from_prost(
     append_only: bool,
     agg_call_proto: &risingwave_pb::expr::AggCall,
-) -> Result<AggCall> {
+) -> StreamResult<AggCall> {
     let agg_kind = AggKind::try_from(agg_call_proto.get_type()?)?;
     let args = match &agg_call_proto.get_args()[..] {
         [] => AggArgs::None,
@@ -44,11 +45,7 @@ pub fn build_agg_call_from_prost(
                 extra_arg.get_input()?.column_idx as usize,
             ],
         ),
-        _ => {
-            return Err(RwError::from(ErrorCode::ExprError(
-                format!("Too many/few arguments for {:?}", agg_kind).into(),
-            )))
-        }
+        _ => bail!("Too many/few arguments for {:?}", agg_kind),
     };
     let mut order_pairs = vec![];
     let mut order_col_types = vec![];

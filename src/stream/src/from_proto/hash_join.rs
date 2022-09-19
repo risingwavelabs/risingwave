@@ -33,7 +33,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
@@ -86,7 +86,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 fn create_hash_join_executor<S: StateStore>(
                     typ: JoinTypeProto, kind: HashKeyKind,
                     args: HashJoinExecutorDispatcherArgs<S>,
-                ) -> Result<BoxedExecutor> {
+                ) -> StreamResult<BoxedExecutor> {
                     match typ {
                         $( JoinTypeProto::$join_type_proto => HashJoinExecutorDispatcher::<_, {JoinType::$join_type}>::dispatch_by_kind(kind, args), )*
                         JoinTypeProto::Unspecified => unreachable!(),
@@ -181,7 +181,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
     for HashJoinExecutorDispatcher<S, T>
 {
     type Input = HashJoinExecutorDispatcherArgs<S>;
-    type Output = Result<BoxedExecutor>;
+    type Output = StreamResult<BoxedExecutor>;
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Ok(Box::new(HashJoinExecutor::<K, S, T>::new(

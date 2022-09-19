@@ -15,13 +15,13 @@
 use std::collections::{HashMap, HashSet};
 
 use prometheus::HistogramTimer;
-use risingwave_common::error::Result;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 
 use self::managed_state::ManagedBarrierState;
+use crate::error::StreamResult;
 use crate::executor::*;
 use crate::task::ActorId;
 
@@ -121,7 +121,7 @@ impl LocalBarrierManager {
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
         timer: Option<HistogramTimer>,
-    ) -> Result<()> {
+    ) -> StreamResult<()> {
         let to_send = {
             let to_send: HashSet<ActorId> = actor_ids_to_send.into_iter().collect();
             match &self.state {
@@ -209,7 +209,7 @@ impl LocalBarrierManager {
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) -> Result<()> {
+    pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) -> StreamResult<()> {
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}

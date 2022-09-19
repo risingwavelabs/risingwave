@@ -1,5 +1,6 @@
 [server]
 heartbeat_interval_ms = 1000
+connection_pool_size = 16
 
 [batch]
 
