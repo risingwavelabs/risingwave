@@ -40,7 +40,7 @@ use crate::executor::aggregation::{
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
-use crate::task::{LruManagerRef, ExecutorCache, EvictableHashMap};
+use crate::task::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
 /// Limit number of cached entries (one per group key)
 const HASH_AGG_CACHE_SIZE: usize = 1 << 16;
@@ -456,9 +456,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // The cached states. `HashKey -> (prev_value, value)`.
         let mut state_map = if let Some(lru_manager) = extra.lru_manager.clone() {
-            ExecutorCache::Managed(
-                lru_manager.create_cache_with_hasher(PrecomputedBuildHasher),
-            )
+            ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher(
                 HASH_AGG_CACHE_SIZE,

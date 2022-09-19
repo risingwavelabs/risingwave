@@ -41,9 +41,7 @@ use self::iter_utils::zip_by_order_key;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::Epoch;
-use crate::task::{
-    ActorId, EvictableHashMap, ExecutorCache, LruManagerRef, ManagedLruCache,
-};
+use crate::task::{ActorId, EvictableHashMap, ExecutorCache, LruManagerRef, ManagedLruCache};
 
 type DegreeType = u64;
 
@@ -74,11 +72,6 @@ impl Index<usize> for JoinRow {
 impl JoinRow {
     pub fn new(row: Row, degree: DegreeType) -> Self {
         Self { row, degree }
-    }
-
-    #[expect(dead_code)]
-    pub fn size(&self) -> usize {
-        self.row.size()
     }
 
     pub fn is_zero_degree(&self) -> bool {

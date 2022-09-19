@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::hash::PrecomputedBuildHasher;
 
-use crate::task::{LruManagerRef, ExecutorCache, EvictableHashMap};
+use crate::task::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
 const JOIN_CACHE_CAP: usize = 1 << 16;
 
@@ -63,15 +63,13 @@ impl LookupCache {
 
     pub fn new(lru_manager: Option<LruManagerRef>) -> Self {
         let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(
-                lru_manager.create_cache_with_hasher(PrecomputedBuildHasher),
-            )
+            ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher(
                 JOIN_CACHE_CAP,
                 PrecomputedBuildHasher,
             ))
         };
-        Self {data: cache}
+        Self { data: cache }
     }
 }

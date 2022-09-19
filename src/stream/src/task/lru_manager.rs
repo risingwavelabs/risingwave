@@ -218,7 +218,7 @@ impl LruManager {
             barrier_interval_ms,
         });
 
-        // Run a backgrond memory monitor
+        // Run a background memory monitor
         tokio::spawn(manager.clone().run());
 
         manager
