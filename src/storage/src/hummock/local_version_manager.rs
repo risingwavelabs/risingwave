@@ -860,7 +860,7 @@ impl LocalVersionManager {
                         );
                         let mut local_version_guard = local_version_manager.local_version.write();
                         let prev_max_sync_epoch = if let Some(epoch) =
-                            local_version_guard.advance_max_sync_epoch(new_sync_epoch)
+                            local_version_guard.get_prev_max_sync_epoch(new_sync_epoch)
                         {
                             epoch
                         } else {
