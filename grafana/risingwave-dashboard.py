@@ -180,7 +180,7 @@ def section_cluster_node(panels):
         panels.row("Cluster Node"),
         panels.timeseries_count("Node Count", [
             panels.target(
-                "sum(node_num) by (job)", "{{job}}"
+                "sum(worker_num) by (worker_type)", "{{worker_type}}"
             )], ["last"]),
         panels.timeseries_memory("Node Memory", [
             panels.target(
