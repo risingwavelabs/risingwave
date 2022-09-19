@@ -219,7 +219,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         }: &mut HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         chunk: StreamChunk,
-        epoch: u64,
     ) -> StreamExecutorResult<()> {
         let (data_chunk, ops) = chunk.into_parts();
 
@@ -258,7 +257,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 Some(&key.clone().deserialize(key_data_types.iter())?),
                                 agg_calls,
                                 input_pk_indices.clone(),
-                                epoch,
                                 state_tables,
                                 state_table_col_mappings,
                             )
@@ -268,7 +266,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 };
 
                 // 2. Mark the state as dirty by filling prev states
-                states.may_mark_as_dirty(epoch, state_tables).await?;
+                states.may_mark_as_dirty(state_tables).await?;
 
                 Ok::<(_, Box<AggState<S>>), StreamExecutorError>((key, states))
             });
@@ -303,7 +301,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     capacity,
                 )?;
                 agg_state
-                    .apply_chunk(&ops, vis_map.as_ref(), &column_refs, epoch, state_table)
+                    .apply_chunk(&ops, vis_map.as_ref(), &column_refs, state_table)
                     .await?;
             }
         }
@@ -371,7 +369,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .build_changes(
                             &mut builders[key_indices.len()..],
                             &mut new_ops,
-                            epoch,
                             state_tables,
                         )
                         .await?;
@@ -417,6 +414,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
+        for state_table in &mut extra.state_tables {
+            state_table.init_epoch(barrier.epoch.prev);
+        }
+
         let mut epoch = barrier.epoch.curr;
         yield Message::Barrier(barrier);
 
@@ -425,7 +426,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&mut extra, &mut state_map, chunk, epoch).await?;
+                    Self::apply_chunk(&mut extra, &mut state_map, chunk).await?;
                 }
                 Message::Barrier(barrier) => {
                     let next_epoch = barrier.epoch.curr;

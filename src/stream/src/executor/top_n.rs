@@ -230,7 +230,6 @@ impl TopNCache {
         managed_state: &mut ManagedTopNState<S>,
         ordered_pk_row: OrderedRow,
         row: Row,
-        epoch: u64,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<Row>,
     ) -> StreamExecutorResult<()> {
@@ -250,7 +249,6 @@ impl TopNCache {
                         &mut self.high,
                         self.middle.last_key_value().unwrap().0,
                         self.high_capacity,
-                        epoch,
                     )
                     .await?;
             }
@@ -285,7 +283,6 @@ impl TopNCache {
                             &mut self.high,
                             self.middle.last_key_value().unwrap().0,
                             self.high_capacity,
-                            epoch,
                         )
                         .await?;
                 }
@@ -373,11 +370,7 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
 
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
-    async fn apply_chunk(
-        &mut self,
-        chunk: StreamChunk,
-        epoch: u64,
-    ) -> StreamExecutorResult<StreamChunk> {
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.cache.limit);
         let mut res_rows = Vec::with_capacity(self.cache.limit);
 
@@ -404,7 +397,6 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                             &mut self.managed_state,
                             ordered_pk_row,
                             row,
-                            epoch,
                             &mut res_ops,
                             &mut res_rows,
                         )
@@ -433,8 +425,9 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
     }
 
     async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+        self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(None, &mut self.cache, epoch)
+            .init_topn_cache(None, &mut self.cache)
             .await
     }
 }

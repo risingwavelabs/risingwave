@@ -62,6 +62,9 @@ pub struct MetaMetrics {
     pub hummock_manager_real_process_time: HistogramVec,
 
     pub time_after_last_observation: AtomicU64,
+
+    /// The number of workers in the cluster.
+    pub worker_num: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -175,6 +178,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let worker_num = register_int_gauge_vec_with_registry!(
+            "worker_num",
+            "number of nodes in the cluster",
+            &["worker_type"],
+            registry,
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -195,6 +206,8 @@ impl MetaMetrics {
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
+
+            worker_num,
         }
     }
 
