@@ -5,7 +5,7 @@ rustflags = [
 
 [target.aarch64-unknown-linux-gnu]
 rustflags = [
-    "-Clink-arg=-fuse-ld=lld", "-Clink-arg=-Wl,--no-rosegment", "-Ctarget-feature=+v7,+neon", "--cfg", "tokio_unstable"
+    "-Clink-arg=-fuse-ld=lld", "-Clink-arg=-Wl,--no-rosegment", "-Ctarget-feature=+neon", "--cfg", "tokio_unstable"
 ]
 
 [build]
