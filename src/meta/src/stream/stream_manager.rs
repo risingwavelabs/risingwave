@@ -21,7 +21,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnitMapping, WorkerType};
+use risingwave_pb::common::{ActorInfo, Buffer, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -41,7 +41,9 @@ use crate::manager::{
 };
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{fetch_source_fragments, Scheduler, SourceManagerRef};
+use crate::stream::{
+    fetch_source_fragments, parallel_unit_mapping_to_actor_mapping, Scheduler, SourceManagerRef,
+};
 use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
@@ -482,19 +484,10 @@ where
                             .collect::<HashMap<_, _>>();
 
                         // Transform the mapping of parallel unit to the mapping of actor.
-                        let ParallelUnitMapping {
-                            original_indices,
-                            data,
-                            ..
-                        } = downstream_vnode_mapping;
-                        let data = data
-                            .iter()
-                            .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
-                            .collect_vec();
-                        dispatcher.hash_mapping = Some(ActorMapping {
-                            original_indices: original_indices.clone(),
-                            data,
-                        });
+                        dispatcher.hash_mapping = Some(parallel_unit_mapping_to_actor_mapping(
+                            downstream_vnode_mapping,
+                            &parallel_unit_actor_map,
+                        ));
                     }
                 }
             }
@@ -745,6 +738,7 @@ where
         Ok(())
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
