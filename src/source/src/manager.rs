@@ -126,7 +126,8 @@ pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
     /// local source metrics
     metrics: Arc<SourceMetrics>,
-    /// The size of channel that connects between `ConnectorSource` and `SourceExecutor`.
+    /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
+    /// `SourceExecutor`.
     connector_message_buffer_size: usize,
 }
 
