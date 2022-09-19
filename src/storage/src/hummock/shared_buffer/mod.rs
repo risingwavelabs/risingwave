@@ -26,7 +26,6 @@ use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 
 use self::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::iterator::{
@@ -199,9 +198,8 @@ pub enum SharedBufferEvent {
     /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
     /// handle sender.
     SyncEpoch {
-        prev_max_sync_epoch: HummockEpoch,
         new_sync_epoch: HummockEpoch,
-        join_handle_sender: oneshot::Sender<Vec<JoinHandle<()>>>,
+        sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     },
 
     /// Clear shared buffer and reset all states

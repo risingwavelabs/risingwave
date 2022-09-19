@@ -24,8 +24,14 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::task::{JoinError, JoinHandle};
 
+/// Attach an extra item of type `E` to the future. The `Output` of the `AttachedFuture` will be
+/// `(Fut::Output, E)`
 pub(crate) struct AttachedFuture<Fut: Future + Unpin, E: Unpin> {
+    /// The inner future
     inner: Fut,
+
+    /// The attached item. Set it as `Option` so that when we `poll` the `inner` future and return
+    /// `Ready`, we can take it out
     extra: Option<E>,
 }
 
@@ -59,8 +65,18 @@ impl<Fut: Future + Unpin, E: Unpin> Future for AttachedFuture<Fut, E> {
     }
 }
 
+/// Handle the upload `JoinHandle` of each `HummockEpoch`.
+///
+/// Calling `upload_handle_manager.next_finished_epoch().await` will return an epoch when all the
+/// upload handles of the epoch is finished, and otherwise pending.
+///
+/// `upload_handle_manager.next_finished_epoch()` will return a
+/// `UploadHandleManagerNextFinishedEpoch` future, which is cancellation safe. In case of being
+/// dropped, the pending upload join handle will be restored back to the `upload_handle_manager`.
 pub(crate) struct UploadHandleManager {
+    /// A list of upload join handles attached with their pending epochs.
     epoch_upload_handle: Vec<AttachedFuture<JoinHandle<()>, HummockEpoch>>,
+    /// Count the number of remaining join handle of each epoch in `epoch_upload_handle`.
     remaining_handle_count: BTreeMap<HummockEpoch, usize>,
 }
 
@@ -72,6 +88,7 @@ impl UploadHandleManager {
         }
     }
 
+    /// Add some upload join handle to an `epoch`
     pub(crate) fn add_epoch_handle(
         &mut self,
         epoch: HummockEpoch,
@@ -86,6 +103,7 @@ impl UploadHandleManager {
         *self.remaining_handle_count.entry(epoch).or_default() += count;
     }
 
+    /// Drain and return the upload join handle of epochs that fall in the given `range`.
     pub(crate) fn drain_epoch_handle(
         &mut self,
         range: impl RangeBounds<HummockEpoch>,
@@ -109,63 +127,91 @@ impl UploadHandleManager {
             .collect_vec()
     }
 
-    pub(crate) fn next_finished_epoch(&mut self) -> UploadHandleManagerSelectAll<'_> {
-        let futures = self.epoch_upload_handle.drain(..);
-        let select_all_fut = select_all(futures);
-        UploadHandleManagerSelectAll {
+    /// Return a `UploadHandleManagerNextFinishedEpoch` future that returns an epoch when all the
+    /// upload join handle of the epoch are finished, and pending otherwise.
+    pub(crate) fn next_finished_epoch(&mut self) -> UploadHandleManagerNextFinishedEpoch<'_> {
+        let futures = self.epoch_upload_handle.drain(..).collect_vec();
+        let select_all = if futures.is_empty() {
+            None
+        } else {
+            Some(select_all(futures))
+        };
+        UploadHandleManagerNextFinishedEpoch {
             manager: self,
-            select_all: Some(select_all_fut),
+            select_all,
         }
     }
 }
 
-pub(crate) struct UploadHandleManagerSelectAll<'a> {
+/// A future which is associated to a `UploadHandleManager` by holding its mutable reference. The
+/// future returns an epoch when all the upload join handle of the epoch are finished, and pending
+/// otherwise.
+///
+/// The future is cancellation safe. In case of being dropped, it will restore the pending join
+/// handle back to the `UploadHandleManager`.
+pub(crate) struct UploadHandleManagerNextFinishedEpoch<'a> {
     manager: &'a mut UploadHandleManager,
+
+    /// Wrap all pending upload join handle with a `SelectAll`. If there is no pending upload join
+    /// handle, it will be `None`.
     select_all: Option<SelectAll<AttachedFuture<JoinHandle<()>, HummockEpoch>>>,
 }
 
-impl<'a> Unpin for UploadHandleManagerSelectAll<'a> {}
+impl<'a> Unpin for UploadHandleManagerNextFinishedEpoch<'a> {}
 
-impl<'a> Future for UploadHandleManagerSelectAll<'a> {
+impl<'a> Future for UploadHandleManagerNextFinishedEpoch<'a> {
     type Output = std::result::Result<HummockEpoch, JoinError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut select_all_fut = self
-            .select_all
-            .take()
-            .expect("should have select all when not ok before");
         loop {
+            let mut select_all_fut = if let Some(select_all_fut) = self.select_all.take() {
+                select_all_fut
+            } else {
+                assert!(self.manager.remaining_handle_count.is_empty());
+                // If `self.select_all` is `None`, there is no pending epoch. Return `Pending`.
+                return Poll::Pending;
+            };
             match select_all_fut.poll_unpin(cx) {
                 Poll::Ready(((result, epoch), _, futures)) => {
-                    let ret = match result {
+                    // Reset `self.select_all`
+                    if !futures.is_empty() {
+                        assert!(self.select_all.replace(select_all(futures)).is_none());
+                    }
+
+                    // Decrease the remaining count of the epoch by 1 and remove it when it reaches
+                    // 0.
+                    let epoch_remaining_count_mut_ref =
+                        self.manager.remaining_handle_count.get_mut(&epoch).expect(
+                            "a join handle just finish. prev count must not zero. should exist",
+                        );
+                    assert!(*epoch_remaining_count_mut_ref > 0);
+                    *epoch_remaining_count_mut_ref -= 1;
+                    let epoch_remaining_count = *epoch_remaining_count_mut_ref;
+                    if epoch_remaining_count == 0 {
+                        let _ = self.manager.remaining_handle_count.remove(&epoch);
+                    } else {
+                        assert!(
+                            self.select_all.is_some(),
+                            "an epoch has some remaining join handle, the select_all must not be empty"
+                        );
+                    }
+
+                    match result {
                         Ok(_) => {
-                            let epoch_count = self
-                                .manager
-                                .remaining_handle_count
-                                .get_mut(&epoch)
-                                .expect("prev count not zero. should exist");
-                            *epoch_count -= 1;
-                            if *epoch_count == 0 {
-                                let _ = self.manager.remaining_handle_count.remove(&epoch);
-                                Some(Ok(epoch))
-                            } else {
-                                None
+                            // If the there is no remaining join handle in this epoch, return the
+                            // epoch. Otherwise, keep polling other join handle
+                            if epoch_remaining_count == 0 {
+                                return Poll::Ready(Ok(epoch));
                             }
                         }
-                        Err(e) => Some(Err(e)),
+                        Err(e) => {
+                            // Return when we meet an error
+                            return Poll::Ready(Err(e));
+                        }
                     };
-                    match ret {
-                        Some(ret) => {
-                            let _ = self.select_all.insert(select_all(futures));
-                            return Poll::Ready(ret);
-                        }
-                        None => {
-                            select_all_fut = select_all(futures);
-                        }
-                    }
                 }
                 Poll::Pending => {
-                    let _ = self.select_all.insert(select_all_fut);
+                    assert!(self.select_all.replace(select_all_fut).is_none());
                     return Poll::Pending;
                 }
             };
@@ -173,8 +219,112 @@ impl<'a> Future for UploadHandleManagerSelectAll<'a> {
     }
 }
 
-impl<'a> Drop for UploadHandleManagerSelectAll<'a> {
+impl<'a> Drop for UploadHandleManagerNextFinishedEpoch<'a> {
     fn drop(&mut self) {
-        todo!()
+        // In case of being dropped, restore the join handle back to `self.manager`
+        if let Some(select_all) = self.select_all.take() {
+            self.manager
+                .epoch_upload_handle
+                .extend(select_all.into_inner());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::{poll_fn, Future};
+    use std::iter::once;
+    use std::task::Poll;
+
+    use futures::FutureExt;
+    use tokio::sync::oneshot;
+
+    use crate::hummock::upload_handle_manager::{AttachedFuture, UploadHandleManager};
+
+    async fn is_pending<F>(future: &mut F) -> bool
+    where
+        F: Future + Unpin,
+    {
+        poll_fn(|cx| match future.poll_unpin(cx) {
+            Poll::Ready(_) => Poll::Ready(false),
+            Poll::Pending => Poll::Ready(true),
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn test_attached_future() {
+        let future = async move { 1 }.boxed();
+        let attached_future = AttachedFuture::new(future, 2);
+        assert_eq!(attached_future.get_extra(), &2);
+        assert_eq!(attached_future.await, (1, 2));
+    }
+
+    #[tokio::test]
+    async fn test_attached_future_into_inner() {
+        let future = async move { 1 }.boxed();
+        let attached_future = AttachedFuture::new(future, 2);
+        assert_eq!(attached_future.get_extra(), &2);
+        assert_eq!(attached_future.into_inner().await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_empty_pending() {
+        let mut manager = UploadHandleManager::new();
+        let mut select_all = manager.next_finished_epoch();
+        assert!(is_pending(&mut select_all).await);
+    }
+
+    #[tokio::test]
+    async fn test_normal() {
+        let mut manager = UploadHandleManager::new();
+        let (tx1, rx1) = oneshot::channel();
+        let (tx2, rx2) = oneshot::channel();
+        let (tx3, rx3) = oneshot::channel();
+        let join_handle1 = tokio::spawn(async move {
+            rx1.await.unwrap();
+        });
+        let join_handle2 = tokio::spawn(async move {
+            rx2.await.unwrap();
+        });
+        let join_handle3 = tokio::spawn(async move {
+            rx3.await.unwrap();
+        });
+        manager.add_epoch_handle(1, vec![join_handle1, join_handle2].into_iter());
+        manager.add_epoch_handle(2, once(join_handle3));
+
+        let mut select_all = manager.next_finished_epoch();
+        assert!(is_pending(&mut select_all).await);
+        tx1.send(()).unwrap();
+        assert!(is_pending(&mut select_all).await);
+        tx3.send(()).unwrap();
+        assert_eq!(select_all.await.unwrap(), 2);
+
+        let mut select_all = manager.next_finished_epoch();
+        assert!(is_pending(&mut select_all).await);
+        tx2.send(()).unwrap();
+        assert_eq!(select_all.await.unwrap(), 1);
+
+        assert!(manager.drain_epoch_handle(..).is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_drain_epoch_handle() {
+        let mut manager = UploadHandleManager::new();
+        let join_handle1 = tokio::spawn(async move {});
+        let id1 = join_handle1.id();
+        manager.add_epoch_handle(1, once(join_handle1));
+        let join_handle2 = tokio::spawn(async move {});
+        let id2 = join_handle2.id();
+        manager.add_epoch_handle(2, once(join_handle2));
+        let join_handle3 = tokio::spawn(async move {});
+        let id3 = join_handle3.id();
+        manager.add_epoch_handle(3, once(join_handle3));
+
+        assert_eq!(manager.drain_epoch_handle(1..=1).pop().unwrap().id(), id1);
+
+        let mut join_handles = manager.drain_epoch_handle(2..=3);
+        assert_eq!(join_handles.pop().unwrap().id(), id3);
+        assert_eq!(join_handles.pop().unwrap().id(), id2);
     }
 }

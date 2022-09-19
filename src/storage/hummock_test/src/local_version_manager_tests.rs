@@ -256,7 +256,7 @@ async fn test_update_uncommitted_ssts() {
     // Update uncommitted sst for epochs[0]
     let sst1 = gen_dummy_sst_info(1, vec![batches[0].clone()]);
     {
-        let payload = {
+        let (payload, task_size) = {
             let mut local_version_guard = local_version_manager.local_version().write();
             let prev_max_sync_epoch = local_version_guard
                 .advance_max_sync_epoch(epochs[0])
@@ -269,14 +269,17 @@ async fn test_update_uncommitted_ssts() {
                 assert_eq!(payload[0][0], UncommittedData::Batch(batches[0].clone()));
                 assert_eq!(task_size, batches[0].size());
             }
-            payload
+            (payload, task_size)
         };
         // Check uncommitted ssts
-        let epoch_uncommitted_ssts = local_version_manager
-            .run_sync_upload_task(payload, epochs[0])
+        local_version_manager
+            .run_sync_upload_task(payload, task_size, epochs[0])
             .await
             .unwrap();
-        assert_eq!(epoch_uncommitted_ssts.len(), 1);
+        let epoch_uncommitted_ssts = local_version_manager
+            .get_local_version()
+            .get_synced_ssts(epochs[0])
+            .clone();
         assert_eq!(
             epoch_uncommitted_ssts.first().unwrap().1.key_range,
             sst1.key_range
@@ -298,7 +301,7 @@ async fn test_update_uncommitted_ssts() {
     // Update uncommitted sst for epochs[1]
     let sst2 = gen_dummy_sst_info(2, vec![batches[1].clone()]);
     {
-        let payload = {
+        let (payload, task_size) = {
             let mut local_version_guard = local_version_manager.local_version().write();
             let prev_max_sync_epoch = local_version_guard
                 .advance_max_sync_epoch(epochs[1])
@@ -311,13 +314,17 @@ async fn test_update_uncommitted_ssts() {
                 assert_eq!(payload[0][0], UncommittedData::Batch(batches[1].clone()));
                 assert_eq!(task_size, batches[1].size());
             }
-            payload
+            (payload, task_size)
         };
 
-        let epoch_uncommitted_ssts = local_version_manager
-            .run_sync_upload_task(payload, epochs[1])
+        local_version_manager
+            .run_sync_upload_task(payload, task_size, epochs[1])
             .await
             .unwrap();
+        let epoch_uncommitted_ssts = local_version_manager
+            .get_local_version()
+            .get_synced_ssts(epochs[1])
+            .clone();
         assert_eq!(epoch_uncommitted_ssts.len(), 1);
         assert_eq!(
             epoch_uncommitted_ssts.first().unwrap().1.key_range,
