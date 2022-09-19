@@ -55,8 +55,8 @@ pub use planner::Planner;
 #[expect(dead_code)]
 mod scheduler;
 pub mod session;
-mod stream_fragmenter;
-mod utils;
+pub mod stream_fragmenter;
+pub mod utils;
 pub use utils::WithOptions;
 mod meta_client;
 pub mod test_utils;
