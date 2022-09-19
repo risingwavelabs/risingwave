@@ -201,10 +201,8 @@ impl LocalVersion {
     }
 
     pub fn seal_epoch(&mut self, epoch: HummockEpoch, is_checkpoint: bool) {
-        // TODO: remove it when non-checkpoint barrier is enabled
-        assert!(is_checkpoint, "current seal_epoch must be a checkpoint");
         self.sealed_epoch = self.sealed_epoch.max(epoch);
-        if self.advance_max_sync_epoch(epoch).is_none() {
+        if is_checkpoint && self.advance_max_sync_epoch(epoch).is_none() {
             tracing::trace!("trivial advance max sync epoch: {}", epoch);
         }
     }
