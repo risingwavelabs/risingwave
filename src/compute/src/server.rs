@@ -209,7 +209,7 @@ pub async fn compute_node_serve(
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
-    let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+    let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
     let batch_env = BatchEnvironment::new(
         source_mgr.clone(),
         batch_mgr.clone(),
