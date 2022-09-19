@@ -228,7 +228,7 @@ impl LocalVersionManager {
         ));
 
         // Buffer size manager.
-        tokio::spawn(LocalVersionManager::start_buffer_tracker_worker(
+        tokio::spawn(LocalVersionManager::start_flush_controller_worker(
             local_version_manager.clone(),
             buffer_event_receiver,
         ));
@@ -682,7 +682,7 @@ impl LocalVersionManager {
         }
     }
 
-    pub async fn start_buffer_tracker_worker(
+    pub async fn start_flush_controller_worker(
         local_version_manager: Arc<LocalVersionManager>,
         mut buffer_size_change_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
     ) {
