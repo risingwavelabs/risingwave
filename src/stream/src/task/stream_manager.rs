@@ -234,7 +234,7 @@ impl LocalStreamManager {
             .barrier_sync_latency
             .start_timer();
         let res = dispatch_state_store!(self.state_store(), store, {
-            match store.await_sync_epoch(epoch).await {
+            match store.sync(epoch).await {
                 Ok(sync_result) => Ok(sync_result.uncommitted_ssts),
                 Err(e) => {
                     tracing::error!(
