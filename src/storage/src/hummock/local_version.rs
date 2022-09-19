@@ -72,6 +72,8 @@ pub enum SyncUncommittedDataStage {
 pub struct SyncUncommittedData {
     #[allow(dead_code)]
     sync_epoch: HummockEpoch,
+    /// The previous `max_sync_epoch` when we start syncing `sync_epoch` and advance to a new
+    /// `max_sync_epoch`.
     prev_max_sync_epoch: HummockEpoch,
     // newer epochs come first
     epochs: Vec<HummockEpoch>,

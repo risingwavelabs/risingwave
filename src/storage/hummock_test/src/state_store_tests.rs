@@ -61,8 +61,8 @@ async fn test_basic() {
 
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
-        (anchor.clone(), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+        (anchor.clone(), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
 
     // Make sure the batch is sorted.
@@ -70,8 +70,8 @@ async fn test_basic() {
 
     // Second batch modifies the anchor.
     let mut batch2 = vec![
-        (Bytes::from("cc"), StorageValue::new_default_put("333")),
-        (anchor.clone(), StorageValue::new_default_put("111111")),
+        (Bytes::from("cc"), StorageValue::new_put("333")),
+        (anchor.clone(), StorageValue::new_put("111111")),
     ];
 
     // Make sure the batch is sorted.
@@ -79,9 +79,9 @@ async fn test_basic() {
 
     // Third batch deletes the anchor
     let mut batch3 = vec![
-        (Bytes::from("dd"), StorageValue::new_default_put("444")),
-        (Bytes::from("ee"), StorageValue::new_default_put("555")),
-        (anchor.clone(), StorageValue::new_default_delete()),
+        (Bytes::from("dd"), StorageValue::new_put("444")),
+        (Bytes::from("ee"), StorageValue::new_put("555")),
+        (anchor.clone(), StorageValue::new_delete()),
     ];
 
     // Make sure the batch is sorted.
@@ -363,8 +363,8 @@ async fn test_state_store_sync() {
 
     // ingest 16B batch
     let mut batch1 = vec![
-        (Bytes::from("aaaa"), StorageValue::new_default_put("1111")),
-        (Bytes::from("bbbb"), StorageValue::new_default_put("2222")),
+        (Bytes::from("aaaa"), StorageValue::new_put("1111")),
+        (Bytes::from("bbbb"), StorageValue::new_put("2222")),
     ];
 
     // Make sure the batch is sorted.
@@ -391,9 +391,9 @@ async fn test_state_store_sync() {
 
     // ingest 24B batch
     let mut batch2 = vec![
-        (Bytes::from("cccc"), StorageValue::new_default_put("3333")),
-        (Bytes::from("dddd"), StorageValue::new_default_put("4444")),
-        (Bytes::from("eeee"), StorageValue::new_default_put("5555")),
+        (Bytes::from("cccc"), StorageValue::new_put("3333")),
+        (Bytes::from("dddd"), StorageValue::new_put("4444")),
+        (Bytes::from("eeee"), StorageValue::new_put("5555")),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage
@@ -419,7 +419,7 @@ async fn test_state_store_sync() {
     epoch += 1;
 
     // ingest more 8B then will trigger a sync behind the scene
-    let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_default_put("5555"))];
+    let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_put("5555"))];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage
         .ingest_batch(
@@ -473,8 +473,8 @@ async fn test_reload_storage() {
 
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
-        (anchor.clone(), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+        (anchor.clone(), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
 
     // Make sure the batch is sorted.
@@ -482,8 +482,8 @@ async fn test_reload_storage() {
 
     // Second batch modifies the anchor.
     let mut batch2 = vec![
-        (Bytes::from("cc"), StorageValue::new_default_put("333")),
-        (anchor.clone(), StorageValue::new_default_put("111111")),
+        (Bytes::from("cc"), StorageValue::new_put("333")),
+        (anchor.clone(), StorageValue::new_put("111111")),
     ];
 
     // Make sure the batch is sorted.
@@ -747,9 +747,9 @@ async fn test_write_anytime() {
     };
 
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
-        (Bytes::from("cc"), StorageValue::new_default_put("333")),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
+        (Bytes::from("cc"), StorageValue::new_put("333")),
     ];
 
     hummock_storage
@@ -839,8 +839,8 @@ async fn test_write_anytime() {
 
     // Update aa, delete bb, cc unchanged
     let batch2 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("111_new")),
-        (Bytes::from("bb"), StorageValue::new_default_delete()),
+        (Bytes::from("aa"), StorageValue::new_put("111_new")),
+        (Bytes::from("bb"), StorageValue::new_delete()),
     ];
 
     hummock_storage
@@ -921,8 +921,8 @@ async fn test_delete_get() {
         .max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     hummock_storage
         .ingest_batch(
@@ -937,7 +937,7 @@ async fn test_delete_get() {
     let ssts = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -1003,8 +1003,8 @@ async fn test_multiple_epoch_sync() {
         .max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     hummock_storage
         .ingest_batch(
@@ -1018,7 +1018,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -1032,8 +1032,8 @@ async fn test_multiple_epoch_sync() {
 
     let epoch3 = initial_epoch + 3;
     let batch3 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("444")),
-        (Bytes::from("bb"), StorageValue::new_default_put("555")),
+        (Bytes::from("aa"), StorageValue::new_put("444")),
+        (Bytes::from("bb"), StorageValue::new_put("555")),
     ];
     hummock_storage
         .ingest_batch(

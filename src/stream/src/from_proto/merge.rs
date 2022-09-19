@@ -27,7 +27,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         x_node: &StreamNode,
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(x_node.get_node_body().unwrap(), NodeBody::Merge)?;
         let upstreams = node.get_upstream_actor_id();
         let upstream_fragment_id = node.get_upstream_fragment_id();

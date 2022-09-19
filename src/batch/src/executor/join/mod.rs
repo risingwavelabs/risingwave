@@ -154,7 +154,7 @@ fn convert_datum_refs_to_chunk(
         .collect();
     for _i in 0..num_tuples {
         for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
-            builder.append_datum_ref(*datum_ref)?;
+            builder.append_datum_ref(*datum_ref);
         }
     }
 
@@ -196,7 +196,7 @@ mod tests {
         for i in 0..num_of_columns {
             let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
-                builder.append(Some(i as i32)).unwrap();
+                builder.append(Some(i as i32));
             }
             let arr = builder.finish();
             columns.push(Column::new(Arc::new(arr.into())))

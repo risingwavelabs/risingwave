@@ -116,9 +116,14 @@ impl StateStoreImpl {
 
             let options = FileCacheOptions {
                 dir: file_cache_dir.to_string(),
-                capacity: config.file_cache.capacity,
-                total_buffer_capacity: config.file_cache.total_buffer_capacity,
-                cache_file_fallocate_unit: config.file_cache.cache_file_fallocate_unit,
+                capacity: config.file_cache.capacity_mb * 1024 * 1024,
+                total_buffer_capacity: config.file_cache.total_buffer_capacity_mb * 1024 * 1024,
+                cache_file_fallocate_unit: config.file_cache.cache_file_fallocate_unit_mb
+                    * 1024
+                    * 1024,
+                cache_meta_fallocate_unit: config.file_cache.cache_meta_fallocate_unit_mb
+                    * 1024
+                    * 1024,
                 flush_buffer_hooks: vec![],
             };
             let metrics = Arc::new(tiered_cache_metrics_builder.file());
@@ -166,7 +171,8 @@ impl StateStoreImpl {
             }
 
             "in_memory" | "in-memory" => {
-                panic!("in-memory state backend should never be used in end-to-end environment, use `hummock+memory` instead.")
+                tracing::warn!("in-memory state backend should never be used in end-to-end benchmarks or production environment.");
+                StateStoreImpl::shared_in_memory_store(state_store_stats.clone())
             }
 
             other => unimplemented!("{} state store is not supported", other),

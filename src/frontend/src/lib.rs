@@ -38,6 +38,7 @@
 #![feature(map_first_last)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
+#![feature(once_cell)]
 
 #[macro_use]
 mod catalog;

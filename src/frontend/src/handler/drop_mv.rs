@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::valid_table_name;
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
@@ -61,6 +62,14 @@ pub async fn handle_drop_mv(
                 "Use `DROP INDEX` to drop an index.".to_owned(),
             )));
         }
+
+        // If the name is not valid, then it is a actually an internal table.
+        if !valid_table_name(&table_name) {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                "Cannot drop an internal table.".to_owned(),
+            )));
+        }
+
         table.id()
     };
 

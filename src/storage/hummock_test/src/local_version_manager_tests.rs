@@ -27,7 +27,7 @@ use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::shared_buffer::UncommittedData;
 use risingwave_storage::hummock::test_utils::{
-    default_config_for_test, gen_dummy_batch, gen_dummy_sst_info,
+    default_config_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
 };
 use risingwave_storage::storage_value::StorageValue;
 use tokio::sync::mpsc;
@@ -203,7 +203,10 @@ async fn test_update_pinned_version() {
 
 #[tokio::test]
 async fn test_update_uncommitted_ssts() {
-    let opt = Arc::new(default_config_for_test());
+    let mut opt = default_config_for_test();
+    opt.share_buffers_sync_parallelism = 2;
+    opt.sstable_size_mb = 1;
+    let opt = Arc::new(opt);
     let (_, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
     let local_version_manager = LocalVersionManager::for_test(
         opt.clone(),
@@ -221,7 +224,10 @@ async fn test_update_uncommitted_ssts() {
     let version = pinned_version.version();
 
     let epochs: Vec<u64> = vec![max_commit_epoch + 1, max_commit_epoch + 2];
-    let kvs: Vec<Vec<(Bytes, StorageValue)>> = epochs.iter().map(|e| gen_dummy_batch(*e)).collect();
+    let kvs: Vec<Vec<(Bytes, StorageValue)>> = epochs
+        .iter()
+        .map(|e| gen_dummy_batch_several_keys(*e, 2000))
+        .collect();
     let mut batches = Vec::with_capacity(kvs.len());
 
     // Fill shared buffer with dummy batches
@@ -270,10 +276,28 @@ async fn test_update_uncommitted_ssts() {
             .run_sync_upload_task(payload, epochs[0])
             .await
             .unwrap();
-        assert_eq!(epoch_uncommitted_ssts.len(), 1);
+        assert_eq!(epoch_uncommitted_ssts.len(), 2);
         assert_eq!(
-            epoch_uncommitted_ssts.first().unwrap().1.key_range,
-            sst1.key_range
+            epoch_uncommitted_ssts
+                .first()
+                .unwrap()
+                .1
+                .key_range
+                .as_ref()
+                .unwrap()
+                .left,
+            sst1.key_range.as_ref().unwrap().left,
+        );
+        assert_eq!(
+            epoch_uncommitted_ssts
+                .last()
+                .unwrap()
+                .1
+                .key_range
+                .as_ref()
+                .unwrap()
+                .right,
+            sst1.key_range.as_ref().unwrap().right,
         );
     }
 
@@ -309,10 +333,28 @@ async fn test_update_uncommitted_ssts() {
             .run_sync_upload_task(payload, epochs[1])
             .await
             .unwrap();
-        assert_eq!(epoch_uncommitted_ssts.len(), 1);
+        assert_eq!(epoch_uncommitted_ssts.len(), 2);
         assert_eq!(
-            epoch_uncommitted_ssts.first().unwrap().1.key_range,
-            sst2.key_range
+            epoch_uncommitted_ssts
+                .first()
+                .unwrap()
+                .1
+                .key_range
+                .as_ref()
+                .unwrap()
+                .left,
+            sst2.key_range.as_ref().unwrap().left,
+        );
+        assert_eq!(
+            epoch_uncommitted_ssts
+                .last()
+                .unwrap()
+                .1
+                .key_range
+                .as_ref()
+                .unwrap()
+                .right,
+            sst2.key_range.as_ref().unwrap().right,
         );
     }
     let local_version = local_version_manager.get_local_version();

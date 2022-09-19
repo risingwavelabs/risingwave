@@ -165,3 +165,9 @@ select
 from (values ('{{{1, 2, 3}, {44, 55, 66}}}')) as t(arr);
 ----
 {44, 55, 66} 66 66
+
+# Test cast from array to string
+query T
+select array['a', 'b']::varchar;
+----
+{a,b}

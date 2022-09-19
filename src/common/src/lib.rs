@@ -39,6 +39,7 @@
 #![feature(lint_reasons)]
 #![feature(generators)]
 #![feature(map_try_insert)]
+#![feature(once_cell)]
 
 #[macro_use]
 pub mod error;

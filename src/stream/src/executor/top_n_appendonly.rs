@@ -25,6 +25,7 @@ use super::managed_state::top_n::ManagedTopNState;
 use super::top_n::TopNCache;
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::error::StreamResult;
 use crate::executor::top_n::generate_executor_pk_indices_info;
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
@@ -44,7 +45,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
 
@@ -101,7 +102,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
 
@@ -131,21 +132,18 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
 
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
-    async fn apply_chunk(
-        &mut self,
-        chunk: StreamChunk,
-        _epoch: u64,
-    ) -> StreamExecutorResult<StreamChunk> {
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.cache.limit);
         let mut res_rows = Vec::with_capacity(self.cache.limit);
 
         // apply the chunk to state table
-        for (_, row_ref) in chunk.rows() {
+        for (op, row_ref) in chunk.rows() {
+            debug_assert_eq!(op, Op::Insert);
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
             let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
             let row = row_ref.to_owned_row();
 
-            if self.cache.middle.len() == self.cache.limit
+            if self.cache.is_middle_cache_full()
                 && ordered_pk_row >= *self.cache.middle.last_key_value().unwrap().0
             {
                 continue;
@@ -154,51 +152,48 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                 .insert(ordered_pk_row.clone(), row.clone());
 
             // Then insert input row to corresponding cache range according to its order key
-            if self.cache.low.len() < self.cache.offset {
-                debug_assert!(self.cache.middle.is_empty());
-                debug_assert!(self.cache.high.is_empty());
+            if !self.cache.is_low_cache_full() {
                 self.cache.low.insert(ordered_pk_row, row);
                 continue;
             }
 
-            // If offset is 0, every input row has noting to do with `cache.low`
-            let elem_to_compare_with_middle = if self.cache.offset > 0
-                && ordered_pk_row <= *self.cache.low.last_key_value().unwrap().0
-            {
-                // If the new row is in the range of [0, offset), the largest row in
-                // `cache.low` needs be moved to `cache.middle`
-                // which covers the range of [offset, offset+limit)
-                let res = self.cache.low.pop_last().unwrap();
-                self.cache.low.insert(ordered_pk_row.clone(), row.clone());
-                res
+            let elem_to_insert_into_middle =
+            if let Some(low_last) = self.cache.low.last_entry()
+                && ordered_pk_row <= *low_last.key() {
+                // Take the last element of `cache.low` and insert input row to it.
+                let low_last = low_last.remove_entry();
+                self.cache.low.insert(ordered_pk_row, row);
+                low_last
             } else {
                 (ordered_pk_row, row)
             };
 
-            if self.cache.middle.len() < self.cache.limit {
+            if !self.cache.is_middle_cache_full() {
                 self.cache.middle.insert(
-                    elem_to_compare_with_middle.0,
-                    elem_to_compare_with_middle.1.clone(),
+                    elem_to_insert_into_middle.0,
+                    elem_to_insert_into_middle.1.clone(),
                 );
                 res_ops.push(Op::Insert);
-                res_rows.push(elem_to_compare_with_middle.1);
+                res_rows.push(elem_to_insert_into_middle.1);
                 continue;
             }
-            // If the row in the range of [offset, offset+limit), the largest row in
-            // `cache.middle` needs to be removed.
-            let res = self.cache.middle.pop_last().unwrap();
+
+            // The row must be in the range of [offset, offset+limit).
+            // the largest row in `cache.middle` needs to be removed.
+            let middle_last = self.cache.middle.pop_last().unwrap();
+            debug_assert!(elem_to_insert_into_middle.0 < middle_last.0);
+
             res_ops.push(Op::Delete);
-            res_rows.push(res.1.clone());
-            self.managed_state.delete(&res.0, res.1);
+            res_rows.push(middle_last.1.clone());
+            self.managed_state.delete(&middle_last.0, middle_last.1);
 
             res_ops.push(Op::Insert);
-            res_rows.push(elem_to_compare_with_middle.1.clone());
+            res_rows.push(elem_to_insert_into_middle.1.clone());
             self.cache
                 .middle
-                .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
+                .insert(elem_to_insert_into_middle.0, elem_to_insert_into_middle.1);
 
-            // Unlike normal topN, append only topN does not necessarily use the high part of the
-            // cache
+            // Unlike normal topN, append only topN does not use the high part of the cache.
         }
 
         generate_output(res_rows, res_ops, &self.schema)
@@ -221,8 +216,9 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     }
 
     async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+        self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(None, &mut self.cache, epoch)
+            .init_topn_cache(None, &mut self.cache)
             .await
     }
 }

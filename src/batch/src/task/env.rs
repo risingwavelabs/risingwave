@@ -93,7 +93,7 @@ impl BatchEnvironment {
         use risingwave_storage::monitor::StateStoreMetrics;
 
         BatchEnvironment {
-            task_manager: Arc::new(BatchManager::new()),
+            task_manager: Arc::new(BatchManager::new(None)),
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_manager: std::sync::Arc::new(MemSourceManager::default()),
             config: Arc::new(BatchConfig::default()),
@@ -103,7 +103,7 @@ impl BatchEnvironment {
             )),
             task_metrics_manager: Arc::new(BatchTaskMetricsManager::for_test()),
             stats: Arc::new(BatchMetrics::for_test()),
-            client_pool: Arc::new(ComputeClientPool::new(u64::MAX)),
+            client_pool: Arc::new(ComputeClientPool::default()),
         }
     }
 

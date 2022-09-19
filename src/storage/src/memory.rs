@@ -15,36 +15,161 @@
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::iter::Fuse;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use lazy_static::lazy_static;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 use crate::hummock::local_version_manager::SyncResult;
-use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
+
+mod batched_iter {
+    use itertools::Itertools;
+
+    use super::*;
+
+    /// A utility struct for iterating over a range of keys in a locked `BTreeMap`, which will batch
+    /// some records to make a trade-off between the copying overhead and the times of acquiring
+    /// the lock.
+    ///
+    /// Therefore, it's not guaranteed that we're iterating over a consistent snapshot of the map.
+    /// Users should handle MVCC by themselves.
+    pub struct Iter<K, V> {
+        inner: Arc<RwLock<BTreeMap<K, V>>>,
+        range: (Bound<K>, Bound<K>),
+        current: std::vec::IntoIter<(K, V)>,
+    }
+
+    impl<K, V> Iter<K, V> {
+        pub fn new(inner: Arc<RwLock<BTreeMap<K, V>>>, range: (Bound<K>, Bound<K>)) -> Self {
+            Self {
+                inner,
+                range,
+                current: Vec::new().into_iter(),
+            }
+        }
+    }
+
+    impl<K, V> Iter<K, V>
+    where
+        K: Ord + Clone,
+        V: Clone,
+    {
+        const BATCH_SIZE: usize = 256;
+
+        /// Get the next batch of records and fill the `current` buffer.
+        fn refill(&mut self) {
+            assert!(self.current.is_empty());
+
+            let batch: Vec<(K, V)> = self
+                .inner
+                .read()
+                .range((self.range.0.as_ref(), self.range.1.as_ref()))
+                .take(Self::BATCH_SIZE)
+                .map(|(k, v)| (K::clone(k), V::clone(v)))
+                .collect_vec();
+
+            if let Some((last_key, _)) = batch.last() {
+                self.range.0 = Bound::Excluded(K::clone(last_key));
+            }
+            self.current = batch.into_iter();
+        }
+    }
+
+    impl<K, V> Iterator for Iter<K, V>
+    where
+        K: Ord + Clone,
+        V: Clone,
+    {
+        type Item = (K, V);
+
+        fn next(&mut self) -> Option<Self::Item> {
+            match self.current.next() {
+                Some(r) => Some(r),
+                None => {
+                    self.refill();
+                    self.current.next()
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use rand::Rng;
+
+        use super::*;
+
+        #[test]
+        fn test_iter_chaos() {
+            let key_range = 1..=10000;
+            let map: BTreeMap<i32, Arc<str>> = key_range
+                .clone()
+                .map(|k| (k, k.to_string().into()))
+                .collect();
+            let map = Arc::new(RwLock::new(map));
+
+            let rand_bound = || {
+                let key = rand::thread_rng().gen_range(key_range.clone());
+                match rand::thread_rng().gen_range(1..=5) {
+                    1 | 2 => Bound::Included(key),
+                    3 | 4 => Bound::Excluded(key),
+                    _ => Bound::Unbounded,
+                }
+            };
+
+            for _ in 0..1000 {
+                let range = loop {
+                    let range = (rand_bound(), rand_bound());
+                    let (start, end) = (range.start_bound(), range.end_bound());
+
+                    // Filter out invalid ranges. Code migrated from `BTreeMap::range`.
+                    match (start, end) {
+                        (Bound::Excluded(s), Bound::Excluded(e)) if s == e => {
+                            continue;
+                        }
+                        (
+                            Bound::Included(s) | Bound::Excluded(s),
+                            Bound::Included(e) | Bound::Excluded(e),
+                        ) if s > e => {
+                            continue;
+                        }
+                        _ => break range,
+                    }
+                };
+
+                let v1 = Iter::new(map.clone(), range).collect_vec();
+                let v2 = map
+                    .read()
+                    .range(range)
+                    .map(|(&k, v)| (k, v.clone()))
+                    .collect_vec();
+
+                // Items iterated from the batched iterator should be the same as normal iterator.
+                assert_eq!(v1, v2);
+            }
+        }
+    }
+}
 
 type KeyWithEpoch = (Bytes, Reverse<u64>);
 
 /// An in-memory state store
 ///
 /// The in-memory state store is a [`BTreeMap`], which maps (key, epoch) to value. It never does GC,
-/// so the memory usage will be high. At the same time, every time we create a new iterator on
-/// `BTreeMap`, it will fully clone the map, so as to act as a snapshot. Therefore, in-memory state
-/// store should never be used in production.
+/// so the memory usage will be high. Therefore, in-memory state store should never be used in
+/// production.
 #[derive(Clone, Default)]
 pub struct MemoryStateStore {
-    /// Stores (key, epoch) -> user value. We currently don't consider value meta here.
+    /// Stores (key, epoch) -> user value.
     inner: Arc<RwLock<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
-    /// current largest committed epoch,
-    epoch: Option<u64>,
 }
 
 fn to_bytes_range<R, B>(range: R) -> (Bound<KeyWithEpoch>, Bound<KeyWithEpoch>)
@@ -71,29 +196,8 @@ impl MemoryStateStore {
     }
 
     pub fn shared() -> Self {
-        lazy_static! {
-            static ref STORE: MemoryStateStore = MemoryStateStore::new();
-        }
+        static STORE: LazyLock<MemoryStateStore> = LazyLock::new(MemoryStateStore::new);
         STORE.clone()
-    }
-
-    pub fn commit_epoch(&mut self, epoch: u64) -> StorageResult<()> {
-        match self.epoch {
-            None => {
-                self.epoch = Some(epoch);
-                Ok(())
-            }
-            Some(current_epoch) => {
-                if current_epoch > epoch {
-                    Err(StorageError::Hummock(HummockError::expired_epoch(
-                        current_epoch,
-                        epoch,
-                    )))
-                } else {
-                    Ok(())
-                }
-            }
-        }
     }
 }
 
@@ -145,11 +249,11 @@ impl StateStore for MemoryStateStore {
                 if *key_epoch > epoch {
                     continue;
                 }
-                if Some(key) != last_key.as_ref() {
+                if Some(key) != last_key {
                     if let Some(value) = value {
                         data.push((key.clone(), value.clone()));
                     }
-                    last_key = Some(key.clone());
+                    last_key = Some(key);
                 }
                 if let Some(limit) = limit && data.len() >= limit {
                     break;
@@ -201,10 +305,8 @@ impl StateStore for MemoryStateStore {
     {
         async move {
             Ok(MemoryStateStoreIter::new(
-                self.scan(None, key_range, None, read_options)
-                    .await
-                    .unwrap()
-                    .into_iter(),
+                batched_iter::Iter::new(self.inner.clone(), to_bytes_range(key_range)),
+                read_options.epoch,
             ))
         }
     }
@@ -223,7 +325,7 @@ impl StateStore for MemoryStateStore {
 
     fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
-            // memory backend doesn't support wait for epoch, so this is a no-op.
+            // memory backend doesn't need to wait for epoch, so this is a no-op.
             Ok(())
         }
     }
@@ -237,7 +339,7 @@ impl StateStore for MemoryStateStore {
 
     fn await_sync_epoch(&self, _epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
         async move {
-            // memory backend doesn't support push to S3, so this is a no-op
+            // memory backend doesn't need to push to S3, so this is a no-op
             Ok(SyncResult {
                 ..Default::default()
             })
@@ -252,25 +354,42 @@ impl StateStore for MemoryStateStore {
 }
 
 pub struct MemoryStateStoreIter {
-    inner: std::vec::IntoIter<(Bytes, Bytes)>,
+    inner: Fuse<batched_iter::Iter<KeyWithEpoch, Option<Bytes>>>,
+
+    epoch: u64,
+
+    last_key: Option<Bytes>,
 }
 
 impl MemoryStateStoreIter {
-    fn new(iter: std::vec::IntoIter<(Bytes, Bytes)>) -> Self {
-        Self { inner: iter }
+    pub fn new(inner: batched_iter::Iter<KeyWithEpoch, Option<Bytes>>, epoch: u64) -> Self {
+        Self {
+            inner: inner.fuse(),
+            epoch,
+            last_key: None,
+        }
     }
 }
 
 impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
 
-    type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
+    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            let item = self.inner.next();
-            Ok(item)
+            for ((key, Reverse(key_epoch)), value) in self.inner.by_ref() {
+                if key_epoch > self.epoch {
+                    continue;
+                }
+                if Some(&key) != self.last_key.as_ref() {
+                    self.last_key = Some(key.clone());
+                    if let Some(value) = value {
+                        return Ok(Some((key, value)));
+                    }
+                }
+            }
+            Ok(None)
         }
     }
 }
@@ -285,14 +404,8 @@ mod tests {
         state_store
             .ingest_batch(
                 vec![
-                    (
-                        b"a".to_vec().into(),
-                        StorageValue::new_default_put(b"v1".to_vec()),
-                    ),
-                    (
-                        b"b".to_vec().into(),
-                        StorageValue::new_default_put(b"v1".to_vec()),
-                    ),
+                    (b"a".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
+                    (b"b".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
                 ],
                 WriteOptions {
                     epoch: 0,
@@ -304,11 +417,8 @@ mod tests {
         state_store
             .ingest_batch(
                 vec![
-                    (
-                        b"a".to_vec().into(),
-                        StorageValue::new_default_put(b"v2".to_vec()),
-                    ),
-                    (b"b".to_vec().into(), StorageValue::new_default_delete()),
+                    (b"a".to_vec().into(), StorageValue::new_put(b"v2".to_vec())),
+                    (b"b".to_vec().into(), StorageValue::new_delete()),
                 ],
                 WriteOptions {
                     epoch: 1,

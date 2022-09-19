@@ -15,20 +15,24 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use enum_as_inner::EnumAsInner;
 use futures::future::{select, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, BoxedMessageStream, Message, StreamChunk};
+use super::{Barrier, BoxedMessageStream, Message, StreamChunk, StreamExecutorResult};
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
 
-#[derive(Debug, PartialEq)]
+pub type AlignedMessageStreamItem = StreamExecutorResult<AlignedMessage>;
+pub trait AlignedMessageStream = futures::Stream<Item = AlignedMessageStreamItem> + Send;
+
+#[derive(Debug, EnumAsInner, PartialEq)]
 pub enum AlignedMessage {
+    Barrier(Barrier),
     Left(StreamChunk),
     Right(StreamChunk),
-    Barrier(Barrier),
 }
 
 #[try_stream(ok = AlignedMessage, error = StreamExecutorError)]
