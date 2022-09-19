@@ -779,10 +779,9 @@ impl LocalVersionManager {
                             upload_handle_manager.add_epoch_handle(sync_epoch, once(join_handle));
                         }
                         SyncUncommittedDataStage::Syncing(_) => {
-                            assert!(
-                                sync_data.is_failed(),
-                                "a sync epoch must be failed if a sync task is finished but still at stage Syncing"
-                            );
+                            unreachable!("when a join handle is finished, the stage should not be at syncing");
+                        }
+                        SyncUncommittedDataStage::Failed(_) => {
                             send_sync_result(
                                 &mut pending_sync_requests,
                                 sync_epoch,

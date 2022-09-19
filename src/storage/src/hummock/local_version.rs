@@ -64,6 +64,8 @@ pub enum SyncUncommittedDataStage {
     CheckpointEpochSealed(BTreeMap<HummockEpoch, SharedBuffer>),
     /// Task payload when we start syncing
     Syncing(OrderSortedUncommittedData),
+    /// Sync task is failed
+    Failed(OrderSortedUncommittedData),
     /// After we finish syncing, we changed `Syncing` to `Synced`.
     Synced(Vec<LocalSstableInfo>, usize),
 }
@@ -78,8 +80,6 @@ pub struct SyncUncommittedData {
     // newer epochs come first
     epochs: Vec<HummockEpoch>,
     stage: SyncUncommittedDataStage,
-
-    is_failed: bool,
 }
 
 // state transition
@@ -95,7 +95,6 @@ impl SyncUncommittedData {
             prev_max_sync_epoch,
             epochs,
             stage: SyncUncommittedDataStage::CheckpointEpochSealed(shared_buffer_data),
-            is_failed: false,
         }
     }
 
@@ -137,11 +136,15 @@ impl SyncUncommittedData {
     }
 
     fn failed(&mut self) {
-        self.is_failed = true;
-    }
-
-    pub fn is_failed(&self) -> bool {
-        self.is_failed
+        let payload = match &mut self.stage {
+            SyncUncommittedDataStage::Syncing(payload) => {
+                let mut owned_payload = OrderSortedUncommittedData::default();
+                swap(payload, &mut owned_payload);
+                owned_payload
+            }
+            invalid_stage => unreachable!("fail at invalid stage: {:?}", invalid_stage),
+        };
+        self.stage = SyncUncommittedDataStage::Failed(payload);
     }
 
     pub fn stage(&self) -> &SyncUncommittedDataStage {
@@ -167,26 +170,29 @@ impl SyncUncommittedData {
                     .flat_map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
                     .collect()
             }
-            SyncUncommittedDataStage::Syncing(task) => task
-                .iter()
-                .map(|order_vec_data| {
-                    order_vec_data
-                        .iter()
-                        .filter(|data| match data {
-                            UncommittedData::Batch(batch) => {
-                                batch.epoch() <= epoch
-                                    && range_overlap(
-                                        key_range,
-                                        batch.start_user_key(),
-                                        batch.end_user_key(),
-                                    )
-                            }
-                            UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
-                        })
-                        .cloned()
-                        .collect_vec()
-                })
-                .collect_vec(),
+            SyncUncommittedDataStage::Syncing(task) | SyncUncommittedDataStage::Failed(task) => {
+                task.iter()
+                    .map(|order_vec_data| {
+                        order_vec_data
+                            .iter()
+                            .filter(|data| match data {
+                                UncommittedData::Batch(batch) => {
+                                    batch.epoch() <= epoch
+                                        && range_overlap(
+                                            key_range,
+                                            batch.start_user_key(),
+                                            batch.end_user_key(),
+                                        )
+                                }
+                                UncommittedData::Sst((_, info)) => {
+                                    filter_single_sst(info, key_range)
+                                }
+                            })
+                            .cloned()
+                            .collect_vec()
+                    })
+                    .collect_vec()
+            }
             SyncUncommittedDataStage::Synced(ssts, _) => vec![ssts
                 .iter()
                 .filter(|(_, info)| filter_single_sst(info, key_range))
