@@ -19,7 +19,7 @@ dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
 dnf install -y gh
 
 echo "--- Release create"
-#gh release create "${BUILDKITE_TAG}" --generate-notes -d -p
+gh release create "${BUILDKITE_TAG}" --generate-notes -d -p
 
 echo "--- Build release asset"
 cargo build -p risingwave_cmd_all --features static-link --profile release
@@ -28,4 +28,4 @@ chmod +x risingwave
 tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
 
 echo "--- Release upload asset"
-#gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
+gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
