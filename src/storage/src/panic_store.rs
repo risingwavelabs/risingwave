@@ -119,13 +119,19 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
+    fn sync(&self, _epoch: u64, _is_checkpoint: bool) -> Self::SyncFuture<'_> {
         async move {
             panic!("should not sync from the panic state store!");
         }
     }
 
-    fn seal_epoch(&self, _epoch: u64) {
+    fn await_sync_epoch(&self, _epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
+        async move {
+            panic!("should not await sync epoch from the panic state store!");
+        }
+    }
+
+    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {
         panic!("should not update current epoch from the panic state store!");
     }
 

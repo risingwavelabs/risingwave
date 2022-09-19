@@ -41,6 +41,7 @@ macro_rules! define_state_store_associated_type {
         type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl SyncFutureTrait<'a>;
+        type AwaitSyncEpochFuture<'a> = impl SyncFutureTrait<'a>;
 
         type BackwardIterFuture<'a, R, B> = impl IterFutureTrait<'a, Self::Iter, R, B>
                                                             where
@@ -86,6 +87,8 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
 
     type SyncFuture<'a>: SyncFutureTrait<'a>;
+
+    type AwaitSyncEpochFuture<'a>: SyncFutureTrait<'a>;
 
     type IterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
     where
@@ -190,10 +193,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Syncs buffered data to S3.
     /// If the epoch is None, all buffered data will be synced.
     /// Otherwise, only data of the provided epoch will be synced.
-    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_>;
+    fn sync(&self, epoch: u64, is_checkpoint: bool) -> Self::SyncFuture<'_>;
+
+    fn await_sync_epoch(&self, epoch: u64) -> Self::AwaitSyncEpochFuture<'_>;
 
     /// update max current epoch in storage.
-    fn seal_epoch(&self, epoch: u64);
+    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {

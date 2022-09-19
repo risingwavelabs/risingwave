@@ -37,6 +37,7 @@ use crate::hummock::iterator::{
     HummockIteratorUnion,
 };
 use crate::hummock::local_version::ReadVersion;
+use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
@@ -597,18 +598,29 @@ impl StateStore for HummockStorage {
         async move { Ok(self.local_version_manager.try_wait_epoch(epoch).await?) }
     }
 
-    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
+    fn sync(&self, epoch: u64, is_checkpoint: bool) -> Self::SyncFuture<'_> {
+        async move {
+            self.seal_epoch(epoch, is_checkpoint);
+            if is_checkpoint {
+                self.await_sync_epoch(epoch).await
+            } else {
+                Ok(SyncResult::default())
+            }
+        }
+    }
+
+    fn await_sync_epoch(&self, epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
         async move {
             let sync_result = self
                 .local_version_manager()
-                .sync_shared_buffer(epoch)
+                .await_sync_shared_buffer(epoch)
                 .await?;
             Ok(sync_result)
         }
     }
 
-    fn seal_epoch(&self, epoch: u64) {
-        self.local_version_manager.seal_epoch(epoch);
+    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+        self.local_version_manager.seal_epoch(epoch, is_checkpoint);
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
