@@ -121,11 +121,13 @@ pub struct SourceDesc {
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
     /// local source metrics
     metrics: Arc<SourceMetrics>,
+    /// The size of channel that connects between `ConnectorSource` and `SourceExecutor`.
+    connector_message_buffer_size: usize,
 }
 
 #[async_trait]
@@ -175,6 +177,7 @@ impl SourceManager for MemSourceManager {
             config,
             columns: columns.clone(),
             parser,
+            connector_message_buffer_size: self.connector_message_buffer_size,
         });
 
         let desc = SourceDesc {
@@ -259,11 +262,22 @@ impl SourceManager for MemSourceManager {
     }
 }
 
+impl Default for MemSourceManager {
+    fn default() -> Self {
+        MemSourceManager {
+            sources: Default::default(),
+            metrics: Default::default(),
+            connector_message_buffer_size: 16,
+        }
+    }
+}
+
 impl MemSourceManager {
-    pub fn new(metrics: Arc<SourceMetrics>) -> Self {
+    pub fn new(metrics: Arc<SourceMetrics>, connector_message_buffer_size: usize) -> Self {
         MemSourceManager {
             sources: Mutex::new(HashMap::new()),
             metrics,
+            connector_message_buffer_size,
         }
     }
 
