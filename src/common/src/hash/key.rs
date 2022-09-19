@@ -32,7 +32,7 @@ use crate::types::{
     NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode,
     VIRTUAL_NODE_COUNT,
 };
-use crate::util::hash_util::CRC32FastBuilder;
+use crate::util::hash_util::Crc32FastBuilder;
 
 /// This file contains implementation for hash key serialization for
 /// hash-agg, hash-join, and perhaps other hash-based operators.
@@ -101,7 +101,7 @@ pub trait HashKey:
     type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
-        let hash_codes = data_chunk.get_hash_values(column_idxes, CRC32FastBuilder)?;
+        let hash_codes = data_chunk.get_hash_values(column_idxes, Crc32FastBuilder);
         Ok(Self::build_from_hash_code(
             column_idxes,
             data_chunk,

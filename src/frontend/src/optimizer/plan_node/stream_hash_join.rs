@@ -297,11 +297,17 @@ fn infer_internal_and_degree_table_catalog(
 
     internal_table_catalog_builder
         .set_properties(base.ctx.inner().with_options.internal_table_subset());
+    let value_indices = vec![degree_table_catalog_builder.get_columns().len() - 1];
     degree_table_catalog_builder
         .set_properties(base.ctx.inner().with_options.internal_table_subset());
 
     (
         internal_table_catalog_builder.build(internal_table_dist_keys, append_only, None),
-        degree_table_catalog_builder.build(degree_table_dist_keys, append_only, None),
+        degree_table_catalog_builder.build_with_value_indices(
+            degree_table_dist_keys,
+            append_only,
+            None,
+            value_indices,
+        ),
     )
 }

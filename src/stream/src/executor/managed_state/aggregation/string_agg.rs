@@ -189,12 +189,10 @@ impl<S: StateStore> ManagedStringAggState<S> {
 
     async fn get_output_inner(
         &mut self,
-        epoch: u64,
         state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         if !self.cache_synced {
-            let all_data_iter =
-                iter_state_table(state_table, epoch, self.group_key.as_ref()).await?;
+            let all_data_iter = iter_state_table(state_table, self.group_key.as_ref()).await?;
             pin_mut!(all_data_iter);
 
             self.cache.clear();
@@ -226,18 +224,13 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl], // contains all upstream columns
-        _epoch: u64,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         self.apply_chunk_inner(ops, visibility, columns, state_table)
     }
 
-    async fn get_output(
-        &mut self,
-        epoch: u64,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Datum> {
-        self.get_output_inner(epoch, state_table).await
+    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
+        self.get_output_inner(state_table).await
     }
 
     fn is_dirty(&self) -> bool {
@@ -308,6 +301,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         let chunk = StreamChunk::from_pretty(
             " T T i i I
@@ -319,20 +314,14 @@ mod tests {
         let (ops, columns, visibility) = chunk.into_inner();
         let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
         agg_state
-            .apply_chunk(
-                &ops,
-                visibility.as_ref(),
-                &column_refs,
-                epoch,
-                &mut state_table,
-            )
+            .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
             .await?;
 
         epoch += 1;
         agg_state.flush(&mut state_table)?;
         state_table.commit(epoch).await.unwrap();
 
-        let res = agg_state.get_output(epoch, &state_table).await?;
+        let res = agg_state.get_output(&state_table).await?;
         match res {
             Some(ScalarImpl::Utf8(s)) => {
                 // should be "a,c" or "c,a"
@@ -388,6 +377,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         let chunk = StreamChunk::from_pretty(
             " T T I
@@ -399,20 +390,14 @@ mod tests {
         let (ops, columns, visibility) = chunk.into_inner();
         let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
         agg_state
-            .apply_chunk(
-                &ops,
-                visibility.as_ref(),
-                &column_refs,
-                epoch,
-                &mut state_table,
-            )
+            .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
             .await?;
 
         epoch += 1;
         agg_state.flush(&mut state_table)?;
         state_table.commit(epoch).await.unwrap();
 
-        let res = agg_state.get_output(epoch, &state_table).await?;
+        let res = agg_state.get_output(&state_table).await?;
         match res {
             Some(ScalarImpl::Utf8(s)) => {
                 // should be something like "ac4d"
@@ -477,6 +462,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -489,20 +476,14 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             agg_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = agg_state.get_output(epoch, &state_table).await?;
+            let res = agg_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "c,a".to_string());
@@ -520,20 +501,13 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             agg_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
-            epoch += 1;
 
-            let res = agg_state.get_output(epoch, &state_table).await?;
+            let res = agg_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "d_c,a+e".to_string());
@@ -593,7 +567,8 @@ mod tests {
         );
 
         let mut epoch = 0;
-
+        state_table.init_epoch(epoch);
+        epoch += 1;
         {
             let chunk = StreamChunk::from_pretty(
                 " T T i i I
@@ -604,20 +579,14 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             agg_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = agg_state.get_output(epoch, &state_table).await?;
+            let res = agg_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "a_b".to_string());
@@ -635,20 +604,13 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             agg_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
-            epoch += 1;
 
-            let res = agg_state.get_output(epoch, &state_table).await?;
+            let res = agg_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "a,e_b".to_string());

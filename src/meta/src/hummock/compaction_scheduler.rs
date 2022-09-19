@@ -143,8 +143,15 @@ where
                 }
             };
             sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
-            self.pick_and_assign(compaction_group, request_channel.clone())
+            let status = self
+                .pick_and_assign(compaction_group, request_channel.clone())
                 .await;
+            if let ScheduleStatus::NoAvailableCompactor(_) = status {
+                tokio::time::sleep(Duration::from_secs(
+                    self.env.opts.no_available_compactor_stall_sec,
+                ))
+                .await;
+            }
         }
         tracing::info!("Compaction scheduler is stopped");
     }

@@ -131,7 +131,7 @@ impl<'a, S: StateStore> KeySpaceWriteBatch<'a, S> {
 
     /// Treats the keyspace as a single key, and delete a value.
     pub fn delete_single(&mut self) {
-        self.do_push(None, StorageValue::new_default_delete());
+        self.do_push(None, StorageValue::new_delete());
     }
 
     /// Puts a value, with the key prepended by the prefix of `keyspace`, like `[prefix | given
@@ -143,7 +143,7 @@ impl<'a, S: StateStore> KeySpaceWriteBatch<'a, S> {
     /// Deletes a value, with the key prepended by the prefix of `keyspace`, like `[prefix | given
     /// key]`.
     pub fn delete(&mut self, key: impl AsRef<[u8]>) {
-        self.do_push(Some(key.as_ref()), StorageValue::new_default_delete());
+        self.do_push(Some(key.as_ref()), StorageValue::new_delete());
     }
 
     pub async fn ingest(self) -> StorageResult<()> {
@@ -170,9 +170,9 @@ mod tests {
             epoch: 1,
             table_id: Default::default(),
         });
-        key_space_batch.put(Bytes::from("aa"), StorageValue::new_default_put("444"));
-        key_space_batch.put(Bytes::from("cc"), StorageValue::new_default_put("444"));
-        key_space_batch.put(Bytes::from("bb"), StorageValue::new_default_put("444"));
+        key_space_batch.put(Bytes::from("aa"), StorageValue::new_put("444"));
+        key_space_batch.put(Bytes::from("cc"), StorageValue::new_put("444"));
+        key_space_batch.put(Bytes::from("bb"), StorageValue::new_put("444"));
         key_space_batch.delete(Bytes::from("aa"));
 
         key_space_batch

@@ -45,6 +45,13 @@
 - input: CREATE TABLE T (a STRUCT<v1 INT>)
   formatted_sql: CREATE TABLE T (a STRUCT<v1 INT>)
 
+- input: CREATE TABLE T (FULL INT)
+  error_msg: |
+    sql parser error: syntax error at or near "FULL"
+
+- input: CREATE TABLE T ("FULL" INT)
+  formatted_sql: CREATE TABLE T ("FULL" INT)
+
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
 

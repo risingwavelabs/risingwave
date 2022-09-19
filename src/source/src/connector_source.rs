@@ -14,7 +14,7 @@
 
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -47,9 +47,7 @@ impl SourceContext {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref DEFAULT_SPLIT_ID: SplitId = "None".into();
-}
+static DEFAULT_SPLIT_ID: LazyLock<SplitId> = LazyLock::new(|| "None".into());
 
 struct InnerConnectorSourceReader {
     reader: SplitReaderImpl,
@@ -209,7 +207,7 @@ impl ConnectorSourceReader {
             }
         }
 
-        let chunk = builder.finish()?;
+        let chunk = builder.finish();
 
         Ok(StreamChunkWithState {
             chunk,

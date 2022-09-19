@@ -376,7 +376,7 @@ In RisingWave, deterministic simulation is supported in both unit test and end-t
 # run deterministic unit test
 ./risedev stest
 # run deterministic end-to-end test
-./risedev sslt './e2e_test/path/to/directory/**/*.slt'
+./risedev sslt -- './e2e_test/path/to/directory/**/*.slt'
 ```
 
 When your program panics, the simulator will print the random seed of this run:

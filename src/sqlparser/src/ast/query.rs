@@ -296,10 +296,6 @@ pub enum TableFactor {
     Table {
         name: ObjectName,
         alias: Option<TableAlias>,
-        /// Arguments of a table-valued function, as supported by Postgres
-        /// and MSSQL. Note that deprecated MSSQL `FROM foo (NOLOCK)` syntax
-        /// will also be parsed as `args`.
-        args: Vec<FunctionArg>,
     },
     Derived {
         lateral: bool,
@@ -308,8 +304,9 @@ pub enum TableFactor {
     },
     /// `<expr>[ AS <alias> ]`
     TableFunction {
-        expr: Expr,
+        name: ObjectName,
         alias: Option<TableAlias>,
+        args: Vec<FunctionArg>,
     },
     /// Represents a parenthesized table factor. The SQL spec only allows a
     /// join expression (`(foo <JOIN> bar [ <JOIN> baz ... ])`) to be nested,
@@ -323,11 +320,8 @@ pub enum TableFactor {
 impl fmt::Display for TableFactor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TableFactor::Table { name, alias, args } => {
+            TableFactor::Table { name, alias } => {
                 write!(f, "{}", name)?;
-                if !args.is_empty() {
-                    write!(f, "({})", display_comma_separated(args))?;
-                }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }
@@ -347,8 +341,8 @@ impl fmt::Display for TableFactor {
                 }
                 Ok(())
             }
-            TableFactor::TableFunction { expr, alias } => {
-                write!(f, "TABLE({})", expr)?;
+            TableFactor::TableFunction { name, alias, args } => {
+                write!(f, "{}({})", name, display_comma_separated(args))?;
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }
