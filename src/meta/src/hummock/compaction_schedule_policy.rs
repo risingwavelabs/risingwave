@@ -205,7 +205,7 @@ pub struct ScoredPolicy {
 
 impl ScoredPolicy {
     /// Initialize policy with already assigned tasks.
-    pub fn new_with_task_assignment(task_assignment: &[CompactTaskAssignment]) -> Self {
+    pub fn with_task_assignment(task_assignment: &[CompactTaskAssignment]) -> Self {
         let mut compactor_to_score = HashMap::new();
         task_assignment.iter().for_each(|assignment| {
             let score_delta =
@@ -541,7 +541,7 @@ mod tests {
                 });
             });
 
-        let mut policy = ScoredPolicy::new_with_task_assignment(&existing_assignments);
+        let mut policy = ScoredPolicy::with_task_assignment(&existing_assignments);
         assert_eq!(policy.score_to_compactor.len(), 0);
         assert_eq!(policy.context_id_to_score.len(), existing_tasks.len());
 

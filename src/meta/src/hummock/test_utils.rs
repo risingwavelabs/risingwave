@@ -248,7 +248,7 @@ pub async fn setup_compute_env_with_config(
     );
 
     let compaction_group_manager = Arc::new(
-        CompactionGroupManager::new_with_config(env.clone(), config.clone())
+        CompactionGroupManager::with_config(env.clone(), config.clone())
             .await
             .unwrap(),
     );

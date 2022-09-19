@@ -124,14 +124,14 @@ pub struct CompactorManager {
 }
 
 impl CompactorManager {
-    pub async fn new_with_meta<S: MetaStore>(
+    pub async fn with_meta<S: MetaStore>(
         env: MetaSrvEnv<S>,
         task_expiry_seconds: u64,
     ) -> MetaResult<Self> {
         // Retrieve the existing task assignments from metastore.
         let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
         let manager = Self {
-            policy: RwLock::new(Box::new(ScoredPolicy::new_with_task_assignment(
+            policy: RwLock::new(Box::new(ScoredPolicy::with_task_assignment(
                 &task_assignment,
             ))),
             task_expiry_seconds,
@@ -155,7 +155,7 @@ impl CompactorManager {
     }
 
     /// Only used for unit test.
-    pub fn new_with_policy(policy: Box<dyn CompactionSchedulePolicy>) -> Self {
+    pub fn with_policy(policy: Box<dyn CompactionSchedulePolicy>) -> Self {
         Self {
             policy: RwLock::new(policy),
             task_expiry_seconds: 1,
@@ -356,7 +356,7 @@ mod tests {
         };
 
         // Restart. Set task_expiry_seconds to 0 only to speed up test.
-        let compactor_manager = CompactorManager::new_with_meta(env, 0).await.unwrap();
+        let compactor_manager = CompactorManager::with_meta(env, 0).await.unwrap();
         // Because task assignment exists.
         assert_eq!(compactor_manager.task_heartbeats.read().len(), 1);
         // Because compactor gRPC is not established yet.
