@@ -23,10 +23,9 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use minitrace::prelude::*;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
+use risingwave_common::array::{ArrayImpl, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
 use risingwave_connector::source::{ConnectorState, SplitImpl};
 use risingwave_pb::data::Epoch as ProstEpoch;
@@ -41,6 +40,7 @@ use risingwave_pb::stream_plan::{
 };
 use smallvec::SmallVec;
 
+use crate::error::StreamResult;
 use crate::task::ActorId;
 
 mod actor;
@@ -90,7 +90,7 @@ pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
-pub use error::StreamExecutorResult;
+pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::GlobalSimpleAggExecutor;
@@ -186,8 +186,6 @@ impl std::fmt::Debug for BoxedExecutor {
 }
 
 pub const INVALID_EPOCH: u64 = 0;
-
-pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 /// See [`risingwave_pb::stream_plan::barrier::Mutation`] for the semantics of each mutation.
 #[derive(Debug, Clone, PartialEq, EnumAsInner)]
@@ -412,7 +410,7 @@ impl Mutation {
         }
     }
 
-    fn from_protobuf(prost: &ProstMutation) -> Result<Self> {
+    fn from_protobuf(prost: &ProstMutation) -> StreamResult<Self> {
         let mutation = match prost {
             ProstMutation::Stop(stop) => {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
@@ -467,8 +465,7 @@ impl Mutation {
                                     .splits
                                     .iter()
                                     .map(SplitImpl::try_from)
-                                    .collect::<anyhow::Result<Vec<SplitImpl>>>()
-                                    .to_rw_result()?,
+                                    .try_collect()?,
                             ),
                         ));
                     }
@@ -507,7 +504,7 @@ impl Barrier {
         }
     }
 
-    pub fn from_protobuf(prost: &ProstBarrier) -> Result<Self> {
+    pub fn from_protobuf(prost: &ProstBarrier) -> StreamResult<Self> {
         let mutation = prost
             .mutation
             .as_ref()
@@ -557,7 +554,7 @@ impl Message {
         )
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstStreamMessage> {
+    pub fn to_protobuf(&self) -> StreamResult<ProstStreamMessage> {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf();
@@ -571,7 +568,7 @@ impl Message {
         Ok(prost_stream_msg)
     }
 
-    pub fn from_protobuf(prost: &ProstStreamMessage) -> Result<Self> {
+    pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamResult<Self> {
         let res = match prost.get_stream_message()? {
             StreamMessage::StreamChunk(ref stream_chunk) => {
                 Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
@@ -626,7 +623,7 @@ pub async fn expect_first_barrier_from_aligned_stream(
 
 /// `StreamConsumer` is the last step in an actor.
 pub trait StreamConsumer: Send + 'static {
-    type BarrierStream: Stream<Item = Result<Barrier>> + Send;
+    type BarrierStream: Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream;
 }

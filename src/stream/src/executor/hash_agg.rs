@@ -33,6 +33,7 @@ use risingwave_storage::StateStore;
 use super::aggregation::agg_call_filter_res;
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::common::StateTableColumnMapping;
+use crate::error::StreamResult;
 use crate::executor::aggregation::{
     generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
@@ -121,7 +122,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         key_indices: Vec<usize>,
         mut state_tables: Vec<StateTable<S>>,
         state_table_col_mappings: Vec<Vec<usize>>,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
