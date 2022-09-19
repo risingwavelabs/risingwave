@@ -30,17 +30,7 @@ impl StorageValue {
         }
     }
 
-    pub fn new_default_put(user_value: impl Into<Bytes>) -> Self {
-        Self {
-            user_value: Some(user_value.into()),
-        }
-    }
-
     pub fn new_delete() -> Self {
-        Self { user_value: None }
-    }
-
-    pub fn new_default_delete() -> Self {
         Self { user_value: None }
     }
 

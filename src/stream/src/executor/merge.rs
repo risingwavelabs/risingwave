@@ -565,7 +565,7 @@ mod tests {
         assert!(server_run.load(Ordering::SeqCst));
 
         let remote_input = {
-            let pool = ComputeClientPool::new(u64::MAX);
+            let pool = ComputeClientPool::default();
             RemoteInput::new(
                 pool,
                 addr.into(),
