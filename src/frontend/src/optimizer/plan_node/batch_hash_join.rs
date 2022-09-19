@@ -66,6 +66,8 @@ impl BatchHashJoin {
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
+            // we can not derive the hash distribution from the side where outer join can generate a
+            // NULL row
             (Distribution::HashShard(_), Distribution::HashShard(_)) => match logical.join_type() {
                 JoinType::Unspecified => unreachable!(),
                 JoinType::FullOuter => Distribution::SomeShard,

@@ -99,6 +99,8 @@ impl StreamHashJoin {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(left_dist), Distribution::HashShard(right_dist)) => {
+                // we can not derive the hash distribution from the side where outer join can
+                // generate a NULL row
                 match logical.join_type() {
                     JoinType::Unspecified => unreachable!(),
                     JoinType::FullOuter => Distribution::SomeShard,
