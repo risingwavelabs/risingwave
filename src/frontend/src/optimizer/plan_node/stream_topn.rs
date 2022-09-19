@@ -82,6 +82,7 @@ impl StreamNode for StreamTopN {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
+            with_ties: false,
         };
         if self.input().append_only() {
             ProstStreamNode::AppendOnlyTopN(topn_node)

@@ -21,3 +21,6 @@ f2c5758789ddd22ba6edbfeb6d7f5279ac919f9c
 
 # chore: fix typos & add typo checker to ci #4767
 0019e5914beec085fb1d36350d10e85f4b528929
+
+# refactor: Row::serialize() does not need to return Result #5281
+531140508954b13cae4ddc436562719f550e9afb

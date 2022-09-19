@@ -89,4 +89,9 @@ impl OrderedRow {
         res.iter_mut().for_each(|byte| *byte = !*byte);
         Ok(res)
     }
+
+    pub fn prefix(self, n: usize) -> Self {
+        debug_assert!(n <= self.0.len());
+        OrderedRow(self.0[..n].to_vec())
+    }
 }

@@ -100,6 +100,8 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore> {
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
+
+    sort_key_len: usize,
 }
 
 impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
@@ -139,6 +141,7 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
             key_indices,
             group_by,
             caches: HashMap::new(),
+            sort_key_len: order_pairs.len(),
         })
     }
 }
@@ -165,7 +168,8 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
             match entry {
                 Occupied(_) => {}
                 Vacant(entry) => {
-                    let mut topn_cache = TopNCacheWithoutTies::new(self.offset, self.limit);
+                    let mut topn_cache =
+                        TopNCacheWithoutTies::new(self.offset, self.limit, self.sort_key_len);
                     self.managed_state
                         .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
                         .await?;

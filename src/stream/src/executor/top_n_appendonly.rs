@@ -123,7 +123,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCacheWithoutTies::new(num_offset, num_limit),
+            cache: TopNCacheWithoutTies::new(num_offset, num_limit, order_pairs.len()),
             key_indices,
         })
     }

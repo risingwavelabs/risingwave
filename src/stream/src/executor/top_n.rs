@@ -47,6 +47,7 @@ impl<S: StateStore> TopNExecutor<S, TopNCacheWithoutTies> {
     ) -> StreamResult<TopNExecutor<S, TopNCacheWithoutTies>> {
         let info = input.info();
         let schema = input.schema().clone();
+        let sort_key_len = order_pairs.len();
 
         Ok(TopNExecutorWrapper {
             input,
@@ -54,7 +55,7 @@ impl<S: StateStore> TopNExecutor<S, TopNCacheWithoutTies> {
                 info,
                 schema,
                 order_pairs,
-                TopNCacheWithoutTies::new(offset_and_limit.0, offset_and_limit.1),
+                TopNCacheWithoutTies::new(offset_and_limit.0, offset_and_limit.1, sort_key_len),
                 pk_indices,
                 executor_id,
                 key_indices,
@@ -77,6 +78,7 @@ impl<S: StateStore> TopNExecutor<S, TopNCacheWithTies> {
     ) -> StreamResult<TopNExecutor<S, TopNCacheWithTies>> {
         let info = input.info();
         let schema = input.schema().clone();
+        let sort_key_len = order_pairs.len();
 
         Ok(TopNExecutorWrapper {
             input,
@@ -84,7 +86,7 @@ impl<S: StateStore> TopNExecutor<S, TopNCacheWithTies> {
                 info,
                 schema,
                 order_pairs,
-                TopNCacheWithTies::new(offset_and_limit.0, offset_and_limit.1),
+                TopNCacheWithTies::new(offset_and_limit.0, offset_and_limit.1, sort_key_len),
                 pk_indices,
                 executor_id,
                 key_indices,
@@ -124,7 +126,7 @@ const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
 #[async_trait]
 pub trait TopNCache: Send + 'static {
-    fn new(offset: usize, limit: usize) -> Self;
+    fn new(offset: usize, limit: usize, sort_key_len: usize) -> Self;
     fn limit(&self) -> usize;
 
     /// Insert input row to corresponding cache range according to its order key.
@@ -211,7 +213,7 @@ impl TopNCacheWithoutTies {
 
 #[async_trait]
 impl TopNCache for TopNCacheWithoutTies {
-    fn new(offset: usize, limit: usize) -> Self {
+    fn new(offset: usize, limit: usize, _sort_key_len: usize) -> Self {
         assert!(limit != 0);
         Self {
             low: BTreeMap::new(),
@@ -386,6 +388,8 @@ pub struct TopNCacheWithTies {
     pub offset: usize,
     /// Assumption: `limit != 0`
     pub limit: usize,
+
+    pub sort_key_len: usize,
 }
 
 impl TopNCacheWithTies {
@@ -422,7 +426,7 @@ impl TopNCacheWithTies {
 
 #[async_trait]
 impl TopNCache for TopNCacheWithTies {
-    fn new(offset: usize, limit: usize) -> Self {
+    fn new(offset: usize, limit: usize, sort_key_len: usize) -> Self {
         assert!(limit != 0);
         Self {
             low: BTreeMap::new(),
@@ -431,6 +435,7 @@ impl TopNCache for TopNCacheWithTies {
             high_capacity: (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR,
             offset,
             limit,
+            sort_key_len,
         }
     }
 
@@ -452,6 +457,8 @@ impl TopNCache for TopNCacheWithTies {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<Row>,
     ) {
+        let ordered_pk_row = ordered_pk_row.prefix(self.sort_key_len);
+
         if !self.is_low_cache_full() {
             self.low.entry(ordered_pk_row).or_default().insert(row);
             return;
@@ -548,12 +555,14 @@ impl TopNCache for TopNCacheWithTies {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<Row>,
     ) -> StreamExecutorResult<()> {
+        let ordered_pk_row = ordered_pk_row.prefix(self.sort_key_len);
+
         if self.is_middle_cache_full() && ordered_pk_row > *self.middle.last_key_value().unwrap().0
         {
             // The row is in high
             let mut entry = match self.high.entry(ordered_pk_row) {
                 Entry::Occupied(e) => e,
-                Entry::Vacant(_) => unreachable!("Deleting a non-existing row"),
+                Entry::Vacant(e) => unreachable!("Deleting a non-existing row {:?}", e.key()),
             };
             entry.get_mut().remove(&row);
             if entry.get().is_empty() {
@@ -571,62 +580,20 @@ impl TopNCache for TopNCacheWithTies {
                         &mut self.high,
                         self.middle.last_key_value().unwrap().0,
                         self.high_capacity,
+                        self.sort_key_len,
                     )
                     .await?;
             }
 
             let mut entry = match self.middle.entry(ordered_pk_row) {
                 Entry::Occupied(e) => e,
-                Entry::Vacant(_) => unreachable!("Deleting a non-existing row"),
+                Entry::Vacant(e) => unreachable!("Deleting a non-existing row {:?}", e.key()),
             };
             entry.get_mut().remove(&row);
-            if entry.get().is_empty() {
-                entry.remove_entry();
-            }
             res_ops.push(Op::Delete);
             res_rows.push(row.clone());
-
-            // Bring one element, if any, from high cache to middle cache
-            if !self.high.is_empty() {
-                let high_first = self.high.pop_first().unwrap();
-                high_first.1.clone().into_iter().for_each(|row| {
-                    res_ops.push(Op::Insert);
-                    res_rows.push(row);
-                });
-                self.middle.insert(high_first.0, high_first.1);
-            }
-        } else {
-            // The row is in low
-            let mut entry = match self.low.entry(ordered_pk_row) {
-                Entry::Occupied(e) => e,
-                Entry::Vacant(_) => unreachable!("Deleting a non-existing row"),
-            };
-            entry.get_mut().remove(&row);
             if entry.get().is_empty() {
                 entry.remove_entry();
-            }
-
-            // Bring one element, if any, from middle cache to low cache
-            if !self.middle.is_empty() {
-                let middle_first = self.middle.pop_first().unwrap();
-                middle_first.1.clone().into_iter().for_each(|row| {
-                    res_ops.push(Op::Insert);
-                    res_rows.push(row);
-                });
-                self.low.insert(middle_first.0, middle_first.1);
-
-                // Try to fill the high cache if it is empty
-                if self.high.is_empty() {
-                    managed_state
-                        .fill_cache_with_ties(
-                            pk_prefix,
-                            &mut self.high,
-                            self.middle.last_key_value().unwrap().0,
-                            self.high_capacity,
-                        )
-                        .await?;
-                }
-
                 // Bring one element, if any, from high cache to middle cache
                 if !self.high.is_empty() {
                     let high_first = self.high.pop_first().unwrap();
@@ -635,6 +602,48 @@ impl TopNCache for TopNCacheWithTies {
                         res_rows.push(row);
                     });
                     self.middle.insert(high_first.0, high_first.1);
+                }
+            }
+        } else {
+            // The row is in low
+            let mut entry = match self.low.entry(ordered_pk_row) {
+                Entry::Occupied(e) => e,
+                Entry::Vacant(e) => unreachable!("Deleting a non-existing row {:?}", e.key()),
+            };
+            entry.get_mut().remove(&row);
+            if entry.get().is_empty() {
+                entry.remove_entry();
+                // Bring one element, if any, from middle cache to low cache
+                if !self.middle.is_empty() {
+                    let middle_first = self.middle.pop_first().unwrap();
+                    middle_first.1.clone().into_iter().for_each(|row| {
+                        res_ops.push(Op::Delete);
+                        res_rows.push(row);
+                    });
+                    self.low.insert(middle_first.0, middle_first.1);
+
+                    // Try to fill the high cache if it is empty
+                    if self.high.is_empty() {
+                        managed_state
+                            .fill_cache_with_ties(
+                                pk_prefix,
+                                &mut self.high,
+                                self.middle.last_key_value().unwrap().0,
+                                self.high_capacity,
+                                self.sort_key_len,
+                            )
+                            .await?;
+                    }
+
+                    // Bring one element, if any, from high cache to middle cache
+                    if !self.high.is_empty() {
+                        let high_first = self.high.pop_first().unwrap();
+                        high_first.1.clone().into_iter().for_each(|row| {
+                            res_ops.push(Op::Insert);
+                            res_rows.push(row);
+                        });
+                        self.middle.insert(high_first.0, high_first.1);
+                    }
                 }
             }
         }
@@ -784,309 +793,205 @@ mod tests {
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Barrier, Message};
 
-    fn create_stream_chunks() -> Vec<StreamChunk> {
-        let chunk1 = StreamChunk::from_pretty(
-            "  I I
-            +  1 0
-            +  2 1
-            +  3 2
-            + 10 3
-            +  9 4
-            +  8 5",
-        );
-        let chunk2 = StreamChunk::from_pretty(
-            "  I I
-            +  7 6
-            -  3 2
-            -  1 0
-            +  5 7
-            -  2 1
-            + 11 8",
-        );
-        let chunk3 = StreamChunk::from_pretty(
-            "  I  I
-            +  6  9
-            + 12 10
-            + 13 11
-            + 14 12",
-        );
-        let chunk4 = StreamChunk::from_pretty(
-            "  I  I
-            -  5  7
-            -  6  9
-            - 11  8",
-        );
-        vec![chunk1, chunk2, chunk3, chunk4]
-    }
-
-    fn create_schema() -> Schema {
-        Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        }
-    }
-
-    fn create_order_pairs() -> Vec<OrderPair> {
-        vec![
-            OrderPair::new(0, OrderType::Ascending),
-            OrderPair::new(1, OrderType::Ascending),
-        ]
-    }
-
-    fn create_source_new() -> Box<MockSource> {
-        let mut chunks = vec![
-            StreamChunk::from_pretty(
-                " I I I I
-            +  1 1 4 1001",
-            ),
-            StreamChunk::from_pretty(
-                " I I I I
-            +  5 1 4 1002 ",
-            ),
-            StreamChunk::from_pretty(
-                " I I I I
-            +  1 9 1 1003
-            +  9 8 1 1004
-            +  0 2 3 1005",
-            ),
-            StreamChunk::from_pretty(
-                " I I I I
-            +  1 0 2 1006",
-            ),
-        ];
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        };
-        Box::new(MockSource::with_messages(
-            schema,
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Chunk(std::mem::take(&mut chunks[2])),
-                Message::Chunk(std::mem::take(&mut chunks[3])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-            ],
-        ))
-    }
-
-    fn create_source_new_before_recovery() -> Box<MockSource> {
-        let mut chunks = vec![
-            StreamChunk::from_pretty(
-                " I I I I
-            +  1 1 4 1001",
-            ),
-            StreamChunk::from_pretty(
-                " I I I I
-            +  5 1 4 1002 ",
-            ),
-        ];
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        };
-        Box::new(MockSource::with_messages(
-            schema,
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-            ],
-        ))
-    }
-
-    fn create_source_new_after_recovery() -> Box<MockSource> {
-        let mut chunks = vec![
-            StreamChunk::from_pretty(
-                " I I I I
-            +  1 9 1 1003
-            +  9 8 1 1004
-            +  0 2 3 1005",
-            ),
-            StreamChunk::from_pretty(
-                " I I I I
-            +  1 0 2 1006",
-            ),
-        ];
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        };
-        Box::new(MockSource::with_messages(
-            schema,
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(3)),
-                Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(4)),
-            ],
-        ))
-    }
-
-    fn create_source() -> Box<MockSource> {
-        let mut chunks = create_stream_chunks();
-        let schema = create_schema();
-        Box::new(MockSource::with_messages(
-            schema,
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-                Message::Chunk(std::mem::take(&mut chunks[2])),
-                Message::Barrier(Barrier::new_test_barrier(4)),
-                Message::Chunk(std::mem::take(&mut chunks[3])),
-                Message::Barrier(Barrier::new_test_barrier(5)),
-            ],
-        ))
-    }
-    #[tokio::test]
-    async fn test_top_n_executor_with_offset() {
-        let order_types = create_order_pairs();
-        let source = create_source();
-        let state_table = create_in_memory_state_table(
-            &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
-            &[0, 1],
-        );
-        let top_n_executor = Box::new(
-            TopNExecutor::new(
-                source as Box<dyn Executor>,
-                order_types,
-                (3, 1000),
-                vec![0, 1],
-                1,
-                vec![],
-                state_table,
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
-
-        // consume the init barrier
-        top_n_executor.next().await.unwrap().unwrap();
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
+    mod test1 {
+        use super::*;
+        fn create_stream_chunks() -> Vec<StreamChunk> {
+            let chunk1 = StreamChunk::from_pretty(
                 "  I I
+                +  1 0
+                +  2 1
+                +  3 2
+                + 10 3
+                +  9 4
+                +  8 5",
+            );
+            let chunk2 = StreamChunk::from_pretty(
+                "  I I
+                +  7 6
+                -  3 2
+                -  1 0
+                +  5 7
+                -  2 1
+                + 11 8",
+            );
+            let chunk3 = StreamChunk::from_pretty(
+                "  I  I
+                +  6  9
+                + 12 10
+                + 13 11
+                + 14 12",
+            );
+            let chunk4 = StreamChunk::from_pretty(
+                "  I  I
+                -  5  7
+                -  6  9
+                - 11  8",
+            );
+            vec![chunk1, chunk2, chunk3, chunk4]
+        }
+
+        fn create_schema() -> Schema {
+            Schema {
+                fields: vec![
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                ],
+            }
+        }
+
+        fn create_order_pairs() -> Vec<OrderPair> {
+            vec![
+                OrderPair::new(0, OrderType::Ascending),
+                OrderPair::new(1, OrderType::Ascending),
+            ]
+        }
+
+        fn create_source() -> Box<MockSource> {
+            let mut chunks = create_stream_chunks();
+            let schema = create_schema();
+            Box::new(MockSource::with_messages(
+                schema,
+                PkIndices::new(),
+                vec![
+                    Message::Barrier(Barrier::new_test_barrier(1)),
+                    Message::Chunk(std::mem::take(&mut chunks[0])),
+                    Message::Barrier(Barrier::new_test_barrier(2)),
+                    Message::Chunk(std::mem::take(&mut chunks[1])),
+                    Message::Barrier(Barrier::new_test_barrier(3)),
+                    Message::Chunk(std::mem::take(&mut chunks[2])),
+                    Message::Barrier(Barrier::new_test_barrier(4)),
+                    Message::Chunk(std::mem::take(&mut chunks[3])),
+                    Message::Barrier(Barrier::new_test_barrier(5)),
+                ],
+            ))
+        }
+
+        #[tokio::test]
+        async fn test_top_n_executor_with_offset() {
+            let order_types = create_order_pairs();
+            let source = create_source();
+            let state_table = create_in_memory_state_table(
+                &[DataType::Int64, DataType::Int64],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 1],
+            );
+            let top_n_executor = Box::new(
+                TopNExecutor::new(
+                    source as Box<dyn Executor>,
+                    order_types,
+                    (3, 1000),
+                    vec![0, 1],
+                    1,
+                    vec![],
+                    state_table,
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor.execute();
+
+            // consume the init barrier
+            top_n_executor.next().await.unwrap().unwrap();
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
                 + 10 3
                 +  9 4
                 +  8 5"
-            )
-        );
-        // Barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
+                )
+            );
+            // Barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
                 +  7 6
                 - 7 6
                 - 8 5
                 +  8 5
                 - 8 5
                 + 11 8"
-            )
-        );
+                )
+            );
 
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        // (8, 9, 10, 11, 12, 13, 14)
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I  I
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            // (8, 9, 10, 11, 12, 13, 14)
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I  I
                 +  8  5
                 + 12 10
                 + 13 11
                 + 14 12"
-            )
-        );
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
+                )
+            );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
 
-        // (10, 12, 13, 14)
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
+            // (10, 12, 13, 14)
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
                 - 8 5
                 - 9 4
                 - 11 8"
-            )
-        );
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-    }
+                )
+            );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+        }
 
-    #[tokio::test]
-    async fn test_top_n_executor_with_limit() {
-        let order_types = create_order_pairs();
-        let source = create_source();
-        let state_table = create_in_memory_state_table(
-            &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
-            &[0, 1],
-        );
-        let top_n_executor = Box::new(
-            TopNExecutor::new(
-                source as Box<dyn Executor>,
-                order_types,
-                (0, 4),
-                vec![0, 1],
-                1,
-                vec![],
-                state_table,
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
+        #[tokio::test]
+        async fn test_top_n_executor_with_limit() {
+            let order_types = create_order_pairs();
+            let source = create_source();
+            let state_table = create_in_memory_state_table(
+                &[DataType::Int64, DataType::Int64],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 1],
+            );
+            let top_n_executor = Box::new(
+                TopNExecutor::new(
+                    source as Box<dyn Executor>,
+                    order_types,
+                    (0, 4),
+                    vec![0, 1],
+                    1,
+                    vec![],
+                    state_table,
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor.execute();
 
-        // consume the init barrier
-        top_n_executor.next().await.unwrap().unwrap();
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
+            // consume the init barrier
+            top_n_executor.next().await.unwrap().unwrap();
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
                 +  1 0
                 +  2 1
                 +  3 2
@@ -1095,20 +1000,20 @@ mod tests {
                 +  9 4
                 - 9 4
                 +  8 5"
-            )
-        );
-        // now () -> (1, 2, 3, 8)
+                )
+            );
+            // now () -> (1, 2, 3, 8)
 
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
                 - 8 5
                 +  7 6
                 - 3 2
@@ -1119,321 +1024,824 @@ mod tests {
                 +  5 7
                 - 2 1
                 +  9 4"
-            )
-        );
+                )
+            );
 
-        // (5, 7, 8, 9)
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
+            // (5, 7, 8, 9)
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
                 - 9 4
                 +  6 9"
-            )
-        );
-        // (5, 6, 7, 8)
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
+                )
+            );
+            // (5, 6, 7, 8)
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
                 - 5 7
                 +  9 4
                 - 6 9
                 + 10 3"
-            )
-        );
-        // (7, 8, 9, 10)
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-    }
+                )
+            );
+            // (7, 8, 9, 10)
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+        }
 
-    #[tokio::test]
-    async fn test_top_n_executor_with_offset_and_limit() {
-        let order_types = create_order_pairs();
-        let source = create_source();
-        let state_table = create_in_memory_state_table(
-            &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
-            &[0, 1],
-        );
-        let top_n_executor = Box::new(
-            TopNExecutor::new(
-                source as Box<dyn Executor>,
-                order_types,
-                (3, 4),
-                vec![0, 1],
-                1,
-                vec![],
-                state_table,
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
+        #[tokio::test]
+        async fn test_top_n_executor_with_offset_and_limit() {
+            let order_types = create_order_pairs();
+            let source = create_source();
+            let state_table = create_in_memory_state_table(
+                &[DataType::Int64, DataType::Int64],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 1],
+            );
+            let top_n_executor = Box::new(
+                TopNExecutor::new(
+                    source as Box<dyn Executor>,
+                    order_types,
+                    (3, 4),
+                    vec![0, 1],
+                    1,
+                    vec![],
+                    state_table,
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor.execute();
 
-        // consume the init barrier
-        top_n_executor.next().await.unwrap().unwrap();
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
+            // consume the init barrier
+            top_n_executor.next().await.unwrap().unwrap();
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
                 + 10 3
                 +  9 4
                 +  8 5"
-            )
-        );
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
+                )
+            );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
                 +  7 6
                 -  7 6
                 -  8 5
                 +  8 5
                 -  8 5
                 + 11 8"
-            )
-        );
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
+                )
+            );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
                 +  8 5"
-            )
-        );
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I  I
+                )
+            );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I  I
                 -  8  5
                 + 12 10
                 -  9  4
                 + 13 11
                 - 11  8
                 + 14 12"
-            )
-        );
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
+                )
+            );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+        }
+
+        // Should have the same result as above, since there are no duplicate sort keys.
+        #[tokio::test]
+        async fn test_with_ties() {
+            let order_types = create_order_pairs();
+            let source = create_source();
+            let state_table = create_in_memory_state_table(
+                &[DataType::Int64, DataType::Int64],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 1],
+            );
+            let top_n_executor = Box::new(
+                TopNExecutor::new_with_ties(
+                    source as Box<dyn Executor>,
+                    order_types,
+                    (3, 4),
+                    vec![0, 1],
+                    1,
+                    vec![],
+                    state_table,
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor.execute();
+
+            // consume the init barrier
+            top_n_executor.next().await.unwrap().unwrap();
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
+                + 10 3
+                +  9 4
+                +  8 5"
+                )
+            );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
+                +  7 6
+                -  7 6
+                -  8 5
+                +  8 5
+                -  8 5
+                + 11 8"
+                )
+            );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
+                +  8 5"
+                )
+            );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I  I
+                -  8  5
+                + 12 10
+                -  9  4
+                + 13 11
+                - 11  8
+                + 14 12"
+                )
+            );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+        }
     }
 
-    #[tokio::test]
-    async fn test_top_n_executor_with_offset_and_limit_new() {
-        let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+    mod test2 {
+        use super::*;
+        fn create_source_new() -> Box<MockSource> {
+            let mut chunks = vec![
+                StreamChunk::from_pretty(
+                    " I I I I
+                +  1 1 4 1001",
+                ),
+                StreamChunk::from_pretty(
+                    " I I I I
+                +  5 1 4 1002 ",
+                ),
+                StreamChunk::from_pretty(
+                    " I I I I
+                +  1 9 1 1003
+                +  9 8 1 1004
+                +  0 2 3 1005",
+                ),
+                StreamChunk::from_pretty(
+                    " I I I I
+                +  1 0 2 1006",
+                ),
+            ];
+            let schema = Schema {
+                fields: vec![
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                ],
+            };
+            Box::new(MockSource::with_messages(
+                schema,
+                PkIndices::new(),
+                vec![
+                    Message::Barrier(Barrier::new_test_barrier(1)),
+                    Message::Chunk(std::mem::take(&mut chunks[0])),
+                    Message::Chunk(std::mem::take(&mut chunks[1])),
+                    Message::Chunk(std::mem::take(&mut chunks[2])),
+                    Message::Chunk(std::mem::take(&mut chunks[3])),
+                    Message::Barrier(Barrier::new_test_barrier(2)),
+                ],
+            ))
+        }
 
-        let source = create_source_new();
-        let state_table = create_in_memory_state_table(
-            &[
-                DataType::Int64,
-                DataType::Int64,
-                DataType::Int64,
-                DataType::Int64,
-            ],
-            &[OrderType::Ascending, OrderType::Ascending],
-            &[0, 3],
-        );
-        let top_n_executor = Box::new(
-            TopNExecutor::new(
-                source as Box<dyn Executor>,
-                order_types,
-                (1, 3),
-                vec![0, 3],
-                1,
-                vec![],
-                state_table,
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
+        fn create_source_new_before_recovery() -> Box<MockSource> {
+            let mut chunks = vec![
+                StreamChunk::from_pretty(
+                    " I I I I
+                +  1 1 4 1001",
+                ),
+                StreamChunk::from_pretty(
+                    " I I I I
+                +  5 1 4 1002 ",
+                ),
+            ];
+            let schema = Schema {
+                fields: vec![
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                ],
+            };
+            Box::new(MockSource::with_messages(
+                schema,
+                PkIndices::new(),
+                vec![
+                    Message::Barrier(Barrier::new_test_barrier(1)),
+                    Message::Chunk(std::mem::take(&mut chunks[0])),
+                    Message::Chunk(std::mem::take(&mut chunks[1])),
+                    Message::Barrier(Barrier::new_test_barrier(2)),
+                ],
+            ))
+        }
 
-        // consume the init barrier
-        top_n_executor.next().await.unwrap().unwrap();
+        fn create_source_new_after_recovery() -> Box<MockSource> {
+            let mut chunks = vec![
+                StreamChunk::from_pretty(
+                    " I I I I
+                +  1 9 1 1003
+                +  9 8 1 1004
+                +  0 2 3 1005",
+                ),
+                StreamChunk::from_pretty(
+                    " I I I I
+                +  1 0 2 1006",
+                ),
+            ];
+            let schema = Schema {
+                fields: vec![
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                ],
+            };
+            Box::new(MockSource::with_messages(
+                schema,
+                PkIndices::new(),
+                vec![
+                    Message::Barrier(Barrier::new_test_barrier(3)),
+                    Message::Chunk(std::mem::take(&mut chunks[0])),
+                    Message::Chunk(std::mem::take(&mut chunks[1])),
+                    Message::Barrier(Barrier::new_test_barrier(4)),
+                ],
+            ))
+        }
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        // should be empty
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty("  I I I I")
-        );
+        #[tokio::test]
+        async fn test_top_n_executor_with_offset_and_limit_new() {
+            let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I I I
+            let source = create_source_new();
+            let state_table = create_in_memory_state_table(
+                &[
+                    DataType::Int64,
+                    DataType::Int64,
+                    DataType::Int64,
+                    DataType::Int64,
+                ],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 3],
+            );
+            let top_n_executor = Box::new(
+                TopNExecutor::new(
+                    source as Box<dyn Executor>,
+                    order_types,
+                    (1, 3),
+                    vec![0, 3],
+                    1,
+                    vec![],
+                    state_table,
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor.execute();
+
+            // consume the init barrier
+            top_n_executor.next().await.unwrap().unwrap();
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            // should be empty
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty("  I I I I")
+            );
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
                 +  5 1 4 1002
                 "
-            )
-        );
+                )
+            );
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I I I
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
                 +  1 9 1 1003
                 +  9 8 1 1004
                 -  9 8 1 1004
                 +  1 1 4 1001",
-            ),
-        );
+                ),
+            );
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I I I
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
                 -  5 1 4 1002
                 +  1 0 2 1006",
-            )
-        );
+                )
+            );
 
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-    }
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+        }
 
-    #[tokio::test]
-    async fn test_top_n_executor_with_offset_and_limit_new_after_recovery() {
-        let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
-        let state_table = create_in_memory_state_table(
-            &[
-                DataType::Int64,
-                DataType::Int64,
-                DataType::Int64,
-                DataType::Int64,
-            ],
-            &[OrderType::Ascending, OrderType::Ascending],
-            &[0, 3],
-        );
-        let top_n_executor = Box::new(
-            TopNExecutor::new(
-                create_source_new_before_recovery() as Box<dyn Executor>,
-                order_types.clone(),
-                (1, 3),
-                vec![0, 3],
-                1,
-                vec![],
-                state_table.clone(),
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
+        #[tokio::test]
+        async fn test_top_n_executor_with_offset_and_limit_new_after_recovery() {
+            let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+            let state_table = create_in_memory_state_table(
+                &[
+                    DataType::Int64,
+                    DataType::Int64,
+                    DataType::Int64,
+                    DataType::Int64,
+                ],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 3],
+            );
+            let top_n_executor = Box::new(
+                TopNExecutor::new(
+                    create_source_new_before_recovery() as Box<dyn Executor>,
+                    order_types.clone(),
+                    (1, 3),
+                    vec![0, 3],
+                    1,
+                    vec![],
+                    state_table.clone(),
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor.execute();
 
-        // consume the init barrier
-        top_n_executor.next().await.unwrap().unwrap();
+            // consume the init barrier
+            top_n_executor.next().await.unwrap().unwrap();
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        // should be empty
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty("  I I I I")
-        );
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            // should be empty
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty("  I I I I")
+            );
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I I I
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
                 +  5 1 4 1002
                 "
-            )
-        );
+                )
+            );
 
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
 
-        // recovery
-        let top_n_executor_after_recovery = Box::new(
-            TopNExecutor::new(
-                create_source_new_after_recovery() as Box<dyn Executor>,
-                order_types.clone(),
-                (1, 3),
-                vec![3],
-                1,
-                vec![],
-                state_table,
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor_after_recovery.execute();
+            // recovery
+            let top_n_executor_after_recovery = Box::new(
+                TopNExecutor::new(
+                    create_source_new_after_recovery() as Box<dyn Executor>,
+                    order_types.clone(),
+                    (1, 3),
+                    vec![3],
+                    1,
+                    vec![],
+                    state_table,
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor_after_recovery.execute();
 
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I I I
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
                 +  1 9 1 1003
                 +  9 8 1 1004
                 -  9 8 1 1004
                 +  1 1 4 1001",
-            ),
-        );
+                ),
+            );
 
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I I I
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
                 -  5 1 4 1002
                 +  1 0 2 1006",
-            )
-        );
+                )
+            );
 
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+        }
+
+        // The results differ from above.
+        #[tokio::test]
+        async fn test_with_ties() {
+            let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+
+            let source = create_source_new();
+            let state_table = create_in_memory_state_table(
+                &[
+                    DataType::Int64,
+                    DataType::Int64,
+                    DataType::Int64,
+                    DataType::Int64,
+                ],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 3],
+            );
+            let top_n_executor = Box::new(
+                TopNExecutor::new_with_ties(
+                    source as Box<dyn Executor>,
+                    order_types,
+                    (1, 3),
+                    vec![0, 3],
+                    1,
+                    vec![],
+                    state_table,
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor.execute();
+
+            // consume the init barrier
+            top_n_executor.next().await.unwrap().unwrap();
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            // should be empty
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty("  I I I I")
+            );
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
+                +  5 1 4 1002
+                "
+                )
+            );
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
+                    +  9 8 1 1004
+                    +  1 1 4 1001
+                    +  1 9 1 1003",
+                ),
+            );
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
+                +  1 0 2 1006",
+                )
+            );
+
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+        }
+
+        #[tokio::test]
+        async fn test_with_ties_after_recovery() {
+            let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+            let state_table = create_in_memory_state_table(
+                &[
+                    DataType::Int64,
+                    DataType::Int64,
+                    DataType::Int64,
+                    DataType::Int64,
+                ],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 3],
+            );
+            let top_n_executor = Box::new(
+                TopNExecutor::new_with_ties(
+                    create_source_new_before_recovery() as Box<dyn Executor>,
+                    order_types.clone(),
+                    (1, 3),
+                    vec![0, 3],
+                    1,
+                    vec![],
+                    state_table.clone(),
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor.execute();
+
+            // consume the init barrier
+            top_n_executor.next().await.unwrap().unwrap();
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            // should be empty
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty("  I I I I")
+            );
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
+                +  5 1 4 1002
+                "
+                )
+            );
+
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+
+            // recovery
+            let top_n_executor_after_recovery = Box::new(
+                TopNExecutor::new_with_ties(
+                    create_source_new_after_recovery() as Box<dyn Executor>,
+                    order_types.clone(),
+                    (1, 3),
+                    vec![3],
+                    1,
+                    vec![],
+                    state_table,
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor_after_recovery.execute();
+
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
+                    +  9 8 1 1004
+                    +  1 1 4 1001
+                    +  1 9 1 1003",
+                ),
+            );
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I I I
+                +  1 0 2 1006",
+                )
+            );
+
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+        }
+    }
+
+    mod test_with_ties {
+        use super::*;
+        fn create_source() -> Box<MockSource> {
+            let mut chunks = vec![
+                StreamChunk::from_pretty(
+                    "  I I
+                    +  1 0
+                    +  2 1
+                    +  3 2
+                    + 10 3
+                    +  9 4
+                    +  8 5",
+                ),
+                StreamChunk::from_pretty(
+                    "  I  I
+                    +  1  6
+                    +  2  7
+                    +  3  8
+                    + 10  9
+                    +  9 10
+                    +  8 11",
+                ),
+                StreamChunk::from_pretty(
+                    "  I  I
+                    + 11 12
+                    + 11 13
+                    -  1 0
+                    -  9 10
+                    +  4 14",
+                ),
+            ];
+            let schema = Schema {
+                fields: vec![
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                ],
+            };
+            Box::new(MockSource::with_messages(
+                schema,
+                PkIndices::new(),
+                vec![
+                    Message::Barrier(Barrier::new_test_barrier(1)),
+                    Message::Chunk(std::mem::take(&mut chunks[0])),
+                    Message::Chunk(std::mem::take(&mut chunks[1])),
+                    Message::Chunk(std::mem::take(&mut chunks[2])),
+                    Message::Barrier(Barrier::new_test_barrier(2)),
+                ],
+            ))
+        }
+
+        #[tokio::test]
+        async fn test_with_ties() {
+            let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+
+            let source = create_source();
+            let state_table = create_in_memory_state_table(
+                &[DataType::Int64, DataType::Int64],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &[0, 1],
+            );
+            let top_n_executor = Box::new(
+                TopNExecutor::new_with_ties(
+                    source as Box<dyn Executor>,
+                    order_types,
+                    (3, 4),
+                    vec![0, 1],
+                    1,
+                    vec![],
+                    state_table,
+                )
+                .unwrap(),
+            );
+            let mut top_n_executor = top_n_executor.execute();
+
+            // consume the init barrier
+            top_n_executor.next().await.unwrap().unwrap();
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I I
+                    + 10 3
+                    +  9 4
+                    +  8 5"
+                )
+            );
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I  I
+                    + 10  9
+                    +  9 10
+                    +  8 11"
+                )
+            );
+
+            let res = top_n_executor.next().await.unwrap().unwrap();
+            assert_eq!(
+                *res.as_chunk().unwrap(),
+                StreamChunk::from_pretty(
+                    "  I  I
+                    + 11 12
+                    + 11 13
+                    -  9 10
+                    - 11 12
+                    - 11 13
+                    +  4 14
+                    "
+                )
+            );
+
+            // barrier
+            assert_matches!(
+                top_n_executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            );
+        }
     }
 }
