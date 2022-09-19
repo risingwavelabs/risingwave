@@ -24,7 +24,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::StreamExecutorResult;
+use crate::executor::{Epoch, StreamExecutorResult};
 
 /// The `RangeCache` caches a given range of `ScalarImpl` keys and corresponding rows.
 /// It will evict keys from memory if it is above capacity and shrink its range.
@@ -63,6 +63,11 @@ impl<S: StateStore> RangeCache<S> {
             capacity,
             current_epoch,
         }
+    }
+
+    pub fn init(&mut self, epoch: Epoch) {
+        self.state_table.init_epoch(epoch.prev);
+        self.current_epoch = epoch.curr;
     }
 
     /// Insert a row and corresponding scalar value key into cache (if within range) and

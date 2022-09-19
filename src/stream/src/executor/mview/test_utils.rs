@@ -45,7 +45,9 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
         vec![OrderType::Ascending],
         vec![0],
     );
-    let epoch: u64 = 0;
+    let mut epoch: u64 = 0;
+    state.init_epoch(epoch);
+    epoch += 1;
 
     for idx in 0..row_count {
         let idx = idx as i32;

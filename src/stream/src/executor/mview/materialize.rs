@@ -26,7 +26,8 @@ use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
-    BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
+    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    PkIndicesRef,
 };
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
@@ -110,7 +111,13 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        let input = self.input.execute();
+        let mut input = self.input.execute();
+        let barrier = expect_first_barrier(&mut input).await?;
+        self.state_table.init_epoch(barrier.epoch.prev);
+
+        // The first barrier message should be propagated.
+        yield Message::Barrier(barrier);
+
         #[for_await]
         for msg in input {
             let msg = msg?;
@@ -201,10 +208,11 @@ mod tests {
             schema.clone(),
             PkIndices::new(),
             vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(chunk1),
-                Message::Barrier(Barrier::default()),
+                Message::Barrier(Barrier::new_test_barrier(2)),
                 Message::Chunk(chunk2),
-                Message::Barrier(Barrier::default()),
+                Message::Barrier(Barrier::new_test_barrier(3)),
             ],
         );
 
@@ -231,6 +239,7 @@ mod tests {
             1,
         ))
         .execute();
+        materialize_executor.next().await.transpose().unwrap();
 
         materialize_executor.next().await.transpose().unwrap();
 

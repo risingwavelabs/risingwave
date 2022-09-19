@@ -41,6 +41,7 @@ use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use self::iter_utils::zip_by_order_key;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::Epoch;
 use crate::task::ActorId;
 
 type DegreeType = u64;
@@ -324,6 +325,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.alloc.bytes_in_use()
     }
 
+    pub fn init(&mut self, epoch: Epoch) {
+        self.current_epoch = epoch.curr;
+        self.state.table.init_epoch(epoch.prev);
+        self.degree_state.table.init_epoch(epoch.prev);
+    }
+
     pub fn update_epoch(&mut self, epoch: u64) {
         self.current_epoch = epoch;
     }
@@ -393,15 +400,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
         let key = key.clone().deserialize(self.join_key_data_types.iter())?;
 
-        let table_iter_fut = self.state.table.iter_key_and_val(&key, self.current_epoch);
+        let table_iter_fut = self.state.table.iter_key_and_val(&key);
 
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let degree_table_iter_fut = self
-                .degree_state
-                .table
-                .iter_key_and_val(&key, self.current_epoch);
+            let degree_table_iter_fut = self.degree_state.table.iter_key_and_val(&key);
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
