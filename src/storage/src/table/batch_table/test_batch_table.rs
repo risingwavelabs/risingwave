@@ -50,7 +50,7 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut table: StorageTable<MemoryStateStore> = StorageTable::new_for_test(
+    let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -121,7 +121,7 @@ async fn test_storage_get_row_for_string() {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut table: StorageTable<MemoryStateStore> = StorageTable::new_for_test(
+    let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -204,7 +204,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     state.init_epoch(epoch);
     epoch += 1;
 
-    let mut table: StorageTable<MemoryStateStore> = StorageTable::new_for_test(
+    let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
