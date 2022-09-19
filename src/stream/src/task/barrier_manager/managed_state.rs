@@ -48,6 +48,8 @@ enum ManagedBarrierStateInner {
 #[derive(Debug)]
 pub(super) struct ManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
+    ///
+    /// The key is curr_epoch, and the first value is prev_epoch
     epoch_barrier_state_map: BTreeMap<u64, (u64, ManagedBarrierStateInner)>,
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
