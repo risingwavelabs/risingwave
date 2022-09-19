@@ -22,7 +22,7 @@ use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_COUNT};
-use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::error::StorageResult;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
@@ -108,22 +108,36 @@ pub trait TableIter: Send {
     }
 }
 
-/// Get vnode value with `indices` on the given `row`. Should not be used directly.
+/// Get vnode value with `indices` on the given `row`.
 fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
-        row.hash_by_indices(indices, &CRC32FastBuilder {})
+        row.hash_by_indices(indices, &Crc32FastBuilder {})
             .to_vnode()
     };
 
     tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
 
-    // FIXME: temporary workaround for local agg, may not needed after we have a vnode builder
-    if !indices.is_empty() {
-        check_vnode_is_set(vnode, vnodes);
-    }
+    check_vnode_is_set(vnode, vnodes);
     vnode
+}
+
+/// Get vnode values with `indices` on the given `chunk`.
+fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) -> Vec<VirtualNode> {
+    if indices.is_empty() {
+        vec![DEFAULT_VNODE; chunk.capacity()]
+    } else {
+        chunk
+            .get_hash_values(indices, Crc32FastBuilder {})
+            .into_iter()
+            .map(|h| {
+                let vnode = h.to_vnode();
+                check_vnode_is_set(vnode, vnodes);
+                vnode
+            })
+            .collect()
+    }
 }
 
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
