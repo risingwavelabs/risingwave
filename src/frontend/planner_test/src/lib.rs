@@ -28,10 +28,10 @@ use risingwave_frontend::handler::{
     create_index, create_mv, create_source, create_table, drop_table, variable,
 };
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use risingwave_frontend::stream_fragmenter::build_graph;
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
-use risingwave_frontend::utils::explain_stream_graph;
-use risingwave_frontend::{Binder, FrontendOpts, PlanRef, Planner, WithOptions};
+use risingwave_frontend::{
+    build_graph, explain_stream_graph, Binder, FrontendOpts, PlanRef, Planner, WithOptions,
+};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
