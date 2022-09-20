@@ -233,6 +233,11 @@ export interface LookupJoinNode {
   probeSideColumnIds: number[];
   outputIndices: number[];
   workerNodes: WorkerNode[];
+  /**
+   * Null safe means it treats `null = null` as true.
+   * Each key pair can be null safe independently. (left_key, right_key, null_safe)
+   */
+  nullSafe: boolean[];
 }
 
 export interface UnionNode {
@@ -1423,6 +1428,7 @@ function createBaseLookupJoinNode(): LookupJoinNode {
     probeSideColumnIds: [],
     outputIndices: [],
     workerNodes: [],
+    nullSafe: [],
   };
 }
 
@@ -1445,6 +1451,7 @@ export const LookupJoinNode = {
         ? object.outputIndices.map((e: any) => Number(e))
         : [],
       workerNodes: Array.isArray(object?.workerNodes) ? object.workerNodes.map((e: any) => WorkerNode.fromJSON(e)) : [],
+      nullSafe: Array.isArray(object?.nullSafe) ? object.nullSafe.map((e: any) => Boolean(e)) : [],
     };
   },
 
@@ -1481,6 +1488,11 @@ export const LookupJoinNode = {
     } else {
       obj.workerNodes = [];
     }
+    if (message.nullSafe) {
+      obj.nullSafe = message.nullSafe.map((e) => e);
+    } else {
+      obj.nullSafe = [];
+    }
     return obj;
   },
 
@@ -1498,6 +1510,7 @@ export const LookupJoinNode = {
     message.probeSideColumnIds = object.probeSideColumnIds?.map((e) => e) || [];
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     message.workerNodes = object.workerNodes?.map((e) => WorkerNode.fromPartial(e)) || [];
+    message.nullSafe = object.nullSafe?.map((e) => e) || [];
     return message;
   },
 };

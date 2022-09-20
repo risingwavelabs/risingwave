@@ -67,9 +67,6 @@ pub struct SyncResult {
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
-    /// If this epoch had been synced, it will be false. So it may be false, if we sync multiple
-    /// epochs in one shot.
-    pub sync_succeed: bool,
 }
 
 struct WorkerContext {
