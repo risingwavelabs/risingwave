@@ -32,12 +32,14 @@ pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> Re
 struct StreamGraphFormatter {
     /// exchange's operator_id -> edge
     edges: HashMap<u64, StreamFragmentEdge>,
+    verbose: bool,
 }
 
 impl StreamGraphFormatter {
-    fn new(_is_verbose: bool) -> Self {
+    fn new(verbose: bool) -> Self {
         StreamGraphFormatter {
             edges: HashMap::default(),
+            verbose,
         }
     }
 
@@ -93,6 +95,26 @@ impl StreamGraphFormatter {
             _ => node.identity.clone(),
         };
         writeln!(f, "{}{}", " ".repeat(level * 2), one_line_explain)?;
+        if self.verbose {
+            writeln!(
+                f,
+                "{}Output: [{}]",
+                " ".repeat(level * 2 + 1),
+                node.fields.iter().map(|f| f.get_name()).join(", ")
+            )?;
+            writeln!(
+                f,
+                "{}Stream key: [{}]",
+                " ".repeat(level * 2 + 1),
+                node.stream_key
+                    .iter()
+                    .map(|i| node.fields[*i as usize].get_name())
+                    .join(", ")
+            )?;
+            if node.append_only {
+                writeln!(f, "{}AppendOnly", " ".repeat(level * 2 + 1))?;
+            }
+        }
         for input in &node.input {
             self.explain_node(level + 1, input, f)?;
         }
