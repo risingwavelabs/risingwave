@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package health;
 
+// This proto is copied from https://github.com/grpc/grpc/blob/v1.15.0/doc/health-checking.md
+
 message HealthCheckRequest {
   string service = 1;
 }
