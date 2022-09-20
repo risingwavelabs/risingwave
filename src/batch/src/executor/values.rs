@@ -86,7 +86,7 @@ impl ValuesExecutor {
                 for row in self.rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                         let out = expr.eval(&one_row_chunk)?;
-                        builder.append_array(&out)?;
+                        builder.append_array(&out);
                     }
                 }
 

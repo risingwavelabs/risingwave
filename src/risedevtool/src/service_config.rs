@@ -37,6 +37,7 @@ pub struct ComputeNodeConfig {
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
+    pub enable_in_memory_kv_state_backend: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -65,6 +66,7 @@ pub struct MetaNodeConfig {
     pub collect_gc_watermark_spin_interval_sec: u64,
     pub min_sst_retention_time_sec: u64,
     pub enable_committed_sst_sanity_check: bool,
+    pub no_available_compactor_stall_sec: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

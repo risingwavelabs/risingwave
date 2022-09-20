@@ -132,32 +132,34 @@ impl MergeExecutor {
                     barrier.passed_actors.push(actor_id);
 
                     if let Some(update) = barrier.as_update_merge(self.actor_context.id) {
-                        // Create new upstreams receivers.
-                        let new_upstreams = update
-                            .added_upstream_actor_id
-                            .iter()
-                            .map(|&upstream_actor_id| {
-                                new_input(
-                                    &self.context,
-                                    self.metrics.clone(),
-                                    self.actor_context.id,
-                                    self.fragment_id,
-                                    upstream_actor_id,
-                                    self.upstream_fragment_id,
-                                )
-                            })
-                            .try_collect()
-                            .map_err(|e| anyhow!("failed to create upstream receivers: {e}"))?;
+                        if !update.added_upstream_actor_id.is_empty() {
+                            // Create new upstreams receivers.
+                            let new_upstreams = update
+                                .added_upstream_actor_id
+                                .iter()
+                                .map(|&upstream_actor_id| {
+                                    new_input(
+                                        &self.context,
+                                        self.metrics.clone(),
+                                        self.actor_context.id,
+                                        self.fragment_id,
+                                        upstream_actor_id,
+                                        self.upstream_fragment_id,
+                                    )
+                                })
+                                .try_collect()
+                                .map_err(|e| anyhow!("failed to create upstream receivers: {e}"))?;
 
-                        // Poll the first barrier from the new upstreams. It must be the same as the
-                        // one we polled from original upstreams.
-                        let mut select_new =
-                            SelectReceivers::new(self.actor_context.id, new_upstreams);
-                        let new_barrier = expect_first_barrier(&mut select_new).await?;
-                        assert_eq!(barrier, &new_barrier);
+                            // Poll the first barrier from the new upstreams. It must be the same as
+                            // the one we polled from original upstreams.
+                            let mut select_new =
+                                SelectReceivers::new(self.actor_context.id, new_upstreams);
+                            let new_barrier = expect_first_barrier(&mut select_new).await?;
+                            assert_eq!(barrier, &new_barrier);
 
-                        // Add the new upstreams to select.
-                        select_all.add_upstreams_from(select_new);
+                            // Add the new upstreams to select.
+                            select_all.add_upstreams_from(select_new);
+                        }
 
                         // Remove upstreams.
                         select_all.remove_upstreams(
@@ -201,6 +203,8 @@ pub struct SelectReceivers {
 
 impl SelectReceivers {
     fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
+        assert!(!upstreams.is_empty());
+
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
             upstreams,
@@ -565,7 +569,7 @@ mod tests {
         assert!(server_run.load(Ordering::SeqCst));
 
         let remote_input = {
-            let pool = ComputeClientPool::new(u64::MAX);
+            let pool = ComputeClientPool::default();
             RemoteInput::new(
                 pool,
                 addr.into(),

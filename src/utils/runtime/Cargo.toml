@@ -7,11 +7,11 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1"
 console = "0.15"
-console-subscriber = "0.1"
+console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.10", features = ["flamegraph"] }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { version = "0.2.7", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",

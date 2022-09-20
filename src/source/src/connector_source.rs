@@ -14,7 +14,7 @@
 
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -47,9 +47,7 @@ impl SourceContext {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref DEFAULT_SPLIT_ID: SplitId = "None".into();
-}
+static DEFAULT_SPLIT_ID: LazyLock<SplitId> = LazyLock::new(|| "None".into());
 
 struct InnerConnectorSourceReader {
     reader: SplitReaderImpl,
@@ -64,8 +62,6 @@ struct InnerConnectorSourceReaderHandle {
     stop_tx: oneshot::Sender<()>,
     join_handle: JoinHandle<()>,
 }
-
-const CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 512;
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or
 /// batch processing. [`ConnectorSource`] introduces schema at this level while
@@ -209,7 +205,7 @@ impl ConnectorSourceReader {
             }
         }
 
-        let chunk = builder.finish()?;
+        let chunk = builder.finish();
 
         Ok(StreamChunkWithState {
             chunk,
@@ -281,6 +277,7 @@ pub struct ConnectorSource {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub parser: Arc<SourceParserImpl>,
+    pub connector_message_buffer_size: usize,
 }
 
 impl ConnectorSource {
@@ -309,7 +306,7 @@ impl ConnectorSource {
         metrics: Arc<SourceMetrics>,
         context: SourceContext,
     ) -> Result<ConnectorSourceReader> {
-        let (tx, rx) = mpsc::channel(CONNECTOR_MESSAGE_BUFFER_SIZE);
+        let (tx, rx) = mpsc::channel(self.connector_message_buffer_size);
         let mut handles = HashMap::with_capacity(if let Some(split) = &splits {
             split.len()
         } else {

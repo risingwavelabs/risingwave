@@ -68,7 +68,7 @@ impl RegexpMatches {
                 .map(|mat| Some(mat.as_str().to_string().to_scalar_value()))
                 .collect_vec();
             let list = ListValue::new(list);
-            builder.append_datum(&Some(list.into()))?;
+            builder.append_datum(&Some(list.into()));
         }
 
         Ok(Arc::new(builder.finish()))

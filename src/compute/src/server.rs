@@ -57,7 +57,6 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::server::StateStoreImpl::HummockStateStore;
 use crate::{ComputeNodeConfig, ComputeNodeOpts};
 
 /// Bootstraps the compute-node.
@@ -73,6 +72,10 @@ pub async fn compute_node_serve(
         config,
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
+    // Initialize all the configs
+    let storage_config = Arc::new(config.storage.clone());
+    let stream_config = Arc::new(config.streaming.clone());
+    let batch_config = Arc::new(config.batch.clone());
 
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
 
@@ -99,7 +102,6 @@ pub async fn compute_node_serve(
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
-    let storage_config = Arc::new(config.storage.clone());
     let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
     let object_store_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
@@ -123,28 +125,22 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
-    let local_version_manager = match &state_store {
-        HummockStateStore(monitored) => monitored.local_version_manager(),
-        _ => {
-            panic!();
-        }
-    };
-
-    let compute_observer_node =
-        ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
-    let observer_manager = ObserverManager::new(
-        meta_client.clone(),
-        client_addr.clone(),
-        Box::new(compute_observer_node),
-        WorkerType::ComputeNode,
-    )
-    .await;
-
-    let observer_join_handle = observer_manager.start().await.unwrap();
-    join_handle_vec.push(observer_join_handle);
-
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
+        let local_version_manager = storage.local_version_manager();
+        let compute_observer_node =
+            ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
+        let observer_manager = ObserverManager::new(
+            meta_client.clone(),
+            client_addr.clone(),
+            Box::new(compute_observer_node),
+            WorkerType::ComputeNode,
+        )
+        .await;
+
+        let observer_join_handle = observer_manager.start().await.unwrap();
+        join_handle_vec.push(observer_join_handle);
+
         assert!(
             storage
                 .local_version_manager()
@@ -203,7 +199,7 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize the managers.
-    let batch_mgr = Arc::new(BatchManager::new());
+    let batch_mgr = Arc::new(BatchManager::new(config.batch.worker_threads_num));
     let stream_mgr = Arc::new(LocalStreamManager::new(
         client_addr.clone(),
         state_store.clone(),
@@ -211,12 +207,14 @@ pub async fn compute_node_serve(
         config.streaming.clone(),
         opts.enable_async_stack_trace,
     ));
-    let source_mgr = Arc::new(MemSourceManager::new(source_metrics));
+    let source_mgr = Arc::new(MemSourceManager::new(
+        source_metrics,
+        stream_config.developer.connector_message_buffer_size,
+    ));
     let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
 
     // Initialize batch environment.
-    let batch_config = Arc::new(config.batch.clone());
-    let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+    let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
     let batch_env = BatchEnvironment::new(
         source_mgr.clone(),
         batch_mgr.clone(),
@@ -230,7 +228,6 @@ pub async fn compute_node_serve(
     );
 
     // Initialize the streaming environment.
-    let stream_config = Arc::new(config.streaming.clone());
     let stream_env = StreamEnvironment::new(
         source_mgr,
         client_addr.clone(),

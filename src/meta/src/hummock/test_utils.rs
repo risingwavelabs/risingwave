@@ -68,16 +68,30 @@ where
     // Current state: {v0: [], v1: [test_tables]}
 
     // Simulate a compaction and increase version by 1.
+    let mut temp_compactor = false;
+    if hummock_manager
+        .compactor_manager_ref_for_test()
+        .compactor_num()
+        == 0
+    {
+        hummock_manager
+            .compactor_manager_ref_for_test()
+            .add_compactor(context_id, u64::MAX);
+        temp_compactor = true;
+    }
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()
         .unwrap();
     compact_task.target_level = 6;
-    hummock_manager
-        .assign_compaction_task(&compact_task, context_id)
+    let compactor = hummock_manager
+        .assign_compaction_task(&compact_task)
         .await
         .unwrap();
+    if temp_compactor {
+        assert_eq!(compactor.context_id(), context_id);
+    }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager(),
@@ -91,6 +105,11 @@ where
         .report_compact_task(context_id, &compact_task)
         .await
         .unwrap();
+    if temp_compactor {
+        hummock_manager
+            .compactor_manager_ref_for_test()
+            .remove_compactor(context_id);
+    }
     // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, test_tables to_delete]}
 
     // Increase version by 1.
@@ -161,7 +180,7 @@ pub async fn register_table_ids_to_compaction_group<S>(
 {
     compaction_group_manager_ref
         .register_table_ids(
-            &table_ids
+            &mut table_ids
                 .iter()
                 .map(|table_id| (*table_id, compaction_group_id, TableOption::default()))
                 .collect_vec(),
@@ -223,22 +242,18 @@ pub async fn setup_compute_env_with_config(
 ) {
     let env = MetaSrvEnv::for_test().await;
     let cluster_manager = Arc::new(
-        ClusterManager::new_for_test(env.clone(), Duration::from_secs(1))
+        ClusterManager::new(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );
 
     let compaction_group_manager = Arc::new(
-        CompactionGroupManager::new_with_config(env.clone(), config.clone())
+        CompactionGroupManager::with_config(env.clone(), config.clone())
             .await
             .unwrap(),
     );
 
-    let compactor_manager = Arc::new(
-        CompactorManager::new_with_meta(env.clone(), 1)
-            .await
-            .unwrap(),
-    );
+    let compactor_manager = Arc::new(CompactorManager::for_test());
 
     let hummock_manager = Arc::new(
         HummockManager::new(

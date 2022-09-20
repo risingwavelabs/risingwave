@@ -80,6 +80,7 @@ where
         }
     }
 
+    #[allow(clippy::uninit_vec)]
     pub fn append(&mut self, key: K, value: &V) {
         let offset = self.buffer.len();
         let len = value.encoded_len();
@@ -89,10 +90,12 @@ where
         };
         self.blocs.push(bloc);
 
-        self.buffer.resize(offset + len, 0);
+        let buffer_len = utils::align_up(self.block_size, offset + len);
+        self.buffer.reserve(buffer_len);
+        unsafe {
+            self.buffer.set_len(buffer_len);
+        }
         value.encode(&mut self.buffer[offset..offset + len]);
-        self.buffer
-            .resize(utils::align_up(self.block_size, self.buffer.len()), 0);
 
         self.keys.push(key);
     }
@@ -161,6 +164,7 @@ pub struct StoreOptions {
     pub capacity: usize,
     pub buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
+    pub cache_meta_fallocate_unit: usize,
 
     pub metrics: FileCacheMetricsRef,
 }
@@ -214,7 +218,10 @@ where
             fallocate_unit: options.cache_file_fallocate_unit,
         };
 
-        let mf = MetaFile::open(PathBuf::from(&options.dir).join(META_FILE_FILENAME))?;
+        let mf = MetaFile::open(
+            PathBuf::from(&options.dir).join(META_FILE_FILENAME),
+            options.cache_meta_fallocate_unit,
+        )?;
 
         let cf = CacheFile::open(
             PathBuf::from(&options.dir).join(CACHE_FILE_FILENAME),

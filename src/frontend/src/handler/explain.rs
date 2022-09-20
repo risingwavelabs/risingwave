@@ -64,7 +64,7 @@ pub(super) fn handle_explain(
             query,
             name,
             ..
-        } => gen_create_mv_plan(&session, planner.ctx(), query, name)?.0,
+        } => gen_create_mv_plan(&session, planner.ctx(), *query, name, false)?.0,
 
         Statement::CreateSink { stmt } => gen_sink_plan(&session, planner.ctx(), stmt)?.0,
 

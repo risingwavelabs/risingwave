@@ -29,11 +29,12 @@ use risingwave_frontend::handler::{
 };
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
-use risingwave_frontend::{Binder, FrontendOpts, PlanRef, Planner, WithOptions};
+use risingwave_frontend::{
+    build_graph, explain_stream_graph, Binder, FrontendOpts, PlanRef, Planner, WithOptions,
+};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
-
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -68,6 +69,9 @@ pub struct TestCase {
 
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
+
+    /// Create MV fragments plan
+    pub stream_dist_plan: Option<String>,
 
     // TODO: uncomment for Proto JSON of generated stream plan
     //  was: "stream_plan_proto": Option<String>
@@ -129,6 +133,9 @@ pub struct TestCaseResult {
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
+    /// Create MV fragments plan
+    pub stream_dist_plan: Option<String>,
+
     /// Error of binder
     pub binder_error: Option<String>,
 
@@ -180,6 +187,7 @@ impl TestCaseResult {
             binder_error: self.binder_error,
             create_source: original_test_case.create_source.clone(),
             with_config_map: original_test_case.with_config_map.clone(),
+            stream_dist_plan: self.stream_dist_plan,
         };
         Ok(case)
     }
@@ -315,7 +323,7 @@ impl TestCase {
                     query,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, query).await?;
+                    create_mv::handle_create_mv(context, name, *query).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(context, drop_statement.object_name).await?;
@@ -427,7 +435,10 @@ impl TestCase {
         }
 
         'stream: {
-            if self.stream_plan.is_some() || self.stream_error.is_some() {
+            if self.stream_plan.is_some()
+                || self.stream_error.is_some()
+                || self.stream_dist_plan.is_some()
+            {
                 let q = if let Statement::Query(q) = stmt {
                     q.as_ref().clone()
                 } else {
@@ -437,10 +448,11 @@ impl TestCase {
                 let stream_plan = match create_mv::gen_create_mv_plan(
                     &session,
                     context,
-                    Box::new(q),
+                    q,
                     ObjectName(vec!["test".into()]),
+                    false,
                 ) {
-                    Ok((stream_plan, _table)) => stream_plan,
+                    Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {
                         ret.stream_error = Some(err.to_string());
                         break 'stream;
@@ -450,6 +462,12 @@ impl TestCase {
                 // Only generate stream_plan if it is specified in test case
                 if self.stream_plan.is_some() {
                     ret.stream_plan = Some(explain_plan(&stream_plan));
+                }
+
+                // Only generate stream_dist_plan if it is specified in test case
+                if self.stream_dist_plan.is_some() {
+                    let graph = build_graph(stream_plan);
+                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, true).unwrap());
                 }
             }
         }
@@ -489,6 +507,11 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &actual.batch_local_plan,
     )?;
     check_option_plan_eq("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
+    check_option_plan_eq(
+        "stream_dist_plan",
+        &expected.stream_dist_plan,
+        &actual.stream_dist_plan,
+    )?;
     check_option_plan_eq(
         "batch_plan_proto",
         &expected.batch_plan_proto,

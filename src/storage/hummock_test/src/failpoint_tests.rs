@@ -65,14 +65,14 @@ async fn test_failpoints_state_store_read_upload() {
 
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![
-        (anchor.clone(), StorageValue::new_default_put("111")),
-        (Bytes::from("cc"), StorageValue::new_default_put("222")),
+        (anchor.clone(), StorageValue::new_put("111")),
+        (Bytes::from("cc"), StorageValue::new_put("222")),
     ];
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     let mut batch2 = vec![
-        (Bytes::from("cc"), StorageValue::new_default_put("333")),
-        (anchor.clone(), StorageValue::new_default_delete()),
+        (Bytes::from("cc"), StorageValue::new_put("333")),
+        (anchor.clone(), StorageValue::new_delete()),
     ];
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
@@ -115,7 +115,11 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap();
 
     // sync epoch1 test the read_error
-    let ssts = hummock_storage.sync(1).await.unwrap().uncommitted_ssts;
+    let ssts = hummock_storage
+        .seal_and_sync_epoch(1)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     meta_client.commit_epoch(1, ssts).await.unwrap();
     local_version_manager
         .try_wait_epoch(HummockReadEpoch::Committed(1))
@@ -168,11 +172,15 @@ async fn test_failpoints_state_store_read_upload() {
     // test the upload_error
     fail::cfg(mem_upload_err, "return").unwrap();
 
-    let result = hummock_storage.sync(3).await;
+    let result = hummock_storage.seal_and_sync_epoch(3).await;
     assert!(result.is_err());
     fail::remove(mem_upload_err);
 
-    let ssts = hummock_storage.sync(3).await.unwrap().uncommitted_ssts;
+    let ssts = hummock_storage
+        .seal_and_sync_epoch(3)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     meta_client.commit_epoch(3, ssts).await.unwrap();
     local_version_manager
         .try_wait_epoch(HummockReadEpoch::Committed(3))

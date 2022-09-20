@@ -313,51 +313,48 @@ impl Binder {
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, alias, args } => {
-                if args.is_empty() {
-                    self.bind_relation_by_name(name, alias)
-                } else {
-                    let func_name = &name.0[0].value;
-                    if func_name.eq_ignore_ascii_case(RW_TABLE_FUNCTION_NAME) {
-                        let (schema, table_id) = self.resolve_table_id(args)?;
-                        return self.bind_relation_by_id(table_id, schema, alias);
-                    }
-                    if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
-                        let args: Vec<ExprImpl> = args
-                            .into_iter()
-                            .map(|arg| self.bind_function_arg(arg))
-                            .flatten_ok()
-                            .try_collect()?;
-                        let tf = TableFunction::new(table_function_type, args)?;
-                        let columns = [(
-                            false,
-                            Field {
-                                data_type: tf.return_type(),
-                                name: tf.function_type.name().to_string(),
-                                sub_fields: vec![],
-                                type_name: "".to_string(),
-                            },
-                        )]
-                        .into_iter();
-
-                        self.bind_table_to_context(
-                            columns,
-                            tf.function_type.name().to_string(),
-                            alias,
-                        )?;
-
-                        return Ok(Relation::TableFunction(Box::new(tf)));
-                    }
-                    let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
-                        ErrorCode::NotImplemented(
-                            format!("unknown table function kind: {}", name.0[0].value),
-                            1191.into(),
-                        )
-                    })?;
-                    Ok(Relation::WindowTableFunction(Box::new(
-                        self.bind_window_table_function(alias, kind, args)?,
-                    )))
+            TableFactor::Table { name, alias } => self.bind_relation_by_name(name, alias),
+            TableFactor::TableFunction { name, alias, args } => {
+                let func_name = &name.0[0].value;
+                if func_name.eq_ignore_ascii_case(RW_TABLE_FUNCTION_NAME) {
+                    let (schema, table_id) = self.resolve_table_id(args)?;
+                    return self.bind_relation_by_id(table_id, schema, alias);
                 }
+                if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
+                    let args: Vec<ExprImpl> = args
+                        .into_iter()
+                        .map(|arg| self.bind_function_arg(arg))
+                        .flatten_ok()
+                        .try_collect()?;
+                    let tf = TableFunction::new(table_function_type, args)?;
+                    let columns = [(
+                        false,
+                        Field {
+                            data_type: tf.return_type(),
+                            name: tf.function_type.name().to_string(),
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                    )]
+                    .into_iter();
+
+                    self.bind_table_to_context(
+                        columns,
+                        tf.function_type.name().to_string(),
+                        alias,
+                    )?;
+
+                    return Ok(Relation::TableFunction(Box::new(tf)));
+                }
+                let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
+                    ErrorCode::NotImplemented(
+                        format!("unknown table function kind: {}", name.0[0].value),
+                        1191.into(),
+                    )
+                })?;
+                Ok(Relation::WindowTableFunction(Box::new(
+                    self.bind_window_table_function(alias, kind, args)?,
+                )))
             }
             TableFactor::Derived {
                 lateral,
@@ -391,16 +388,6 @@ impl Binder {
                 self.pop_and_merge_lateral_context()?;
                 Ok(bound_join)
             }
-
-            // TODO: if and when we allow nested joins (binding table factors which are themselves
-            // joins), We need to `self.push_table_context()` prior to binding the join and
-            // `self.pop_and_merge_table_context()` after. This ensures that the nested join's
-            // `BindContext` references only the columns that are visible to it.
-            _ => Err(ErrorCode::NotImplemented(
-                format!("unsupported table factor {:?}", table_factor),
-                None.into(),
-            )
-            .into()),
         }
     }
 }
