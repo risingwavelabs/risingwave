@@ -582,6 +582,9 @@ template:
     # Enable sanity check when SSTs are committed. Disabled by default.
     enable-committed-sst-sanity-check: false
 
+    # Seconds compaction scheduler should stall when there is no available compactor.
+    no-available-compactor-stall-sec: 5,
+
   prometheus:
     # Advertise address of Prometheus
     address: "127.0.0.1"
