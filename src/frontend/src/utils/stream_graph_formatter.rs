@@ -75,11 +75,11 @@ impl StreamGraphFormatter {
     }
 
     fn explain_table(&mut self, tb: &Table, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        writeln!(f, "Table {}", tb.id)?;
         let tb = TableCatalog::from(tb.clone());
         writeln!(
             f,
-            "  columns: [{}]",
+            " Table {} {{ columns: [{}], primary key: {:?}, value indices: {:?}{} }}",
+            tb.id,
             tb.columns
                 .iter()
                 .map(|c| {
@@ -89,14 +89,15 @@ impl StreamGraphFormatter {
                         c.name().to_string()
                     }
                 })
-                .join(", ")
-        )?;
-        writeln!(f, "  primary key: {:?}", tb.order_key)?;
-        writeln!(f, "  value indices: {:?}", tb.value_indices)?;
-        if let Some(vnode_col_idx) = tb.vnode_col_idx {
-            writeln!(f, "  vnode column idx: {}", vnode_col_idx)?;
-        }
-        writeln!(f)
+                .join(", "),
+            tb.order_key,
+            tb.value_indices,
+            if let Some(vnode_col_idx) = tb.vnode_col_idx {
+                format!(", vnode column idx: {}", vnode_col_idx)
+            } else {
+                "".to_string()
+            }
+        )
     }
 
     fn explain_fragment(
