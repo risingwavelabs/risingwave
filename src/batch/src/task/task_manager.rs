@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{hash_map, HashMap};
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
@@ -26,16 +25,18 @@ use risingwave_pb::task_service::GetDataResponse;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
+use weak_table::WeakValueHashMap;
 
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::rpc::service::task_service::TaskInfoResponseResult;
 use crate::task::{BatchTaskExecution, ComputeNodeContext, TaskId, TaskOutput, TaskOutputId};
 
+type TasksMap = Arc<Mutex<WeakValueHashMap<TaskId, Weak<BatchTaskExecution<ComputeNodeContext>>>>>;
 /// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
 pub struct BatchManager {
     /// Every task id has a corresponding task execution.
-    tasks: Arc<Mutex<HashMap<TaskId, Arc<BatchTaskExecution<ComputeNodeContext>>>>>,
+    tasks: TasksMap,
 
     /// Runtime for the batch manager.
     runtime: &'static Runtime,
@@ -55,7 +56,7 @@ impl BatchManager {
                 .unwrap()
         };
         BatchManager {
-            tasks: Arc::new(Mutex::new(HashMap::new())),
+            tasks: Arc::new(Mutex::new(WeakValueHashMap::new())),
             // Leak the runtime to avoid runtime shutting-down in the main async context.
             // TODO: may manually shutdown the runtime after we implement graceful shutdown for
             // stream manager.
@@ -77,7 +78,9 @@ impl BatchManager {
         // Here the task id insert into self.tasks is put in front of `.async_execute`, cuz when
         // send `TaskStatus::Running` in `.async_execute`, the query runner may schedule next stage,
         // it's possible do not found parent task id in theory.
-        let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
+        let ret = if let weak_table::weak_value_hash_map::Entry::Vacant(e) =
+            self.tasks.lock().entry(task_id.clone())
+        {
             e.insert(task.clone());
             Ok(())
         } else {
@@ -87,7 +90,7 @@ impl BatchManager {
             ))
             .into())
         };
-        task.clone().async_execute().await?;
+        task.async_execute().await?;
         ret
     }
 
