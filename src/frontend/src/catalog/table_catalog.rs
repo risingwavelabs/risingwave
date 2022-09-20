@@ -143,6 +143,7 @@ impl TableCatalog {
             retention_seconds: table_options
                 .retention_seconds
                 .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
+            value_indices: self.value_indices.clone(),
         }
     }
 
