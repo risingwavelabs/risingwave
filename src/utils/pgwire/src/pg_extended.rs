@@ -28,7 +28,42 @@ use crate::pg_response::{PgResponse, StatementType};
 use crate::pg_server::{BoxedError, Session, SessionManager};
 use crate::types::Row;
 
-/// Parse params according the type description.
+/// default_params is to create default params:[String] from type_description:[TypeOid].
+/// The params produced by this function will be used in the replace_params.
+///
+/// type_description is a list of type oids.
+pub fn default_params(type_description: &[TypeOid]) -> PsqlResult<Vec<String>> {
+    let mut params: _ = Vec::new();
+    for oid in type_description.iter() {
+        match oid {
+            TypeOid::Boolean => params.push("false".to_string()),
+            TypeOid::BigInt => params.push("0::BIGINT".to_string()),
+            TypeOid::SmallInt => params.push("0::SMALLINT".to_string()),
+            TypeOid::Int => params.push("0::INT".to_string()),
+            TypeOid::Float4 => params.push("0::FLOAT4".to_string()),
+            TypeOid::Float8 => params.push("0::FLOAT8".to_string()),
+            TypeOid::Varchar => params.push("'0'".to_string()),
+            TypeOid::Date => params.push("'2021-01-01'::DATE".to_string()),
+            TypeOid::Time => params.push("'00:00:00'::TIME".to_string()),
+            TypeOid::Timestamp => params.push("'2021-01-01 00:00:00'::TIMESTAMP".to_string()),
+            TypeOid::Decimal => params.push("'0'::DECIMAL".to_string()),
+            TypeOid::Timestampz => {
+                return Err(PsqlError::ParseError(
+                    "Can't support Timestampz type in extended query mode".into(),
+                ))
+            }
+            TypeOid::Interval => {
+                return Err(PsqlError::ParseError(
+                    "Can't support Interval type in extended query mode".into(),
+                ))
+            }
+        };
+    }
+    Ok(params)
+}
+
+/// parse_params is to parse raw_params:&[Bytes] into params:[String].
+/// The param produced by this function will be used in the replace_params.
 ///
 /// type_description is a list of type oids.
 /// raw_params is a list of raw params.
@@ -39,8 +74,13 @@ use crate::types::Row;
 /// ```ignore
 /// let raw_params = vec!["A".into(), "B".into(), "C".into()];
 /// let type_description = vec![TypeOid::Varchar; 3];
-/// let params = parse_params(&type_description, &raw_params);
+/// let params = parse_params(&type_description, &raw_params,false);
 /// assert_eq!(params, vec!["'A'", "'B'", "'C'"])
+///
+/// let raw_params = vec!["1".into(), "2".into(), "3.1".into()];
+/// let type_description = vec![TypeOid::INT,TypeOid::INT,TypeOid::FLOAT4];
+/// let params = parse_params(&type_description, &raw_params,false);
+/// assert_eq!(params, vec!["1::INT", "2::INT", "3.1::FLOAT4"])
 /// ```
 fn parse_params(
     type_description: &[TypeOid],
@@ -51,104 +91,136 @@ fn parse_params(
 
     let mut params = Vec::with_capacity(raw_params.len());
 
-    if !param_format {
-        // TEXT FORMAT PARAMS
-        for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
-            let str = match type_oid {
-                TypeOid::Varchar => {
-                    format!("'{}'", cstr_to_str(raw_param).unwrap())
+    // BINARY FORMAT PARAMS
+    let place_hodler = Type::ANY;
+    for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
+        let str = match type_oid {
+            TypeOid::Varchar => {
+                format!("'{}'", cstr_to_str(raw_param).unwrap())
+            }
+            TypeOid::Boolean => {
+                if param_format {
+                    bool::from_sql(&place_hodler, raw_param)
+                        .unwrap()
+                        .to_string()
+                } else {
+                    cstr_to_str(raw_param).unwrap().to_string()
                 }
-                _ => cstr_to_str(raw_param).unwrap().to_string(),
-            };
-            params.push(str)
-        }
-    } else {
-        // BINARY FORMAT PARAMS
-        let place_hodler = Type::ANY;
-        for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
-            let str = match type_oid {
-                TypeOid::Varchar => {
-                    format!("'{}'", cstr_to_str(raw_param).unwrap())
-                }
-                TypeOid::Boolean => {
-                    format!("{}", bool::from_sql(&place_hodler, raw_param).unwrap())
-                }
-                TypeOid::BigInt => {
-                    format!(
-                        "{}::BIGINT",
-                        i64::from_sql(&place_hodler, raw_param).unwrap()
-                    )
-                }
-                TypeOid::SmallInt => {
-                    format!(
-                        "{}::SMALLINT",
-                        i16::from_sql(&place_hodler, raw_param).unwrap()
-                    )
-                }
-                TypeOid::Int => {
-                    format!("{}::INT", i32::from_sql(&place_hodler, raw_param).unwrap())
-                }
-                TypeOid::Float4 => {
-                    format!("{}::REAL", f32::from_sql(&place_hodler, raw_param).unwrap())
-                }
-                TypeOid::Float8 => {
-                    format!(
-                        "{}::DOUBLE PRECISION",
-                        f64::from_sql(&place_hodler, raw_param).unwrap()
-                    )
-                }
-                TypeOid::Date => {
-                    format!(
-                        "'{}'::DATE ",
-                        chrono::NaiveDate::from_sql(&place_hodler, raw_param).unwrap()
-                    )
-                }
-                TypeOid::Time => {
-                    format!(
-                        "'{}'::TIME",
-                        chrono::NaiveTime::from_sql(&place_hodler, raw_param).unwrap()
-                    )
-                }
-                TypeOid::Timestamp => {
-                    format!(
-                        "'{}'::TIMESTAMP ",
-                        chrono::NaiveDateTime::from_sql(&place_hodler, raw_param).unwrap()
-                    )
-                }
-                TypeOid::Decimal => {
-                    format!(
-                        "{}::DECIMAL",
-                        rust_decimal::Decimal::from_sql(&place_hodler, raw_param).unwrap()
-                    )
-                }
-                TypeOid::Timestampz => {
-                    todo!("can't parse timestampz")
-                }
-                TypeOid::Interval => {
-                    todo!("can't parse interval type")
-                }
-            };
-            params.push(str)
-        }
+            }
+            TypeOid::BigInt => {
+                let tmp = if param_format {
+                    i64::from_sql(&place_hodler, raw_param).unwrap().to_string()
+                } else {
+                    cstr_to_str(raw_param).unwrap().to_string()
+                };
+                format!("{}::BIGINT", tmp)
+            }
+            TypeOid::SmallInt => {
+                let tmp = if param_format {
+                    i16::from_sql(&place_hodler, raw_param).unwrap().to_string()
+                } else {
+                    cstr_to_str(raw_param).unwrap().to_string()
+                };
+                format!("{}::SMALLINT", tmp)
+            }
+            TypeOid::Int => {
+                let tmp = if param_format {
+                    i32::from_sql(&place_hodler, raw_param).unwrap().to_string()
+                } else {
+                    cstr_to_str(raw_param).unwrap().to_string()
+                };
+                format!("{}::INT", tmp)
+            }
+            TypeOid::Float4 => {
+                let tmp = if param_format {
+                    f32::from_sql(&place_hodler, raw_param).unwrap().to_string()
+                } else {
+                    cstr_to_str(raw_param).unwrap().to_string()
+                };
+                format!("{}::FLOAT4", tmp)
+            }
+            TypeOid::Float8 => {
+                let tmp = if param_format {
+                    f64::from_sql(&place_hodler, raw_param).unwrap().to_string()
+                } else {
+                    cstr_to_str(raw_param).unwrap().to_string()
+                };
+                format!("{}::FLOAT8", tmp)
+            }
+            TypeOid::Date => {
+                let tmp = if param_format {
+                    chrono::NaiveDate::from_sql(&place_hodler, raw_param)
+                        .unwrap()
+                        .to_string()
+                } else {
+                    cstr_to_str(raw_param).unwrap().to_string()
+                };
+                format!("'{}'::DATE", tmp)
+            }
+            TypeOid::Time => {
+                let tmp = if param_format {
+                    chrono::NaiveTime::from_sql(&place_hodler, raw_param)
+                        .unwrap()
+                        .to_string()
+                } else {
+                    cstr_to_str(raw_param).unwrap().to_string()
+                };
+                format!("'{}'::TIME", tmp)
+            }
+            TypeOid::Timestamp => {
+                let tmp = if param_format {
+                    chrono::NaiveDateTime::from_sql(&place_hodler, raw_param)
+                        .unwrap()
+                        .to_string()
+                } else {
+                    cstr_to_str(raw_param).unwrap().to_string()
+                };
+                format!("'{}'::TIMESTAMP", tmp)
+            }
+            TypeOid::Decimal => {
+                let tmp = if param_format {
+                    rust_decimal::Decimal::from_sql(&place_hodler, raw_param)
+                        .unwrap()
+                        .to_string()
+                } else {
+                    cstr_to_str(raw_param).unwrap().to_string()
+                };
+                format!("{}::DECIMAL", tmp)
+            }
+            TypeOid::Timestampz => {
+                return Err(PsqlError::BindError(
+                    "Can't support Timestampz type in extended query mode".into(),
+                ))
+            }
+            TypeOid::Interval => {
+                return Err(PsqlError::BindError(
+                    "Can't support Interval type in extended query mode".into(),
+                ))
+            }
+        };
+        params.push(str)
     }
+
     Ok(params)
 }
 
-/// Replace generic params in query into real params.
+/// repalce_params is to replace generic params in raw_query into real params.
+///
+/// raw_query is the query with generic params($1,$2,$3...).
+/// params is the real params(e.g. ["1::INT","'A'::VARCHAR"]).
 ///
 /// # Example
 ///
 /// ```ignore
-/// let raw_params = vec!["A".into(), "B".into(), "C".into()];
-/// let type_description = vec![TypeOid::Varchar; 3];
-/// let params = parse_params(&type_description, &raw_params);
-/// let res = replace_params("SELECT $3,$2,$1".to_string(), &[1, 2, 3], &params);
-/// assert_eq!(res, "SELECT 'C','B','A'");
+/// let params = vec!["'A'::VARCHAR".into(), "1::INT".into(), "2::SMALLINT".into()];
+/// let res = replace_params("SELECT $3,$2,$1".to_string(), &params);
+/// assert_eq!(res, "SELECT 2::SMALLINT,1::INT,'A'::VARCHAR")");
 /// ```
-fn replace_params(query_string: String, generic_params: &[usize], params: &[String]) -> String {
-    let mut tmp = query_string;
+pub fn replace_params(raw_query: String, params: &[String]) -> String {
+    let mut tmp = raw_query;
 
-    for &param_idx in generic_params {
+    let len = params.len();
+    for param_idx in 1..(len + 1) {
         let pattern =
             Regex::new(format!(r"(?P<x>\${0})(?P<y>[^\d]{{1}})|\${0}$", param_idx).as_str())
                 .unwrap();
@@ -234,27 +306,11 @@ impl PgStatement {
             });
         }
 
-        // 1. Identify all the $n. For example, "SELECT $3, $2, $1" -> [3, 2, 1].
-        let parameter_pattern = Regex::new(r"\$[0-9][0-9]*").unwrap();
-        let generic_params: Vec<usize> = parameter_pattern
-            .find_iter(statement.as_str())
-            .map(|x| {
-                x.as_str()
-                    .strip_prefix('$')
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap()
-            })
-            .collect();
-
-        // 2. Parse params bytes into string form according to type.
+        // Convert sql with generic params into real sql.
         let params = parse_params(&self.type_description, params, param_format)?;
+        let instance_query_string = replace_params(statement, &params);
 
-        // 3. Replace generic params in statement to real value. For example, "SELECT $3, $2, $1" ->
-        // "SELECT 'A', 'B', 'C'".
-        let instance_query_string = replace_params(statement, &generic_params, &params);
-
-        // 4. Get row_description and return portal.
+        // Get row_description and return portal.
         let row_description =
             Self::infer_row_description::<SM>(session, instance_query_string.as_str()).await?;
 
@@ -360,101 +416,196 @@ impl PgPortal {
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
 
+    use postgres_types::private::BytesMut;
+    use tokio_postgres::types::{ToSql, Type};
+
     use super::{parse_params, replace_params};
     use crate::pg_field_descriptor::TypeOid;
     #[test]
+    fn test_parse_params_text() {
+        let raw_params = vec!["A".into(), "B".into(), "C".into()];
+        let type_description = vec![TypeOid::Varchar; 3];
+        let params = parse_params(&type_description, &raw_params, false).unwrap();
+        assert_eq!(params, vec!["'A'", "'B'", "'C'"]);
+
+        let raw_params = vec!["false".into(), "true".into()];
+        let type_description = vec![TypeOid::Boolean; 2];
+        let params = parse_params(&type_description, &raw_params, false).unwrap();
+        assert_eq!(params, vec!["false", "true"]);
+
+        let raw_params = vec!["1".into(), "2".into(), "3".into()];
+        let type_description = vec![TypeOid::SmallInt, TypeOid::Int, TypeOid::BigInt];
+        let params = parse_params(&type_description, &raw_params, false).unwrap();
+        assert_eq!(params, vec!["1::SMALLINT", "2::INT", "3::BIGINT"]);
+
+        let raw_params = vec![
+            "1.0".into(),
+            "2.0".into(),
+            rust_decimal::Decimal::from_f32_retain(3.0_f32)
+                .unwrap()
+                .to_string()
+                .into(),
+        ];
+        let type_description = vec![TypeOid::Float4, TypeOid::Float8, TypeOid::Decimal];
+        let params = parse_params(&type_description, &raw_params, false).unwrap();
+        assert_eq!(params, vec!["1.0::FLOAT4", "2.0::FLOAT8", "3::DECIMAL"]);
+
+        let raw_params = vec![
+            chrono::NaiveDate::from_ymd(2021, 1, 1).to_string().into(),
+            chrono::NaiveTime::from_hms(12, 0, 0).to_string().into(),
+            chrono::NaiveDateTime::from_timestamp(1610000000, 0)
+                .to_string()
+                .into(),
+        ];
+        let type_description = vec![TypeOid::Date, TypeOid::Time, TypeOid::Timestamp];
+        let params = parse_params(&type_description, &raw_params, false).unwrap();
+        assert_eq!(
+            params,
+            vec![
+                "'2021-01-01'::DATE",
+                "'12:00:00'::TIME",
+                "'2021-01-07 06:13:20'::TIMESTAMP"
+            ]
+        );
+    }
+    #[test]
+    fn test_parse_params_binary() {
+        let place_hodler = Type::ANY;
+
+        let raw_params = vec!["A".into(), "B".into(), "C".into()];
+        let type_description = vec![TypeOid::Varchar; 3];
+        let params = parse_params(&type_description, &raw_params, true).unwrap();
+        assert_eq!(params, vec!["'A'", "'B'", "'C'"]);
+
+        let mut raw_params = vec![BytesMut::new(); 2];
+        false.to_sql(&place_hodler, &mut raw_params[0]).unwrap();
+        true.to_sql(&place_hodler, &mut raw_params[1]).unwrap();
+        let raw_params = raw_params
+            .into_iter()
+            .map(|b| b.freeze())
+            .collect::<Vec<_>>();
+        let type_description = vec![TypeOid::Boolean; 2];
+        let params = parse_params(&type_description, &raw_params, true).unwrap();
+        assert_eq!(params, vec!["false", "true"]);
+
+        let mut raw_params = vec![BytesMut::new(); 3];
+        1_i16.to_sql(&place_hodler, &mut raw_params[0]).unwrap();
+        2_i32.to_sql(&place_hodler, &mut raw_params[1]).unwrap();
+        3_i64.to_sql(&place_hodler, &mut raw_params[2]).unwrap();
+        let raw_params = raw_params
+            .into_iter()
+            .map(|b| b.freeze())
+            .collect::<Vec<_>>();
+        let type_description = vec![TypeOid::SmallInt, TypeOid::Int, TypeOid::BigInt];
+        let params = parse_params(&type_description, &raw_params, true).unwrap();
+        assert_eq!(params, vec!["1::SMALLINT", "2::INT", "3::BIGINT"]);
+
+        let mut raw_params = vec![BytesMut::new(); 3];
+        1.0_f32.to_sql(&place_hodler, &mut raw_params[0]).unwrap();
+        2.0_f64.to_sql(&place_hodler, &mut raw_params[1]).unwrap();
+        rust_decimal::Decimal::from_f32_retain(3.0_f32)
+            .unwrap()
+            .to_sql(&place_hodler, &mut raw_params[2])
+            .unwrap();
+        let raw_params = raw_params
+            .into_iter()
+            .map(|b| b.freeze())
+            .collect::<Vec<_>>();
+        let type_description = vec![TypeOid::Float4, TypeOid::Float8, TypeOid::Decimal];
+        let params = parse_params(&type_description, &raw_params, true).unwrap();
+        assert_eq!(params, vec!["1::FLOAT4", "2::FLOAT8", "3::DECIMAL"]);
+
+        let mut raw_params = vec![BytesMut::new(); 3];
+        chrono::NaiveDate::from_ymd(2021, 1, 1)
+            .to_sql(&place_hodler, &mut raw_params[0])
+            .unwrap();
+        chrono::NaiveTime::from_hms(12, 0, 0)
+            .to_sql(&place_hodler, &mut raw_params[1])
+            .unwrap();
+        chrono::NaiveDateTime::from_timestamp(1610000000, 0)
+            .to_sql(&place_hodler, &mut raw_params[2])
+            .unwrap();
+        let raw_params = raw_params
+            .into_iter()
+            .map(|b| b.freeze())
+            .collect::<Vec<_>>();
+        let type_description = vec![TypeOid::Date, TypeOid::Time, TypeOid::Timestamp];
+        let params = parse_params(&type_description, &raw_params, true).unwrap();
+        assert_eq!(
+            params,
+            vec![
+                "'2021-01-01'::DATE",
+                "'12:00:00'::TIME",
+                "'2021-01-07 06:13:20'::TIMESTAMP"
+            ]
+        );
+    }
+    #[test]
     fn test_replace_params() {
-        {
-            let raw_params = vec!["A".into(), "B".into(), "C".into()];
-            let type_description = vec![TypeOid::Varchar; 3];
-            let params = parse_params(&type_description, &raw_params, false).unwrap();
+        let res = replace_params(
+            "SELECT $3,$2,$1".to_string(),
+            &["'A'".into(), "'B'".into(), "'C'".into()],
+        );
+        assert_eq!(res, "SELECT 'C','B','A'");
 
-            let res = replace_params("SELECT $3,$2,$1".to_string(), &[1, 2, 3], &params);
-            assert_eq!(res, "SELECT 'C','B','A'");
+        let res = replace_params(
+            "SELECT $2,$3,$1  ,$3 ,$2 ,$1     ;".to_string(),
+            &["'A'".into(), "'B'".into(), "'C'".into(), "'D'".into()],
+        );
+        assert_eq!(res, "SELECT 'B','C','A'  ,'C' ,'B' ,'A'     ;");
 
-            let res = replace_params(
-                "SELECT $2,$3,$1  ,$3 ,$2 ,$1     ;".to_string(),
-                &[1, 2, 3],
-                &params,
-            );
-            assert_eq!(res, "SELECT 'B','C','A'  ,'C' ,'B' ,'A'     ;");
-        }
+        let res = replace_params(
+            "SELECT $10,$2,$1;".to_string(),
+            &[
+                "1".into(),
+                "2".into(),
+                "3".into(),
+                "4".into(),
+                "5".into(),
+                "6".into(),
+                "7".into(),
+                "8".into(),
+                "9".into(),
+                "10".into(),
+            ],
+        );
+        assert_eq!(res, "SELECT 10,2,1;");
 
-        {
-            let raw_params = vec![
-                "A".into(),
-                "B".into(),
-                "C".into(),
-                "D".into(),
-                "E".into(),
-                "F".into(),
-                "G".into(),
-                "H".into(),
-                "I".into(),
-                "J".into(),
-                "K".into(),
-            ];
-            let type_description = vec![TypeOid::Varchar; 11];
-            let params = parse_params(&type_description, &raw_params, false).unwrap();
+        let res = replace_params(
+            "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  'He1ll2o',1;".to_string(),
+            &[
+                "1".into(),
+                "2".into(),
+                "3".into(),
+                "4".into(),
+                "5".into(),
+                "6".into(),
+                "7".into(),
+                "8".into(),
+                "9".into(),
+                "10".into(),
+                "11".into(),
+                "12".into(),
+            ],
+        );
+        assert_eq!(res, "SELECT 2,1,11,10 ,11, 1,12 , 2,  'He1ll2o',1;");
 
-            let res = replace_params(
-                "SELECT $11,$2,$1;".to_string(),
-                &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-                &params,
-            );
-            assert_eq!(res, "SELECT 'K','B','A';");
-        }
+        let res = replace_params(
+            "INSERT INTO nperson (name,data) VALUES ($1,$2)".to_string(),
+            &["'A'".into(), "2.0::FLOAT4".into()],
+        );
+        assert!(res == "INSERT INTO nperson (name,data) VALUES ('A',2.0::FLOAT4)");
 
-        {
-            let raw_params = vec![
-                "A".into(),
-                "B".into(),
-                "C".into(),
-                "D".into(),
-                "E".into(),
-                "F".into(),
-                "G".into(),
-                "H".into(),
-                "I".into(),
-                "J".into(),
-                "K".into(),
-                "L".into(),
-            ];
-            let type_description = vec![TypeOid::Varchar; 12];
-            let params = parse_params(&type_description, &raw_params, false).unwrap();
+        let res = replace_params(
+            "UPDATE COFFEES SET SALES = $1 WHERE COF_NAME LIKE $2 ".to_string(),
+            &["1::INT4".into(), "2::INT8".into()],
+        );
+        assert!(res == "UPDATE COFFEES SET SALES = 1::INT4 WHERE COF_NAME LIKE 2::INT8 ");
 
-            let res = replace_params(
-                "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  'He1ll2o',1;".to_string(),
-                &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-                &params,
-            );
-            assert_eq!(
-                res,
-                "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;"
-            );
-
-            let res = replace_params(
-                "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  'He1ll2o',1;".to_string(),
-                &[2, 1, 11, 10, 12, 9, 7, 8, 5, 6, 4, 3],
-                &params,
-            );
-            assert_eq!(
-                res,
-                "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;"
-            );
-        }
-
-        {
-            let raw_params = vec!["A".into(), "B".into()];
-            let type_description = vec![TypeOid::Varchar; 2];
-            let params = parse_params(&type_description, &raw_params, false).unwrap();
-
-            let res = replace_params(
-                "INSERT INTO nperson (name,data) VALUES ($1,$2)".to_string(),
-                &[1, 2],
-                &params,
-            );
-            assert!(res == "INSERT INTO nperson (name,data) VALUES ('A','B')");
-        }
+        let res = replace_params(
+            "SELECT * FROM TEST WHERE TIME = $1".into(),
+            &["'2021-01-01'::DATE".into()],
+        );
+        assert!(res == "SELECT * FROM TEST WHERE TIME = '2021-01-01'::DATE");
     }
 }

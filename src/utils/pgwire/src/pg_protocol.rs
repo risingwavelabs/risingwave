@@ -24,7 +24,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::log::trace;
 
 use crate::error::{PsqlError, PsqlResult};
-use crate::pg_extended::{PgPortal, PgStatement};
+use crate::pg_extended::{default_params, replace_params, PgPortal, PgStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
@@ -337,48 +337,15 @@ where
                     .await
                     .map_err(PsqlError::ParseError)?
             } else {
-                // Process the statement with params.
-                // For now, we can only process the statement type like this e.g. 'select
-                // $1,$2,$3...'. The following process only consider statement as
-                // 'select $1,$2,$3...'.
-
-                // Get the generic params e.g. [$1,$2,$3]
-                let generic_params: Vec<&str> = sql
-                    .split(&[' ', ',', ';'])
-                    .skip(1)
-                    .into_iter()
-                    .take_while(|x| !x.is_empty())
-                    .collect();
-
-                // Strip the '$' from the generic params e.g. [1,2,3]
-                let mut idx = Vec::with_capacity(generic_params.len());
-                for x in generic_params.iter() {
-                    // NOTE: Assume all output are generic params.
-                    let str = x
-                        .strip_prefix('$')
-                        .ok_or_else(|| PsqlError::ParseError("Invalid generic param".into()))?;
-                    // NOTE: Assume all generic are valid.
-                    let v: i32 = str
-                        .parse()
-                        .map_err(|e| PsqlError::ParseError(Box::new(e)))?;
-                    if !v.is_positive() {
-                        return Err(PsqlError::ParseError("Invalid generic param".into()));
-                    }
-                    idx.push(v);
-                }
-
-                // Create the PgFieldDescriptor according the type of generic params.
-                let mut res = Vec::with_capacity(idx.len());
-                for x in idx.iter() {
-                    if ((x - 1) as usize) >= types.len() {
-                        return Err(PsqlError::ParseError("Invalid generic param".into()));
-                    }
-                    res.push(PgFieldDescriptor::new(
-                        String::new(),
-                        types[(x - 1) as usize].to_owned(),
-                    ));
-                }
-                res
+                // replace the param use default value of that type
+                let default_params = default_params(&types)?;
+                let real_sql = replace_params(sql.to_string(), &default_params);
+                let session = self.session.clone().unwrap();
+                session
+                    .infer_return_type(&real_sql)
+                    .await
+                    .map_err(PsqlError::ParseError)?
+                // send sql to the infer_return_type
             }
         } else {
             vec![]
