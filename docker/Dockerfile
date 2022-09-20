@@ -22,7 +22,7 @@ RUN rustup self update \
   && rustup default $(cat "/risingwave/rust-toolchain") \
   && rustup component add rustfmt
 
-# RUN cargo fetch
+RUN cargo fetch
 RUN mkdir -p /risingwave/bin
 
 ARG simd_disabled=false
