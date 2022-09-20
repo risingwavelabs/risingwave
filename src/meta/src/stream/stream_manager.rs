@@ -317,12 +317,24 @@ where
             let upstream_table_id = chain_fragment_upstream_table_map
                 .get(&fragment.fragment_id)
                 .unwrap();
-            fragment.vnode_mapping = env
+
+            let upstream_fragment_vnode_info = env
                 .upstream_fragment_vnode_info
                 .get(upstream_table_id)
-                .unwrap()
+                .unwrap();
+
+            let upstream_fragment_id = upstream_fragment_vnode_info
                 .vnode_mapping
-                .clone();
+                .as_ref()
+                .unwrap()
+                .fragment_id;
+
+            assert!(fragment.upstream_fragment_ids.is_empty());
+            fragment
+                .upstream_fragment_ids
+                .push(upstream_fragment_id as FragmentId);
+
+            fragment.vnode_mapping = upstream_fragment_vnode_info.vnode_mapping.clone();
         }
         Ok(())
     }
@@ -418,7 +430,6 @@ where
             chain_fragment_upstream_table_map,
         )
         .await?;
-
         let dispatchers = &*dispatchers;
         let upstream_worker_actors = &*upstream_worker_actors;
 
