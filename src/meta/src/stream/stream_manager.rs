@@ -1246,7 +1246,7 @@ mod tests {
         assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
-        services.drop_materialized_view(&table_id).await?;
+        services.drop_materialized_view(&table_id).await.unwrap();
 
         // test get table_fragment;
         let select_err_1 = services
