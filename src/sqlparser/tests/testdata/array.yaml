@@ -27,3 +27,6 @@
 
 - input: SELECT (CAST(ARRAY[ARRAY[2, 3]] AS INT[][]))[1][2]
   formatted_sql: SELECT (CAST(ARRAY[ARRAY[2, 3]] AS INT[][]))[1][2]
+
+- input: SELECT ARRAY[]
+  formatted_sql: SELECT ARRAY[]
