@@ -71,6 +71,8 @@ enum HummockCommands {
         #[clap(short, long = "num-epochs", default_value_t = 100)]
         num_epochs: u32,
     },
+    /// Forbid hummock commit new epochs, which is a prerequisite for compaction deterministic test
+    DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
         #[clap(short, long = "epoch", default_value_t = u64::MAX)]
@@ -150,6 +152,9 @@ enum MetaCommands {
 
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
+        Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
+            cmd_impl::hummock::disable_commit_epoch().await?
+        }
         Commands::Hummock(HummockCommands::ListVersion) => {
             cmd_impl::hummock::list_version().await?;
         }

@@ -132,17 +132,17 @@ pub async fn compaction_test_serve(
             compaction_groups
         );
         replay_count += 1;
-
         compaction_groups
             .into_iter()
             .map(|c| modified_compaction_groups.insert(c))
             .count();
 
-        if replay_count % COMPACTION_FREQ == 0 {
+        // We can custom more conditions for compaction triggering
+        // For now I just use a static way here
+        if replay_count % COMPACTION_FREQ == 0 && !modified_compaction_groups.is_empty() {
             local_version_manager
                 .try_wait_epoch(HummockReadEpoch::Committed(max_committed_epoch))
                 .await?;
-
             let expect_result = hummock
                 .scan::<_, Vec<u8>>(
                     None,
@@ -155,22 +155,20 @@ pub async fn compaction_test_serve(
                     },
                 )
                 .await?;
-
             tracing::info!(
                 "Trigger compaction for version {}, epoch {} compaction_groups: {:?}",
                 version_id,
                 max_committed_epoch,
                 modified_compaction_groups,
             );
-
-            // triger compactions once for each hummock group
+            // When this function returns, the compaction is finished.
+            // The returned version deltas is order by id in ascending order
             let new_versions = meta_client
                 .trigger_compaction_deterministic(
                     version_id,
                     Vec::from_iter(modified_compaction_groups.into_iter()),
                 )
                 .await?;
-
             if let Some(latest_version) = new_versions.version_deltas.last() {
                 // compare KVs after compaction finished
                 let actual_result = hummock
@@ -185,7 +183,6 @@ pub async fn compaction_test_serve(
                         },
                     )
                     .await?;
-
                 tracing::info!(
                     "Check result for version: id: {}, max_committed_epoch: {}",
                     latest_version.id,
@@ -196,7 +193,6 @@ pub async fn compaction_test_serve(
             modified_compaction_groups = HashSet::new();
         }
     }
-
     tracing::info!("Replay finished");
     tokio::try_join!(join_handle, observer_join_handle)?;
     Ok(())

@@ -920,9 +920,6 @@ where
             task_status != TaskStatus::Pending,
             "report pending compaction task"
         );
-
-        tracing::info!("Report compaction task: {}", task_status.as_str_name());
-
         if let TaskStatus::Success = task_status {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
@@ -948,11 +945,13 @@ where
 
             current_version.apply_version_delta(&version_delta);
 
-            // Compaction success, send the new version to channel
-            self.compaction_finish_channel
-                .0
-                .send(version_delta.clone())
-                .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))?;
+            if versioning.deterministic_mode {
+                // Compaction success, send the new version to channel
+                self.compaction_finish_channel
+                    .0
+                    .send(version_delta.clone())
+                    .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))?;
+            }
 
             self.env
                 .notification_manager()
@@ -1471,6 +1470,12 @@ where
             "old_version epoch {}",
             old_version.max_committed_epoch
         );
+
+        if compaction_groups.is_empty() {
+            return Ok(HummockVersionDeltas {
+                version_deltas: vec![],
+            });
+        }
         let mut pending_ack = compaction_groups.len();
         for compaction_group in compaction_groups {
             self.try_sched_compaction_deterministic(compaction_group)?;

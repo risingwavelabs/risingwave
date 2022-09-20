@@ -192,10 +192,7 @@ where
             let compaction_group: CompactionGroupId = tokio::select! {
                 compaction_group = sched_rx.recv() => {
                     match compaction_group {
-                        Some(compaction_group) =>  {
-                            assert!(false, "unexpected schedule");
-                            compaction_group
-                        },
+                        Some(compaction_group) => compaction_group,
                         None => {
                             tracing::warn!("Compactor Scheduler: The Hummock manager has dropped the connection,
                                 it means it has either died or started a new session. Exiting.");
