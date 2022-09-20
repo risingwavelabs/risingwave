@@ -364,9 +364,34 @@
          Output: [max(ak1.v), ak1.k1]
          Stream key: [ak1.k1]
           StreamHashAgg { group_key: [ak1.k1], aggs: [count, max(ak1.v)] }
+           state tables: [0, 1]
+           Output: [ak1.k1, count, max(ak1.v)]
+           Stream key: [ak1.k1]
             Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
+             Output: [ak1.k1, ak1.v, ak1.a._row_id]
+             Stream key: [ak1.a._row_id]
               Upstream
+               Output: [k1, k2, k3, v, a._row_id]
+               Stream key: [a._row_id]
               BatchPlanNode
+               Output: [ak1.k1, ak1.v, ak1.a._row_id]
+               Stream key: [ak1.a._row_id]
+               AppendOnly
+
+    Table 0
+      columns: [ak1.k1:integer, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 1
+      columns: [ak1.k1:integer, ak1.v:integer, ak1.a._row_id:bigint]
+      primary key: [$0 ASC, $1 DESC, $2 ASC]
+      values indices: [0, 1, 2]
+
+    Table 4294967294
+      columns: [max_v:integer, ak1.k1:integer]
+      primary key: [$1 ASC]
+      values indices: [0, 1]
 
 - id: aggk1_from_Ak1k2
   before:
@@ -521,9 +546,34 @@
          Output: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2]
          Stream key: [ak1k2.k1, ak1k2.k2]
           StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [count, sum(ak1k2.v)] }
+           state tables: [0, 1]
+           Output: [ak1k2.k1, ak1k2.k2, count, sum(ak1k2.v)]
+           Stream key: [ak1k2.k1, ak1k2.k2]
             Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+             Output: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id]
+             Stream key: [ak1k2.a._row_id]
               Upstream
+               Output: [k1, k2, k3, v, a._row_id]
+               Stream key: [a._row_id]
               BatchPlanNode
+               Output: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id]
+               Stream key: [ak1k2.a._row_id]
+               AppendOnly
+
+    Table 0
+      columns: [ak1k2.k1:integer, ak1k2.k2:integer, count:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 1
+      columns: [ak1k2.k1:integer, ak1k2.k2:integer, sum(ak1k2.v):bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 4294967294
+      columns: [sum_v:bigint, ak1k2.k1:integer, ak1k2.k2:integer]
+      primary key: [$1 ASC, $2 ASC]
+      values indices: [0, 1, 2]
 
 - id: aggk1k2_from_Ak1
   before:
@@ -552,9 +602,34 @@
          Output: [sum(ak1.v), ak1.k1, ak1.k2]
          Stream key: [ak1.k1, ak1.k2]
           StreamHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [count, sum(ak1.v)] }
+           state tables: [0, 1]
+           Output: [ak1.k1, ak1.k2, count, sum(ak1.v)]
+           Stream key: [ak1.k1, ak1.k2]
             Chain { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
+             Output: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id]
+             Stream key: [ak1.a._row_id]
               Upstream
+               Output: [k1, k2, k3, v, a._row_id]
+               Stream key: [a._row_id]
               BatchPlanNode
+               Output: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id]
+               Stream key: [ak1.a._row_id]
+               AppendOnly
+
+    Table 0
+      columns: [ak1.k1:integer, ak1.k2:integer, count:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 1
+      columns: [ak1.k1:integer, ak1.k2:integer, sum(ak1.v):bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 4294967294
+      columns: [sum_v:bigint, ak1.k1:integer, ak1.k2:integer]
+      primary key: [$1 ASC, $2 ASC]
+      values indices: [0, 1, 2]
 
 - id: aggk1_from_aggk1
   before:
@@ -598,8 +673,15 @@
            Output: [a.k1, count, max(count)]
            Stream key: [a.k1]
             StreamProject { exprs: [a.k1, count] }
+             Output: [a.k1, count]
+             Stream key: [a.k1]
               StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+               state tables: [2, 3]
+               Output: [a.k1, count, count]
+               Stream key: [a.k1]
                 StreamExchange Hash([0]) from 1
+                 Output: [a.k1, a._row_id]
+                 Stream key: [a._row_id]
 
     Fragment 1
       Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
@@ -874,8 +956,15 @@
            Output: [a.k1, a.k2, count, max(count)]
            Stream key: [a.k1, a.k2]
             StreamProject { exprs: [a.k1, a.k2, count] }
+             Output: [a.k1, a.k2, count]
+             Stream key: [a.k1, a.k2]
               StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, count] }
+               state tables: [2, 3]
+               Output: [a.k1, a.k2, count, count]
+               Stream key: [a.k1, a.k2]
                 StreamExchange Hash([0, 1]) from 1
+                 Output: [a.k1, a.k2, a._row_id]
+                 Stream key: [a._row_id]
 
     Fragment 1
       Chain { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
@@ -957,8 +1046,15 @@
            Output: [ak1.k1, ak1.v, ak1.a._row_id]
            Stream key: [ak1.a._row_id]
           StreamProject { exprs: [count, a.k1] }
+           Output: [count, a.k1]
+           Stream key: [a.k1]
             StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+             state tables: [4, 5]
+             Output: [a.k1, count, count]
+             Stream key: [a.k1]
               StreamExchange Hash([0]) from 2
+               Output: [a.k1, a._row_id]
+               Stream key: [a._row_id]
 
     Fragment 1
       Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
@@ -1059,9 +1155,18 @@
          Output: [ak1.v, count, a.k1, ak1.a._row_id, ak1.k1]
          Stream key: [a.k1, ak1.a._row_id, ak1.k1]
           StreamProject { exprs: [count, a.k1] }
+           Output: [count, a.k1]
+           Stream key: [a.k1]
             StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+             state tables: [4, 5]
+             Output: [a.k1, count, count]
+             Stream key: [a.k1]
               StreamExchange Hash([0]) from 1
+               Output: [a.k1, a._row_id]
+               Stream key: [a._row_id]
           StreamExchange Hash([0]) from 2
+           Output: [ak1.k1, ak1.v, ak1.a._row_id]
+           Stream key: [ak1.a._row_id]
 
     Fragment 1
       Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
@@ -1171,11 +1276,25 @@
          Output: [count, count, a.k1, b.k1]
          Stream key: [a.k1, b.k1]
           StreamProject { exprs: [count, a.k1] }
+           Output: [count, a.k1]
+           Stream key: [a.k1]
             StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+             state tables: [4, 5]
+             Output: [a.k1, count, count]
+             Stream key: [a.k1]
               StreamExchange Hash([0]) from 1
+               Output: [a.k1, a._row_id]
+               Stream key: [a._row_id]
           StreamProject { exprs: [count, b.k1] }
+           Output: [count, b.k1]
+           Stream key: [b.k1]
             StreamHashAgg { group_key: [b.k1], aggs: [count, count] }
+             state tables: [6, 7]
+             Output: [b.k1, count, count]
+             Stream key: [b.k1]
               StreamExchange Hash([0]) from 2
+               Output: [b.k1, b._row_id]
+               Stream key: [b._row_id]
 
     Fragment 1
       Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }

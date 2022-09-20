@@ -477,7 +477,11 @@
            Output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey]
            Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
             StreamExchange Hash([8]) from 2
+             Output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), supplier.s_nationkey, nation.n_nationkey]
+             Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey]
             StreamExchange Hash([0]) from 18
+             Output: [region.r_regionkey]
+             Stream key: [region.r_regionkey]
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), supplier.s_nationkey, nation.n_nationkey] }
@@ -485,7 +489,11 @@
        Output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), supplier.s_nationkey, nation.n_nationkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey]
         StreamExchange Hash([4]) from 3
+         Output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, partsupp.ps_supplycost, part.p_partkey, min(partsupp.ps_supplycost)]
+         Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost)]
         StreamExchange Hash([0]) from 17
+         Output: [nation.n_nationkey, nation.n_name, nation.n_regionkey]
+         Stream key: [nation.n_nationkey]
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey AND partsupp.ps_supplycost = min(partsupp.ps_supplycost), output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, partsupp.ps_supplycost, part.p_partkey, min(partsupp.ps_supplycost)] }
@@ -496,10 +504,22 @@
          Output: [partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
          Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey]
         StreamProject { exprs: [part.p_partkey, min(partsupp.ps_supplycost)] }
+         Output: [part.p_partkey, min(partsupp.ps_supplycost)]
+         Stream key: [part.p_partkey]
           StreamHashAgg { group_key: [part.p_partkey], aggs: [count, min(partsupp.ps_supplycost)] }
+           state tables: [22, 23]
+           Output: [part.p_partkey, count, min(partsupp.ps_supplycost)]
+           Stream key: [part.p_partkey]
             StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey] }
+             left table: 24, right table 26, left degree table: 25, right degree table: 27,
+             Output: [part.p_partkey, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
+             Stream key: [part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
               StreamExchange Hash([0]) from 9
+               Output: [part.p_partkey]
+               Stream key: [part.p_partkey]
               StreamExchange Hash([0]) from 10
+               Output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey]
+               Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey] }
@@ -572,24 +592,55 @@
        Output: [part.p_partkey]
        Stream key: [part.p_partkey]
         StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
+         state tables: [28]
+         Output: [part.p_partkey, count]
+         Stream key: [part.p_partkey]
           Chain { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+           Output: [part.p_partkey]
+           Stream key: [part.p_partkey]
             Upstream
+             Output: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment]
+             Stream key: [p_partkey]
             BatchPlanNode
+             Output: [part.p_partkey]
+             Stream key: [part.p_partkey]
+             AppendOnly
 
     Fragment 10
       StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey] }
+       left table: 29, right table 31, left degree table: 30, right degree table: 32,
+       Output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey]
+       Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
         StreamExchange Hash([2]) from 11
+         Output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey]
+         Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
         StreamExchange Hash([0]) from 16
+         Output: [region.r_regionkey]
+         Stream key: [region.r_regionkey]
 
     Fragment 11
       StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
+       left table: 33, right table 35, left degree table: 34, right degree table: 36,
+       Output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey]
+       Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
         StreamExchange Hash([2]) from 12
+         Output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey]
+         Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
         StreamExchange Hash([0]) from 15
+         Output: [nation.n_nationkey, nation.n_regionkey]
+         Stream key: [nation.n_nationkey]
 
     Fragment 12
       StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
+       left table: 37, right table 39, left degree table: 38, right degree table: 40,
+       Output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey]
+       Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
         StreamExchange Hash([1]) from 13
+         Output: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost]
+         Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamExchange Hash([0]) from 14
+         Output: [supplier.s_suppkey, supplier.s_nationkey]
+         Stream key: [supplier.s_suppkey]
 
     Fragment 13
       StreamFilter { predicate: IsNotNull(partsupp.ps_partkey) }
@@ -2918,7 +2969,11 @@
          Output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, partsupp.ps_supplycost, orders.o_orderdate, nation.n_name, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey, supplier.s_nationkey, nation.n_nationkey]
          Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey]
           StreamExchange Hash([3]) from 2
+           Output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey]
+           Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey]
           StreamExchange Hash([0]) from 10
+           Output: [nation.n_nationkey, nation.n_name]
+           Stream key: [nation.n_nationkey]
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey] }
@@ -2926,19 +2981,42 @@
        Output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey]
         StreamExchange Hash([0]) from 3
+         Output: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey]
+         Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamExchange Hash([0]) from 9
+         Output: [orders.o_orderkey, orders.o_orderdate]
+         Stream key: [orders.o_orderkey]
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: lineitem.l_suppkey = partsupp.ps_suppkey AND lineitem.l_partkey = partsupp.ps_partkey, output: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey] }
+       left table: 10, right table 12, left degree table: 11, right degree table: 13,
+       Output: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey]
+       Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamHashJoin { type: Inner, predicate: lineitem.l_suppkey = supplier.s_suppkey, output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, part.p_partkey, supplier.s_suppkey] }
+         left table: 14, right table 16, left degree table: 15, right degree table: 17,
+         Output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, part.p_partkey, supplier.s_suppkey]
+         Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey]
           StreamExchange Hash([2]) from 4
+           Output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, part.p_partkey]
+           Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
           StreamExchange Hash([0]) from 7
+           Output: [supplier.s_suppkey, supplier.s_nationkey]
+           Stream key: [supplier.s_suppkey]
         StreamExchange Hash([1]) from 8
+         Output: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost]
+         Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: all }
+       left table: 18, right table 20, left degree table: 19, right degree table: 21,
+       Output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, part.p_partkey]
+       Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
         StreamExchange Hash([1]) from 5
+         Output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber]
+         Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
         StreamExchange Hash([0]) from 6
+         Output: [part.p_partkey]
+         Stream key: [part.p_partkey]
 
     Fragment 5
       Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
@@ -3621,22 +3699,45 @@
            Output: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))]
            Stream key: [partsupp.ps_partkey]
             StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
+             Output: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))]
+             Stream key: [partsupp.ps_partkey]
               StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
+               state tables: [2, 3, 4]
+               Output: [partsupp.ps_partkey, count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))]
+               Stream key: [partsupp.ps_partkey]
                 StreamExchange Hash([0]) from 1
+                 Output: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty), partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
+                 Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
             StreamExchange Broadcast from 6
+             Output: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)]
+             Stream key: []
 
     Fragment 1
       StreamProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty), partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
        Output: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty), partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
         StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
+         left table: 5, right table 7, left degree table: 6, right degree table: 8,
+         Output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey]
+         Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
           StreamExchange Hash([3]) from 2
+           Output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey]
+           Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
           StreamExchange Hash([0]) from 5
+           Output: [nation.n_nationkey]
+           Stream key: [nation.n_nationkey]
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
+       left table: 9, right table 11, left degree table: 10, right degree table: 12,
+       Output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey]
+       Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
         StreamExchange Hash([1]) from 3
+         Output: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost]
+         Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamExchange Hash([0]) from 4
+         Output: [supplier.s_suppkey, supplier.s_nationkey]
+         Stream key: [supplier.s_suppkey]
 
     Fragment 3
       Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
@@ -3685,7 +3786,12 @@
        Output: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)]
        Stream key: []
         StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))] }
+         state tables: [13, 14]
+         Output: [sum(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))]
+         Stream key: []
           StreamExchange Single from 7
+           Output: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty))]
+           Stream key: []
 
     Fragment 7
       StreamStatelessLocalSimpleAgg { aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
@@ -3695,13 +3801,27 @@
          Output: [(partsupp.ps_supplycost * partsupp.ps_availqty), partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
          Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
           StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
+           left table: 15, right table 17, left degree table: 16, right degree table: 18,
+           Output: [partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey]
+           Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
             StreamExchange Hash([2]) from 8
+             Output: [partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
+             Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
             StreamExchange Hash([0]) from 11
+             Output: [nation.n_nationkey]
+             Stream key: [nation.n_nationkey]
 
     Fragment 8
       StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey] }
+       left table: 19, right table 21, left degree table: 20, right degree table: 22,
+       Output: [partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
+       Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
         StreamExchange Hash([0]) from 9
+         Output: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey]
+         Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamExchange Hash([0]) from 10
+         Output: [supplier.s_suppkey, supplier.s_nationkey]
+         Stream key: [supplier.s_suppkey]
 
     Fragment 9
       Chain { table: partsupp, columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
@@ -4130,9 +4250,19 @@
        Output: [count(orders.o_orderkey), customer.c_custkey]
        Stream key: [customer.c_custkey]
         StreamHashAgg { group_key: [customer.c_custkey], aggs: [count, count(orders.o_orderkey)] }
+         state tables: [2, 3]
+         Output: [customer.c_custkey, count, count(orders.o_orderkey)]
+         Stream key: [customer.c_custkey]
           StreamHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: all }
+           left table: 4, right table 6, left degree table: 5, right degree table: 7,
+           Output: [customer.c_custkey, orders.o_orderkey, orders.o_custkey]
+           Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey]
             StreamExchange Hash([0]) from 2
+             Output: [customer.c_custkey]
+             Stream key: [customer.c_custkey]
             StreamExchange Hash([1]) from 3
+             Output: [orders.o_orderkey, orders.o_custkey]
+             Stream key: [orders.o_orderkey]
 
     Fragment 2
       Chain { table: customer, columns: [customer.c_custkey], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
@@ -4498,7 +4628,11 @@
          Output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey, max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
          Stream key: [supplier.s_suppkey, lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
           StreamExchange Hash([4]) from 1
+           Output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey]
+           Stream key: [supplier.s_suppkey, lineitem.l_suppkey]
           StreamExchange Hash([0]) from 4
+           Output: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
+           Stream key: []
 
     Fragment 1
       StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey] }
@@ -4509,8 +4643,15 @@
          Output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone]
          Stream key: [supplier.s_suppkey]
         StreamProject { exprs: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+         Output: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
+         Stream key: [lineitem.l_suppkey]
           StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+           state tables: [8, 9]
+           Output: [lineitem.l_suppkey, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
+           Stream key: [lineitem.l_suppkey]
             StreamExchange Hash([0]) from 3
+             Output: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber]
+             Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
 
     Fragment 2
       Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
@@ -4547,7 +4688,12 @@
        Output: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
        Stream key: []
         StreamGlobalSimpleAgg { aggs: [sum(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
+         state tables: [10, 11]
+         Output: [sum(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
+         Stream key: []
           StreamExchange Single from 5
+           Output: [Vnode(lineitem.l_suppkey), count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))]
+           Stream key: [Vnode(lineitem.l_suppkey)]
 
     Fragment 5
       StreamHashAgg { group_key: [Vnode(lineitem.l_suppkey)], aggs: [count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
@@ -4558,8 +4704,15 @@
          Output: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey, Vnode(lineitem.l_suppkey)]
          Stream key: [lineitem.l_suppkey]
           StreamProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey] }
+           Output: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey]
+           Stream key: [lineitem.l_suppkey]
             StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+             state tables: [14, 15]
+             Output: [lineitem.l_suppkey, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
+             Stream key: [lineitem.l_suppkey]
               StreamExchange Hash([0]) from 6
+               Output: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber]
+               Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
 
     Fragment 6
       StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber] }
@@ -4778,14 +4931,31 @@
        Output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]
        Stream key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]
         StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [count] }
+         state tables: [2]
+         Output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, count]
+         Stream key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]
           StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp.ps_partkey, part.p_partkey] }
+           left table: 3, right table 5, left degree table: 4, right degree table: 6,
+           Output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp.ps_partkey, part.p_partkey]
+           Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey]
             StreamExchange Hash([0]) from 2
+             Output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey]
+             Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey]
             StreamExchange Hash([0]) from 5
+             Output: [supplier.s_suppkey]
+             Stream key: [supplier.s_suppkey]
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey] }
+       left table: 7, right table 9, left degree table: 8, right degree table: 10,
+       Output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey]
+       Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey]
         StreamExchange Hash([0]) from 3
+         Output: [partsupp.ps_partkey, partsupp.ps_suppkey]
+         Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamExchange Hash([0]) from 4
+         Output: [part.p_partkey, part.p_brand, part.p_type, part.p_size]
+         Stream key: [part.p_partkey]
 
     Fragment 3
       Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
@@ -5027,10 +5197,22 @@
                Output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey]
                Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
               StreamProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))] }
+               Output: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))]
+               Stream key: [part.p_partkey]
                 StreamHashAgg { group_key: [part.p_partkey], aggs: [count, sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
+                 state tables: [10, 11, 12]
+                 Output: [part.p_partkey, count, sum(lineitem.l_quantity), count(lineitem.l_quantity)]
+                 Stream key: [part.p_partkey]
                   StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
+                   left table: 13, right table 15, left degree table: 14, right degree table: 16,
+                   Output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey]
+                   Stream key: [part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey]
                     StreamExchange Hash([0]) from 5
+                     Output: [part.p_partkey]
+                     Stream key: [part.p_partkey]
                     StreamExchange Hash([0]) from 6
+                     Output: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber]
+                     Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
@@ -5079,9 +5261,19 @@
        Output: [part.p_partkey]
        Stream key: [part.p_partkey]
         StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
+         state tables: [17]
+         Output: [part.p_partkey, count]
+         Stream key: [part.p_partkey]
           Chain { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+           Output: [part.p_partkey]
+           Stream key: [part.p_partkey]
             Upstream
+             Output: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment]
+             Stream key: [p_partkey]
             BatchPlanNode
+             Output: [part.p_partkey]
+             Stream key: [part.p_partkey]
+             AppendOnly
 
     Fragment 6
       StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
@@ -5335,20 +5527,51 @@
            Output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)]
            Stream key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice]
             StreamHashAgg { group_key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice], aggs: [count, sum(lineitem.l_quantity)] }
+             state tables: [2, 3]
+             Output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, count, sum(lineitem.l_quantity)]
+             Stream key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice]
               StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+               left table: 4, right table 6, left degree table: 5, right degree table: 7,
+               Output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber]
+               Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber]
                 StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+                 left table: 8, right table 10, left degree table: 9, right degree table: 11,
+                 Output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber]
+                 Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber]
                   StreamExchange Hash([2]) from 2
+                   Output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, orders.o_custkey]
+                   Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey]
                   StreamExchange Hash([0]) from 5
+                   Output: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber]
+                   Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
                 StreamProject { exprs: [lineitem.l_orderkey] }
+                 Output: [lineitem.l_orderkey]
+                 Stream key: [lineitem.l_orderkey]
                   StreamFilter { predicate: (sum(lineitem.l_quantity) > 1:Int32) }
+                   Output: [lineitem.l_orderkey, sum(lineitem.l_quantity)]
+                   Stream key: [lineitem.l_orderkey]
                     StreamProject { exprs: [lineitem.l_orderkey, sum(lineitem.l_quantity)] }
+                     Output: [lineitem.l_orderkey, sum(lineitem.l_quantity)]
+                     Stream key: [lineitem.l_orderkey]
                       StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [count, sum(lineitem.l_quantity)] }
+                       state tables: [16, 17]
+                       Output: [lineitem.l_orderkey, count, sum(lineitem.l_quantity)]
+                       Stream key: [lineitem.l_orderkey]
                         StreamExchange Hash([0]) from 6
+                         Output: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber]
+                         Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, orders.o_custkey] }
+       left table: 12, right table 14, left degree table: 13, right degree table: 15,
+       Output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, orders.o_custkey]
+       Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey]
         StreamExchange Hash([0]) from 3
+         Output: [customer.c_custkey, customer.c_name]
+         Stream key: [customer.c_custkey]
         StreamExchange Hash([1]) from 4
+         Output: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate]
+         Stream key: [orders.o_orderkey]
 
     Fragment 3
       Chain { table: customer, columns: [customer.c_custkey, customer.c_name], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
@@ -5900,10 +6123,22 @@
              Output: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty]
              Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
             StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))] }
+             Output: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))]
+             Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
               StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count, sum(lineitem.l_quantity)] }
+               state tables: [16, 17]
+               Output: [partsupp.ps_partkey, partsupp.ps_suppkey, count, sum(lineitem.l_quantity)]
+               Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
                 StreamHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM lineitem.l_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, lineitem.l_suppkey] }
+                 left table: 18, right table 20, left degree table: 19, right degree table: 21,
+                 Output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, lineitem.l_suppkey]
+                 Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, lineitem.l_suppkey]
                   StreamExchange Hash([0, 1]) from 8
+                   Output: [partsupp.ps_partkey, partsupp.ps_suppkey]
+                   Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
                   StreamExchange Hash([0, 1]) from 9
+                   Output: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber]
+                   Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
 
     Fragment 5
       StreamHashJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey, output: all }
@@ -5952,9 +6187,19 @@
        Output: [partsupp.ps_partkey, partsupp.ps_suppkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count] }
+         state tables: [22]
+         Output: [partsupp.ps_partkey, partsupp.ps_suppkey, count]
+         Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
           Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+           Output: [partsupp.ps_partkey, partsupp.ps_suppkey]
+           Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
             Upstream
+             Output: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment]
+             Stream key: [ps_partkey, ps_suppkey]
             BatchPlanNode
+             Output: [partsupp.ps_partkey, partsupp.ps_suppkey]
+             Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
+             AppendOnly
 
     Fragment 9
       StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
@@ -6281,24 +6526,53 @@
 
     Fragment 2
       StreamHashJoin { type: LeftAnti, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: [supplier.s_name, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey] }
+       left table: 4, right table 6, left degree table: 5, right degree table: 7,
+       Output: [supplier.s_name, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
+       Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
         StreamHashJoin { type: LeftSemi, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: all }
+         left table: 8, right table 10, left degree table: 9, right degree table: 11,
+         Output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
+         Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
           StreamHashJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey, output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey] }
+           left table: 12, right table 14, left degree table: 13, right degree table: 15,
+           Output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
+           Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
             StreamExchange Hash([1]) from 3
+             Output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, supplier.s_nationkey, nation.n_nationkey]
+             Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey]
             StreamExchange Hash([0]) from 8
+             Output: [orders.o_orderkey]
+             Stream key: [orders.o_orderkey]
           StreamExchange Hash([0]) from 9
+           Output: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber]
+           Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
         StreamExchange Hash([0]) from 10
-         Output: [orders.o_orderkey]
-         Stream key: [orders.o_orderkey]
+         Output: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber]
+         Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, supplier.s_nationkey, nation.n_nationkey] }
+       left table: 16, right table 18, left degree table: 17, right degree table: 19,
+       Output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, supplier.s_nationkey, nation.n_nationkey]
+       Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey]
         StreamExchange Hash([1]) from 4
+         Output: [supplier.s_name, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber]
+         Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey]
         StreamExchange Hash([0]) from 7
+         Output: [nation.n_nationkey]
+         Stream key: [nation.n_nationkey]
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_name, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber] }
+       left table: 20, right table 22, left degree table: 21, right degree table: 23,
+       Output: [supplier.s_name, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber]
+       Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey]
         StreamExchange Hash([0]) from 5
+         Output: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey]
+         Stream key: [supplier.s_suppkey]
         StreamExchange Hash([1]) from 6
+         Output: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber]
+         Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
 
     Fragment 5
       Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
