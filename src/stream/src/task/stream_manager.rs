@@ -464,7 +464,7 @@ impl LocalStreamManagerCore {
         subtasks: &mut Vec<SubtaskHandle>,
     ) -> StreamResult<BoxedExecutor> {
         // The "stateful" here means that the executor may issue read operations to the state store
-        // massively and continuosly. Used to decide whether to apply the optimization of subtasks.
+        // massively and continuously. Used to decide whether to apply the optimization of subtasks.
         fn is_stateful_executor(stream_node: &StreamNode) -> bool {
             matches!(
                 stream_node.get_node_body().unwrap(),
