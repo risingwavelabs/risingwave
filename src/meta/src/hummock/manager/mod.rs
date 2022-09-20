@@ -652,6 +652,7 @@ where
                 current_version,
                 &compact_task,
                 true,
+                versioning.deterministic_mode,
             );
 
             commit_multi_var!(self, None, hummock_version_deltas)?;
@@ -918,6 +919,9 @@ where
             task_status != TaskStatus::Pending,
             "report pending compaction task"
         );
+
+        tracing::info!("Report compaction task: {}", task_status.as_str_name());
+
         if let TaskStatus::Success = task_status {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
@@ -930,6 +934,7 @@ where
                 current_version,
                 compact_task,
                 false,
+                versioning.deterministic_mode,
             );
 
             commit_multi_var!(
@@ -1084,7 +1089,7 @@ where
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit empty epochs if this flag is set
-        if versioning_guard.ignore_empty_epoch && sstables.is_empty() {
+        if versioning_guard.deterministic_mode && sstables.is_empty() {
             return Ok(());
         }
 
@@ -1400,7 +1405,7 @@ where
         let mut versioning_guard = write_lock!(self, versioning).await;
         let old_version = versioning_guard.current_version.clone();
         versioning_guard.current_version = init_version;
-        versioning_guard.ignore_empty_epoch = true;
+        versioning_guard.deterministic_mode = true;
         Ok(old_version)
     }
 
@@ -1454,8 +1459,13 @@ where
         base_version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<HummockVersionDeltas> {
+        tracing::info!("Trigger compaction for version {}", base_version_id);
         let old_version = self.get_current_version().await;
-        assert_eq!(base_version_id, old_version.id);
+        assert_eq!(
+            base_version_id, old_version.id,
+            "old_version epoch {}",
+            old_version.max_committed_epoch
+        );
 
         for compaction_group in compaction_groups {
             self.try_sched_compaction_deterministic(compaction_group)?;
@@ -1469,29 +1479,35 @@ where
                         if sched_status == ScheduleStatus::Ok {
                             tracing::info!("Compaction schedule Ok");
                             let mut guard = self.compaction_finish_channel.1.lock().await;
-                            if let Some(version_delta) = guard.recv().await {
-                                tracing::info!(
-                                    "Compaction task finished. version_id: {}, epoch: {}",
-                                    version_delta.id,
-                                    version_delta.max_committed_epoch
-                                );
+                            match guard.recv().await {
+                                Some(version_delta) => {
+                                    tracing::info!(
+                                        "Compaction task finished. version_id: {}, epoch: {}",
+                                        version_delta.id,
+                                        version_delta.max_committed_epoch
+                                    );
 
-                                // When compaction finish the version id of will increase
-                                assert!(version_delta.id > old_version.id);
-                                new_versions.push(version_delta.clone());
+                                    // When compaction finish the version id of will increase
+                                    assert!(version_delta.id > old_version.id);
+                                    new_versions.push(version_delta.clone());
 
-                                // notify our testing tool
-                                self.env.notification_manager().notify_asynchronously(
-                                    WorkerType::RiseCtl,
-                                    Operation::Add,
-                                    Info::HummockVersionDeltas(
-                                        risingwave_pb::hummock::HummockVersionDeltas {
-                                            version_deltas: vec![version_delta],
-                                        },
-                                    ),
-                                );
+                                    // notify our testing tool
+                                    self.env.notification_manager().notify_asynchronously(
+                                        WorkerType::RiseCtl,
+                                        Operation::Add,
+                                        Info::HummockVersionDeltas(
+                                            risingwave_pb::hummock::HummockVersionDeltas {
+                                                version_deltas: vec![version_delta],
+                                            },
+                                        ),
+                                    );
+                                }
+                                None => {
+                                    tracing::warn!("Compaction finish channel is closed");
+                                }
                             }
                         } else {
+                            tracing::info!("Compaction schedule {}", sched_status.as_str());
                             break;
                         }
                     }
@@ -1697,6 +1713,7 @@ fn gen_version_delta<'a>(
     old_version: &HummockVersion,
     compact_task: &CompactTask,
     trivial_move: bool,
+    deterministic_mode: bool,
 ) -> HummockVersionDelta {
     let mut version_delta = HummockVersionDelta {
         prev_id: old_version.id,
@@ -1726,7 +1743,10 @@ fn gen_version_delta<'a>(
     level_deltas.push(level_delta);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
     version_delta.id = old_version.id + 1;
-    txn.insert(version_delta.id, version_delta.clone());
+    if !deterministic_mode {
+        // We don't persist compaction's version delta to meta store
+        txn.insert(version_delta.id, version_delta.clone());
+    }
 
     version_delta
 }

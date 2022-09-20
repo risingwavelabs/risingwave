@@ -158,7 +158,9 @@ pub async fn compaction_test_serve(
                 .await?;
 
             tracing::info!(
-                "Trigger compaction for compaction_groups: {:?}",
+                "Trigger compaction for version {}, epoch {} compaction_groups: {:?}",
+                version_id,
+                max_committed_epoch,
                 modified_compaction_groups,
             );
 

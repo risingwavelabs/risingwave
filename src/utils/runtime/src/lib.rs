@@ -42,7 +42,6 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         // if you want to enable any of them, find the target name and set it to `TRACE`
         // .with_target("events::stream::mview::scan", Level::TRACE)
         .with_target("events", Level::ERROR)
-        .with_target("aws-config", Level::WARN)
 
     // if env_var_is_true("RW_CI") {
     //     targets.with_target("events::meta::server_heartbeat", Level::TRACE)
