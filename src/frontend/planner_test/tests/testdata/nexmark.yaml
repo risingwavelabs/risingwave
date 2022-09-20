@@ -331,6 +331,7 @@
            Output: [auction.id, auction.category, bid.price, bid._row_id, bid.auction]
            Stream key: [auction.id, bid._row_id, bid.auction]
             StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
+<<<<<<< HEAD
              Output: [auction.id, auction.date_time, auction.expires, auction.category, bid.auction, bid.price, bid.date_time, bid._row_id]
              Stream key: [auction.id, bid._row_id, bid.auction]
               StreamExchange NoShuffle from 2
@@ -350,6 +351,13 @@
          Stream key: [bid._row_id]
 
     Fragment 3
+=======
+              StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+                StreamExchange Hash([0]) from 2
+                StreamExchange Hash([0]) from 3
+
+    Fragment 2
+>>>>>>> origin/main
       Chain { table: auction, columns: [auction.id, auction.date_time, auction.expires, auction.category], pk: [auction.id], distribution: UpstreamHashShard(auction.id) }
        Output: [auction.id, auction.date_time, auction.expires, auction.category]
        Stream key: [auction.id]
@@ -361,7 +369,7 @@
          Stream key: [auction.id]
          AppendOnly
 
-    Fragment 4
+    Fragment 3
       Chain { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
        Output: [bid.auction, bid.price, bid.date_time, bid._row_id]
        Stream key: [bid._row_id]
@@ -515,11 +523,16 @@
                Output: [bid.auction, count, window_start]
                Stream key: [window_start, bid.auction]
               StreamProject { exprs: [max(count), window_start] }
+<<<<<<< HEAD
                Output: [max(count), window_start]
                Stream key: [window_start]
                 StreamExchange NoShuffle from 3
                  Output: [window_start, count, max(count)]
                  Stream key: [window_start]
+=======
+                StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
+                  StreamExchange Hash([0]) from 3
+>>>>>>> origin/main
 
     Fragment 1
       StreamProject { exprs: [bid.auction, count, window_start] }
@@ -552,6 +565,7 @@
              AppendOnly
 
     Fragment 3
+<<<<<<< HEAD
       StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
        state tables: [6, 7]
        Output: [window_start, count, max(count)]
@@ -561,18 +575,24 @@
          Stream key: [bid.auction, window_start]
 
     Fragment 4
+=======
+>>>>>>> origin/main
       StreamProject { exprs: [window_start, count, bid.auction] }
        Output: [window_start, count, bid.auction]
        Stream key: [bid.auction, window_start]
         StreamHashAgg { group_key: [bid.auction, window_start], aggs: [count, count] }
+<<<<<<< HEAD
          state tables: [8, 9]
          Output: [bid.auction, window_start, count, count]
          Stream key: [bid.auction, window_start]
           StreamExchange Hash([0, 1]) from 5
            Output: [bid.auction, window_start, bid._row_id]
            Stream key: [bid._row_id, window_start]
+=======
+          StreamExchange Hash([0, 1]) from 4
+>>>>>>> origin/main
 
-    Fragment 5
+    Fragment 4
       StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
        Output: [bid.auction, window_start, bid._row_id]
        Stream key: [bid._row_id, window_start]
@@ -885,11 +905,16 @@
            Output: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)]
            Stream key: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)]
           StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
+<<<<<<< HEAD
            Output: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)]
            Stream key: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)]
             StreamExchange NoShuffle from 3
              Output: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), count]
              Stream key: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)]
+=======
+            StreamHashAgg { group_key: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [count] }
+              StreamExchange Hash([0, 1, 2]) from 2
+>>>>>>> origin/main
 
     Fragment 1
       StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
@@ -900,6 +925,7 @@
          Output: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), count]
          Stream key: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)]
           StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
+<<<<<<< HEAD
            Output: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)]
            Stream key: [person.id]
             StreamExchange NoShuffle from 2
@@ -928,6 +954,13 @@
          Stream key: [auction.id]
 
     Fragment 4
+=======
+            Chain { table: person, columns: [person.id, person.name, person.date_time], pk: [person.id], distribution: UpstreamHashShard(person.id) }
+              Upstream
+              BatchPlanNode
+
+    Fragment 2
+>>>>>>> origin/main
       StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction.id] }
        Output: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction.id]
        Stream key: [auction.id]

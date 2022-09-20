@@ -15,6 +15,7 @@
 use std::ops::{Bound, RangeBounds};
 
 use itertools::Itertools;
+use paste::paste;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
@@ -116,6 +117,57 @@ pub fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
     matches!(bounds.start_bound(), Bound::Unbounded)
         && matches!(bounds.end_bound(), Bound::Unbounded)
 }
+
+macro_rules! for_all_scalar_int_variants {
+    ($macro:ident $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*],
+            { Int16 },
+            { Int32 },
+            { Int64 }
+        }
+    };
+}
+
+macro_rules! impl_split_small_range {
+    ([], $( { $type_name:ident} ),*) => {
+        paste! {
+            impl ScanRange {
+                /// `Precondition`: make sure the first order key is int type if you call this method.
+                /// Optimize small range scan. It turns x between 0 and 5 into x in (0, 1, 2, 3, 4, 5).s
+                pub fn split_small_range(&self, max_gap: u64) -> Option<Vec<Self>> {
+                     if self.eq_conds.is_empty() {
+                        match self.range {
+                            $(
+                                (
+                                    Bound::Included(ScalarImpl::$type_name(ref left)),
+                                    Bound::Included(ScalarImpl::$type_name(ref right)),
+                                ) => {
+                                    if (right - left + 1) as u64 <= max_gap {
+                                        return Some(
+                                            (*left..=*right)
+                                                .into_iter()
+                                                .map(|i| ScanRange {
+                                                    eq_conds: vec![Some(ScalarImpl::$type_name(i))],
+                                                    range: full_range(),
+                                                })
+                                                .collect(),
+                                        );
+                                    }
+                                }
+                            )*
+                            _ => {}
+                        }
+                    }
+
+                    None
+                }
+            }
+        }
+    };
+}
+
+for_all_scalar_int_variants! { impl_split_small_range }
 
 #[cfg(test)]
 mod tests {

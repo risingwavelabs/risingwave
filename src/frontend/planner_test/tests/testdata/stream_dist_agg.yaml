@@ -267,49 +267,9 @@
        Output: [Vnode(t._row_id), count, max(t.v)]
        Stream key: [Vnode(t._row_id)]
         StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id)] }
-         Output: [t.v, t._row_id, Vnode(t._row_id)]
-         Stream key: [t._row_id]
-          StreamExchange NoShuffle from 2
-           Output: [t.v, t._row_id]
-           Stream key: [t._row_id]
-
-    Fragment 2
-      Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-       Output: [t.v, t._row_id]
-       Stream key: [t._row_id]
-        Upstream
-         Output: [k, v, o, s, _row_id]
-         Stream key: [_row_id]
-        BatchPlanNode
-         Output: [t.v, t._row_id]
-         Stream key: [t._row_id]
-         AppendOnly
-
-    Table 0
-      columns: [sum(count):bigint]
-      primary key: []
-      values indices: [0]
-
-    Table 1
-      columns: [max(t.v):integer, Vnode(t._row_id):smallint]
-      primary key: [$0 DESC, $1 ASC]
-      values indices: [0, 1]
-
-    Table 2
-      columns: [Vnode(t._row_id):smallint, count:bigint]
-      primary key: [$0 ASC]
-      values indices: [0, 1]
-
-    Table 3
-      columns: [Vnode(t._row_id):smallint, t.v:integer, t._row_id:bigint]
-      primary key: [$0 ASC, $1 DESC, $2 ASC]
-      values indices: [0, 1, 2]
-      vnode column idx: 0
-
-    Table 4294967294
-      columns: [a1:integer]
-      primary key: []
-      values indices: [0]
+          Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            Upstream
+            BatchPlanNode
 
 - id: extreme_on_AO
   before:
@@ -792,59 +752,9 @@
        Output: [Vnode(t._row_id), count, max(t.v), count(t.v)]
        Stream key: [Vnode(t._row_id)]
         StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id)] }
-         Output: [t.v, t._row_id, Vnode(t._row_id)]
-         Stream key: [t._row_id]
-          StreamExchange NoShuffle from 2
-           Output: [t.v, t._row_id]
-           Stream key: [t._row_id]
-
-    Fragment 2
-      Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-       Output: [t.v, t._row_id]
-       Stream key: [t._row_id]
-        Upstream
-         Output: [k, v, o, s, _row_id]
-         Stream key: [_row_id]
-        BatchPlanNode
-         Output: [t.v, t._row_id]
-         Stream key: [t._row_id]
-         AppendOnly
-
-    Table 0
-      columns: [sum(count):bigint]
-      primary key: []
-      values indices: [0]
-
-    Table 1
-      columns: [max(t.v):integer, Vnode(t._row_id):smallint]
-      primary key: [$0 DESC, $1 ASC]
-      values indices: [0, 1]
-
-    Table 2
-      columns: [sum(count(t.v)):bigint]
-      primary key: []
-      values indices: [0]
-
-    Table 3
-      columns: [Vnode(t._row_id):smallint, count:bigint]
-      primary key: [$0 ASC]
-      values indices: [0, 1]
-
-    Table 4
-      columns: [Vnode(t._row_id):smallint, t.v:integer, t._row_id:bigint]
-      primary key: [$0 ASC, $1 DESC, $2 ASC]
-      values indices: [0, 1, 2]
-      vnode column idx: 0
-
-    Table 5
-      columns: [Vnode(t._row_id):smallint, count(t.v):bigint]
-      primary key: [$0 ASC]
-      values indices: [0, 1]
-
-    Table 4294967294
-      columns: [a1:integer, a2:bigint]
-      primary key: []
-      values indices: [0, 1]
+          Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            Upstream
+            BatchPlanNode
 
 - id: extreme_count_on_AO
   before:
@@ -1271,39 +1181,9 @@
          Output: [max(tk.v), tk.k]
          Stream key: [tk.k]
           StreamHashAgg { group_key: [tk.k], aggs: [count, max(tk.v)] }
-           state tables: [0, 1]
-           Output: [tk.k, count, max(tk.v)]
-           Stream key: [tk.k]
-            StreamExchange NoShuffle from 1
-             Output: [tk.k, tk.v, tk.t._row_id]
-             Stream key: [tk.t._row_id]
-
-    Fragment 1
-      Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-       Output: [tk.k, tk.v, tk.t._row_id]
-       Stream key: [tk.t._row_id]
-        Upstream
-         Output: [k, v, o, s, t._row_id]
-         Stream key: [t._row_id]
-        BatchPlanNode
-         Output: [tk.k, tk.v, tk.t._row_id]
-         Stream key: [tk.t._row_id]
-         AppendOnly
-
-    Table 0
-      columns: [tk.k:integer, count:bigint]
-      primary key: [$0 ASC]
-      values indices: [0, 1]
-
-    Table 1
-      columns: [tk.k:integer, tk.v:integer, tk.t._row_id:bigint]
-      primary key: [$0 ASC, $1 DESC, $2 ASC]
-      values indices: [0, 1, 2]
-
-    Table 4294967294
-      columns: [a1:integer, tk.k:integer]
-      primary key: [$1 ASC]
-      values indices: [0, 1]
+            Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+              Upstream
+              BatchPlanNode
 
 - id: extreme_on_S_by_k
   before:
@@ -1508,39 +1388,9 @@
          Output: [sum(tk.v), tk.k]
          Stream key: [tk.k]
           StreamHashAgg { group_key: [tk.k], aggs: [count, sum(tk.v)] }
-           state tables: [0, 1]
-           Output: [tk.k, count, sum(tk.v)]
-           Stream key: [tk.k]
-            StreamExchange NoShuffle from 1
-             Output: [tk.k, tk.v, tk.t._row_id]
-             Stream key: [tk.t._row_id]
-
-    Fragment 1
-      Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-       Output: [tk.k, tk.v, tk.t._row_id]
-       Stream key: [tk.t._row_id]
-        Upstream
-         Output: [k, v, o, s, t._row_id]
-         Stream key: [t._row_id]
-        BatchPlanNode
-         Output: [tk.k, tk.v, tk.t._row_id]
-         Stream key: [tk.t._row_id]
-         AppendOnly
-
-    Table 0
-      columns: [tk.k:integer, count:bigint]
-      primary key: [$0 ASC]
-      values indices: [0, 1]
-
-    Table 1
-      columns: [tk.k:integer, sum(tk.v):bigint]
-      primary key: [$0 ASC]
-      values indices: [0, 1]
-
-    Table 4294967294
-      columns: [a1:bigint, tk.k:integer]
-      primary key: [$1 ASC]
-      values indices: [0, 1]
+            Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+              Upstream
+              BatchPlanNode
 
 - id: sum_on_S_by_k
   before:
@@ -1745,39 +1595,9 @@
          Output: [count(tk.v), tk.k]
          Stream key: [tk.k]
           StreamHashAgg { group_key: [tk.k], aggs: [count, count(tk.v)] }
-           state tables: [0, 1]
-           Output: [tk.k, count, count(tk.v)]
-           Stream key: [tk.k]
-            StreamExchange NoShuffle from 1
-             Output: [tk.k, tk.v, tk.t._row_id]
-             Stream key: [tk.t._row_id]
-
-    Fragment 1
-      Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-       Output: [tk.k, tk.v, tk.t._row_id]
-       Stream key: [tk.t._row_id]
-        Upstream
-         Output: [k, v, o, s, t._row_id]
-         Stream key: [t._row_id]
-        BatchPlanNode
-         Output: [tk.k, tk.v, tk.t._row_id]
-         Stream key: [tk.t._row_id]
-         AppendOnly
-
-    Table 0
-      columns: [tk.k:integer, count:bigint]
-      primary key: [$0 ASC]
-      values indices: [0, 1]
-
-    Table 1
-      columns: [tk.k:integer, count(tk.v):bigint]
-      primary key: [$0 ASC]
-      values indices: [0, 1]
-
-    Table 4294967294
-      columns: [a1:bigint, tk.k:integer]
-      primary key: [$1 ASC]
-      values indices: [0, 1]
+            Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+              Upstream
+              BatchPlanNode
 
 - id: cnt_on_S_by_k
   before:
@@ -1993,38 +1813,9 @@
            Output: [tk.k, count, string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))]
            Stream key: [tk.k]
             StreamProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o, tk.t._row_id] }
-             Output: [tk.k, tk.s, ',':Varchar, tk.o, tk.t._row_id]
-             Stream key: [tk.t._row_id]
-              StreamExchange NoShuffle from 1
-               Output: [tk.k, tk.o, tk.s, tk.t._row_id]
-               Stream key: [tk.t._row_id]
-
-    Fragment 1
-      Chain { table: tk, columns: [tk.k, tk.o, tk.s, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-       Output: [tk.k, tk.o, tk.s, tk.t._row_id]
-       Stream key: [tk.t._row_id]
-        Upstream
-         Output: [k, v, o, s, t._row_id]
-         Stream key: [t._row_id]
-        BatchPlanNode
-         Output: [tk.k, tk.o, tk.s, tk.t._row_id]
-         Stream key: [tk.t._row_id]
-         AppendOnly
-
-    Table 0
-      columns: [tk.k:integer, count:bigint]
-      primary key: [$0 ASC]
-      values indices: [0, 1]
-
-    Table 1
-      columns: [tk.k:integer, tk.o:integer, tk.t._row_id:bigint, tk.s:varchar, ',':Varchar:varchar]
-      primary key: [$0 ASC, $1 ASC, $2 ASC]
-      values indices: [0, 1, 2, 3, 4]
-
-    Table 4294967294
-      columns: [a1:varchar, tk.k:integer]
-      primary key: [$1 ASC]
-      values indices: [0, 1]
+              Chain { table: tk, columns: [tk.k, tk.o, tk.s, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+                Upstream
+                BatchPlanNode
 
 - id: string_agg_on_S_by_k
   before:
