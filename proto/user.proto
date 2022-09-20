@@ -83,7 +83,7 @@ message DropUserResponse {
 
 message UpdateUserRequest {
   enum UpdateField {
-    UNKNOWN = 0;
+    UNSPECIFIED = 0;
     SUPER = 1;
     LOGIN = 2;
     CREATE_DB = 3;
