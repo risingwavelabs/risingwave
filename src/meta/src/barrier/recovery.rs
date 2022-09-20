@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::iter::Map;
+use std::iter::{Map, Take};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
-use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -51,14 +50,17 @@ where
 {
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 100;
+    // Retry max attempts.
+    const RECOVERY_RETRY_MAX_ATTEMPTS: usize = 10;
     // Retry max interval.
     const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(10);
 
     #[inline(always)]
     /// Initialize a retry strategy for operation in recovery.
-    fn get_retry_strategy() -> Map<ExponentialBackoff, fn(Duration) -> Duration> {
+    fn get_retry_strategy() -> Map<Take<ExponentialBackoff>, fn(Duration) -> Duration> {
         ExponentialBackoff::from_millis(Self::RECOVERY_RETRY_BASE_INTERVAL)
             .max_delay(Self::RECOVERY_RETRY_MAX_INTERVAL)
+            .take(Self::RECOVERY_RETRY_MAX_ATTEMPTS)
             .map(jitter)
     }
 
@@ -70,12 +72,31 @@ where
         .await
     }
 
+    async fn clean_dirty_fragments(&self) -> MetaResult<()> {
+        let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
+        let table_fragments = self.fragment_manager.list_table_fragments().await?;
+
+        for table_fragment in table_fragments {
+            if !stream_job_ids.contains(&table_fragment.table_id().table_id) {
+                debug!("clean dirty table fragments: {}", table_fragment.table_id());
+                self.fragment_manager
+                    .drop_table_fragments(&table_fragment.table_id())
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Recovery the whole cluster from the latest epoch.
     pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> RecoveryResult {
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
         debug!("recovery start!");
+        self.clean_dirty_fragments()
+            .await
+            .expect("clean dirty fragments");
         let retry_strategy = Self::get_retry_strategy();
         let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
             let mut info = self.resolve_actor_info_for_recovery().await;
@@ -88,29 +109,23 @@ where
             }
 
             // Reset all compute nodes, stop and drop existing actors.
-            if let Err(err) = self
-                .reset_compute_nodes(&info, &prev_epoch, &new_epoch)
-                .await
-            {
-                error!("reset compute nodes failed: {}", err);
-                return Err(err);
-            }
+            self.reset_compute_nodes(&info).await.inspect_err(|e| {
+                error!("reset compute nodes failed: {}", e);
+            })?;
 
             // Refresh sources in local source manger of compute node.
-            if let Err(err) = self.sync_sources(&info).await {
-                error!("sync_sources failed: {}", err);
-                return Err(err);
-            }
+            // TODO: remove this after local source manager removed in CN.
+            self.sync_sources(&info).await.inspect_err(|e| {
+                error!("sync sources failed: {}", e);
+            })?;
 
             // update and build all actors.
-            if let Err(err) = self.update_actors(&info).await {
-                error!("update_actors failed: {}", err);
-                return Err(err);
-            }
-            if let Err(err) = self.build_actors(&info).await {
-                error!("build_actors failed: {}", err);
-                return Err(err);
-            }
+            self.update_actors(&info).await.inspect_err(|e| {
+                error!("update actors failed: {}", e);
+            })?;
+            self.build_actors(&info).await.inspect_err(|e| {
+                error!("build_actors failed: {}", e);
+            })?;
 
             // get split assignments for all actors
             let source_split_assignments = self.source_manager.list_assignments().await;
@@ -315,34 +330,13 @@ where
     }
 
     /// Reset all compute nodes by calling `force_stop_actors`.
-    async fn reset_compute_nodes(
-        &self,
-        info: &BarrierActorInfo,
-        prev_epoch: &Epoch,
-        new_epoch: &Epoch,
-    ) -> MetaResult<()> {
-        // Here in order to stop all actors in CNs, we need resolve all actors include those in
-        // starting status.
-        let all_actors = &self
-            .fragment_manager
-            .load_all_actors(|_, _, _| true)
-            .await
-            .actor_maps
-            .values()
-            .flat_map(|actor_ids| actor_ids.clone().into_iter())
-            .collect_vec();
-
+    async fn reset_compute_nodes(&self, info: &BarrierActorInfo) -> MetaResult<()> {
         let futures = info.node_map.iter().map(|(_, worker_node)| async move {
             let client = self.env.stream_client_pool().get(worker_node).await?;
             debug!("force stop actors: {}", worker_node.id);
             client
                 .force_stop_actors(ForceStopActorsRequest {
                     request_id: Uuid::new_v4().to_string(),
-                    epoch: Some(ProstEpoch {
-                        curr: new_epoch.0,
-                        prev: prev_epoch.0,
-                    }),
-                    actor_ids: all_actors.clone(),
                 })
                 .await
         });

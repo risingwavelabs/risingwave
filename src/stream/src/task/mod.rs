@@ -152,6 +152,10 @@ impl SharedContext {
             .retain(|up_down_ids, _| f(up_down_ids));
     }
 
+    pub fn clear_channels(&self) {
+        self.lock_channel_map().clear();
+    }
+
     pub fn get_actor_info(&self, actor_id: &ActorId) -> StreamResult<ActorInfo> {
         self.actor_infos
             .read()

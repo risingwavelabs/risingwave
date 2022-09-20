@@ -973,6 +973,16 @@ where
             .await
     }
 
+    pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<RelationId>> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_stream_job_ids()
+            .await
+            .map(|iter| iter.collect())
+    }
+
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.env
             .notification_manager()

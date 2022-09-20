@@ -75,7 +75,7 @@ impl HummockIteratorType for BackwardIter {
 }
 
 impl HummockStorage {
-    /// `iter_inner` impletements the `bloom_filter` filtering of sstable by `prefix_hint` (iff when
+    /// `iter_inner` implements the `bloom_filter` filtering of sstable by `prefix_hint` (iff when
     /// its Some), and builds iterator by `key_range`
     async fn iter_inner<R, B, T>(
         &self,
