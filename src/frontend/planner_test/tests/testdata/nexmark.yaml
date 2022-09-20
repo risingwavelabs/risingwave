@@ -210,19 +210,16 @@
         StreamHashAgg { group_key: [auction.id, auction.category], aggs: [count, max(bid.price)] }
           StreamProject { exprs: [auction.id, auction.category, bid.price, bid._row_id, bid.auction] }
             StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
-              StreamExchange NoShuffle from 2
+              StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+                StreamExchange Hash([0]) from 2
+                StreamExchange Hash([0]) from 3
 
     Fragment 2
-      StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
-        StreamExchange Hash([0]) from 3
-        StreamExchange Hash([0]) from 4
-
-    Fragment 3
       Chain { table: auction, columns: [auction.id, auction.date_time, auction.expires, auction.category], pk: [auction.id], distribution: UpstreamHashShard(auction.id) }
         Upstream
         BatchPlanNode
 
-    Fragment 4
+    Fragment 3
       Chain { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
         Upstream
         BatchPlanNode
@@ -307,7 +304,8 @@
             StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
               StreamExchange Hash([2]) from 1
               StreamProject { exprs: [max(count), window_start] }
-                StreamExchange NoShuffle from 3
+                StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
+                  StreamExchange Hash([0]) from 3
 
     Fragment 1
       StreamProject { exprs: [bid.auction, count, window_start] }
@@ -322,15 +320,11 @@
             BatchPlanNode
 
     Fragment 3
-      StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
-        StreamExchange Hash([0]) from 4
-
-    Fragment 4
       StreamProject { exprs: [window_start, count, bid.auction] }
         StreamHashAgg { group_key: [bid.auction, window_start], aggs: [count, count] }
-          StreamExchange Hash([0, 1]) from 5
+          StreamExchange Hash([0, 1]) from 4
 
-    Fragment 5
+    Fragment 4
       StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
         Chain { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
           Upstream
@@ -497,24 +491,18 @@
         StreamHashJoin { type: Inner, predicate: person.id = auction.seller AND TumbleStart(person.date_time, '00:00:10':Interval) = TumbleStart(auction.date_time, '00:00:10':Interval) AND (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval) = (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), output: all }
           StreamExchange Hash([0, 2, 3]) from 1
           StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
-            StreamExchange NoShuffle from 3
+            StreamHashAgg { group_key: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [count] }
+              StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 1
       StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
         StreamHashAgg { group_key: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [count] }
           StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
-            StreamExchange NoShuffle from 2
+            Chain { table: person, columns: [person.id, person.name, person.date_time], pk: [person.id], distribution: UpstreamHashShard(person.id) }
+              Upstream
+              BatchPlanNode
 
     Fragment 2
-      Chain { table: person, columns: [person.id, person.name, person.date_time], pk: [person.id], distribution: UpstreamHashShard(person.id) }
-        Upstream
-        BatchPlanNode
-
-    Fragment 3
-      StreamHashAgg { group_key: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [count] }
-        StreamExchange Hash([0, 1, 2]) from 4
-
-    Fragment 4
       StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction.id] }
         Chain { table: auction, columns: [auction.date_time, auction.seller, auction.id], pk: [auction.id], distribution: UpstreamHashShard(auction.id) }
           Upstream
