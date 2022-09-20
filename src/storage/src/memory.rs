@@ -334,13 +334,12 @@ impl StateStore for MemoryStateStore {
         async move {
             // memory backend doesn't need to push to S3, so this is a no-op
             Ok(SyncResult {
-                sync_succeed: true,
                 ..Default::default()
             })
         }
     }
 
-    fn seal_epoch(&self, _epoch: u64) {}
+    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move { Ok(()) }

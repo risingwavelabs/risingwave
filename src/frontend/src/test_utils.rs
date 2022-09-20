@@ -19,9 +19,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use pgwire::error::PsqlResult;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
     IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
@@ -73,11 +72,7 @@ impl SessionManager for LocalFrontend {
         Ok(self.session_ref())
     }
 
-    fn connect_for_cancel(
-        &self,
-        _process_id: i32,
-        _secret_key: i32,
-    ) -> PsqlResult<Arc<Self::Session>> {
+    fn cancel_queries_in_session(&self, _session_id: SessionId) {
         todo!()
     }
 }

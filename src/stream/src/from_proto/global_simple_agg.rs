@@ -27,7 +27,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GlobalSimpleAgg)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node

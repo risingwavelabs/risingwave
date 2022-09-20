@@ -30,7 +30,6 @@ use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ColIndexMapping;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
@@ -61,9 +60,7 @@ impl StreamHashJoin {
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &logical
-                .l2i_col_mapping()
-                .composite(&logical.i2o_col_mapping()),
+            &logical,
         );
 
         // TODO: derive from input
@@ -97,12 +94,32 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        l2o_mapping: &ColIndexMapping,
+        logical: &LogicalJoin,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                l2o_mapping.rewrite_provided_distribution(left)
+                // we can not derive the hash distribution from the side where outer join can
+                // generate a NULL row
+                match logical.join_type() {
+                    JoinType::Unspecified => unreachable!(),
+                    JoinType::FullOuter => Distribution::SomeShard,
+                    JoinType::Inner
+                    | JoinType::LeftOuter
+                    | JoinType::LeftSemi
+                    | JoinType::LeftAnti => {
+                        let l2o = logical
+                            .l2i_col_mapping()
+                            .composite(&logical.i2o_col_mapping());
+                        l2o.rewrite_provided_distribution(left)
+                    }
+                    JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => {
+                        let r2o = logical
+                            .r2i_col_mapping()
+                            .composite(&logical.i2o_col_mapping());
+                        r2o.rewrite_provided_distribution(right)
+                    }
+                }
             }
             (_, _) => unreachable!(
                 "suspicious distribution: left: {:?}, right: {:?}",
