@@ -156,7 +156,6 @@ impl<'a> Future for UploadHandleManagerNextFinishedEpoch<'a> {
     type Output = std::result::Result<HummockEpoch, JoinError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        println!("get drive");
         loop {
             let mut select_all_fut = if let Some(select_all_fut) = self.select_all.take() {
                 select_all_fut
