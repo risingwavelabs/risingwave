@@ -583,7 +583,7 @@ template:
     enable-committed-sst-sanity-check: false
 
     # Seconds compaction scheduler should stall when there is no available compactor.
-    no-available-compactor-stall-sec: 5,
+    no-available-compactor-stall-sec: 5
 
   prometheus:
     # Advertise address of Prometheus
