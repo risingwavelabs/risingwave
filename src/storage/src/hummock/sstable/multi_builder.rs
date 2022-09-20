@@ -83,7 +83,7 @@ where
         }
     }
 
-    pub fn new_for_test(builder_factory: F) -> Self {
+    pub fn for_test(builder_factory: F) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
@@ -244,7 +244,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
             .sstable_store
             .clone()
             .create_sst_writer(id, writer_options);
-        let builder = SstableBuilder::new_for_test(id, writer, self.options.clone());
+        let builder = SstableBuilder::for_test(id, writer, self.options.clone());
 
         Ok(builder)
     }
@@ -270,7 +270,7 @@ mod tests {
             compression_algorithm: CompressionAlgorithm::None,
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
-        let builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
+        let builder = CapacitySplitTableBuilder::for_test(builder_factory);
         let results = builder.finish().unwrap();
         assert!(results.is_empty());
     }
@@ -287,7 +287,7 @@ mod tests {
             compression_algorithm: CompressionAlgorithm::None,
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
-        let mut builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
+        let mut builder = CapacitySplitTableBuilder::for_test(builder_factory);
 
         for i in 0..table_capacity {
             builder
@@ -307,7 +307,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_seal() {
         let opts = default_builder_opt_for_test();
-        let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
+        let mut builder = CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(
             1001,
             mock_sstable_store(),
             opts,
@@ -347,7 +347,7 @@ mod tests {
     #[tokio::test]
     async fn test_initial_not_allowed_split() {
         let opts = default_builder_opt_for_test();
-        let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
+        let mut builder = CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(
             1001,
             mock_sstable_store(),
             opts,

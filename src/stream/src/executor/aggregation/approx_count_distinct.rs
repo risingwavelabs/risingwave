@@ -197,10 +197,10 @@ pub struct StreamingApproxCountDistinct<const DENSE_BITS: usize> {
 
 impl<const DENSE_BITS: usize> StreamingApproxCountDistinct<DENSE_BITS> {
     pub fn new() -> Self {
-        StreamingApproxCountDistinct::new_with_datum(None)
+        StreamingApproxCountDistinct::with_datum(None)
     }
 
-    pub fn new_with_datum(datum: Datum) -> Self {
+    pub fn with_datum(datum: Datum) -> Self {
         let count = if let Some(c) = datum {
             match c {
                 ScalarImpl::Int64(num) => num,

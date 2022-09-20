@@ -253,7 +253,7 @@ mod tests {
     use crate::task::ComputeNodeContext;
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
-        let context = ComputeNodeContext::new_for_test();
+        let context = ComputeNodeContext::for_test();
         let mut sources = vec![];
         for _ in 0..2 {
             let mut rng = rand::thread_rng();

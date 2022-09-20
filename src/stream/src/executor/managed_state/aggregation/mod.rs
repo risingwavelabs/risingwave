@@ -145,28 +145,23 @@ impl<S: StateStore> ManagedStateImpl<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        epoch: u64,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_chunk(ops, visibility, columns),
             Self::Table(state) => {
                 state
-                    .apply_chunk(ops, visibility, columns, epoch, state_table)
+                    .apply_chunk(ops, visibility, columns, state_table)
                     .await
             }
         }
     }
 
     /// Get the output of the state. Must flush before getting output.
-    pub async fn get_output(
-        &mut self,
-        epoch: u64,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output(),
-            Self::Table(state) => state.get_output(epoch, state_table).await,
+            Self::Table(state) => state.get_output(state_table).await,
         }
     }
 

@@ -35,11 +35,12 @@ use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Epoch, Executor, Message, PkIndices,
+    PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::JoinType::LeftAnti;
-use crate::executor::PROCESSING_WINDOW_SIZE;
+use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
 
 /// Limit number of the cached entries (one per join key) on each side.
 pub const JOIN_CACHE_CAP: usize = 1 << 16;
@@ -196,6 +197,10 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
 
         // TODO: not working with rearranged chain
         // self.ht.clear();
+    }
+
+    pub fn init(&mut self, epoch: Epoch) {
+        self.ht.init(epoch);
     }
 }
 
@@ -603,11 +608,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             self.ctx.id,
             self.metrics.clone(),
         );
+        pin_mut!(aligned_stream);
 
+        let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
+        self.side_l.init(barrier.epoch);
+        self.side_r.init(barrier.epoch);
+
+        // The first barrier message should be propagated.
+        yield Message::Barrier(barrier);
         let actor_id_str = self.ctx.id.to_string();
         let mut start_time = minstant::Instant::now();
 
-        pin_mut!(aligned_stream);
         while let Some(msg) = aligned_stream
             .next()
             .stack_trace("hash_join_barrier_align")

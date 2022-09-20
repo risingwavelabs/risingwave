@@ -25,7 +25,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         node: &StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sink)?;
         let [materialize_executor]: [_; 1] = params.input.try_into().unwrap();
 
