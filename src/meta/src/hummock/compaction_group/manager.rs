@@ -360,6 +360,9 @@ impl CompactionGroupManagerInner {
             if compaction_group_id > StaticCompactionGroupId::END as CompactionGroupId
                 && compaction_group.member_table_ids.is_empty()
             {
+                // remove staging
+                compaction_groups.remove(compaction_group_id);
+                // remove original
                 compaction_groups.remove(compaction_group_id);
             }
         }
