@@ -792,7 +792,6 @@ impl LocalVersionManager {
                                 Ok(SyncResult {
                                     sync_size: *sync_size,
                                     uncommitted_ssts: ssts.clone(),
-                                    sync_succeed: true,
                                 }),
                             );
                         }
