@@ -16,161 +16,86 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::catalog::{Sink, Source, Table};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use super::SourceId;
-use crate::manager::MetaSrvEnv;
-use crate::model::{MetadataModel, MetadataModelResult};
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::MetaResult;
 
-pub type CatalogBackgroundDeleterRef = Arc<CatalogBackgroundDeleter>;
-
-macro_rules! create_catalog_deleted {
-    ($name:ident, $cf:ident) => {
-        paste::paste! {
-            #[derive(Debug)]
-            pub struct [<$name Deleted>](pub $name);
-
-            impl MetadataModel for [<$name Deleted>] {
-                type KeyType = <$name as MetadataModel>::KeyType;
-                type ProstType = <$name as MetadataModel>::ProstType;
-
-                fn cf_name() -> String {
-                    $cf.to_string()
-                }
-
-                fn to_protobuf(&self) -> Self::ProstType {
-                    self.0.clone()
-                }
-
-                fn from_protobuf(prost: Self::ProstType) -> Self {
-                    Self($name::from_protobuf(prost))
-                }
-
-                fn key(&self) -> MetadataModelResult<Self::KeyType> {
-                    self.0.key()
-                }
-            }
-        }
-    };
-}
-
-/// Column family name for deleted table catalog.
-const CATALOG_TABLE_DELETED_CF_NAME: &str = "cf/deleted_catalog_table";
-/// Column family name for deleted sink catalog.
-const CATALOG_SINK_DELETED_CF_NAME: &str = "cf/deleted_catalog_sink";
-/// Column family name for deleted source catalog.
-const CATALOG_SOURCE_DELETED_CF_NAME: &str = "cf/deleted_catalog_source";
-
-create_catalog_deleted!(Table, CATALOG_TABLE_DELETED_CF_NAME);
-create_catalog_deleted!(Sink, CATALOG_SINK_DELETED_CF_NAME);
-create_catalog_deleted!(Source, CATALOG_SOURCE_DELETED_CF_NAME);
+pub type StreamingJobBackgroundDeleterRef = Arc<StreamingJobBackgroundDeleter>;
 
 #[derive(Debug)]
-pub enum CatalogDeletedId {
+// TODO(zehua): just use `TableId` instead of `StreamJobId` after we remove source manager.
+pub enum StreamJobId {
     TableId(TableId),
     SinkId(TableId),
     SourceId(SourceId),
 }
 
-pub struct CatalogBackgroundDeleter(mpsc::UnboundedSender<Vec<CatalogDeletedId>>);
+pub struct StreamingJobBackgroundDeleter(mpsc::UnboundedSender<Vec<StreamJobId>>);
 
-impl CatalogBackgroundDeleter {
+impl StreamingJobBackgroundDeleter {
     pub async fn new<S: MetaStore>(
-        env: MetaSrvEnv<S>,
         stream_manager: GlobalStreamManagerRef<S>,
         source_manager: SourceManagerRef<S>,
     ) -> MetaResult<(Self, JoinHandle<()>, Sender<()>)> {
-        let env_clone = env.clone();
-        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<CatalogDeletedId>>();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<StreamJobId>>();
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
 
         let join_handle = tokio::spawn(async move {
             loop {
-                let catalog_ids = tokio::select! {
+                let streaming_job_ids = tokio::select! {
                     _ = &mut shutdown_rx => {
                         tracing::info!("Table background deleter is stopped");
                         return;
                     }
-                    catalog_ids = rx.recv() => {
-                        catalog_ids
+                    streaming_job_ids = rx.recv() => {
+                        streaming_job_ids
                     }
                 };
 
-                if let Some(catalog_ids) = catalog_ids {
-                    let (source_ids, table_ids): (Vec<_>, Vec<_>) =
-                        catalog_ids.iter().partition_map(|id| match id {
-                            CatalogDeletedId::SourceId(id) => either::Either::Left(id),
-                            CatalogDeletedId::TableId(id) | CatalogDeletedId::SinkId(id) => {
-                                either::Either::Right(id)
-                            }
-                        });
-
-                    // TODO(zehua): add retry and batch.
-                    for id in table_ids {
-                        stream_manager.drop_materialized_view(id).await.ok();
-                    }
-
-                    for id in source_ids {
-                        source_manager.drop_source(id).await.ok();
-                    }
-
-                    for id in catalog_ids {
-                        match id {
-                            CatalogDeletedId::SinkId(id) => {
-                                SinkDeleted::delete(env.meta_store(), &id.table_id)
-                                    .await
-                                    .ok();
-                            }
-                            CatalogDeletedId::TableId(id) => {
-                                TableDeleted::delete(env.meta_store(), &id.table_id)
-                                    .await
-                                    .ok();
-                            }
-                            _ => (),
-                        }
-                    }
+                if let Some(ids) = streaming_job_ids {
+                    Self::handle_streaming_job_ids(ids, &stream_manager, &source_manager)
+                        .await
+                        .ok();
+                } else {
+                    tracing::info!("Channel is closed");
+                    break;
                 }
             }
         });
 
         let background_deleter = Self(tx);
 
-        background_deleter.init(env_clone).await?;
-
         Ok((background_deleter, join_handle, shutdown_tx))
     }
 
-    async fn init<S: MetaStore>(&self, env: MetaSrvEnv<S>) -> MetaResult<()> {
-        let mut catalog_ids = vec![];
-        catalog_ids.extend(
-            TableDeleted::list(env.meta_store())
-                .await?
-                .into_iter()
-                .map(|table_deleted| CatalogDeletedId::TableId(table_deleted.0.id.into())),
-        );
-        catalog_ids.extend(
-            SinkDeleted::list(env.meta_store())
-                .await?
-                .into_iter()
-                .map(|sink_deleted| CatalogDeletedId::SinkId(sink_deleted.0.id.into())),
-        );
-        catalog_ids.extend(
-            SourceDeleted::list(env.meta_store())
-                .await?
-                .into_iter()
-                .map(|source_deleted| CatalogDeletedId::SourceId(source_deleted.0.id)),
-        );
-        self.delete(catalog_ids);
-        Ok(())
+    pub fn delete(&self, streaming_job_ids: Vec<StreamJobId>) {
+        self.0.send(streaming_job_ids).unwrap()
     }
 
-    pub fn delete(&self, catalog_ids: Vec<CatalogDeletedId>) {
-        self.0.send(catalog_ids).unwrap()
+    async fn handle_streaming_job_ids<S: MetaStore>(
+        ids: Vec<StreamJobId>,
+        stream_manager: &GlobalStreamManagerRef<S>,
+        source_manager: &SourceManagerRef<S>,
+    ) -> MetaResult<()> {
+        let (source_ids, table_ids): (Vec<_>, Vec<_>) = ids.iter().partition_map(|id| match id {
+            StreamJobId::SourceId(id) => either::Either::Left(id),
+            StreamJobId::TableId(id) | StreamJobId::SinkId(id) => either::Either::Right(id),
+        });
+
+        // TODO(zehua): add batch.
+        for id in table_ids {
+            stream_manager.drop_materialized_view(id).await?;
+        }
+
+        for id in source_ids {
+            source_manager.drop_source(id).await?;
+        }
+
+        Ok(())
     }
 }

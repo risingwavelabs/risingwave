@@ -40,9 +40,7 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
-use super::background_deleter::{SinkDeleted, TableDeleted};
-use super::{CatalogDeletedId, SourceDeleted};
-use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
+use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamJobId, StreamingJob};
 use crate::model::{MetadataModel, MetadataModelResult, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
@@ -171,7 +169,7 @@ where
     pub async fn drop_database(
         &self,
         database_id: DatabaseId,
-    ) -> MetaResult<(NotificationVersion, Vec<CatalogDeletedId>)> {
+    ) -> MetaResult<(NotificationVersion, Vec<StreamJobId>)> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -198,7 +196,6 @@ where
             let source_ids = sources.iter().map(|source| source.id).collect_vec();
             for source in &sources {
                 source.delete_in_transaction(&mut transaction)?;
-                SourceDeleted(source.clone()).upsert_in_transaction(&mut transaction)?;
             }
 
             let sinks = Sink::list(self.env.meta_store())
@@ -208,7 +205,6 @@ where
                 .collect_vec();
             for sink in &sinks {
                 sink.delete_in_transaction(&mut transaction)?;
-                SinkDeleted(sink.clone()).upsert_in_transaction(&mut transaction)?;
             }
 
             let tables = Table::list(self.env.meta_store())
@@ -219,14 +215,6 @@ where
             let table_ids = tables.iter().map(|table| table.id).collect_vec();
             for table in &tables {
                 table.delete_in_transaction(&mut transaction)?;
-            }
-
-            let valid_tables = tables
-                .iter()
-                .filter(|table| valid_table_name(&table.name))
-                .collect_vec();
-            for table in &valid_tables {
-                TableDeleted((*table).clone()).upsert_in_transaction(&mut transaction)?;
             }
 
             let indexes = Index::list(self.env.meta_store())
@@ -242,6 +230,7 @@ where
             objects.push(Object::DatabaseId(database.id));
             objects.extend(schemas.iter().map(|schema| Object::SchemaId(schema.id)));
             objects.extend(tables.iter().map(|table| Object::TableId(table.id)));
+            objects.extend(sources.iter().map(|source| Object::SourceId(source.id)));
 
             let users_need_update =
                 Self::release_privileges(user_core.list_users(), &objects, &mut transaction)?;
@@ -282,18 +271,23 @@ where
                 .await;
 
             // prepare catalog sent to catalog background deleter.
+            let valid_tables = tables
+                .into_iter()
+                .filter(|table| valid_table_name(&table.name))
+                .collect_vec();
+
             let mut catalog_deleted_ids =
                 Vec::with_capacity(valid_tables.len() + source_ids.len() + sinks.len());
             catalog_deleted_ids.extend(
                 valid_tables
                     .into_iter()
-                    .map(|table| CatalogDeletedId::TableId(table.id.into())),
+                    .map(|table| StreamJobId::TableId(table.id.into())),
             );
-            catalog_deleted_ids.extend(source_ids.into_iter().map(CatalogDeletedId::SourceId));
+            catalog_deleted_ids.extend(source_ids.into_iter().map(StreamJobId::SourceId));
             catalog_deleted_ids.extend(
                 sinks
                     .into_iter()
-                    .map(|sink| CatalogDeletedId::SinkId(sink.id.into())),
+                    .map(|sink| StreamJobId::SinkId(sink.id.into())),
             );
 
             Ok((version, catalog_deleted_ids))
@@ -500,9 +494,8 @@ where
                         }))
                         .await
                         .into_iter()
-                        .filter_map_ok(|table| table)
+                        .map_ok(|table| table.unwrap())
                         .collect::<MetadataModelResult<Vec<_>>>()?;
-                    TableDeleted(table.clone()).upsert_in_transaction(&mut transaction)?;
                     tables_to_drop.push(table);
 
                     for table in &tables_to_drop {
@@ -587,9 +580,8 @@ where
                             }))
                             .await
                             .into_iter()
-                            .filter_map_ok(|table| table)
+                            .map_ok(|table| table.unwrap())
                             .collect::<MetadataModelResult<Vec<_>>>()?;
-                        TableDeleted(table.clone()).upsert_in_transaction(&mut transaction)?;
                         tables_to_drop.push(table);
 
                         for table in &tables_to_drop {
@@ -854,7 +846,6 @@ where
                 )?;
                 mview.delete_in_transaction(&mut transaction)?;
                 source.delete_in_transaction(&mut transaction)?;
-                TableDeleted(mview.clone()).upsert_in_transaction(&mut transaction)?;
                 self.env.meta_store().txn(transaction).await?;
                 database_core.drop_table(&mview);
                 database_core.drop_source(&source);
@@ -1027,10 +1018,7 @@ where
         let core = &mut self.core.lock().await.database;
         let sink = Sink::select(self.env.meta_store(), &sink_id).await?;
         if let Some(sink) = sink {
-            let mut transaction = Transaction::default();
-            sink.delete_in_transaction(&mut transaction)?;
-            SinkDeleted(sink.clone()).upsert_in_transaction(&mut transaction)?;
-            self.env.meta_store().txn(transaction).await?;
+            Sink::delete(self.env.meta_store(), &sink_id).await?;
 
             core.drop_sink(&sink);
             for &dependent_relation_id in &sink.dependent_relations {

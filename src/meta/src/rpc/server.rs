@@ -46,8 +46,8 @@ use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
-    CatalogBackgroundDeleter, CatalogManager, ClusterManager, FragmentManager, IdleManager,
-    MetaOpts, MetaSrvEnv,
+    CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+    StreamingJobBackgroundDeleter,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -400,7 +400,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
 
     let (table_background_deleter, deleter_handle, deleter_shutdown) =
-        CatalogBackgroundDeleter::new(env.clone(), stream_manager.clone(), source_manager.clone())
+        StreamingJobBackgroundDeleter::new(stream_manager.clone(), source_manager.clone())
             .await
             .unwrap();
     let table_background_deleter = Arc::new(table_background_deleter);

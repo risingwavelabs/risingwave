@@ -30,9 +30,9 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::manager::{
-    CatalogBackgroundDeleterRef, CatalogDeletedId, CatalogManagerRef, ClusterManagerRef,
-    FragmentManagerRef, IdCategory, IdCategoryType, MetaSrvEnv, NotificationVersion, SourceId,
-    StreamingJob, TableId,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
+    MetaSrvEnv, NotificationVersion, SourceId, StreamJobId, StreamingJob,
+    StreamingJobBackgroundDeleterRef, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -50,7 +50,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
-    table_background_deleter: CatalogBackgroundDeleterRef,
+    table_background_deleter: StreamingJobBackgroundDeleterRef,
     ddl_lock: Arc<RwLock<()>>,
 }
 
@@ -66,7 +66,7 @@ where
         source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        table_background_deleter: CatalogBackgroundDeleterRef,
+        table_background_deleter: StreamingJobBackgroundDeleterRef,
         ddl_lock: Arc<RwLock<()>>,
     ) -> Self {
         Self {
@@ -195,7 +195,7 @@ where
 
         // 2. Drop source in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![CatalogDeletedId::SourceId(source_id)]);
+            .delete(vec![StreamJobId::SourceId(source_id)]);
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -237,7 +237,7 @@ where
 
         // 2. drop sink in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![CatalogDeletedId::SinkId(sink_id.into())]);
+            .delete(vec![StreamJobId::SinkId(sink_id.into())]);
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -290,7 +290,7 @@ where
 
         // 2. drop mv in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![CatalogDeletedId::TableId(table_id.into())]);
+            .delete(vec![StreamJobId::TableId(table_id.into())]);
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -346,7 +346,7 @@ where
 
         // 2. drop mv(index) in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![CatalogDeletedId::TableId(index_table_id.into())]);
+            .delete(vec![StreamJobId::TableId(index_table_id.into())]);
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -711,8 +711,8 @@ where
         // Note: we need to drop the materialized view to unmap the source_id to fragment_ids before
         // we can drop the source.
         self.table_background_deleter.delete(vec![
-            CatalogDeletedId::TableId(table_id.into()),
-            CatalogDeletedId::SourceId(source_id),
+            StreamJobId::TableId(table_id.into()),
+            StreamJobId::SourceId(source_id),
         ]);
 
         Ok(version)
