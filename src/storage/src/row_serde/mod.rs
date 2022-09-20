@@ -80,7 +80,7 @@ impl ColumnDescMapping {
             .unzip();
         let output_index_set: HashSet<usize> = output_index.iter().copied().collect();
         let value_set = value_indices.iter().copied().collect();
-        debug_assert!(output_index_set.is_subset(&value_set));
+        assert!(output_index_set.is_subset(&value_set));
         Self::new_inner(output_columns, all_data_types, output_index)
     }
 
