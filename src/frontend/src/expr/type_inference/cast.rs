@@ -35,6 +35,68 @@ pub fn get_inner_type(dt: DataType) -> DataType {
     return_val.unwrap()
 }
 
+// helper for determine_nesting_level
+fn determine_nesting_level_inner(dt: DataType, level: i32) -> i32 {
+    let return_val: i32 = match dt.clone() {
+        DataType::List { datatype: inner } => {
+            determine_nesting_level_inner(*(inner.clone()), level + 1)
+        }
+        _ => 0
+    };
+    return_val
+}
+
+/// True if lhs is more nested, else false
+/// 
+/// Examples:
+/// get_most_nested(DataType::Boolean) -> 0
+/// get_most_nested(List{DataType::Int16}) -> 1
+/// get_most_nested(List{List{DataType::Boolean}}) -> 2
+fn determine_nesting_level(dt: DataType) -> i32 {
+    determine_nesting_level_inner(dt, 0)
+}
+
+/// True if lhs is more nested, else false
+/// 
+/// Examples:
+/// lhs_is_more_nested(DataType::Boolean, DataType::Boolean) -> false
+/// lhs_is_more_nested(List{List{DataType::Boolean}}, DataType::Date) -> true
+/// lhs_is_more_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> false
+fn lhs_is_more_nested(lhs: DataType, rhs: DataType) -> bool {
+    let lhs_level = determine_nesting_level(lhs.clone()); 
+    let rhs_level = determine_nesting_level(rhs.clone()); 
+    if lhs_level > rhs_level {
+        return true
+    }
+    false
+}
+
+/// Get the more nested element. Returns lhs if both are equally nested
+/// 
+/// Examples:
+/// get_most_nested(DataType::Boolean, DataType::Boolean) -> DataType::Boolean
+/// get_most_nested(DataType::Date, List{List{DataType::Boolean}}) -> List{List{DataType::Boolean}}
+/// get_most_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> List{List{DataType::Boolean}}
+pub fn get_most_nested(lhs: DataType, rhs: DataType) -> DataType {
+    if lhs_is_more_nested(lhs.clone(), rhs.clone()) {
+        return lhs;
+    }
+    rhs
+}
+
+/// Add levels to target dt until it is as nested as target_nesting
+/// 
+/// Examples:
+/// add_nesting(DataType::Boolean, DataType::Boolean) -> DataType::Boolean
+/// add_nesting(DataType::Date, List{List{DataType::Boolean}}) -> List{List{DataType::Date}}
+/// add_nesting(List{List{DataType::Int16}}, DataType::Interval) -> List{List{DataType::Int16}} // already more nested
+pub fn add_nesting(lhs: DataType, rhs: DataType) -> DataType {
+    if !lhs_is_more_nested(lhs.clone(), rhs.clone()) { // TODO: inefficient. Will be determined over and over
+        return lhs
+    }
+    return add_nesting(DataType::List { datatype: Box::new(lhs) }, rhs)
+}
+
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
 /// It is a simplified version of the rule used in
 /// [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).

@@ -21,6 +21,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeName};
 
 use super::{align_types, cast_ok_base, least_restrictive, CastContext};
+use crate::expr::type_inference::cast::{get_inner_type, get_most_nested, add_nesting};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
@@ -190,12 +191,12 @@ fn infer_type_for_special(
                         Some(right_type.clone())
                     } else {
                         let common_ele_type = least_restrictive(
-                            (**left_elem_type).clone(),
-                            (**right_elem_type).clone(),
+                            get_inner_type(left_type.clone()),
+                            get_inner_type(right_type.clone()),
                         );
                         if common_ele_type.is_err() {
                             return Err(ErrorCode::BindError(format!(
-                                "Cannot concatenate {} and {}",
+                                "A Cannot concatenate {} and {}",
                                 left_type, right_type
                             ))
                             .into());
@@ -203,9 +204,8 @@ fn infer_type_for_special(
 
                         // found common type
                         let common_ele_type = common_ele_type.unwrap();
-                        let array_type = DataType::List {
-                            datatype: Box::new(common_ele_type.clone()),
-                        };
+                        let most_nested = get_most_nested(left_type.clone(), right_type.clone());
+                        let array_type = add_nesting(common_ele_type.clone(), most_nested);
 
                         // try to cast inputs to inputs to common type
                         let inputs_owned = std::mem::take(inputs);
@@ -225,7 +225,7 @@ fn infer_type_for_special(
             };
             Ok(Some(return_type.ok_or_else(|| {
                 ErrorCode::BindError(format!(
-                    "Cannot concatenate {} and {}",
+                    "B Cannot concatenate {} and {}",
                     left_type, right_type
                 ))
             })?))
