@@ -20,7 +20,6 @@ use etcd_client::{Client as EtcdClient, ConnectOptions};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::bail;
-use risingwave_common::monitor::node::report_node_process;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -301,6 +300,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
+    // Initialize managers.
     let (info, lease_handle, lease_shutdown) = register_leader_for_meta(
         address_info.addr.clone(),
         meta_store.clone(),
@@ -314,9 +314,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
-    report_node_process(registry).unwrap();
     let compactor_manager = Arc::new(
-        hummock::CompactorManager::new_with_meta(env.clone(), max_heartbeat_interval.as_secs())
+        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
             .await
             .unwrap(),
     );
@@ -415,11 +414,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         )
         .await
         .unwrap();
-    let compaction_scheduler = Arc::new(CompactionScheduler::new(
-        env.clone(),
-        hummock_manager.clone(),
-        compactor_manager.clone(),
-    ));
+
+    // Initialize services.
     let vacuum_trigger = Arc::new(hummock::VacuumManager::new(
         env.clone(),
         hummock_manager.clone(),
@@ -480,6 +476,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         )
     }
 
+    // Initialize sub-tasks.
+    let compaction_scheduler = Arc::new(CompactionScheduler::new(
+        env.clone(),
+        hummock_manager.clone(),
+        compactor_manager.clone(),
+    ));
     let mut sub_tasks = hummock::start_hummock_workers(
         hummock_manager.clone(),
         compactor_manager,
@@ -489,6 +491,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         &env.opts,
     )
     .await;
+    sub_tasks.push(
+        ClusterManager::start_worker_num_monitor(
+            cluster_manager.clone(),
+            Duration::from_secs(env.opts.node_num_monitor_interval_sec),
+            meta_metrics.clone(),
+        )
+        .await,
+    );
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
     sub_tasks.push((lease_handle, lease_shutdown));
     if cfg!(not(test)) {
@@ -516,6 +526,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
     };
 
+    // Start services.
     tokio::spawn(async move {
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))

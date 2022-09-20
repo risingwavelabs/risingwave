@@ -180,7 +180,7 @@ def section_cluster_node(panels):
         panels.row("Cluster Node"),
         panels.timeseries_count("Node Count", [
             panels.target(
-                "sum(node_num) by (job)", "{{job}}"
+                "sum(worker_num) by (worker_type)", "{{worker_type}}"
             )], ["last"]),
         panels.timeseries_memory("Node Memory", [
             panels.target(
@@ -638,7 +638,20 @@ def section_streaming_actors(outer_panels):
                 panels.target(
                     "stream_join_cached_estimated_size", "{{actor_id}} {{side}}"
                 ),
-            ])
+            ]),
+            panels.timeseries_actor_ops("Aggregation Executor Cache", [
+                panels.target(
+                    "rate(stream_agg_lookup_miss_count[$__rate_interval])", "cache miss {{actor_id}}"
+                ),
+                panels.target(
+                    "rate(stream_agg_lookup_total_count[$__rate_interval])", "total lookups {{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_count("Aggregation Cached Keys", [
+                panels.target(
+                    "stream_agg_cached_keys", "{{actor_id}}"
+                ),
+            ]),
         ])
     ]
 

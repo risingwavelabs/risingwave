@@ -51,7 +51,7 @@ impl ObserverManager<RpcNotificationClient> {
     ) -> Self {
         let client = RpcNotificationClient { meta_client };
         let rx = client.subscribe(&addr, worker_type).await.unwrap();
-        Self::new_with(rx, client, addr, observer_states, worker_type)
+        Self::with_subscriber(rx, client, addr, observer_states, worker_type)
     }
 }
 
@@ -60,7 +60,7 @@ where
     T: NotificationClient<Channel = C> + Send + Sync + 'static,
     C: Channel<SubscribeResponse> + Send + 'static,
 {
-    pub fn new_with(
+    pub fn with_subscriber(
         rx: C,
         client: T,
         addr: HostAddr,

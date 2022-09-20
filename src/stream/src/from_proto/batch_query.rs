@@ -31,7 +31,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         node: &StreamNode,
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;

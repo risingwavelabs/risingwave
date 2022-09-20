@@ -26,3 +26,15 @@
   binder_error: |-
     Feature is not yet implemented: unsupported data type: TIME WITH TIME ZONE
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: select ''::iNt2;
+  logical_plan: |
+    LogicalProject { exprs: ['':Varchar::Int16] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: select ''::"iNt2";
+  binder_error: |-
+    Feature is not yet implemented: unsupported data type: "iNt2"
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: select ''::public.int2;
+  binder_error: |-
+    Feature is not yet implemented: unsupported data type: public.int2
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
