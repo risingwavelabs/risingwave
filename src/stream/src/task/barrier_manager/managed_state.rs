@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter::once;
 
-use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
@@ -109,13 +108,11 @@ impl ManagedBarrierState {
                     })
                     .collect();
 
-                if prev_epoch != INVALID_EPOCH {
-                    dispatch_state_store!(&self.state_store, state_store, {
-                        // TODO: set `is_checkpoint` according to whether the barrier is a
-                        // checkpoint barrier
-                        state_store.seal_epoch(prev_epoch, true);
-                    });
-                }
+                dispatch_state_store!(&self.state_store, state_store, {
+                    // TODO: set `is_checkpoint` according to whether the barrier is a
+                    // checkpoint barrier
+                    state_store.seal_epoch(prev_epoch, true);
+                });
 
                 match inner {
                     ManagedBarrierStateInner::Issued {
