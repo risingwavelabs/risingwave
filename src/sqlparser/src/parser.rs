@@ -2283,36 +2283,29 @@ impl Parser {
     }
 
     pub fn parse_row_expr(&mut self) -> Result<Expr, ParserError> {
-        if self.consume_token(&Token::LParen) {
-            if self.consume_token(&Token::RParen) {
-                Ok(Expr::Row(vec![]))
-            } else {
-                self.prev_token();
-                Ok(Expr::Row(self.parse_token_wrapped_exprs(
-                    &Token::LParen,
-                    &Token::RParen,
-                )?))
-            }
-        } else {
-            self.expected("(", self.peek_token())
-        }
+        Ok(Expr::Row(self.parse_token_wrapped_exprs(
+            &Token::LParen,
+            &Token::RParen,
+        )?))
     }
 
-    /// Parse a comma-separated list from a wrapped expression
+    /// Parse a comma-separated list (maybe empty) from a wrapped expression
     pub fn parse_token_wrapped_exprs(
         &mut self,
         left: &Token,
         right: &Token,
     ) -> Result<Vec<Expr>, ParserError> {
         if self.consume_token(left) {
-            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-            self.expect_token(right)?;
+            let exprs = if self.consume_token(right) {
+                vec![]
+            } else {
+                let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+                self.expect_token(right)?;
+                exprs
+            };
             Ok(exprs)
         } else {
-            self.expected(
-                format!("an array of expressions in {} and {}", left, right).as_str(),
-                self.peek_token(),
-            )
+            self.expected(left.to_string().as_str(), self.peek_token())
         }
     }
 

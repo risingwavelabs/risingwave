@@ -70,7 +70,7 @@
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
         LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [window_end, t1._row_id] }
+    StreamMaterialize { columns: [id, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_start, window_end] }
       StreamHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at, window_start, window_end, t1._row_id] }
         StreamTableScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -81,7 +81,7 @@
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
         LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_start, t1._row_id(hidden)], pk_columns: [window_start, t1._row_id] }
+    StreamMaterialize { columns: [id, created_at, window_start, t1._row_id(hidden)], pk_columns: [t1._row_id, window_start] }
       StreamHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at, window_start, t1._row_id] }
         StreamTableScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -92,7 +92,7 @@
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
         LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_end, t1._row_id(hidden)], pk_columns: [window_end, t1._row_id] }
+    StreamMaterialize { columns: [id, created_at, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_end] }
       StreamHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at, window_end, t1._row_id] }
         StreamTableScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -107,7 +107,7 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_start(hidden), t1._row_id(hidden)], pk_columns: [window_start, t1._row_id] }
+    StreamMaterialize { columns: [id, created_at, window_start(hidden), t1._row_id(hidden)], pk_columns: [t1._row_id, window_start] }
       StreamHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at, window_start, t1._row_id] }
         StreamTableScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -122,7 +122,7 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_start(hidden), t1._row_id(hidden)], pk_columns: [window_start, t1._row_id] }
+    StreamMaterialize { columns: [id, created_at, window_start(hidden), t1._row_id(hidden)], pk_columns: [t1._row_id, window_start] }
       StreamHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at, window_start, t1._row_id] }
         StreamTableScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -186,7 +186,7 @@
         BatchFilter { predicate: (t1.v1 >= 10:Int32) }
           BatchScan { table: t1, columns: [t1.id, t1.v1, t1.created_at], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [id, v1, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [window_end, t1._row_id] }
+    StreamMaterialize { columns: [id, v1, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_start, window_end] }
       StreamHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.v1, t1.created_at, window_start, window_end, t1._row_id] }
         StreamFilter { predicate: (t1.v1 >= 10:Int32) }
           StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }

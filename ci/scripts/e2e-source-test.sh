@@ -36,7 +36,7 @@ chmod +x ./target/debug/risingwave
 chmod +x ./target/debug/risedev-dev
 
 echo "--- Generate RiseDev CI config"
-cp ci/risedev-components.ci.env risedev-components.user.env
+cp ci/risedev-components.ci.source.env risedev-components.user.env
 
 echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
