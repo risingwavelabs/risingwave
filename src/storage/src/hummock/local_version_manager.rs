@@ -731,7 +731,6 @@ impl LocalVersionManager {
         let mut pending_sync_requests: HashMap<HummockEpoch, Sender<HummockResult<SyncResult>>> =
             HashMap::new();
 
-        // While the current Arc is not the only strong reference to the local version manager
         loop {
             let select_result = match select(
                 upload_handle_manager.next_finished_epoch(),
@@ -846,13 +845,20 @@ impl LocalVersionManager {
                         new_sync_epoch,
                         sync_result_sender,
                     } => {
-                        assert!(
-                            pending_sync_requests
-                                .insert(new_sync_epoch, sync_result_sender)
-                                .is_none(),
-                            "sync epoch is send for twice for epoch: {}",
-                            new_sync_epoch
-                        );
+                        if let Some(old_sync_result_sender) =
+                            pending_sync_requests.insert(new_sync_epoch, sync_result_sender)
+                        {
+                            let _ = old_sync_result_sender
+                                .send(Err(HummockError::other(
+                                    "the sync rx is overwritten by an new rx",
+                                )))
+                                .inspect_err(|e| {
+                                    error!(
+                                        "unable to send sync result: {}. Err: {:?}",
+                                        new_sync_epoch, e
+                                    );
+                                });
+                        }
                         let mut local_version_guard = local_version_manager.local_version.write();
                         let prev_max_sync_epoch = if let Some(epoch) =
                             local_version_guard.get_prev_max_sync_epoch(new_sync_epoch)
@@ -862,7 +868,10 @@ impl LocalVersionManager {
                             send_sync_result(
                                 &mut pending_sync_requests,
                                 new_sync_epoch,
-                                Ok(SyncResult::default()),
+                                Err(HummockError::other(format!(
+                                    "no sync task on epoch: {}. May have been cleared",
+                                    new_sync_epoch
+                                ))),
                             );
                             continue;
                         };
