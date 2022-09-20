@@ -91,6 +91,9 @@ impl Binder {
 
     /// `ARRAY[...]` is represented as an function call at the binder stage.
     pub(super) fn bind_array(&mut self, exprs: Vec<Expr>) -> Result<ExprImpl> {
+        if exprs.is_empty() {
+            return Err(ErrorCode::BindError("cannot determine type of empty array\nHINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].".into()).into());
+        }
         let mut exprs = exprs
             .into_iter()
             .map(|e| self.bind_expr(e))

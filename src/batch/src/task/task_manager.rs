@@ -271,7 +271,7 @@ mod tests {
                 distribution: None,
             }),
         };
-        let context = ComputeNodeContext::new_for_test();
+        let context = ComputeNodeContext::for_test();
         let task_id = ProstTaskId {
             query_id: "".to_string(),
             stage_id: 0,
@@ -316,7 +316,7 @@ mod tests {
                 distribution: None,
             }),
         };
-        let context = ComputeNodeContext::new_for_test();
+        let context = ComputeNodeContext::for_test();
         let task_id = ProstTaskId {
             query_id: "".to_string(),
             stage_id: 0,

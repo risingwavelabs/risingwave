@@ -102,7 +102,14 @@ export interface Table {
   properties: { [key: string]: string };
   fragmentId: number;
   /** an optional column index which is the vnode of each row computed by the table's consistent hash distribution */
-  vnodeColIdx: ColumnIndex | undefined;
+  vnodeColIdx:
+    | ColumnIndex
+    | undefined;
+  /**
+   * The column indices which are stored in the state store's value with row-encoding.
+   * Currently is not supported yet and expected to be `[0..columns.len()]`.
+   */
+  valueIndices: number[];
 }
 
 export interface Table_PropertiesEntry {
@@ -565,6 +572,7 @@ function createBaseTable(): Table {
     properties: {},
     fragmentId: 0,
     vnodeColIdx: undefined,
+    valueIndices: [],
   };
 }
 
@@ -601,6 +609,9 @@ export const Table = {
         : {},
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
       vnodeColIdx: isSet(object.vnodeColIdx) ? ColumnIndex.fromJSON(object.vnodeColIdx) : undefined,
+      valueIndices: Array.isArray(object?.valueIndices)
+        ? object.valueIndices.map((e: any) => Number(e))
+        : [],
     };
   },
 
@@ -650,6 +661,11 @@ export const Table = {
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
     message.vnodeColIdx !== undefined &&
       (obj.vnodeColIdx = message.vnodeColIdx ? ColumnIndex.toJSON(message.vnodeColIdx) : undefined);
+    if (message.valueIndices) {
+      obj.valueIndices = message.valueIndices.map((e) => Math.round(e));
+    } else {
+      obj.valueIndices = [];
+    }
     return obj;
   },
 
@@ -691,6 +707,7 @@ export const Table = {
     message.vnodeColIdx = (object.vnodeColIdx !== undefined && object.vnodeColIdx !== null)
       ? ColumnIndex.fromPartial(object.vnodeColIdx)
       : undefined;
+    message.valueIndices = object.valueIndices?.map((e) => e) || [];
     return message;
   },
 };
