@@ -122,7 +122,11 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let ssts = storage.sync(epoch, true).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
     }
@@ -448,7 +452,11 @@ mod tests {
             local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
 
-            let ssts = storage.sync(epoch, true).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -574,7 +582,11 @@ mod tests {
             local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
 
-            let ssts = storage.sync(epoch, true).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -737,7 +749,12 @@ mod tests {
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
-            let ssts = storage.sync(epoch, true).await.unwrap().uncommitted_ssts;
+
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -905,7 +922,11 @@ mod tests {
             let ramdom_key = [key_prefix, &rand::thread_rng().gen::<[u8; 32]>()].concat();
             local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
-            let ssts = storage.sync(epoch, true).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 

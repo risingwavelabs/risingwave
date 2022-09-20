@@ -244,23 +244,12 @@ where
 
     fn sync(&self, epoch: u64, is_checkpoint: bool) -> Self::SyncFuture<'_> {
         async move {
-            self.seal_epoch(epoch, is_checkpoint);
-            if is_checkpoint {
-                self.await_sync_epoch(epoch).await
-            } else {
-                Ok(SyncResult::default())
-            }
-        }
-    }
-
-    fn await_sync_epoch(&self, epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
-        async move {
             // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
             // move this metrics to inside uploader
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
             let sync_result = self
                 .inner
-                .await_sync_epoch(epoch)
+                .sync(epoch)
                 .stack_trace("store_await_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;

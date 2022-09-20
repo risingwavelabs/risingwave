@@ -123,7 +123,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         .unwrap();
     if enable_sync {
         let ssts = hummock_storage
-            .sync(epoch1, true)
+            .seal_and_sync_epoch(epoch1)
             .await
             .unwrap()
             .uncommitted_ssts;
@@ -156,7 +156,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         .unwrap();
     if enable_sync {
         let ssts = hummock_storage
-            .sync(epoch2, true)
+            .seal_and_sync_epoch(epoch2)
             .await
             .unwrap()
             .uncommitted_ssts;
@@ -190,7 +190,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         .unwrap();
     if enable_sync {
         let ssts = hummock_storage
-            .sync(epoch3, true)
+            .seal_and_sync_epoch(epoch3)
             .await
             .unwrap()
             .uncommitted_ssts;
@@ -256,7 +256,7 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         .unwrap();
     if enable_sync {
         let ssts = hummock_storage
-            .sync(epoch, true)
+            .seal_and_sync_epoch(epoch)
             .await
             .unwrap()
             .uncommitted_ssts;
@@ -333,7 +333,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         .unwrap();
     if enable_sync {
         let ssts = hummock_storage
-            .sync(epoch, true)
+            .seal_and_sync_epoch(epoch)
             .await
             .unwrap()
             .uncommitted_ssts;
@@ -364,7 +364,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         .unwrap();
     if enable_sync {
         let ssts = hummock_storage
-            .sync(epoch + 1, true)
+            .seal_and_sync_epoch(epoch + 1)
             .await
             .unwrap()
             .uncommitted_ssts;

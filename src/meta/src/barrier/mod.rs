@@ -437,7 +437,10 @@ where
             .iter_mut()
             .find(|x| x.command_ctx.prev_epoch.0 == prev_epoch)
         {
-            let checkpoint = result.iter().all(|node| node.checkpoint);
+            let checkpoint = result.iter().any(|resp| resp.checkpoint);
+            if checkpoint {
+                assert!(result.iter().all(|resp| resp.checkpoint));
+            }
             assert!(matches!(node.state, InFlight));
             node.wait_commit_timer = Some(wait_commit_timer);
             node.state = Completed((result, checkpoint));

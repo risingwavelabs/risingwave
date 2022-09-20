@@ -298,7 +298,7 @@ async fn test_basic() {
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
     let ssts = hummock_storage
-        .sync(epoch1, true)
+        .seal_and_sync_epoch(epoch1)
         .await
         .unwrap()
         .uncommitted_ssts;
@@ -445,8 +445,11 @@ async fn test_state_store_sync() {
     // );
 
     // trigger a sync
-    hummock_storage.sync(epoch - 1, true).await.unwrap();
-    hummock_storage.sync(epoch, true).await.unwrap();
+    hummock_storage
+        .seal_and_sync_epoch(epoch - 1)
+        .await
+        .unwrap();
+    hummock_storage.seal_and_sync_epoch(epoch).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
     // FYI: https://github.com/risingwavelabs/risingwave/pull/1928#discussion_r852698719
@@ -879,7 +882,7 @@ async fn test_write_anytime() {
     assert_old_value(epoch2).await;
 
     let ssts1 = hummock_storage
-        .sync(epoch1, true)
+        .seal_and_sync_epoch(epoch1)
         .await
         .unwrap()
         .uncommitted_ssts;
@@ -887,7 +890,7 @@ async fn test_write_anytime() {
     assert_old_value(epoch2).await;
 
     let ssts2 = hummock_storage
-        .sync(epoch2, true)
+        .seal_and_sync_epoch(epoch2)
         .await
         .unwrap()
         .uncommitted_ssts;
@@ -947,7 +950,7 @@ async fn test_delete_get() {
         .await
         .unwrap();
     let ssts = hummock_storage
-        .sync(epoch1, true)
+        .seal_and_sync_epoch(epoch1)
         .await
         .unwrap()
         .uncommitted_ssts;
@@ -965,7 +968,7 @@ async fn test_delete_get() {
         .await
         .unwrap();
     let ssts = hummock_storage
-        .sync(epoch2, true)
+        .seal_and_sync_epoch(epoch2)
         .await
         .unwrap()
         .uncommitted_ssts;
@@ -1116,11 +1119,13 @@ async fn test_multiple_epoch_sync() {
         }
     };
     test_get().await;
-    let sync_result3 = hummock_storage.sync(epoch3, true).await.unwrap();
-    let sync_result2 = hummock_storage.sync(epoch2, true).await.unwrap();
-    assert!(!sync_result2.sync_succeed);
-    assert!(sync_result3.sync_succeed);
+    let sync_result2 = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
+    let sync_result3 = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
     test_get().await;
+    meta_client
+        .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
+        .await
+        .unwrap();
     meta_client
         .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
         .await

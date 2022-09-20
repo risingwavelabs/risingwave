@@ -330,22 +330,10 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn sync(&self, epoch: u64, is_checkpoint: bool) -> Self::SyncFuture<'_> {
-        async move {
-            self.seal_epoch(epoch, is_checkpoint);
-            if is_checkpoint {
-                self.await_sync_epoch(epoch).await
-            } else {
-                Ok(SyncResult::default())
-            }
-        }
-    }
-
-    fn await_sync_epoch(&self, _epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
+    fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             // memory backend doesn't need to push to S3, so this is a no-op
             Ok(SyncResult {
-                sync_succeed: true,
                 ..Default::default()
             })
         }

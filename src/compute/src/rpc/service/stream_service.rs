@@ -167,7 +167,7 @@ impl StreamService for StreamServiceImpl {
             .await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
-        let (synced_sstables, checkpoint) = self
+        let synced_sstables = self
             .mgr
             .sync_epoch(req.prev_epoch, checkpoint)
             .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
@@ -184,7 +184,9 @@ impl StreamService for StreamServiceImpl {
                     sst: Some(sst),
                 })
                 .collect_vec(),
-            checkpoint,
+            // TODO: in the future may set it according to whether the barrier is a checkpoint
+            // barrier
+            checkpoint: true,
             worker_id: self.env.worker_id(),
         }))
     }

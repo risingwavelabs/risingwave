@@ -23,9 +23,11 @@ use bytes::Bytes;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
+use tracing::log::warn;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
@@ -602,17 +604,13 @@ impl StateStore for HummockStorage {
 
     fn sync(&self, epoch: u64, is_checkpoint: bool) -> Self::SyncFuture<'_> {
         async move {
-            self.seal_epoch(epoch, is_checkpoint);
-            if is_checkpoint {
-                self.await_sync_epoch(epoch).await
-            } else {
-                Ok(SyncResult::default())
+            if epoch == INVALID_EPOCH {
+                warn!("syncing invalid epoch");
+                return Ok(SyncResult {
+                    sync_size: 0,
+                    uncommitted_ssts: vec![],
+                });
             }
-        }
-    }
-
-    fn await_sync_epoch(&self, epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
-        async move {
             let sync_result = self
                 .local_version_manager()
                 .await_sync_shared_buffer(epoch)
@@ -622,6 +620,10 @@ impl StateStore for HummockStorage {
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+        if epoch == INVALID_EPOCH {
+            warn!("sealing invalid epoch");
+            return;
+        }
         self.local_version_manager.seal_epoch(epoch, is_checkpoint);
     }
 
@@ -630,6 +632,14 @@ impl StateStore for HummockStorage {
             self.local_version_manager.clear_shared_buffer().await;
             Ok(())
         }
+    }
+}
+
+impl HummockStorage {
+    #[cfg(any(test, feature = "test"))]
+    pub async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
+        self.seal_epoch(epoch, true);
+        self.sync(epoch).await
     }
 }
 
