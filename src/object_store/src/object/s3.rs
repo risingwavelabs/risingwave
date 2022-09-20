@@ -158,7 +158,7 @@ impl S3StreamingUploader {
         Ok(())
     }
 
-    async fn flush_and_complete(&mut self) -> ObjectResult<()> {
+    async fn flush_multipart_and_complete(&mut self) -> ObjectResult<()> {
         if !self.buf.is_empty() {
             self.upload_next_part().await?;
         }
@@ -265,7 +265,7 @@ impl StreamingUploader for S3StreamingUploader {
                     .await?;
                 Ok(())
             }
-        } else if let Err(e) = self.flush_and_complete().await {
+        } else if let Err(e) = self.flush_multipart_and_complete().await {
             tracing::warn!("Failed to upload object {}: {:?}", self.key, e);
             self.abort().await?;
             Err(e)
