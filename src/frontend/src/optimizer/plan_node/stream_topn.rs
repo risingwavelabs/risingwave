@@ -15,6 +15,7 @@
 use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::top_n_node::RankType as ProstRankType;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
@@ -82,7 +83,7 @@ impl StreamNode for StreamTopN {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
-            with_ties: false,
+            rank_type: ProstRankType::RowNumber as i32,
         };
         if self.input().append_only() {
             ProstStreamNode::AppendOnlyTopN(topn_node)

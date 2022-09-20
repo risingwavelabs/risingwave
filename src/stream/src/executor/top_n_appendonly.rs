@@ -22,7 +22,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
 use super::managed_state::top_n::ManagedTopNState;
-use super::top_n::{generate_executor_pk_indices_info, TopNCache, TopNCacheWithoutTies};
+use super::top_n::{generate_executor_pk_indices_info, TopNCache, TopNCacheRowNumber};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 use crate::error::StreamResult;
@@ -83,7 +83,7 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
-    cache: TopNCacheWithoutTies,
+    cache: TopNCacheRowNumber,
 
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -123,7 +123,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCacheWithoutTies::new(num_offset, num_limit, order_pairs.len()),
+            cache: TopNCacheRowNumber::new(num_offset, num_limit, order_pairs.len()),
             key_indices,
         })
     }

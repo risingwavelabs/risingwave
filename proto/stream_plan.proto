@@ -176,7 +176,13 @@ message TopNNode {
   uint64 limit = 1;
   uint64 offset = 2;
   catalog.Table table = 3;
-  bool with_ties = 4;
+  enum RankType {
+    UNSPECIFIED = 0;
+    ROW_NUMBER = 1;
+    RANK = 2;
+    DENSE_RANK = 3;
+  }
+  RankType rank_type = 4;
 }
 
 message GroupTopNNode {

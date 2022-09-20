@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_pb::stream_plan::top_n_node::RankType;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
@@ -45,8 +46,9 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
             .iter()
             .map(|idx| *idx as usize)
             .collect();
-        if node.with_ties {
-            Ok(TopNExecutor::new_with_ties(
+        match node.get_rank_type()? {
+            RankType::Unspecified => unreachable!(),
+            RankType::RowNumber => Ok(TopNExecutor::new_row_number(
                 input,
                 order_pairs,
                 (node.offset as usize, node.limit as usize),
@@ -55,9 +57,9 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
                 key_indices,
                 state_table,
             )?
-            .boxed())
-        } else {
-            Ok(TopNExecutor::new(
+            .boxed()),
+            RankType::Rank => todo!(),
+            RankType::DenseRank => Ok(TopNExecutor::new_row_number(
                 input,
                 order_pairs,
                 (node.offset as usize, node.limit as usize),
@@ -66,7 +68,7 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
                 key_indices,
                 state_table,
             )?
-            .boxed())
+            .boxed()),
         }
     }
 }

@@ -34,9 +34,9 @@ use crate::error::StreamResult;
 /// records/rows that have been seen, and returns topN records overall.
 pub type TopNExecutor<S, C> = TopNExecutorWrapper<InnerTopNExecutorNew<S, C>>;
 
-impl<S: StateStore> TopNExecutor<S, TopNCacheWithoutTies> {
+impl<S: StateStore> TopNExecutor<S, TopNCacheRowNumber> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn new_row_number(
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
@@ -44,7 +44,7 @@ impl<S: StateStore> TopNExecutor<S, TopNCacheWithoutTies> {
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamResult<TopNExecutor<S, TopNCacheWithoutTies>> {
+    ) -> StreamResult<TopNExecutor<S, TopNCacheRowNumber>> {
         let info = input.info();
         let schema = input.schema().clone();
         let sort_key_len = order_pairs.len();
@@ -55,7 +55,7 @@ impl<S: StateStore> TopNExecutor<S, TopNCacheWithoutTies> {
                 info,
                 schema,
                 order_pairs,
-                TopNCacheWithoutTies::new(offset_and_limit.0, offset_and_limit.1, sort_key_len),
+                TopNCacheRowNumber::new(offset_and_limit.0, offset_and_limit.1, sort_key_len),
                 pk_indices,
                 executor_id,
                 key_indices,
@@ -65,9 +65,9 @@ impl<S: StateStore> TopNExecutor<S, TopNCacheWithoutTies> {
     }
 }
 
-impl<S: StateStore> TopNExecutor<S, TopNCacheWithTies> {
+impl<S: StateStore> TopNExecutor<S, TopNCacheDenseRank> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new_with_ties(
+    pub fn new_dense_rank(
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
@@ -75,7 +75,7 @@ impl<S: StateStore> TopNExecutor<S, TopNCacheWithTies> {
         executor_id: u64,
         key_indices: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamResult<TopNExecutor<S, TopNCacheWithTies>> {
+    ) -> StreamResult<TopNExecutor<S, TopNCacheDenseRank>> {
         let info = input.info();
         let schema = input.schema().clone();
         let sort_key_len = order_pairs.len();
@@ -86,7 +86,7 @@ impl<S: StateStore> TopNExecutor<S, TopNCacheWithTies> {
                 info,
                 schema,
                 order_pairs,
-                TopNCacheWithTies::new(offset_and_limit.0, offset_and_limit.1, sort_key_len),
+                TopNCacheDenseRank::new(offset_and_limit.0, offset_and_limit.1, sort_key_len),
                 pk_indices,
                 executor_id,
                 key_indices,
@@ -166,7 +166,7 @@ pub trait TopNCache: Send + 'static {
     ) -> StreamExecutorResult<()>;
 }
 
-pub struct TopNCacheWithoutTies {
+pub struct TopNCacheRowNumber {
     /// Rows in the range `[0, offset)`
     pub low: BTreeMap<OrderedRow, Row>,
     /// Rows in the range `[offset, offset+limit)`
@@ -179,7 +179,7 @@ pub struct TopNCacheWithoutTies {
     pub limit: usize,
 }
 
-impl TopNCacheWithoutTies {
+impl TopNCacheRowNumber {
     pub fn is_low_cache_full(&self) -> bool {
         debug_assert!(self.low.len() <= self.offset);
         let full = self.low.len() == self.offset;
@@ -212,7 +212,7 @@ impl TopNCacheWithoutTies {
 }
 
 #[async_trait]
-impl TopNCache for TopNCacheWithoutTies {
+impl TopNCache for TopNCacheRowNumber {
     fn new(offset: usize, limit: usize, _sort_key_len: usize) -> Self {
         assert!(limit != 0);
         Self {
@@ -377,7 +377,7 @@ impl TopNCache for TopNCacheWithoutTies {
     }
 }
 
-pub struct TopNCacheWithTies {
+pub struct TopNCacheDenseRank {
     /// Rows in the range `[0, offset)`
     pub low: BTreeMap<OrderedRow, BTreeSet<Row>>,
     /// Rows in the range `[offset, offset+limit)`
@@ -392,7 +392,7 @@ pub struct TopNCacheWithTies {
     pub sort_key_len: usize,
 }
 
-impl TopNCacheWithTies {
+impl TopNCacheDenseRank {
     pub fn is_low_cache_full(&self) -> bool {
         debug_assert!(self.low.len() <= self.offset);
         let full = self.low.len() == self.offset;
@@ -425,7 +425,7 @@ impl TopNCacheWithTies {
 }
 
 #[async_trait]
-impl TopNCache for TopNCacheWithTies {
+impl TopNCache for TopNCacheDenseRank {
     fn new(offset: usize, limit: usize, sort_key_len: usize) -> Self {
         assert!(limit != 0);
         Self {
@@ -876,7 +876,7 @@ mod tests {
                 &[0, 1],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new(
+                TopNExecutor::new_row_number(
                     source as Box<dyn Executor>,
                     order_types,
                     (3, 1000),
@@ -972,7 +972,7 @@ mod tests {
                 &[0, 1],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new(
+                TopNExecutor::new_row_number(
                     source as Box<dyn Executor>,
                     order_types,
                     (0, 4),
@@ -1079,7 +1079,7 @@ mod tests {
                 &[0, 1],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new(
+                TopNExecutor::new_row_number(
                     source as Box<dyn Executor>,
                     order_types,
                     (3, 4),
@@ -1172,7 +1172,7 @@ mod tests {
                 &[0, 1],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new_with_ties(
+                TopNExecutor::new_dense_rank(
                     source as Box<dyn Executor>,
                     order_types,
                     (3, 4),
@@ -1380,7 +1380,7 @@ mod tests {
                 &[0, 3],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new(
+                TopNExecutor::new_row_number(
                     source as Box<dyn Executor>,
                     order_types,
                     (1, 3),
@@ -1456,7 +1456,7 @@ mod tests {
                 &[0, 3],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new(
+                TopNExecutor::new_row_number(
                     create_source_new_before_recovery() as Box<dyn Executor>,
                     order_types.clone(),
                     (1, 3),
@@ -1497,7 +1497,7 @@ mod tests {
 
             // recovery
             let top_n_executor_after_recovery = Box::new(
-                TopNExecutor::new(
+                TopNExecutor::new_row_number(
                     create_source_new_after_recovery() as Box<dyn Executor>,
                     order_types.clone(),
                     (1, 3),
@@ -1562,7 +1562,7 @@ mod tests {
                 &[0, 3],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new_with_ties(
+                TopNExecutor::new_dense_rank(
                     source as Box<dyn Executor>,
                     order_types,
                     (1, 3),
@@ -1636,7 +1636,7 @@ mod tests {
                 &[0, 3],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new_with_ties(
+                TopNExecutor::new_dense_rank(
                     create_source_new_before_recovery() as Box<dyn Executor>,
                     order_types.clone(),
                     (1, 3),
@@ -1677,7 +1677,7 @@ mod tests {
 
             // recovery
             let top_n_executor_after_recovery = Box::new(
-                TopNExecutor::new_with_ties(
+                TopNExecutor::new_dense_rank(
                     create_source_new_after_recovery() as Box<dyn Executor>,
                     order_types.clone(),
                     (1, 3),
@@ -1785,7 +1785,7 @@ mod tests {
                 &[0, 1],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new_with_ties(
+                TopNExecutor::new_dense_rank(
                     source as Box<dyn Executor>,
                     order_types,
                     (3, 4),

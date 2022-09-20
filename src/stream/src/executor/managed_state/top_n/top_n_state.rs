@@ -22,7 +22,7 @@ use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
-use crate::executor::top_n::{TopNCacheWithTies, TopNCacheWithoutTies};
+use crate::executor::top_n::{TopNCacheDenseRank, TopNCacheRowNumber};
 
 pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
@@ -156,7 +156,7 @@ impl<S: StateStore> ManagedTopNState<S> {
     pub async fn init_topn_cache(
         &self,
         pk_prefix: Option<&Row>,
-        topn_cache: &mut TopNCacheWithoutTies,
+        topn_cache: &mut TopNCacheRowNumber,
     ) -> StreamExecutorResult<()> {
         assert!(topn_cache.low.is_empty());
         assert!(topn_cache.middle.is_empty());
@@ -201,7 +201,7 @@ impl<S: StateStore> ManagedTopNState<S> {
     pub async fn init_topn_cache_with_ties(
         &self,
         pk_prefix: Option<&Row>,
-        topn_cache: &mut TopNCacheWithTies,
+        topn_cache: &mut TopNCacheDenseRank,
     ) -> StreamExecutorResult<()> {
         assert!(topn_cache.low.is_empty());
         assert!(topn_cache.middle.is_empty());
