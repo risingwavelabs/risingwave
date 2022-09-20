@@ -579,7 +579,6 @@ impl Dispatcher for HashDataDispatcher {
                             if *vnode != last_vnode_when_update_delete {
                                 new_ops.push(Op::Delete);
                                 new_ops.push(Op::Insert);
-                                panic!("Update of the same pk is shuffled to different partitions, which might cause problems. We forbid this for now.");
                             } else {
                                 new_ops.push(Op::UpdateDelete);
                                 new_ops.push(Op::UpdateInsert);
@@ -611,7 +610,6 @@ impl Dispatcher for HashDataDispatcher {
                                 if *vnode != last_vnode_when_update_delete {
                                     new_ops.push(Op::Delete);
                                     new_ops.push(Op::Insert);
-                                    panic!("Update of the same pk is shuffled to different partitions, which might cause problems. We forbid this for now.");
                                 } else {
                                     new_ops.push(Op::UpdateDelete);
                                     new_ops.push(Op::UpdateInsert);
