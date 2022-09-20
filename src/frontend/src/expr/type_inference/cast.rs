@@ -21,6 +21,20 @@ use risingwave_common::types::{DataType, DataTypeName};
 
 use crate::expr::{Expr as _, ExprImpl};
 
+/// Find the nested inner DataType of a List
+///
+/// Examples:
+/// get_inner_type(DataType::Boolean) -> Boolean
+/// get_inner_type(List{DataType::Boolean}) -> Boolean
+/// get_inner_type(List{List{DataType::Boolean}}) -> Boolean
+pub fn get_inner_type(dt: DataType) -> DataType {
+    let return_val = match dt {
+        DataType::List { datatype: inner } => Some(get_inner_type(*inner)),
+        _ => Some(dt),
+    };
+    return_val.unwrap()
+}
+
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
 /// It is a simplified version of the rule used in
 /// [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
@@ -306,5 +320,41 @@ mod tests {
                 "       T   T ",
             ]
         );
+    }
+
+    #[test]
+    fn test_get_inner_type_ok() {
+        for dt in vec![
+            DataType::Boolean,
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Decimal,
+            DataType::Date,
+            DataType::Varchar,
+            DataType::Time,
+            DataType::Timestamp,
+            DataType::Timestampz,
+            DataType::Interval,
+        ] {
+            let nested_1 = DataType::List {
+                datatype: Box::new(dt.clone()),
+            };
+            let nested_2 = DataType::List {
+                datatype: Box::new(nested_1.clone()),
+            };
+            let nested_3 = DataType::List {
+                datatype: Box::new(nested_2.clone()),
+            };
+            let combinations = vec![nested_1, nested_2, nested_3];
+            for (i, ele_i) in combinations.iter().enumerate() {
+                for (_, ele_j) in combinations[..i].iter().enumerate() {
+                    assert_eq!(dt.clone(), get_inner_type(ele_i.clone())); // compare simple with nested
+                    assert_eq!(get_inner_type(ele_i.clone()), get_inner_type(ele_j.clone())); // compare nested
+                }
+            }
+        }
     }
 }
