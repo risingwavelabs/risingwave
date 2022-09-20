@@ -31,6 +31,7 @@ mod stream_manager;
 
 pub use barrier_manager::*;
 pub use env::*;
+use risingwave_storage::StateStoreImpl;
 pub use stream_manager::*;
 
 /// Default capacity of channel if two actors are on the same node
@@ -91,19 +92,19 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(addr: HostAddr) -> Self {
+    pub fn new(addr: HostAddr, state_store: StateStoreImpl) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
-            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new())),
+            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
         }
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self::new(LOCAL_TEST_ADDR.clone())
+        Self::new(LOCAL_TEST_ADDR.clone(), StateStoreImpl::for_test())
     }
 
     #[inline]
