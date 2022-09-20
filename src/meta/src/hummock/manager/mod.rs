@@ -92,7 +92,8 @@ pub struct HummockManager<S: MetaStore> {
     compaction_scheduler: parking_lot::RwLock<Option<CompactionSchedulerChannelRef>>,
 
     side_compaction_sched_channel: parking_lot::RwLock<Option<CompactionSchedulerChannelRef>>,
-    compaction_sched_status_rx: tokio::sync::Mutex<Option<UnboundedReceiver<ScheduleStatus>>>,
+    compaction_sched_status_rx:
+        tokio::sync::Mutex<Option<UnboundedReceiver<(ScheduleStatus, CompactionGroupId)>>>,
     compaction_finish_channel: (
         UnboundedSender<HummockVersionDelta>,
         tokio::sync::Mutex<UnboundedReceiver<HummockVersionDelta>>,
@@ -1088,8 +1089,8 @@ where
 
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
-        // Prevent commit empty epochs if this flag is set
-        if versioning_guard.deterministic_mode && sstables.is_empty() {
+        // Prevent commit new epochs if this flag is set
+        if versioning_guard.deterministic_mode {
             return Ok(());
         }
 
@@ -1370,6 +1371,7 @@ where
     /// Reset current version to empty
     #[named]
     pub async fn reset_current_version(&self) -> Result<HummockVersion> {
+        let mut versioning_guard = write_lock!(self, versioning).await;
         // Reset current version to empty
         let mut init_version = HummockVersion {
             id: FIRST_VERSION_ID,
@@ -1402,10 +1404,8 @@ where
             );
         }
 
-        let mut versioning_guard = write_lock!(self, versioning).await;
         let old_version = versioning_guard.current_version.clone();
         versioning_guard.current_version = init_version;
-        versioning_guard.deterministic_mode = true;
         Ok(old_version)
     }
 
@@ -1417,7 +1417,6 @@ where
         &self,
         version_delta_id: HummockVersionId,
     ) -> Result<(HummockVersionId, HummockEpoch, Vec<CompactionGroupId>)> {
-        tracing::info!("Replay version delta: id {}", version_delta_id);
         let result = HummockVersionDelta::select(self.env.meta_store(), &version_delta_id).await?;
         // the version delta must exist
         assert!(result.is_some());
@@ -1427,12 +1426,6 @@ where
         // ensure the version id is ascending after replay
         version_delta.id = versioning_guard.current_version.id + 1;
         version_delta.prev_id = version_delta.id - 1;
-
-        tracing::info!(
-            "adjusted version delta: id {}, prev {}",
-            version_delta.id,
-            version_delta.prev_id
-        );
         versioning_guard
             .current_version
             .apply_version_delta(&version_delta);
@@ -1453,20 +1446,32 @@ where
         Ok((version_id, max_committed_epoch, compaction_group_ids))
     }
 
+    #[named]
+    pub async fn disable_commit_epoch(&self) -> HummockVersion {
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        versioning_guard.deterministic_mode = true;
+        let version = versioning_guard.current_version.clone();
+        version
+    }
+
     /// Triggers compacitons to specified compaction groups.
     pub async fn trigger_compaction_deterministic(
         &self,
         base_version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<HummockVersionDeltas> {
-        tracing::info!("Trigger compaction for version {}", base_version_id);
+        tracing::info!(
+            "Trigger compaction for version {}, groups {:?}",
+            base_version_id,
+            compaction_groups
+        );
         let old_version = self.get_current_version().await;
         assert_eq!(
             base_version_id, old_version.id,
             "old_version epoch {}",
             old_version.max_committed_epoch
         );
-
+        let mut pending_ack = compaction_groups.len();
         for compaction_group in compaction_groups {
             self.try_sched_compaction_deterministic(compaction_group)?;
         }
@@ -1475,9 +1480,13 @@ where
         if let Some(rx) = mutex_guard.as_mut() {
             loop {
                 match rx.recv().await {
-                    Some(sched_status) => {
+                    Some((sched_status, compaction_group)) => {
+                        tracing::info!(
+                            "Compaction schedule {} for compaction group {}",
+                            sched_status.as_str(),
+                            compaction_group,
+                        );
                         if sched_status == ScheduleStatus::Ok {
-                            tracing::info!("Compaction schedule Ok");
                             let mut guard = self.compaction_finish_channel.1.lock().await;
                             match guard.recv().await {
                                 Some(version_delta) => {
@@ -1506,14 +1515,17 @@ where
                                     tracing::warn!("Compaction finish channel is closed");
                                 }
                             }
-                        } else {
-                            tracing::info!("Compaction schedule {}", sched_status.as_str());
-                            break;
                         }
+                        pending_ack -= 1;
                     }
                     None => {
+                        tracing::warn!("Compaction status channel is closed");
                         break;
                     }
+                }
+                if pending_ack <= 0 {
+                    tracing::info!("Collected acks for all compaction groups");
+                    break;
                 }
             }
         }
@@ -1527,7 +1539,7 @@ where
         &self,
         sched_channel: CompactionSchedulerChannelRef,
         side_sched_channel: Option<CompactionSchedulerChannelRef>,
-        status_rx: UnboundedReceiver<ScheduleStatus>,
+        status_rx: UnboundedReceiver<(ScheduleStatus, CompactionGroupId)>,
     ) {
         *self.compaction_scheduler.write() = Some(sched_channel);
         *self.side_compaction_sched_channel.write() = side_sched_channel;
@@ -1743,8 +1755,8 @@ fn gen_version_delta<'a>(
     level_deltas.push(level_delta);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
     version_delta.id = old_version.id + 1;
+    // We don't persist compaction's version delta to meta store in deterministic mode
     if !deterministic_mode {
-        // We don't persist compaction's version delta to meta store
         txn.insert(version_delta.id, version_delta.clone());
     }
 

@@ -100,6 +100,10 @@ impl HummockMetaClient for MockHummockMetaClient {
         unimplemented!()
     }
 
+    async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
+        unimplemented!()
+    }
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         self.hummock_manager
             .pin_snapshot(self.context_id)

@@ -531,6 +531,16 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.versions.unwrap())
     }
 
+    async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
+        let req = DisableCommitEpochRequest {};
+        Ok(self
+            .inner
+            .disable_commit_epoch(req)
+            .await?
+            .current_version
+            .unwrap())
+    }
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         let req = PinSnapshotRequest {
             context_id: self.worker_id(),
@@ -758,6 +768,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
             ,{ hummock_client, list_version_deltas, ListVersionDeltasRequest, ListVersionDeltasResponse }
             ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
+            ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }

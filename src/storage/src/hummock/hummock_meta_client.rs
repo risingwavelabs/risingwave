@@ -89,6 +89,10 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
+    async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
+        self.meta_client.disable_commit_epoch().await
+    }
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();

@@ -103,7 +103,6 @@ pub async fn compaction_test_serve(
     let (_shutdown_sender, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {},
             _ = &mut shutdown_recv => {
                 for (join_handle, shutdown_sender) in sub_tasks {
                     if let Err(err) = shutdown_sender.send(()) {
@@ -122,8 +121,8 @@ pub async fn compaction_test_serve(
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
     let mut replay_count: u64 = 0;
-    // let mut prev_version_id = FIRST_VERSION_ID;
-    for id in (FIRST_VERSION_ID + 1)..version_before_reset.id {
+    let (start_version, end_version) = (FIRST_VERSION_ID + 1, version_before_reset.id + 1);
+    for id in start_version..end_version {
         let (version_id, max_committed_epoch, compaction_groups) =
             meta_client.replay_version_delta(id).await?;
         tracing::info!(
@@ -198,6 +197,7 @@ pub async fn compaction_test_serve(
         }
     }
 
+    tracing::info!("Replay finished");
     tokio::try_join!(join_handle, observer_join_handle)?;
     Ok(())
 }

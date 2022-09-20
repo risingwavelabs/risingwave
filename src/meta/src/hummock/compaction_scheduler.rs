@@ -173,7 +173,7 @@ where
             };
 
         let (sched_status_tx, sched_status_rx) =
-            tokio::sync::mpsc::unbounded_channel::<ScheduleStatus>();
+            tokio::sync::mpsc::unbounded_channel::<(ScheduleStatus, CompactionGroupId)>();
 
         self.hummock_manager
             .init_compaction_scheduler(
@@ -192,7 +192,10 @@ where
             let compaction_group: CompactionGroupId = tokio::select! {
                 compaction_group = sched_rx.recv() => {
                     match compaction_group {
-                        Some(compaction_group) => compaction_group,
+                        Some(compaction_group) =>  {
+                            assert!(false, "unexpected schedule");
+                            compaction_group
+                        },
                         None => {
                             tracing::warn!("Compactor Scheduler: The Hummock manager has dropped the connection,
                                 it means it has either died or started a new session. Exiting.");
@@ -224,12 +227,15 @@ where
                 }
             };
             sync_point::on("BEFORE_SCHEDULE_COMPACTION_TASK").await;
-            Self::unschedule(sched_channel.clone(), &side_sched_channel, compaction_group);
             let sched_status = self
-                .pick_and_assign(compaction_group, sched_channel.clone())
+                .pick_and_assign(
+                    compaction_group,
+                    sched_channel.clone(),
+                    side_sched_channel.clone(),
+                )
                 .await;
 
-            if let Err(e) = sched_status_tx.send(sched_status) {
+            if let Err(e) = sched_status_tx.send((sched_status, compaction_group)) {
                 tracing::warn!(
                     "Failed to send schedule status for compaction group {} to hummock manager. {}",
                     compaction_group,
@@ -247,10 +253,12 @@ where
         &self,
         compaction_group: CompactionGroupId,
         sched_channel: CompactionSchedulerChannelRef,
+        side_sched_channel: Option<CompactionSchedulerChannelRef>,
     ) -> ScheduleStatus {
         let schedule_status = self
-            .pick_and_assign_impl(compaction_group, sched_channel)
+            .pick_and_assign_impl(compaction_group, sched_channel.clone())
             .await;
+        Self::unschedule(sched_channel, &side_sched_channel, compaction_group);
         let cancel_task = match &schedule_status {
             ScheduleStatus::Ok => None,
             ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
@@ -451,7 +459,8 @@ mod tests {
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
-                    request_channel.clone()
+                    request_channel.clone(),
+                    None
                 )
                 .await
         );
@@ -492,7 +501,8 @@ mod tests {
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
-                    request_channel.clone()
+                    request_channel.clone(),
+                    None
                 )
                 .await
         );
@@ -527,7 +537,8 @@ mod tests {
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
-                    request_channel.clone()
+                    request_channel.clone(),
+                    None
                 )
                 .await
         );

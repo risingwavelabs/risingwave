@@ -130,6 +130,16 @@ where
         }))
     }
 
+    async fn disable_commit_epoch(
+        &self,
+        _request: Request<DisableCommitEpochRequest>,
+    ) -> Result<Response<DisableCommitEpochResponse>, Status> {
+        let version = self.hummock_manager.disable_commit_epoch().await;
+        Ok(Response::new(DisableCommitEpochResponse {
+            current_version: Some(version),
+        }))
+    }
+
     async fn list_version_deltas(
         &self,
         request: Request<ListVersionDeltasRequest>,

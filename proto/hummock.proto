@@ -407,6 +407,14 @@ message TriggerCompactionDeterministicResponse {
   HummockVersionDeltas versions = 1;
 }
 
+message DisableCommitEpochRequest {
+
+}
+
+message DisableCommitEpochResponse {
+  HummockVersion current_version = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -414,7 +422,7 @@ service HummockManagerService {
   rpc ListVersionDeltas(ListVersionDeltasRequest) returns (ListVersionDeltasResponse);
   rpc ReplayVersionDelta(ReplayVersionDeltaRequest) returns (ReplayVersionDeltaResponse);
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
-
+  rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);

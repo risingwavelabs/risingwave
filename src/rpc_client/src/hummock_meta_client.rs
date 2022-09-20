@@ -39,6 +39,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         start_id: u64,
         num_limit: u32,
     ) -> Result<HummockVersionDeltas>;
+    async fn disable_commit_epoch(&self) -> Result<HummockVersion>;
     async fn trigger_compaction_deterministic(
         &self,
         version_id: HummockVersionId,
