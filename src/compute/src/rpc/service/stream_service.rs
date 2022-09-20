@@ -143,8 +143,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<InjectBarrierRequest>,
     ) -> Result<Response<InjectBarrierResponse>, Status> {
         let req = request.into_inner();
-        let barrier =
-            Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
+        let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
 
         self.mgr
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
@@ -168,7 +167,7 @@ impl StreamService for StreamServiceImpl {
             .await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
-        let (synced_sstables, sync_succeed) = self
+        let synced_sstables = self
             .mgr
             .sync_epoch(req.prev_epoch)
             .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
@@ -185,7 +184,9 @@ impl StreamService for StreamServiceImpl {
                     sst: Some(sst),
                 })
                 .collect_vec(),
-            checkpoint: sync_succeed,
+            // TODO: in the future may set it according to whether the barrier is a checkpoint
+            // barrier
+            checkpoint: true,
             worker_id: self.env.worker_id(),
         }))
     }

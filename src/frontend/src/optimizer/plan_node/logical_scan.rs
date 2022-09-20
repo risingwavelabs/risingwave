@@ -223,28 +223,34 @@ impl LogicalScan {
         &self.predicate
     }
 
+    /// get the Mapping of columnIndex from internal column index to output column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::with_remaining_columns(
+            &self.output_col_idx,
+            self.table_desc().columns.len(),
+        )
+    }
+
     /// Return indices of fields the output is ordered by and
     /// corresponding direction
     pub fn get_out_column_index_order(&self) -> Order {
-        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
-        Order::new(
+        let id_to_tb_idx = self.table_desc.get_id_to_op_idx_mapping();
+        let order = Order::new(
             self.table_desc
                 .order_key
                 .iter()
-                .filter_map(|order| {
-                    let out_idx = id_to_op_idx
+                .map(|order| {
+                    let idx = id_to_tb_idx
                         .get(&self.table_desc.columns[order.column_idx].column_id)
-                        .copied();
-                    match out_idx {
-                        Some(idx) => match order.order_type {
-                            OrderType::Ascending => Some(FieldOrder::ascending(idx)),
-                            OrderType::Descending => Some(FieldOrder::descending(idx)),
-                        },
-                        None => None,
+                        .unwrap();
+                    match order.order_type {
+                        OrderType::Ascending => FieldOrder::ascending(*idx),
+                        OrderType::Descending => FieldOrder::descending(*idx),
                     }
                 })
                 .collect(),
-        )
+        );
+        self.i2o_col_mapping().rewrite_provided_order(&order)
     }
 
     /// The mapped distribution key of the scan operator.
@@ -480,8 +486,13 @@ impl LogicalScan {
             required_order.enforce_if_not_satisfies(BatchSeqScan::new(self.clone(), vec![]).into())
         } else {
             let (scan_ranges, predicate) = self.predicate.clone().split_to_scan_ranges(
-                &self.table_desc.order_column_indices(),
-                self.table_desc.columns.len(),
+                self.table_desc.clone(),
+                self.base
+                    .ctx
+                    .inner()
+                    .session_ctx
+                    .config()
+                    .get_max_split_range_gap(),
             )?;
             let mut scan = self.clone();
             scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.

@@ -175,7 +175,7 @@ where
             FeMessage::Bind(m) => self.process_bind_msg(m).await?,
             FeMessage::Execute(m) => self.process_execute_msg(m).await?,
             FeMessage::Describe(m) => self.process_describe_msg(m).await?,
-            FeMessage::Sync => self.stream.write(&BeMessage::ReadyForQuery).await?,
+            FeMessage::Sync => self.stream.write_no_flush(&BeMessage::ReadyForQuery)?,
             FeMessage::Close(m) => self.process_close_msg(m).await?,
         }
         self.stream.flush().await?;
@@ -270,14 +270,8 @@ where
     }
 
     async fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
-        let session = self
-            .session_mgr
-            .connect_for_cancel(m.target_process_id, m.target_secret_key)?;
-        self.session = Some(session);
-        // TODO: Abort running query in `QueryManager`.
-        let session = self.session.clone().unwrap();
-        session.cancel_running_queries().await;
-        self.session = None;
+        let session_id = (m.target_process_id, m.target_secret_key);
+        self.session_mgr.cancel_queries_in_session(session_id);
         self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         Ok(())
     }
@@ -318,11 +312,11 @@ where
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         tracing::trace!("(extended query)parse query: {}", sql);
         // 1. Create the types description.
-        let type_ids = msg.type_ids;
-        let mut types: Vec<TypeOid> = Vec::with_capacity(type_ids.len());
-        for x in type_ids {
-            types.push(TypeOid::as_type(x).map_err(|e| PsqlError::ParseError(Box::new(e)))?);
-        }
+        let types = msg
+            .type_ids
+            .iter()
+            .map(|x| TypeOid::as_type(*x).map_err(|e| PsqlError::ParseError(Box::new(e))))
+            .collect::<PsqlResult<Vec<TypeOid>>>()?;
 
         // Flag indicate whether statement is a query statement.
         let is_query_sql = {
@@ -335,7 +329,7 @@ where
         };
 
         // 2. Create the row description.
-        let rows: Vec<PgFieldDescriptor> = if is_query_sql {
+        let fields: Vec<PgFieldDescriptor> = if is_query_sql {
             if types.is_empty() {
                 let session = self.session.clone().unwrap();
                 session
@@ -395,7 +389,8 @@ where
             cstr_to_str(&msg.statement_name).unwrap().to_string(),
             msg.sql_bytes,
             types,
-            rows,
+            fields,
+            is_query_sql,
         );
 
         // 4. Insert the statement.
@@ -405,7 +400,7 @@ where
         } else {
             self.named_statements.insert(name, statement);
         }
-        self.stream.write(&BeMessage::ParseComplete).await?;
+        self.stream.write_no_flush(&BeMessage::ParseComplete)?;
         Ok(())
     }
 
@@ -434,6 +429,7 @@ where
                 portal_name.clone(),
                 &msg.params,
                 msg.result_format_code,
+                msg.param_format_code,
             )
             .await?;
 
@@ -443,7 +439,7 @@ where
         } else {
             self.named_portals.insert(portal_name, portal);
         }
-        self.stream.write(&BeMessage::BindComplete).await?;
+        self.stream.write_no_flush(&BeMessage::BindComplete)?;
         Ok(())
     }
 
@@ -493,6 +489,11 @@ where
     async fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
         //  b'S' => Statement
         //  b'P' => Portal
+        tracing::trace!(
+            "(extended query)describe name: {}",
+            cstr_to_str(&msg.name).unwrap()
+        );
+
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {
             let name = cstr_to_str(&msg.name).unwrap().to_string();
@@ -509,13 +510,17 @@ where
 
             // 1. Send parameter description.
             self.stream
-                .write(&BeMessage::ParameterDescription(&statement.type_desc()))
-                .await?;
+                .write_no_flush(&BeMessage::ParameterDescription(&statement.type_desc()))?;
 
             // 2. Send row description.
-            self.stream
-                .write(&BeMessage::RowDescription(&statement.row_desc()))
-                .await?;
+            if statement.is_query() {
+                self.stream
+                    .write_no_flush(&BeMessage::RowDescription(&statement.row_desc()))?;
+            } else {
+                // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
+                // return NoData message if the statement is not a query.
+                self.stream.write_no_flush(&BeMessage::NoData)?;
+            }
         } else if msg.kind == b'P' {
             let name = cstr_to_str(&msg.name).unwrap().to_string();
             let portal = if name.is_empty() {
@@ -530,9 +535,14 @@ where
             };
 
             // 3. Send row description.
-            self.stream
-                .write(&BeMessage::RowDescription(&portal.row_desc()))
-                .await?;
+            if portal.is_query() {
+                self.stream
+                    .write_no_flush(&BeMessage::RowDescription(&portal.row_desc()))?;
+            } else {
+                // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
+                // return NoData message if the statement is not a query.
+                self.stream.write_no_flush(&BeMessage::NoData)?;
+            }
         }
         Ok(())
     }
@@ -545,7 +555,7 @@ where
         } else if msg.kind == b'P' {
             self.named_portals.remove_entry(&name);
         }
-        self.stream.write(&BeMessage::CloseComplete).await?;
+        self.stream.write_no_flush(&BeMessage::CloseComplete)?;
         Ok(())
     }
 
@@ -560,15 +570,14 @@ where
         // Quoted from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
         if !is_extended {
             self.stream
-                .write(&BeMessage::RowDescription(&res.get_row_desc()))
-                .await?;
+                .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
         }
 
         let mut rows_cnt = 0;
 
         let iter = res.iter();
         for val in iter {
-            self.stream.write(&BeMessage::DataRow(val)).await?;
+            self.stream.write_no_flush(&BeMessage::DataRow(val))?;
             rows_cnt += 1;
         }
 
@@ -587,7 +596,7 @@ where
                     rows_cnt,
                 }))?;
         } else {
-            self.stream.write(&BeMessage::PortalSuspended).await?;
+            self.stream.write_no_flush(&BeMessage::PortalSuspended)?;
         }
         Ok(())
     }
@@ -649,6 +658,7 @@ where
         BeMessage::write(&mut self.write_buf, message)
     }
 
+    #[allow(unused)]
     async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
         self.write_no_flush(message)?;
         self.flush().await?;

@@ -94,6 +94,8 @@ impl MetaNodeService {
             .arg(format!("{}", config.vacuum_interval_sec))
             .arg("--collect-gc-watermark-spin-interval-sec")
             .arg(format!("{}", config.collect_gc_watermark_spin_interval_sec))
+            .arg("--no-available-compactor-stall-sec")
+            .arg(format!("{}", config.no_available_compactor_stall_sec))
             .arg("--min-sst-retention-time-sec")
             .arg(format!("{}", config.min_sst_retention_time_sec));
 

@@ -93,6 +93,7 @@ pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
     fragment_graph
 }
 
+#[expect(dead_code)]
 fn is_stateful_executor(stream_node: &StreamNode) -> bool {
     matches!(
         stream_node.get_node_body().unwrap(),
@@ -104,8 +105,11 @@ fn is_stateful_executor(stream_node: &StreamNode) -> bool {
     )
 }
 
-/// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
-/// fragments.
+/// Do some dirty rewrites before building the fragments.
+/// Currently, it will split the fragment with multiple stateful operators (those have high I/O
+/// throughput) into multiple fragments, which may help improve the I/O concurrency.
+/// Known as "no-shuffle exchange" or "1v1 exchange".
+#[expect(dead_code)]
 fn rewrite_stream_node(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
@@ -160,8 +164,12 @@ fn generate_fragment_graph(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
 ) -> Result<()> {
-    let stateful = is_stateful_executor(&stream_node);
-    let stream_node = rewrite_stream_node(state, stream_node, stateful)?;
+    // TODO: the 1v1 exchange is disabled for now, as it breaks the assumption of independent
+    // scaling of fragments. We may introduce further optimization transparently to the fragmenter.
+    // #4614
+    #[cfg(any())]
+    let stream_node = rewrite_stream_node(state, stream_node, is_stateful_executor(&stream_node))?;
+
     build_and_add_fragment(state, stream_node)?;
     Ok(())
 }
@@ -235,12 +243,12 @@ fn build_fragment(
                 // Exchange node indicates a new child fragment.
                 NodeBody::Exchange(exchange_node) => {
                     let exchange_node_strategy = exchange_node.get_strategy()?.clone();
-
                     let is_simple_dispatcher =
                         exchange_node_strategy.get_type()? == DispatcherType::Simple;
 
-                    assert_eq!(child_node.input.len(), 1);
-                    let child_fragment = build_and_add_fragment(state, child_node.input.remove(0))?;
+                    // Exchange node should have only one input.
+                    let [input]: [_; 1] = std::mem::take(&mut child_node.input).try_into().unwrap();
+                    let child_fragment = build_and_add_fragment(state, input)?;
                     state.fragment_graph.add_edge(
                         child_fragment.fragment_id,
                         current_fragment.fragment_id,

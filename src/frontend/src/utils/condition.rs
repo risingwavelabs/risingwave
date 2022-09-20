@@ -15,11 +15,12 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug, Display};
 use std::ops::Bound;
+use std::rc::Rc;
+use std::sync::LazyLock;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use lazy_static::lazy_static;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::error::Result;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
@@ -84,9 +85,7 @@ impl Condition {
     }
 
     pub fn always_false(&self) -> bool {
-        lazy_static! {
-            static ref FALSE: ExprImpl = ExprImpl::literal_bool(false);
-        }
+        static FALSE: LazyLock<ExprImpl> = LazyLock::new(|| ExprImpl::literal_bool(false));
         !self.conjunctions.is_empty() && self.conjunctions.iter().all(|e| *e == *FALSE)
     }
 
@@ -245,8 +244,8 @@ impl Condition {
     /// Currently, only support equal type range scans.
     /// Keep in mind that range scans can not overlap, otherwise duplicate rows will occur.
     fn disjunctions_to_scan_ranges(
-        order_column_ids: &[usize],
-        num_cols: usize,
+        table_desc: Rc<TableDesc>,
+        max_split_range_gap: u64,
         disjunctions: Vec<ExprImpl>,
     ) -> Result<Option<(Vec<ScanRange>, Self)>> {
         let disjunctions_result: Result<Vec<(Vec<ScanRange>, Self)>> = disjunctions
@@ -255,7 +254,7 @@ impl Condition {
                 Condition {
                     conjunctions: to_conjunctions(x),
                 }
-                .split_to_scan_ranges(order_column_ids, num_cols)
+                .split_to_scan_ranges(table_desc.clone(), max_split_range_gap)
             })
             .collect();
 
@@ -310,8 +309,8 @@ impl Condition {
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
     pub fn split_to_scan_ranges(
         self,
-        order_column_ids: &[usize],
-        num_cols: usize,
+        table_desc: Rc<TableDesc>,
+        max_split_range_gap: u64,
     ) -> Result<(Vec<ScanRange>, Self)> {
         fn false_cond() -> (Vec<ScanRange>, Condition) {
             (vec![], Condition::false_cond())
@@ -320,15 +319,20 @@ impl Condition {
         // It's an OR.
         if self.conjunctions.len() == 1 {
             if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
-                if let Some((scan_ranges, other_condition)) =
-                    Self::disjunctions_to_scan_ranges(order_column_ids, num_cols, disjunctions)?
-                {
+                if let Some((scan_ranges, other_condition)) = Self::disjunctions_to_scan_ranges(
+                    table_desc,
+                    max_split_range_gap,
+                    disjunctions,
+                )? {
                     return Ok((scan_ranges, other_condition));
                 } else {
                     return Ok((vec![], self));
                 }
             }
         }
+
+        let order_column_ids = &table_desc.order_column_indices();
+        let num_cols = table_desc.columns.len();
 
         let mut col_idx_to_pk_idx = vec![None; num_cols];
         order_column_ids
@@ -507,6 +511,11 @@ impl Condition {
         Ok((
             if scan_range.is_full_table_scan() {
                 vec![]
+            } else if table_desc.columns[order_column_ids[0]].data_type.is_int() {
+                match scan_range.split_small_range(max_split_range_gap) {
+                    Some(scan_ranges) => scan_ranges,
+                    None => vec![scan_range],
+                }
             } else {
                 vec![scan_range]
             },

@@ -750,7 +750,7 @@ impl fmt::Display for CommentObject {
 pub enum ExplainType {
     Logical,
     Physical,
-    DistSQL,
+    DistSql,
 }
 
 impl fmt::Display for ExplainType {
@@ -758,7 +758,7 @@ impl fmt::Display for ExplainType {
         match self {
             ExplainType::Logical => f.write_str("Logical"),
             ExplainType::Physical => f.write_str("Physical"),
-            ExplainType::DistSQL => f.write_str("DistSQL"),
+            ExplainType::DistSql => f.write_str("DistSQL"),
         }
     }
 }

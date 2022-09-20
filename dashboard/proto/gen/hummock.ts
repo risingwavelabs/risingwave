@@ -49,6 +49,7 @@ export interface SstableInfo {
   keyRange: KeyRange | undefined;
   fileSize: number;
   tableIds: number[];
+  metaOffset: number;
 }
 
 export interface OverlappingLevel {
@@ -92,7 +93,6 @@ export interface HummockVersion {
    * Reads against such an epoch will fail.
    */
   safeEpoch: number;
-  maxCurrentEpoch: number;
 }
 
 export interface HummockVersion_Levels {
@@ -117,7 +117,6 @@ export interface HummockVersionDelta {
    */
   safeEpoch: number;
   trivialMove: boolean;
-  maxCurrentEpoch: number;
 }
 
 export interface HummockVersionDelta_LevelDeltas {
@@ -165,6 +164,14 @@ export interface UnpinVersionBeforeRequest {
 
 export interface UnpinVersionBeforeResponse {
   status: Status | undefined;
+}
+
+export interface GetCurrentVersionRequest {
+}
+
+export interface GetCurrentVersionResponse {
+  status: Status | undefined;
+  currentVersion: HummockVersion | undefined;
 }
 
 export interface UnpinVersionRequest {
@@ -252,8 +259,14 @@ export interface CompactTask {
 export const CompactTask_TaskStatus = {
   PENDING: "PENDING",
   SUCCESS: "SUCCESS",
-  FAILED: "FAILED",
-  CANCELED: "CANCELED",
+  HEARTBEAT_CANCELED: "HEARTBEAT_CANCELED",
+  NO_AVAIL_CANCELED: "NO_AVAIL_CANCELED",
+  ASSIGN_FAIL_CANCELED: "ASSIGN_FAIL_CANCELED",
+  SEND_FAIL_CANCELED: "SEND_FAIL_CANCELED",
+  MANUAL_CANCELED: "MANUAL_CANCELED",
+  EXECUTE_FAILED: "EXECUTE_FAILED",
+  JOIN_HANDLE_FAILED: "JOIN_HANDLE_FAILED",
+  TRACK_SST_ID_FAILED: "TRACK_SST_ID_FAILED",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -268,11 +281,29 @@ export function compactTask_TaskStatusFromJSON(object: any): CompactTask_TaskSta
     case "SUCCESS":
       return CompactTask_TaskStatus.SUCCESS;
     case 2:
-    case "FAILED":
-      return CompactTask_TaskStatus.FAILED;
+    case "HEARTBEAT_CANCELED":
+      return CompactTask_TaskStatus.HEARTBEAT_CANCELED;
     case 3:
-    case "CANCELED":
-      return CompactTask_TaskStatus.CANCELED;
+    case "NO_AVAIL_CANCELED":
+      return CompactTask_TaskStatus.NO_AVAIL_CANCELED;
+    case 4:
+    case "ASSIGN_FAIL_CANCELED":
+      return CompactTask_TaskStatus.ASSIGN_FAIL_CANCELED;
+    case 5:
+    case "SEND_FAIL_CANCELED":
+      return CompactTask_TaskStatus.SEND_FAIL_CANCELED;
+    case 6:
+    case "MANUAL_CANCELED":
+      return CompactTask_TaskStatus.MANUAL_CANCELED;
+    case 7:
+    case "EXECUTE_FAILED":
+      return CompactTask_TaskStatus.EXECUTE_FAILED;
+    case 8:
+    case "JOIN_HANDLE_FAILED":
+      return CompactTask_TaskStatus.JOIN_HANDLE_FAILED;
+    case 9:
+    case "TRACK_SST_ID_FAILED":
+      return CompactTask_TaskStatus.TRACK_SST_ID_FAILED;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -286,10 +317,22 @@ export function compactTask_TaskStatusToJSON(object: CompactTask_TaskStatus): st
       return "PENDING";
     case CompactTask_TaskStatus.SUCCESS:
       return "SUCCESS";
-    case CompactTask_TaskStatus.FAILED:
-      return "FAILED";
-    case CompactTask_TaskStatus.CANCELED:
-      return "CANCELED";
+    case CompactTask_TaskStatus.HEARTBEAT_CANCELED:
+      return "HEARTBEAT_CANCELED";
+    case CompactTask_TaskStatus.NO_AVAIL_CANCELED:
+      return "NO_AVAIL_CANCELED";
+    case CompactTask_TaskStatus.ASSIGN_FAIL_CANCELED:
+      return "ASSIGN_FAIL_CANCELED";
+    case CompactTask_TaskStatus.SEND_FAIL_CANCELED:
+      return "SEND_FAIL_CANCELED";
+    case CompactTask_TaskStatus.MANUAL_CANCELED:
+      return "MANUAL_CANCELED";
+    case CompactTask_TaskStatus.EXECUTE_FAILED:
+      return "EXECUTE_FAILED";
+    case CompactTask_TaskStatus.JOIN_HANDLE_FAILED:
+      return "JOIN_HANDLE_FAILED";
+    case CompactTask_TaskStatus.TRACK_SST_ID_FAILED:
+      return "TRACK_SST_ID_FAILED";
     case CompactTask_TaskStatus.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -376,13 +419,33 @@ export interface GetNewSstIdsResponse {
   endId: number;
 }
 
+/**
+ * This is a heartbeat message. Task will be considered dead if
+ * `CompactTaskProgress` is not received for a timeout
+ * or `num_ssts_sealed`/`num_ssts_uploaded` do not increase for a timeout.
+ */
+export interface CompactTaskProgress {
+  taskId: number;
+  numSstsSealed: number;
+  numSstsUploaded: number;
+}
+
+export interface ReportCompactionTaskProgressRequest {
+  contextId: number;
+  progress: CompactTaskProgress[];
+}
+
+export interface ReportCompactionTaskProgressResponse {
+  status: Status | undefined;
+}
+
 export interface SubscribeCompactTasksRequest {
   contextId: number;
   maxConcurrentTaskNumber: number;
 }
 
 export interface ValidationTask {
-  sstIds: number[];
+  sstInfos: SstableInfo[];
   sstIdToWorkerId: { [key: number]: number };
   epoch: number;
 }
@@ -393,10 +456,12 @@ export interface ValidationTask_SstIdToWorkerIdEntry {
 }
 
 export interface SubscribeCompactTasksResponse {
-  task?: { $case: "compactTask"; compactTask: CompactTask } | { $case: "vacuumTask"; vacuumTask: VacuumTask } | {
-    $case: "fullScanTask";
-    fullScanTask: FullScanTask;
-  } | { $case: "validationTask"; validationTask: ValidationTask };
+  task?:
+    | { $case: "compactTask"; compactTask: CompactTask }
+    | { $case: "vacuumTask"; vacuumTask: VacuumTask }
+    | { $case: "fullScanTask"; fullScanTask: FullScanTask }
+    | { $case: "validationTask"; validationTask: ValidationTask }
+    | { $case: "cancelCompactTask"; cancelCompactTask: CancelCompactTask };
 }
 
 /** Delete SSTs in object store */
@@ -407,6 +472,12 @@ export interface VacuumTask {
 /** Scan object store to get candidate orphan SSTs. */
 export interface FullScanTask {
   sstRetentionTimeSec: number;
+}
+
+/** Cancel compact task */
+export interface CancelCompactTask {
+  contextId: number;
+  taskId: number;
 }
 
 export interface ReportVacuumTaskRequest {
@@ -453,6 +524,15 @@ export interface TriggerFullGCResponse {
   status: Status | undefined;
 }
 
+export interface GetVersionDeltasRequest {
+  startId: number;
+  numEpochs: number;
+}
+
+export interface GetVersionDeltasResponse {
+  versionDeltas: HummockVersionDeltas | undefined;
+}
+
 export interface CompactionConfig {
   maxBytesForLevelBase: number;
   maxLevel: number;
@@ -471,7 +551,6 @@ export interface CompactionConfig {
 export const CompactionConfig_CompactionMode = {
   UNSPECIFIED: "UNSPECIFIED",
   RANGE: "RANGE",
-  CONSISTENT_HASH: "CONSISTENT_HASH",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -486,9 +565,6 @@ export function compactionConfig_CompactionModeFromJSON(object: any): Compaction
     case 1:
     case "RANGE":
       return CompactionConfig_CompactionMode.RANGE;
-    case 2:
-    case "CONSISTENT_HASH":
-      return CompactionConfig_CompactionMode.CONSISTENT_HASH;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -502,8 +578,6 @@ export function compactionConfig_CompactionModeToJSON(object: CompactionConfig_C
       return "UNSPECIFIED";
     case CompactionConfig_CompactionMode.RANGE:
       return "RANGE";
-    case CompactionConfig_CompactionMode.CONSISTENT_HASH:
-      return "CONSISTENT_HASH";
     case CompactionConfig_CompactionMode.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -511,7 +585,7 @@ export function compactionConfig_CompactionModeToJSON(object: CompactionConfig_C
 }
 
 function createBaseSstableInfo(): SstableInfo {
-  return { id: 0, keyRange: undefined, fileSize: 0, tableIds: [] };
+  return { id: 0, keyRange: undefined, fileSize: 0, tableIds: [], metaOffset: 0 };
 }
 
 export const SstableInfo = {
@@ -521,6 +595,7 @@ export const SstableInfo = {
       keyRange: isSet(object.keyRange) ? KeyRange.fromJSON(object.keyRange) : undefined,
       fileSize: isSet(object.fileSize) ? Number(object.fileSize) : 0,
       tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
+      metaOffset: isSet(object.metaOffset) ? Number(object.metaOffset) : 0,
     };
   },
 
@@ -534,6 +609,7 @@ export const SstableInfo = {
     } else {
       obj.tableIds = [];
     }
+    message.metaOffset !== undefined && (obj.metaOffset = Math.round(message.metaOffset));
     return obj;
   },
 
@@ -545,6 +621,7 @@ export const SstableInfo = {
       : undefined;
     message.fileSize = object.fileSize ?? 0;
     message.tableIds = object.tableIds?.map((e) => e) || [];
+    message.metaOffset = object.metaOffset ?? 0;
     return message;
   },
 };
@@ -729,7 +806,7 @@ export const UncommittedEpoch = {
 };
 
 function createBaseHummockVersion(): HummockVersion {
-  return { id: 0, levels: {}, maxCommittedEpoch: 0, safeEpoch: 0, maxCurrentEpoch: 0 };
+  return { id: 0, levels: {}, maxCommittedEpoch: 0, safeEpoch: 0 };
 }
 
 export const HummockVersion = {
@@ -744,7 +821,6 @@ export const HummockVersion = {
         : {},
       maxCommittedEpoch: isSet(object.maxCommittedEpoch) ? Number(object.maxCommittedEpoch) : 0,
       safeEpoch: isSet(object.safeEpoch) ? Number(object.safeEpoch) : 0,
-      maxCurrentEpoch: isSet(object.maxCurrentEpoch) ? Number(object.maxCurrentEpoch) : 0,
     };
   },
 
@@ -759,7 +835,6 @@ export const HummockVersion = {
     }
     message.maxCommittedEpoch !== undefined && (obj.maxCommittedEpoch = Math.round(message.maxCommittedEpoch));
     message.safeEpoch !== undefined && (obj.safeEpoch = Math.round(message.safeEpoch));
-    message.maxCurrentEpoch !== undefined && (obj.maxCurrentEpoch = Math.round(message.maxCurrentEpoch));
     return obj;
   },
 
@@ -777,7 +852,6 @@ export const HummockVersion = {
     );
     message.maxCommittedEpoch = object.maxCommittedEpoch ?? 0;
     message.safeEpoch = object.safeEpoch ?? 0;
-    message.maxCurrentEpoch = object.maxCurrentEpoch ?? 0;
     return message;
   },
 };
@@ -844,15 +918,7 @@ export const HummockVersion_LevelsEntry = {
 };
 
 function createBaseHummockVersionDelta(): HummockVersionDelta {
-  return {
-    id: 0,
-    prevId: 0,
-    levelDeltas: {},
-    maxCommittedEpoch: 0,
-    safeEpoch: 0,
-    trivialMove: false,
-    maxCurrentEpoch: 0,
-  };
+  return { id: 0, prevId: 0, levelDeltas: {}, maxCommittedEpoch: 0, safeEpoch: 0, trivialMove: false };
 }
 
 export const HummockVersionDelta = {
@@ -872,7 +938,6 @@ export const HummockVersionDelta = {
       maxCommittedEpoch: isSet(object.maxCommittedEpoch) ? Number(object.maxCommittedEpoch) : 0,
       safeEpoch: isSet(object.safeEpoch) ? Number(object.safeEpoch) : 0,
       trivialMove: isSet(object.trivialMove) ? Boolean(object.trivialMove) : false,
-      maxCurrentEpoch: isSet(object.maxCurrentEpoch) ? Number(object.maxCurrentEpoch) : 0,
     };
   },
 
@@ -889,7 +954,6 @@ export const HummockVersionDelta = {
     message.maxCommittedEpoch !== undefined && (obj.maxCommittedEpoch = Math.round(message.maxCommittedEpoch));
     message.safeEpoch !== undefined && (obj.safeEpoch = Math.round(message.safeEpoch));
     message.trivialMove !== undefined && (obj.trivialMove = message.trivialMove);
-    message.maxCurrentEpoch !== undefined && (obj.maxCurrentEpoch = Math.round(message.maxCurrentEpoch));
     return obj;
   },
 
@@ -908,7 +972,6 @@ export const HummockVersionDelta = {
     message.maxCommittedEpoch = object.maxCommittedEpoch ?? 0;
     message.safeEpoch = object.safeEpoch ?? 0;
     message.trivialMove = object.trivialMove ?? false;
-    message.maxCurrentEpoch = object.maxCurrentEpoch ?? 0;
     return message;
   },
 };
@@ -1193,6 +1256,58 @@ export const UnpinVersionBeforeResponse = {
     const message = createBaseUnpinVersionBeforeResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseGetCurrentVersionRequest(): GetCurrentVersionRequest {
+  return {};
+}
+
+export const GetCurrentVersionRequest = {
+  fromJSON(_: any): GetCurrentVersionRequest {
+    return {};
+  },
+
+  toJSON(_: GetCurrentVersionRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetCurrentVersionRequest>, I>>(_: I): GetCurrentVersionRequest {
+    const message = createBaseGetCurrentVersionRequest();
+    return message;
+  },
+};
+
+function createBaseGetCurrentVersionResponse(): GetCurrentVersionResponse {
+  return { status: undefined, currentVersion: undefined };
+}
+
+export const GetCurrentVersionResponse = {
+  fromJSON(object: any): GetCurrentVersionResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      currentVersion: isSet(object.currentVersion) ? HummockVersion.fromJSON(object.currentVersion) : undefined,
+    };
+  },
+
+  toJSON(message: GetCurrentVersionResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.currentVersion !== undefined &&
+      (obj.currentVersion = message.currentVersion ? HummockVersion.toJSON(message.currentVersion) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetCurrentVersionResponse>, I>>(object: I): GetCurrentVersionResponse {
+    const message = createBaseGetCurrentVersionResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.currentVersion = (object.currentVersion !== undefined && object.currentVersion !== null)
+      ? HummockVersion.fromPartial(object.currentVersion)
       : undefined;
     return message;
   },
@@ -2102,6 +2217,95 @@ export const GetNewSstIdsResponse = {
   },
 };
 
+function createBaseCompactTaskProgress(): CompactTaskProgress {
+  return { taskId: 0, numSstsSealed: 0, numSstsUploaded: 0 };
+}
+
+export const CompactTaskProgress = {
+  fromJSON(object: any): CompactTaskProgress {
+    return {
+      taskId: isSet(object.taskId) ? Number(object.taskId) : 0,
+      numSstsSealed: isSet(object.numSstsSealed) ? Number(object.numSstsSealed) : 0,
+      numSstsUploaded: isSet(object.numSstsUploaded) ? Number(object.numSstsUploaded) : 0,
+    };
+  },
+
+  toJSON(message: CompactTaskProgress): unknown {
+    const obj: any = {};
+    message.taskId !== undefined && (obj.taskId = Math.round(message.taskId));
+    message.numSstsSealed !== undefined && (obj.numSstsSealed = Math.round(message.numSstsSealed));
+    message.numSstsUploaded !== undefined && (obj.numSstsUploaded = Math.round(message.numSstsUploaded));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CompactTaskProgress>, I>>(object: I): CompactTaskProgress {
+    const message = createBaseCompactTaskProgress();
+    message.taskId = object.taskId ?? 0;
+    message.numSstsSealed = object.numSstsSealed ?? 0;
+    message.numSstsUploaded = object.numSstsUploaded ?? 0;
+    return message;
+  },
+};
+
+function createBaseReportCompactionTaskProgressRequest(): ReportCompactionTaskProgressRequest {
+  return { contextId: 0, progress: [] };
+}
+
+export const ReportCompactionTaskProgressRequest = {
+  fromJSON(object: any): ReportCompactionTaskProgressRequest {
+    return {
+      contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
+      progress: Array.isArray(object?.progress) ? object.progress.map((e: any) => CompactTaskProgress.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: ReportCompactionTaskProgressRequest): unknown {
+    const obj: any = {};
+    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
+    if (message.progress) {
+      obj.progress = message.progress.map((e) => e ? CompactTaskProgress.toJSON(e) : undefined);
+    } else {
+      obj.progress = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReportCompactionTaskProgressRequest>, I>>(
+    object: I,
+  ): ReportCompactionTaskProgressRequest {
+    const message = createBaseReportCompactionTaskProgressRequest();
+    message.contextId = object.contextId ?? 0;
+    message.progress = object.progress?.map((e) => CompactTaskProgress.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseReportCompactionTaskProgressResponse(): ReportCompactionTaskProgressResponse {
+  return { status: undefined };
+}
+
+export const ReportCompactionTaskProgressResponse = {
+  fromJSON(object: any): ReportCompactionTaskProgressResponse {
+    return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
+  },
+
+  toJSON(message: ReportCompactionTaskProgressResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReportCompactionTaskProgressResponse>, I>>(
+    object: I,
+  ): ReportCompactionTaskProgressResponse {
+    const message = createBaseReportCompactionTaskProgressResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    return message;
+  },
+};
+
 function createBaseSubscribeCompactTasksRequest(): SubscribeCompactTasksRequest {
   return { contextId: 0, maxConcurrentTaskNumber: 0 };
 }
@@ -2131,13 +2335,13 @@ export const SubscribeCompactTasksRequest = {
 };
 
 function createBaseValidationTask(): ValidationTask {
-  return { sstIds: [], sstIdToWorkerId: {}, epoch: 0 };
+  return { sstInfos: [], sstIdToWorkerId: {}, epoch: 0 };
 }
 
 export const ValidationTask = {
   fromJSON(object: any): ValidationTask {
     return {
-      sstIds: Array.isArray(object?.sstIds) ? object.sstIds.map((e: any) => Number(e)) : [],
+      sstInfos: Array.isArray(object?.sstInfos) ? object.sstInfos.map((e: any) => SstableInfo.fromJSON(e)) : [],
       sstIdToWorkerId: isObject(object.sstIdToWorkerId)
         ? Object.entries(object.sstIdToWorkerId).reduce<{ [key: number]: number }>((acc, [key, value]) => {
           acc[Number(key)] = Number(value);
@@ -2150,10 +2354,10 @@ export const ValidationTask = {
 
   toJSON(message: ValidationTask): unknown {
     const obj: any = {};
-    if (message.sstIds) {
-      obj.sstIds = message.sstIds.map((e) => Math.round(e));
+    if (message.sstInfos) {
+      obj.sstInfos = message.sstInfos.map((e) => e ? SstableInfo.toJSON(e) : undefined);
     } else {
-      obj.sstIds = [];
+      obj.sstInfos = [];
     }
     obj.sstIdToWorkerId = {};
     if (message.sstIdToWorkerId) {
@@ -2167,7 +2371,7 @@ export const ValidationTask = {
 
   fromPartial<I extends Exact<DeepPartial<ValidationTask>, I>>(object: I): ValidationTask {
     const message = createBaseValidationTask();
-    message.sstIds = object.sstIds?.map((e) => e) || [];
+    message.sstInfos = object.sstInfos?.map((e) => SstableInfo.fromPartial(e)) || [];
     message.sstIdToWorkerId = Object.entries(object.sstIdToWorkerId ?? {}).reduce<{ [key: number]: number }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -2223,6 +2427,8 @@ export const SubscribeCompactTasksResponse = {
         ? { $case: "fullScanTask", fullScanTask: FullScanTask.fromJSON(object.fullScanTask) }
         : isSet(object.validationTask)
         ? { $case: "validationTask", validationTask: ValidationTask.fromJSON(object.validationTask) }
+        : isSet(object.cancelCompactTask)
+        ? { $case: "cancelCompactTask", cancelCompactTask: CancelCompactTask.fromJSON(object.cancelCompactTask) }
         : undefined,
     };
   },
@@ -2237,6 +2443,9 @@ export const SubscribeCompactTasksResponse = {
       (obj.fullScanTask = message.task?.fullScanTask ? FullScanTask.toJSON(message.task?.fullScanTask) : undefined);
     message.task?.$case === "validationTask" && (obj.validationTask = message.task?.validationTask
       ? ValidationTask.toJSON(message.task?.validationTask)
+      : undefined);
+    message.task?.$case === "cancelCompactTask" && (obj.cancelCompactTask = message.task?.cancelCompactTask
+      ? CancelCompactTask.toJSON(message.task?.cancelCompactTask)
       : undefined);
     return obj;
   },
@@ -2272,6 +2481,16 @@ export const SubscribeCompactTasksResponse = {
       message.task = {
         $case: "validationTask",
         validationTask: ValidationTask.fromPartial(object.task.validationTask),
+      };
+    }
+    if (
+      object.task?.$case === "cancelCompactTask" &&
+      object.task?.cancelCompactTask !== undefined &&
+      object.task?.cancelCompactTask !== null
+    ) {
+      message.task = {
+        $case: "cancelCompactTask",
+        cancelCompactTask: CancelCompactTask.fromPartial(object.task.cancelCompactTask),
       };
     }
     return message;
@@ -2322,6 +2541,33 @@ export const FullScanTask = {
   fromPartial<I extends Exact<DeepPartial<FullScanTask>, I>>(object: I): FullScanTask {
     const message = createBaseFullScanTask();
     message.sstRetentionTimeSec = object.sstRetentionTimeSec ?? 0;
+    return message;
+  },
+};
+
+function createBaseCancelCompactTask(): CancelCompactTask {
+  return { contextId: 0, taskId: 0 };
+}
+
+export const CancelCompactTask = {
+  fromJSON(object: any): CancelCompactTask {
+    return {
+      contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
+      taskId: isSet(object.taskId) ? Number(object.taskId) : 0,
+    };
+  },
+
+  toJSON(message: CancelCompactTask): unknown {
+    const obj: any = {};
+    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
+    message.taskId !== undefined && (obj.taskId = Math.round(message.taskId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCompactTask>, I>>(object: I): CancelCompactTask {
+    const message = createBaseCancelCompactTask();
+    message.contextId = object.contextId ?? 0;
+    message.taskId = object.taskId ?? 0;
     return message;
   },
 };
@@ -2591,6 +2837,60 @@ export const TriggerFullGCResponse = {
     const message = createBaseTriggerFullGCResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseGetVersionDeltasRequest(): GetVersionDeltasRequest {
+  return { startId: 0, numEpochs: 0 };
+}
+
+export const GetVersionDeltasRequest = {
+  fromJSON(object: any): GetVersionDeltasRequest {
+    return {
+      startId: isSet(object.startId) ? Number(object.startId) : 0,
+      numEpochs: isSet(object.numEpochs) ? Number(object.numEpochs) : 0,
+    };
+  },
+
+  toJSON(message: GetVersionDeltasRequest): unknown {
+    const obj: any = {};
+    message.startId !== undefined && (obj.startId = Math.round(message.startId));
+    message.numEpochs !== undefined && (obj.numEpochs = Math.round(message.numEpochs));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetVersionDeltasRequest>, I>>(object: I): GetVersionDeltasRequest {
+    const message = createBaseGetVersionDeltasRequest();
+    message.startId = object.startId ?? 0;
+    message.numEpochs = object.numEpochs ?? 0;
+    return message;
+  },
+};
+
+function createBaseGetVersionDeltasResponse(): GetVersionDeltasResponse {
+  return { versionDeltas: undefined };
+}
+
+export const GetVersionDeltasResponse = {
+  fromJSON(object: any): GetVersionDeltasResponse {
+    return {
+      versionDeltas: isSet(object.versionDeltas) ? HummockVersionDeltas.fromJSON(object.versionDeltas) : undefined,
+    };
+  },
+
+  toJSON(message: GetVersionDeltasResponse): unknown {
+    const obj: any = {};
+    message.versionDeltas !== undefined &&
+      (obj.versionDeltas = message.versionDeltas ? HummockVersionDeltas.toJSON(message.versionDeltas) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetVersionDeltasResponse>, I>>(object: I): GetVersionDeltasResponse {
+    const message = createBaseGetVersionDeltasResponse();
+    message.versionDeltas = (object.versionDeltas !== undefined && object.versionDeltas !== null)
+      ? HummockVersionDeltas.fromPartial(object.versionDeltas)
       : undefined;
     return message;
   },

@@ -51,13 +51,10 @@ impl ManagedValueState {
         state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let data = if row_count != Some(0) {
-            // TODO: use the correct epoch
-            let epoch = u64::MAX;
-
             // View the state table as single-value table, and get the value via empty primary key
             // or group key.
             let raw_data = state_table
-                .get_row(group_key.unwrap_or_else(Row::empty), epoch)
+                .get_row(group_key.unwrap_or_else(Row::empty))
                 .await?;
 
             // According to row layout, the last field of the row is value and we sure the row is
@@ -164,6 +161,10 @@ mod tests {
             vec![],
             vec![],
         );
+        let mut epoch: u64 = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
+
         let mut managed_state =
             ManagedValueState::new(create_test_count_state(), Some(0), None, &state_table)
                 .await
@@ -175,15 +176,12 @@ mod tests {
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
-                &[&I64Array::from_slice(&[Some(0), Some(1), Some(2), None])
-                    .unwrap()
-                    .into()],
+                &[&I64Array::from_slice(&[Some(0), Some(1), Some(2), None]).into()],
             )
             .unwrap();
         assert!(managed_state.is_dirty());
 
         // write to state store
-        let epoch: u64 = 0;
         managed_state.flush(&mut state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
 
@@ -225,6 +223,10 @@ mod tests {
             vec![],
             pk_index,
         );
+        let mut epoch: u64 = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
+
         let mut managed_state = ManagedValueState::new(
             create_test_max_agg_append_only(),
             Some(0),
@@ -240,17 +242,12 @@ mod tests {
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
-                &[
-                    &I64Array::from_slice(&[Some(-1), Some(0), Some(2), Some(1), None])
-                        .unwrap()
-                        .into(),
-                ],
+                &[&I64Array::from_slice(&[Some(-1), Some(0), Some(2), Some(1), None]).into()],
             )
             .unwrap();
         assert!(managed_state.is_dirty());
 
         // write to state store
-        let epoch: u64 = 0;
         managed_state.flush(&mut state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
 

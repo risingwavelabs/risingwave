@@ -135,17 +135,13 @@ impl DataChunk {
 
         for row in rows {
             for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
-                builder.append_datum(datum)?;
+                builder.append_datum(datum);
             }
         }
 
-        let new_arrays = array_builders
+        let new_columns = array_builders
             .into_iter()
             .map(|builder| builder.finish())
-            .collect::<ArrayResult<Vec<_>>>()?;
-
-        let new_columns = new_arrays
-            .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
         Ok(DataChunk::new(new_columns, rows.len()))
@@ -323,15 +319,16 @@ impl DataChunk {
             array_builders
                 .iter_mut()
                 .zip_eq(chunks[chunk_idx].columns())
-                .try_for_each(|(builder, column)| {
+                .for_each(|(builder, column)| {
                     let mut array_builder = column
                         .array_ref()
-                        .create_builder(end_row_idx - start_row_idx + 1)?;
+                        .create_builder(end_row_idx - start_row_idx + 1)
+                        .unwrap();
                     for row_idx in start_row_idx..=end_row_idx {
-                        array_builder.append_datum_ref(column.array_ref().value_at(row_idx))?;
+                        array_builder.append_datum_ref(column.array_ref().value_at(row_idx));
                     }
-                    builder.append_array(&array_builder.finish()?)
-                })?;
+                    builder.append_array(&array_builder.finish());
+                });
             // since `end_row_idx` is inclusive, exclude it for the next round.
             start_row_idx = end_row_idx + 1;
             // if the current `chunks[chunk_idx] is used up, move to the next one
@@ -345,8 +342,8 @@ impl DataChunk {
             if new_chunk_require == 0 {
                 let new_columns: Vec<Column> = array_builders
                     .drain(..)
-                    .map(|builder| builder.finish().map(Into::into))
-                    .try_collect()?;
+                    .map(|builder| builder.finish().into())
+                    .collect();
 
                 array_builders = new_columns
                     .iter()
@@ -368,17 +365,17 @@ impl DataChunk {
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
-    ) -> ArrayResult<Vec<HashCode>> {
+    ) -> Vec<HashCode> {
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx).array();
             array.hash_vec(&mut states[..]);
         }
-        Ok(finalize_hashers(&mut states[..])
+        finalize_hashers(&mut states[..])
             .into_iter()
             .map(|hash_code| hash_code.into())
-            .collect_vec())
+            .collect_vec()
     }
 
     /// Random access a tuple in a data chunk. Return in a row format.
@@ -605,9 +602,7 @@ impl DataChunkTestExt for DataChunk {
                     }
                     _ => panic!("invalid data type"),
                 };
-                builder
-                    .append_datum(&datum)
-                    .expect("failed to append datum");
+                builder.append_datum(&datum);
             }
             let visible = match token.next() {
                 None | Some("//") => true,
@@ -618,7 +613,7 @@ impl DataChunkTestExt for DataChunk {
         }
         let columns = array_builders
             .into_iter()
-            .map(|builder| Column::new(Arc::new(builder.finish().unwrap())))
+            .map(|builder| Column::new(Arc::new(builder.finish())))
             .collect();
         let vis = if visibility.iter().all(|b| *b) {
             Vis::Compact(visibility.len())
@@ -647,11 +642,11 @@ impl DataChunkTestExt for DataChunk {
                 let arr = col.array_ref();
                 let mut builder = arr.create_builder(n * 2).unwrap();
                 for v in arr.iter() {
-                    builder.append_datum(&v.to_owned_datum()).unwrap();
-                    builder.append_null().unwrap();
+                    builder.append_datum(&v.to_owned_datum());
+                    builder.append_null();
                 }
 
-                Column::new(builder.finish().unwrap().into())
+                Column::new(builder.finish().into())
             })
             .collect();
         let chunk = DataChunk::new(new_cols, Vis::Bitmap(new_vis.finish()));
@@ -682,10 +677,10 @@ mod tests {
             for chunk_idx in 0..num_chunks {
                 let mut builder = PrimitiveArrayBuilder::<i32>::new(0);
                 for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
-                    builder.append(Some(i as i32)).unwrap();
+                    builder.append(Some(i as i32));
                 }
                 let chunk = DataChunk::new(
-                    vec![Column::new(Arc::new(builder.finish().unwrap().into()))],
+                    vec![Column::new(Arc::new(builder.finish().into()))],
                     chunk_size,
                 );
                 chunks.push(chunk);
@@ -744,9 +739,9 @@ mod tests {
         for i in 0..num_of_columns {
             let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
-                builder.append(Some(i as i32)).unwrap();
+                builder.append(Some(i as i32));
             }
-            let arr = builder.finish().unwrap();
+            let arr = builder.finish();
             columns.push(Column::new(Arc::new(arr.into())))
         }
         let chunk: DataChunk = DataChunk::new(columns, length);

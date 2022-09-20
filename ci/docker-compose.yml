@@ -87,8 +87,14 @@ services:
       - ..:/risingwave
 
   benchmark-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220826
     depends_on:
       - kafka
     volumes:
       - ..:/risingwave
+
+  release-env:
+    image: quay.io/pypa/manylinux2014_x86_64
+    working_dir: /mnt
+    volumes:
+      - ..:/mnt

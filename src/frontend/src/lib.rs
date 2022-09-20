@@ -38,6 +38,7 @@
 #![feature(map_first_last)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
+#![feature(once_cell)]
 
 #[macro_use]
 mod catalog;
@@ -55,11 +56,14 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
+pub use stream_fragmenter::build_graph;
 mod utils;
-pub use utils::WithOptions;
+pub use utils::{explain_stream_graph, WithOptions};
 mod meta_client;
 pub mod test_utils;
 mod user;
+
+mod monitor;
 
 use std::ffi::OsString;
 use std::iter;
@@ -90,6 +94,15 @@ pub struct FrontendOpts {
     /// No given `config_path` means to use default config.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    #[clap(long, default_value = "127.0.0.1:2222")]
+    pub prometheus_listener_addr: String,
+
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = close metrics
+    /// >0 = open metrics
+    #[clap(long, default_value = "0")]
+    pub metrics_level: u32,
 }
 
 impl Default for FrontendOpts {

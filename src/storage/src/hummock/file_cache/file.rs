@@ -175,12 +175,16 @@ impl CacheFile {
         Ok(offset as u64)
     }
 
+    #[allow(clippy::uninit_vec)]
     pub async fn read(&self, offset: u64, len: usize) -> Result<DioBuffer> {
         utils::debug_assert_aligned(self.core.block_size, len);
         let core = self.core.clone();
         asyncify(move || {
             let mut buf = DioBuffer::with_capacity_in(len, &DIO_BUFFER_ALLOCATOR);
-            buf.resize(len, 0);
+            buf.reserve(len);
+            unsafe {
+                buf.set_len(len);
+            }
             core.file.read_exact_at(&mut buf, offset)?;
             Ok(buf)
         })

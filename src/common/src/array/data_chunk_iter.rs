@@ -278,11 +278,13 @@ impl Row {
     /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    pub fn serialize(&self) -> Vec<u8> {
+
+    pub fn serialize(&self, value_indices: &[usize]) -> Vec<u8> {
         let mut result = vec![];
-        for cell in &self.0 {
-            serialize_datum(cell, &mut result);
+        for value_idx in value_indices {
+            serialize_datum(&self.0[*value_idx], &mut result);
         }
+
         result
     }
 
@@ -379,7 +381,7 @@ impl RowDeserializer {
 mod tests {
     use super::*;
     use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
-    use crate::util::hash_util::CRC32FastBuilder;
+    use crate::util::hash_util::Crc32FastBuilder;
 
     #[test]
     fn row_value_encode_decode() {
@@ -394,7 +396,8 @@ mod tests {
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
-        let bytes = row.serialize();
+        let value_indices = (0..9).collect_vec();
+        let bytes = row.serialize(&value_indices);
         assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 16 + 16 + 9);
         let de = RowDeserializer::new(vec![
             Ty::Varchar,
@@ -413,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_hash_row() {
-        let hash_builder = CRC32FastBuilder {};
+        let hash_builder = Crc32FastBuilder {};
 
         let row1 = Row(vec![
             Some(ScalarImpl::Utf8("string".into())),

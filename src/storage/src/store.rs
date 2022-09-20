@@ -187,13 +187,10 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
     fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
 
-    /// Syncs buffered data to S3.
-    /// If the epoch is None, all buffered data will be synced.
-    /// Otherwise, only data of the provided epoch will be synced.
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_>;
 
     /// update max current epoch in storage.
-    fn seal_epoch(&self, epoch: u64);
+    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {

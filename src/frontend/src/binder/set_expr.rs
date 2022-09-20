@@ -70,7 +70,7 @@ impl Binder {
                 3584.into(),
             )
             .into()),
-            _ => Err(ErrorCode::NotImplemented(
+            SetExpr::SetOperation { .. } => Err(ErrorCode::NotImplemented(
                 format!("set expr: {:}", set_expr),
                 None.into(),
             )

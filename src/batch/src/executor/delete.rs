@@ -103,9 +103,9 @@ impl DeleteExecutor {
         // create ret value
         {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
-            array_builder.append(Some(rows_deleted as i64))?;
+            array_builder.append(Some(rows_deleted as i64));
 
-            let array = array_builder.finish()?;
+            let array = array_builder.finish();
             let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
             yield ret_chunk

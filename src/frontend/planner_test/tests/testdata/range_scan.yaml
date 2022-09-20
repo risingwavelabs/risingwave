@@ -336,3 +336,30 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id IS NULL], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- sql: |
+    create table sbtest1(id INT, k INT, c VARCHAR, pad VARCHAR);
+    create index k1 on sbtest1(k);
+    select count(k) from sbtest1 where k between 0 and 5;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum(count(k1.k))] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [count(k1.k)] }
+          BatchScan { table: k1, columns: [k1.k], scan_ranges: [k1.k = Int32(0) OR k1.k = Int32(1) OR k1.k = Int32(2) OR k1.k = Int32(3) OR k1.k = Int32(4) OR k1.k = Int32(5)], distribution: UpstreamHashShard(k1.k) }
+- sql: |
+    create table sbtest1(id INT, k INT, c VARCHAR, pad VARCHAR);
+    create index k1 on sbtest1(k);
+    select count(k) from sbtest1 where k between 0 and 500;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum(count(k1.k))] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [count(k1.k)] }
+          BatchScan { table: k1, columns: [k1.k], scan_ranges: [k1.k >= Int32(0) AND k1.k <= Int32(500)], distribution: UpstreamHashShard(k1.k) }
+- sql: |
+    create table sbtest1(id INT, k INT, c VARCHAR, pad VARCHAR, primary key(id));
+    create index k1 on sbtest1(k);
+    select count(k) from sbtest1 where id between 0 and 5;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum(count(sbtest1.k))] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [count(sbtest1.k)] }
+          BatchScan { table: sbtest1, columns: [sbtest1.k], scan_ranges: [sbtest1.id = Int32(0) OR sbtest1.id = Int32(1) OR sbtest1.id = Int32(2) OR sbtest1.id = Int32(3) OR sbtest1.id = Int32(4) OR sbtest1.id = Int32(5)], distribution: SomeShard }

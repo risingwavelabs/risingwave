@@ -31,7 +31,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         node: &StreamNode,
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
@@ -84,7 +84,11 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
                 None
             },
         };
-
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
         let table = StorageTable::new_partial(
             state_store,
             table_id,
@@ -94,6 +98,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             pk_indices,
             distribution,
             table_option,
+            value_indices,
         );
 
         let schema = table.schema().clone();

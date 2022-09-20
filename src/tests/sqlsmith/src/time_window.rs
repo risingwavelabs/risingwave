@@ -90,7 +90,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
 /// Create a table view function.
 fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWithJoins {
-    let factor = TableFactor::Table {
+    let factor = TableFactor::TableFunction {
         name: ObjectName(vec![name.into()]),
         alias: Some(alias),
         args,

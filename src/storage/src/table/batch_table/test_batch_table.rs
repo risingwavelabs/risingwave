@@ -50,14 +50,16 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut table: StorageTable<MemoryStateStore> = StorageTable::new_for_test(
+    let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         pk_indices,
     );
-    let epoch: u64 = 0;
+    let mut epoch: u64 = 0;
+    state.init_epoch(epoch);
+    epoch += 1;
 
     state.insert(Row(vec![Some(1_i32.into()), None, None]));
     state.insert(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
@@ -119,14 +121,16 @@ async fn test_storage_get_row_for_string() {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut table: StorageTable<MemoryStateStore> = StorageTable::new_for_test(
+    let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         pk_indices,
     );
-    let epoch: u64 = 0;
+    let mut epoch: u64 = 0;
+    state.init_epoch(epoch);
+    epoch += 1;
 
     state.insert(Row(vec![
         Some("1".to_string().into()),
@@ -145,7 +149,6 @@ async fn test_storage_get_row_for_string() {
     ]));
     state.commit(epoch).await.unwrap();
 
-    let epoch = u64::MAX;
     let get_row1_res = table
         .get_row(
             &Row(vec![
@@ -197,14 +200,17 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut table: StorageTable<MemoryStateStore> = StorageTable::new_for_test(
+    let mut epoch: u64 = 0;
+    state.init_epoch(epoch);
+    epoch += 1;
+
+    let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         pk_indices.clone(),
     );
-    let epoch: u64 = 0;
 
     state.insert(Row(vec![Some(1_i32.into()), None, None]));
     state.insert(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
@@ -212,8 +218,6 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
 
     state.delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
     state.commit(epoch).await.unwrap();
-
-    let epoch = u64::MAX;
 
     let get_row1_res = table
         .get_row(&Row(vec![Some(1_i32.into()), None]), epoch)
@@ -266,6 +270,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         pk_indices.clone(),
     );
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
+    let value_indices: Vec<usize> = vec![0, 1, 2];
     let mut table = StorageTable::new_partial(
         state_store.clone(),
         TableId::from(0x42),
@@ -275,8 +280,11 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         pk_indices,
         Distribution::fallback(),
         TableOption::default(),
+        value_indices,
     );
-    let epoch: u64 = 0;
+    let mut epoch: u64 = 0;
+    state.init_epoch(epoch);
+    epoch += 1;
 
     state.insert(Row(vec![Some(1_i32.into()), None, None]));
     state.insert(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
@@ -284,8 +292,6 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
 
     state.delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
     state.commit(epoch).await.unwrap();
-
-    let epoch = u64::MAX;
 
     let get_row1_res = table
         .get_row(&Row(vec![Some(1_i32.into()), None]), epoch)
@@ -333,6 +339,7 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         pk_indices.clone(),
     );
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
+    let value_indices: Vec<usize> = vec![0, 1, 2];
     let table = StorageTable::new_partial(
         state_store.clone(),
         TableId::from(0x42),
@@ -342,8 +349,11 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         pk_indices,
         Distribution::fallback(),
         TableOption::default(),
+        value_indices,
     );
-    let epoch: u64 = 0;
+    let mut epoch: u64 = 0;
+    state.init_epoch(epoch);
+    epoch += 1;
 
     state.insert(Row(vec![
         Some(1_i32.into()),
@@ -362,7 +372,6 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
     ]));
     state.commit(epoch).await.unwrap();
 
-    let epoch = u64::MAX;
     let iter = table
         .batch_iter(HummockReadEpoch::Committed(epoch))
         .await

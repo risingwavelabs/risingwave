@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -35,20 +35,19 @@ use risingwave_pb::hummock::{pin_version_response, HummockVersion};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::jitter;
 use tracing::{error, info};
 
-use super::local_version::{LocalVersion, PinnedVersion, ReadVersion};
+use super::local_version::{LocalVersion, PinVersionAction, PinnedVersion, ReadVersion};
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use super::SstableStoreRef;
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version::SyncUncommittedData::{Synced, Syncing};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
-use crate::hummock::shared_buffer::{to_order_sorted, OrderIndex, SharedBufferEvent, WriteRequest};
+use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef, TrackerId,
@@ -63,9 +62,6 @@ pub struct SyncResult {
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
-    /// If this epoch had been synced, it will be false. So it may be false, if we sync multiple
-    /// epochs in one shot.
-    pub sync_succeed: bool,
 }
 
 struct WorkerContext {
@@ -156,8 +152,6 @@ pub struct LocalVersionManager {
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
-    // notify when ever the shared buffer of some epochs moved to `sync_uncommitted_data`
-    shared_buffer_sync_notify: Notify,
 }
 
 impl LocalVersionManager {
@@ -170,7 +164,7 @@ impl LocalVersionManager {
         sstable_id_manager: SstableIdManagerRef,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Arc<LocalVersionManager> {
-        let (version_unpin_worker_tx, version_unpin_worker_rx) =
+        let (pinned_version_manager_tx, pinned_version_manager_rx) =
             tokio::sync::mpsc::unbounded_channel();
         let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
 
@@ -185,7 +179,10 @@ impl LocalVersionManager {
         let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
 
         let local_version_manager = Arc::new(LocalVersionManager {
-            local_version: RwLock::new(LocalVersion::new(pinned_version, version_unpin_worker_tx)),
+            local_version: RwLock::new(LocalVersion::new(
+                pinned_version,
+                pinned_version_manager_tx,
+            )),
             worker_context: WorkerContext {
                 version_update_notifier_tx,
             },
@@ -208,13 +205,11 @@ impl LocalVersionManager {
                 filter_key_extractor_manager,
             )),
             sstable_id_manager,
-            shared_buffer_sync_notify: Notify::new(),
         });
 
         // Unpin unused version.
-        tokio::spawn(LocalVersionManager::start_unpin_worker(
-            Arc::downgrade(&local_version_manager),
-            version_unpin_worker_rx,
+        tokio::spawn(LocalVersionManager::start_pinned_version_worker(
+            pinned_version_manager_rx,
             hummock_meta_client,
         ));
 
@@ -483,19 +478,24 @@ impl LocalVersionManager {
         Some((epoch, join_handle))
     }
 
-    /// seal epoch in local version.
-    pub fn seal_epoch(&self, epoch: HummockEpoch) {
-        self.local_version.write().seal_epoch(epoch);
+    #[cfg(any(test, feature = "test"))]
+    pub async fn sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
+        self.seal_epoch(epoch, true);
+        self.await_sync_shared_buffer(epoch).await
     }
 
-    pub async fn sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
+    /// seal epoch in local version.
+    pub fn seal_epoch(&self, epoch: HummockEpoch, is_checkpoint: bool) {
+        self.local_version.write().seal_epoch(epoch, is_checkpoint);
+    }
+
+    pub async fn await_sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
         tracing::trace!("sync epoch {}", epoch);
-        let prev_max_sync_epoch =
-            if let Some(epoch) = self.local_version.write().advance_max_sync_epoch(epoch) {
-                epoch
-            } else {
-                return Ok(SyncResult::default());
-            };
+        let prev_max_sync_epoch = self
+            .local_version
+            .read()
+            .get_prev_max_sync_epoch(epoch)
+            .expect("should exist");
 
         // Wait all epochs' task that less than epoch.
         let (tx, rx) = oneshot::channel();
@@ -509,105 +509,47 @@ impl LocalVersionManager {
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        self.sync_shared_buffer_le_epoch(epoch, prev_max_sync_epoch)
-            .await
+        self.sync_shared_buffer_le_epoch(epoch).await
     }
 
     /// Sync all shared buffer that less than or equal to the `epoch`.
-    pub async fn sync_shared_buffer_le_epoch(
+    async fn sync_shared_buffer_le_epoch(
         &self,
-        epoch: HummockEpoch,
-        prev_max_sync_epoch: HummockEpoch,
+        new_sync_epoch: HummockEpoch,
     ) -> HummockResult<SyncResult> {
-        loop {
-            let notify = self.shared_buffer_sync_notify.notified();
-            if let Some(min_epoch) = {
-                let min_epoch = self.local_version.read().get_min_shared_buffer_epoch();
-                min_epoch
-            } {
-                // We wait for some concurrent `sync` calls for older epochs to move their shared
-                // buffer first.
-                if min_epoch <= prev_max_sync_epoch {
-                    notify.await;
-                    continue;
-                }
-            }
-            break;
-        }
         // Get epochs that less than epoch and add to sync_uncommitted_data, we must keep the write
         // lock.
-        let (task_payload, epochs, sync_size) = {
-            let mut local_version_guard = self.local_version.write();
-            let mut sync_size = 0;
-            let mut all_uncommitted_data = vec![];
-            let mut epochs = local_version_guard
-                .drain_shared_buffer(..=epoch)
-                .into_iter()
-                .map(|(key, value)| {
-                    if let Some((uncommitted_data, size)) = value.into_uncommitted_data() {
-                        all_uncommitted_data.push(uncommitted_data);
-                        sync_size += size;
-                    };
-                    key
-                })
-                .collect_vec();
-            assert!(
-                epochs
-                    .iter()
-                    .all(|epoch| *epoch > prev_max_sync_epoch),
-                "data is written to shared buffer of older than the max_sync_epoch {}. Synced epoch: {:?}",
-                prev_max_sync_epoch,
-                epochs,
-            );
-            if epochs.is_empty() {
-                tracing::trace!("sync epoch {} has no more task to do", epoch);
-                return Ok(SyncResult {
-                    sync_succeed: true,
-                    ..Default::default()
-                });
-            }
-            // Notify when the shared buffer of some epochs is moved to sync_uncommitted_data.
-            self.shared_buffer_sync_notify.notify_waiters();
-            // Data of smaller epoch was added first. Take a `reverse` to make the data of greater
-            // epoch appear first.
-            all_uncommitted_data.reverse();
-            epochs.reverse();
-            let task_payload = all_uncommitted_data
-                .into_iter()
-                .flat_map(to_order_sorted)
-                .collect_vec();
-            local_version_guard.add_sync_state(epochs.clone(), Syncing(task_payload.clone()));
-            (task_payload, epochs, sync_size)
-        };
+        let (task_payload, sync_size) =
+            { self.local_version.write().start_syncing(new_sync_epoch) };
         let uncommitted_ssts = self
-            .run_sync_upload_task(task_payload, epochs.clone(), epoch)
+            .run_sync_upload_task(task_payload, new_sync_epoch)
             .await?;
-        tracing::trace!("sync epoch {} finished. Task size {}", epoch, sync_size);
-        if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector.archive_epoch(epochs.clone());
-        }
-        self.buffer_tracker
-            .send_event(SharedBufferEvent::EpochSynced(epochs));
+        // TODO: may change it to `info` when we don't sync at every epoch
+        tracing::trace!(
+            "sync epoch {} finished. Task size {}",
+            new_sync_epoch,
+            sync_size
+        );
+        // TODO: re-enable it when conflict detector has enough information to do conflict detection
+        // if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
+        //     conflict_detector.archive_epoch(epochs.clone());
+        // }
         Ok(SyncResult {
             sync_size,
             uncommitted_ssts,
-            sync_succeed: true,
         })
     }
 
     pub async fn run_sync_upload_task(
         &self,
         task_payload: UploadTaskPayload,
-        epochs: Vec<HummockEpoch>,
         epoch: HummockEpoch,
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         let ssts = self
             .shared_buffer_uploader
-            .flush(task_payload, *epochs.last().unwrap(), epoch)
+            .flush(task_payload, epoch)
             .await?;
-        self.local_version
-            .write()
-            .add_sync_state(epochs.clone(), Synced(ssts.clone()));
+        self.local_version.write().data_synced(epoch, ssts.clone());
         Ok(ssts)
     }
 
@@ -617,10 +559,7 @@ impl LocalVersionManager {
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
     ) -> HummockResult<()> {
-        let task_result = self
-            .shared_buffer_uploader
-            .flush(task_payload, epoch, epoch)
-            .await;
+        let task_result = self.shared_buffer_uploader.flush(task_payload, epoch).await;
 
         let mut local_version_guard = self.local_version.write();
         let shared_buffer_guard = local_version_guard
@@ -660,9 +599,8 @@ impl LocalVersionManager {
 
 // concurrent worker thread of `LocalVersionManager`
 impl LocalVersionManager {
-    async fn start_unpin_worker(
-        local_version_manager_weak: Weak<LocalVersionManager>,
-        mut rx: UnboundedReceiver<HummockVersionId>,
+    async fn start_pinned_version_worker(
+        mut rx: UnboundedReceiver<PinVersionAction>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) {
         let min_execute_interval = Duration::from_millis(1000);
@@ -676,6 +614,9 @@ impl LocalVersionManager {
         let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
         min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut need_unpin = false;
+
+        let mut version_ids_in_use: BTreeMap<u64, usize> = BTreeMap::new();
+
         // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
         loop {
             min_execute_interval_tick.tick().await;
@@ -683,9 +624,17 @@ impl LocalVersionManager {
             let mut versions_to_unpin = vec![];
             'collect: loop {
                 match rx.try_recv() {
-                    Ok(version) => {
-                        versions_to_unpin.push(version);
-                    }
+                    Ok(version_action) => match version_action {
+                        PinVersionAction::Pin(version_id) => {
+                            version_ids_in_use
+                                .entry(version_id)
+                                .and_modify(|counter| *counter += 1)
+                                .or_insert(1);
+                        }
+                        PinVersionAction::Unpin(version_id) => {
+                            versions_to_unpin.push(version_id);
+                        }
+                    },
                     Err(err) => match err {
                         TryRecvError::Empty => {
                             break 'collect;
@@ -703,37 +652,43 @@ impl LocalVersionManager {
             if !need_unpin {
                 continue;
             }
-            let local_version_manager = match local_version_manager_weak.upgrade() {
-                None => {
-                    tracing::info!("Shutdown hummock unpin worker");
-                    return;
-                }
-                Some(local_version_manager) => local_version_manager,
-            };
-            let unpin_before = {
-                let mut local_version = local_version_manager.local_version.write();
-                for version in &versions_to_unpin {
-                    local_version.version_ids_in_use.remove(version);
-                }
-                *local_version.version_ids_in_use.first().unwrap()
-            };
 
-            // 2. Call unpin RPC, including versions failed to unpin in previous RPC calls.
-            match hummock_meta_client.unpin_version_before(unpin_before).await {
-                Ok(_) => {
-                    versions_to_unpin.clear();
-                    need_unpin = false;
-                    retry_backoff = get_backoff_strategy();
+            for version in &versions_to_unpin {
+                match version_ids_in_use.get_mut(version) {
+                    Some(counter) => {
+                        *counter -= 1;
+                        if *counter == 0 {
+                            version_ids_in_use.remove(version);
+                        }
+                    }
+                    None => tracing::warn!("version {} to unpin dose not exist", version),
                 }
-                Err(err) => {
-                    let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
-                    tracing::warn!(
-                        "Failed to unpin version {:?}. Will retry after about {} milliseconds",
-                        err,
-                        retry_after.as_millis()
-                    );
-                    tokio::time::sleep(retry_after).await;
+            }
+
+            match version_ids_in_use.first_entry() {
+                Some(unpin_before) => {
+                    // 2. Call unpin RPC, including versions failed to unpin in previous RPC calls.
+                    match hummock_meta_client
+                        .unpin_version_before(*unpin_before.key())
+                        .await
+                    {
+                        Ok(_) => {
+                            versions_to_unpin.clear();
+                            need_unpin = false;
+                            retry_backoff = get_backoff_strategy();
+                        }
+                        Err(err) => {
+                            let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
+                            tracing::warn!(
+                            "Failed to unpin version {:?}. Will retry after about {} milliseconds",
+                            err,
+                            retry_after.as_millis()
+                        );
+                            tokio::time::sleep(retry_after).await;
+                        }
+                    }
                 }
+                None => tracing::warn!("version_ids_in_use is empty!"),
             }
         }
     }
