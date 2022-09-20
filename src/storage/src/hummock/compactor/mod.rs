@@ -148,7 +148,7 @@ impl Compactor {
             Ok(tracker_id) => tracker_id,
             Err(err) => {
                 tracing::warn!("Failed to track pending SST id. {:#?}", err);
-                return TaskStatus::Failed;
+                return TaskStatus::TrackSstIdFailed;
             }
         };
         let sstable_id_manager_clone = context.sstable_id_manager.clone();
@@ -252,7 +252,7 @@ impl Compactor {
             tokio::select! {
                 _ = &mut shutdown_rx => {
                     tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
-                    task_status = TaskStatus::Failed;
+                    task_status = TaskStatus::ManualCanceled;
                     break;
                 }
                 future_result = buffered.next() => {
@@ -261,7 +261,7 @@ impl Compactor {
                             output_ssts.push((split_index, ssts));
                         }
                         Some(Ok(Err(e))) => {
-                            task_status = TaskStatus::Failed;
+                            task_status = TaskStatus::ExecuteFailed;
                             tracing::warn!(
                                 "Compaction task {} failed with error: {:#?}",
                                 compact_task.task_id,
@@ -270,7 +270,7 @@ impl Compactor {
                             break;
                         }
                         Some(Err(e)) => {
-                            task_status = TaskStatus::Failed;
+                            task_status = TaskStatus::JoinHandleFailed;
                             tracing::warn!(
                                 "Compaction task {} failed with join handle error: {:#?}",
                                 compact_task.task_id,
@@ -437,7 +437,7 @@ impl Compactor {
                             let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
                             let meta_client = hummock_meta_client.clone();
-                            executor.execute(async move {
+                            executor.spawn(async move {
                                 match task {
                                     Task::CompactTask(compact_task) => {
                                         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -801,7 +801,7 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
         .sum::<u64>();
 
     let sstable_size = (context.options.sstable_size_mb as u64) << 20;
-    if compaction_size > sstable_size {
+    if compaction_size > sstable_size * 2 {
         let mut indexes = vec![];
         // preload the meta and get the smallest key to split sub_compaction
         for sstable_info in sstable_infos {
@@ -820,7 +820,7 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
                         let full_key =
                             FullKey::from_user_key_slice(user_key(&block.smallest_key), u64::MAX)
                                 .into_inner();
-                        (data_size, full_key.to_vec())
+                        (data_size as u64, full_key.to_vec())
                     })
                     .collect_vec(),
             );
@@ -833,19 +833,25 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
             indexes.len() as u64,
             context.options.max_sub_compaction as u64,
         );
-        let sub_compaction_data_size = compaction_size / parallelism;
+        let sub_compaction_data_size = std::cmp::max(compaction_size / parallelism, sstable_size);
+        let parallelism = compaction_size / sub_compaction_data_size;
 
         if parallelism > 1 {
             let mut last_buffer_size = 0;
             let mut last_key: Vec<u8> = vec![];
+            let mut remaining_size = indexes.iter().map(|block| block.0).sum::<u64>();
             for (data_size, key) in indexes {
-                if last_buffer_size >= sub_compaction_data_size && !last_key.eq(&key) {
+                if last_buffer_size >= sub_compaction_data_size
+                    && !last_key.eq(&key)
+                    && remaining_size > sstable_size
+                {
                     splits.last_mut().unwrap().right = key.clone();
                     splits.push(KeyRange_vec::new(key.clone(), vec![]));
-                    last_buffer_size = data_size as u64;
+                    last_buffer_size = data_size;
                 } else {
-                    last_buffer_size += data_size as u64;
+                    last_buffer_size += data_size;
                 }
+                remaining_size -= data_size;
                 last_key = key;
             }
             compact_task.splits = splits;

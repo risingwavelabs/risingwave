@@ -674,9 +674,9 @@ dependencies = [
 
 [[package]]
 name = "axum-core"
-version = "0.2.7"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4f44a0e6200e9d11a1cdc989e4b358f6e3d354fbf48478f345a17f4e43f8635"
+checksum = "d9f0c0a60006f2a293d82d571f635042a72edf927539b7685bd62d361963839b"
 dependencies = [
  "async-trait",
  "bytes",
@@ -684,6 +684,8 @@ dependencies = [
  "http",
  "http-body",
  "mime",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]
@@ -1093,9 +1095,9 @@ dependencies = [
 
 [[package]]
 name = "console-subscriber"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e933c43a5db3779b3600cdab18856af2411ca2237e33ba8ab476d5d5b1a6c1e7"
+checksum = "22a3a81dfaf6b66bce5d159eddae701e3a002f194d378cbf7be5f053c281d9be"
 dependencies = [
  "console-api",
  "crossbeam-channel",
@@ -2741,9 +2743,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.2"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0401c73aeadc48a1c366f43db67b0fd70c0e2bcbe401c182f5cd58c0a182dd5a"
+checksum = "36e91b9b30c3e60c3bc10897d2eeca4a88b31d74a790b655cc46abbecb0a3fb5"
 dependencies = [
  "futures-lite",
  "madsim",
@@ -3430,9 +3432,12 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes",
+ "chrono",
  "itertools",
  "madsim-tokio",
+ "postgres-types",
  "regex",
+ "rust_decimal",
  "thiserror",
  "tokio-postgres",
  "tracing",
@@ -4161,7 +4166,6 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "itertools",
- "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -4299,7 +4303,6 @@ dependencies = [
  "futures-async-stream",
  "humantime",
  "itertools",
- "lazy_static",
  "libc",
  "lru 0.7.6",
  "madsim-tokio",
@@ -4397,7 +4400,6 @@ dependencies = [
  "futures-async-stream",
  "hyper",
  "itertools",
- "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -4543,7 +4545,6 @@ dependencies = [
  "dyn-clone",
  "either",
  "itertools",
- "lazy_static",
  "lru 0.7.8",
  "madsim-tokio",
  "madsim-tonic",
@@ -4584,7 +4585,6 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "itertools",
- "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -4665,7 +4665,6 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "assert_matches",
- "async-recursion",
  "async-stream",
  "async-trait",
  "axum",
@@ -4682,10 +4681,10 @@ dependencies = [
  "hex",
  "hyper",
  "itertools",
- "lazy_static",
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
+ "maplit",
  "memcomparable",
  "num-integer",
  "num-traits",
@@ -4737,7 +4736,6 @@ dependencies = [
  "futures",
  "hyper",
  "itertools",
- "lazy_static",
  "madsim-tokio",
  "prometheus",
  "risingwave_common",
@@ -4811,6 +4809,7 @@ dependencies = [
  "madsim-tonic",
  "moka",
  "paste",
+ "rand 0.8.5",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
@@ -4880,7 +4879,6 @@ dependencies = [
  "farmhash",
  "futures",
  "itertools",
- "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -4950,7 +4948,6 @@ dependencies = [
  "clap 3.2.17",
  "futures",
  "itertools",
- "lazy_static",
  "libtest-mimic",
  "madsim-tokio",
  "paste",
@@ -4991,7 +4988,6 @@ dependencies = [
  "futures-async-stream",
  "hyper",
  "itertools",
- "lazy_static",
  "libc",
  "lz4",
  "madsim-tokio",
@@ -5057,7 +5053,6 @@ dependencies = [
  "hyper",
  "iter-chunks",
  "itertools",
- "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -5980,9 +5975,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.20.1"
+version = "1.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a8325f63a7d4774dd041e363b2409ed1c5cbbd0f867795e661df066b2b0a581"
+checksum = "0020c875007ad96677dcc890298f4b942882c5d4eb7cc8f439fc3bf813dc9c95"
 dependencies = [
  "autocfg",
  "bytes",

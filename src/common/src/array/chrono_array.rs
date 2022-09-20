@@ -38,7 +38,7 @@ mod tests {
             .collect_vec();
         let mut builder = NaiveDateArrayBuilder::new(0);
         for i in &v {
-            builder.append(*i).unwrap();
+            builder.append(*i);
         }
         let a = builder.finish();
         let res = v.iter().zip_eq(a.iter()).all(|(a, b)| *a == b);

@@ -38,6 +38,7 @@
 #![feature(map_first_last)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
+#![feature(once_cell)]
 
 #[macro_use]
 mod catalog;
@@ -55,8 +56,9 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
+pub use stream_fragmenter::build_graph;
 mod utils;
-pub use utils::WithOptions;
+pub use utils::{explain_stream_graph, WithOptions};
 mod meta_client;
 pub mod test_utils;
 mod user;

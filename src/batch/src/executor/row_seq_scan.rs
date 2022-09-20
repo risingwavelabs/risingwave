@@ -201,7 +201,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 None
             },
         };
-
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let metrics = source.context().get_task_metrics();
             let table = StorageTable::new_partial(
@@ -213,6 +217,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 pk_indices,
                 distribution,
                 table_option,
+                value_indices,
             );
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 

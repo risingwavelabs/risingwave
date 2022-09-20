@@ -145,7 +145,7 @@ where
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        self.ddl_lock.write().await;
+        let _guard = self.ddl_lock.write().await;
 
         let req = request.into_inner();
 

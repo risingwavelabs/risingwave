@@ -337,7 +337,7 @@ pub mod tests {
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
-    pub fn push_table_level0(levels: &mut Levels, sst: SstableInfo) {
+    pub fn push_table_level0_overlapping(levels: &mut Levels, sst: SstableInfo) {
         levels.l0.as_mut().unwrap().total_file_size += sst.file_size;
         levels.l0.as_mut().unwrap().sub_levels.push(Level {
             level_idx: 0,
@@ -348,7 +348,19 @@ pub mod tests {
         });
     }
 
-    pub fn push_tables_level0(levels: &mut Levels, table_infos: Vec<SstableInfo>) {
+    pub fn push_table_level0_nonoverlapping(levels: &mut Levels, sst: SstableInfo) {
+        push_table_level0_overlapping(levels, sst);
+        levels
+            .l0
+            .as_mut()
+            .unwrap()
+            .sub_levels
+            .last_mut()
+            .unwrap()
+            .level_type = LevelType::Nonoverlapping as i32;
+    }
+
+    pub fn push_tables_level0_nonoverlapping(levels: &mut Levels, table_infos: Vec<SstableInfo>) {
         let total_file_size = table_infos.iter().map(|table| table.file_size).sum::<u64>();
         let sub_level_id = table_infos[0].id;
         levels.l0.as_mut().unwrap().total_file_size += total_file_size;
@@ -508,7 +520,7 @@ pub mod tests {
         assert_eq!(ctx.level_max_bytes[4], 3000);
 
         // append a large data to L0 but it does not change the base size of LSM tree.
-        push_tables_level0(&mut levels, generate_tables(20..26, 0..1000, 1, 100));
+        push_tables_level0_nonoverlapping(&mut levels, generate_tables(20..26, 0..1000, 1, 100));
 
         let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 1);
@@ -576,7 +588,7 @@ pub mod tests {
         assert_eq!(compaction.input.target_level, 0);
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
-        let config = CompactionConfigBuilder::new_with(config)
+        let config = CompactionConfigBuilder::with_config(config)
             .max_bytes_for_level_base(100)
             .level0_trigger_file_number(8)
             .compaction_filter_mask(compaction_filter_flag.into())
@@ -588,7 +600,7 @@ pub mod tests {
 
         levels.l0.as_mut().unwrap().sub_levels.clear();
         levels.l0.as_mut().unwrap().total_file_size = 0;
-        push_tables_level0(&mut levels, generate_tables(15..25, 0..600, 3, 20));
+        push_tables_level0_nonoverlapping(&mut levels, generate_tables(15..25, 0..600, 3, 20));
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
         let compaction = selector
             .pick_compaction(1, &levels, &mut levels_handlers)

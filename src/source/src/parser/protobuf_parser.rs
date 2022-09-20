@@ -454,7 +454,7 @@ mod tests {
             let writer = builder.row_writer();
             parser.parse(PRE_GEN_PROTO_DATA, writer).unwrap();
         }
-        let chunk = builder.finish().unwrap();
+        let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
         let row = row.to_owned_row();

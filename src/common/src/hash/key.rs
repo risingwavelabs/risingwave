@@ -32,7 +32,7 @@ use crate::types::{
     NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode,
     VIRTUAL_NODE_COUNT,
 };
-use crate::util::hash_util::CRC32FastBuilder;
+use crate::util::hash_util::Crc32FastBuilder;
 
 /// This file contains implementation for hash key serialization for
 /// hash-agg, hash-join, and perhaps other hash-based operators.
@@ -101,7 +101,7 @@ pub trait HashKey:
     type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
-        let hash_codes = data_chunk.get_hash_values(column_idxes, CRC32FastBuilder)?;
+        let hash_codes = data_chunk.get_hash_values(column_idxes, Crc32FastBuilder);
         Ok(Self::build_from_hash_code(
             column_idxes,
             data_chunk,
@@ -608,7 +608,7 @@ where
     <<A as ArrayBuilder>::ArrayType as Array>::RefItem<'a>: HashKeySerDe<'a>,
     S: HashKeyDeserializer,
 {
-    builder.append(deserializer.deserialize()?)?;
+    builder.append(deserializer.deserialize()?);
     Ok(())
 }
 
@@ -660,12 +660,10 @@ impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
-        array_builders
-            .iter_mut()
-            .zip_eq(self.key.0)
-            .try_for_each(|(array_builder, key)| {
-                array_builder.append_datum(&key).map_err(Into::into)
-            })
+        for (array_builder, key) in array_builders.iter_mut().zip_eq(self.key.0) {
+            array_builder.append_datum(&key);
+        }
+        Ok(())
     }
 
     fn null_bitmap(&self) -> &FixedBitSet {

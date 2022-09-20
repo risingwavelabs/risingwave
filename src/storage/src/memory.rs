@@ -18,10 +18,9 @@ use std::future::Future;
 use std::iter::Fuse;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use lazy_static::lazy_static;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
@@ -197,9 +196,7 @@ impl MemoryStateStore {
     }
 
     pub fn shared() -> Self {
-        lazy_static! {
-            static ref STORE: MemoryStateStore = MemoryStateStore::new();
-        }
+        static STORE: LazyLock<MemoryStateStore> = LazyLock::new(MemoryStateStore::new);
         STORE.clone()
     }
 }
@@ -333,7 +330,14 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
+    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
+        async move {
+            self.seal_epoch(epoch, true);
+            self.await_sync_epoch(epoch).await
+        }
+    }
+
+    fn await_sync_epoch(&self, _epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
         async move {
             // memory backend doesn't need to push to S3, so this is a no-op
             Ok(SyncResult {
@@ -343,7 +347,7 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn seal_epoch(&self, _epoch: u64) {}
+    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move { Ok(()) }
@@ -401,14 +405,8 @@ mod tests {
         state_store
             .ingest_batch(
                 vec![
-                    (
-                        b"a".to_vec().into(),
-                        StorageValue::new_default_put(b"v1".to_vec()),
-                    ),
-                    (
-                        b"b".to_vec().into(),
-                        StorageValue::new_default_put(b"v1".to_vec()),
-                    ),
+                    (b"a".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
+                    (b"b".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
                 ],
                 WriteOptions {
                     epoch: 0,
@@ -420,11 +418,8 @@ mod tests {
         state_store
             .ingest_batch(
                 vec![
-                    (
-                        b"a".to_vec().into(),
-                        StorageValue::new_default_put(b"v2".to_vec()),
-                    ),
-                    (b"b".to_vec().into(), StorageValue::new_default_delete()),
+                    (b"a".to_vec().into(), StorageValue::new_put(b"v2".to_vec())),
+                    (b"b".to_vec().into(), StorageValue::new_delete()),
                 ],
                 WriteOptions {
                     epoch: 1,
