@@ -2,10 +2,10 @@ extend = "common.toml"
 
 [env]
 KAFKA_DOWNLOAD_PATH = "${PREFIX_TMP}/kafka.tgz"
-KAFKA_VERSION = "3.1.0"
+KAFKA_VERSION = "3.2.3"
 KAFKA_SCALA_VERSION = "2.13"
 KAFKA_RELEASE = "kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}"
-KAFKA_DOWNLOAD_TGZ = "https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
+KAFKA_DOWNLOAD_TGZ = "https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
 
 [tasks.download-kafka]
 category = "RiseDev - Components"
