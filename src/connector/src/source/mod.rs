@@ -18,11 +18,13 @@ pub mod datagen;
 pub mod dummy_connector;
 pub mod filesystem;
 pub mod kafka;
+pub mod google_pubsub;
 pub mod kinesis;
 pub mod nexmark;
 pub mod pulsar;
 pub use base::*;
 pub use kafka::KAFKA_CONNECTOR;
+pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
