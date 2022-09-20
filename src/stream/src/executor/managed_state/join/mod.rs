@@ -330,6 +330,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     pub fn update_epoch(&mut self, epoch: u64) {
         self.current_epoch = epoch;
+        // Update the current epoch in `ManagedLruCache`
+        if let ExecutorCache::Managed(ref mut cache) = self.inner {
+            cache.update_epoch(epoch)
+        }
     }
 
     pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {

@@ -61,6 +61,13 @@ impl LookupCache {
         self.data.evict();
     }
 
+    /// Update the current epoch if using managed lru cache
+    pub fn update_epoch(&mut self, epoch: u64) {
+        if let ExecutorCache::Managed(ref mut cache) = self.data {
+            cache.update_epoch(epoch)
+        }
+    }
+
     pub fn new(lru_manager: Option<LruManagerRef>) -> Self {
         let cache = if let Some(lru_manager) = lru_manager {
             ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))

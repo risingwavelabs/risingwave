@@ -249,6 +249,10 @@ impl<S: StateStore> LookupExecutor<S> {
                         // arrange barrier. So we flush now.
                         self.lookup_cache.flush();
                     }
+
+                    // Use the new stream barrier epoch as new cache epoch
+                    self.lookup_cache.update_epoch(barrier.epoch.curr);
+
                     self.process_barrier(barrier.clone()).await?;
                     if self.arrangement.use_current_epoch {
                         // When lookup this epoch, stream side barrier always come after arrangement
