@@ -112,7 +112,7 @@ impl Default for MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
-            no_available_compactor_stall_sec: 10,
+            no_available_compactor_stall_sec: 5,
         }
     }
 }

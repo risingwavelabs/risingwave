@@ -18,6 +18,7 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
@@ -95,6 +96,7 @@ impl HummockStorage {
             Some(table_id) => Some(
                 self.get_compaction_group_id(*table_id)
                     .in_span(Span::enter_with_local_parent("get_compaction_group_id"))
+                    .stack_trace("store_get_compaction_group_id")
                     .await?,
             ),
         };

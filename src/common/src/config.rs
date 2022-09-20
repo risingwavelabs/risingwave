@@ -236,6 +236,11 @@ pub struct DeveloperConfig {
     /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
     #[serde(default = "default::developer_enable_executor_row_count")]
     pub enable_executor_row_count: bool,
+
+    /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
+    /// `SourceExecutor`.
+    #[serde(default = "default::developer_connector_message_buffer_size")]
+    pub connector_message_buffer_size: usize,
 }
 
 impl Default for DeveloperConfig {
@@ -366,6 +371,10 @@ mod default {
 
     pub fn developer_enable_executor_row_count() -> bool {
         false
+    }
+
+    pub fn developer_connector_message_buffer_size() -> usize {
+        16
     }
 }
 

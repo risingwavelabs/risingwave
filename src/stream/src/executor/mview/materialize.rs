@@ -73,7 +73,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
-    pub fn new_for_test(
+    pub fn for_test(
         input: BoxedExecutor,
         store: S,
         table_id: TableId,
@@ -222,7 +222,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let mut table = StorageTable::new_for_test(
+        let mut table = StorageTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -230,7 +230,7 @@ mod tests {
             vec![0],
         );
 
-        let mut materialize_executor = Box::new(MaterializeExecutor::new_for_test(
+        let mut materialize_executor = Box::new(MaterializeExecutor::for_test(
             Box::new(source),
             memory_state_store,
             table_id,

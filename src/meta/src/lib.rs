@@ -152,7 +152,7 @@ pub struct MetaNodeOpts {
     pub periodic_compaction_interval_sec: u64,
 
     /// Seconds compaction scheduler should stall when there is no available compactor.
-    #[clap(long, default_value = "10")]
+    #[clap(long, default_value = "5")]
     pub no_available_compactor_stall_sec: u64,
 
     #[clap(long, default_value = "10")]
