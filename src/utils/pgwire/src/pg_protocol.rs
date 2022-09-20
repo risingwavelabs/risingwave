@@ -270,14 +270,8 @@ where
     }
 
     async fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
-        let session = self
-            .session_mgr
-            .connect_for_cancel(m.target_process_id, m.target_secret_key)?;
-        self.session = Some(session);
-        // TODO: Abort running query in `QueryManager`.
-        let session = self.session.clone().unwrap();
-        session.cancel_running_queries().await;
-        self.session = None;
+        let session_id = (m.target_process_id, m.target_secret_key);
+        self.session_mgr.cancel_queries_in_session(session_id);
         self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         Ok(())
     }
@@ -435,6 +429,7 @@ where
                 portal_name.clone(),
                 &msg.params,
                 msg.result_format_code,
+                msg.param_format_code,
             )
             .await?;
 

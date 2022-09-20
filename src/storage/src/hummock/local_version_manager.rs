@@ -62,9 +62,6 @@ pub struct SyncResult {
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
-    /// If this epoch had been synced, it will be false. So it may be false, if we sync multiple
-    /// epochs in one shot.
-    pub sync_succeed: bool,
 }
 
 struct WorkerContext {
@@ -481,19 +478,24 @@ impl LocalVersionManager {
         Some((epoch, join_handle))
     }
 
-    /// seal epoch in local version.
-    pub fn seal_epoch(&self, epoch: HummockEpoch) {
-        self.local_version.write().seal_epoch(epoch);
+    #[cfg(any(test, feature = "test"))]
+    pub async fn sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
+        self.seal_epoch(epoch, true);
+        self.await_sync_shared_buffer(epoch).await
     }
 
-    pub async fn sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
+    /// seal epoch in local version.
+    pub fn seal_epoch(&self, epoch: HummockEpoch, is_checkpoint: bool) {
+        self.local_version.write().seal_epoch(epoch, is_checkpoint);
+    }
+
+    pub async fn await_sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
         tracing::trace!("sync epoch {}", epoch);
-        let prev_max_sync_epoch =
-            if let Some(epoch) = self.local_version.write().advance_max_sync_epoch(epoch) {
-                epoch
-            } else {
-                return Ok(SyncResult::default());
-            };
+        let prev_max_sync_epoch = self
+            .local_version
+            .read()
+            .get_prev_max_sync_epoch(epoch)
+            .expect("should exist");
 
         // Wait all epochs' task that less than epoch.
         let (tx, rx) = oneshot::channel();
@@ -535,7 +537,6 @@ impl LocalVersionManager {
         Ok(SyncResult {
             sync_size,
             uncommitted_ssts,
-            sync_succeed: true,
         })
     }
 

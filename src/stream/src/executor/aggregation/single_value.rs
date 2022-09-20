@@ -54,7 +54,7 @@ impl<T: Array> StreamingSingleValueAgg<T> {
     /// This function makes the assumption that if this function gets called, then
     /// we must have row count equal to 1. If the row count is equal to 0,
     /// then `new` will be called instead of this function.
-    pub fn new_with_datum(x: Datum) -> StreamExecutorResult<Self> {
+    pub fn with_datum(x: Datum) -> StreamExecutorResult<Self> {
         let mut result = None;
         if let Some(scalar) = x {
             result = Some(T::OwnedItem::try_from(scalar)?);

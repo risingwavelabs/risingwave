@@ -226,19 +226,16 @@ impl LocalStreamManager {
         result
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<(Vec<LocalSstableInfo>, bool)> {
+    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
         let timer = self
             .core
             .lock()
             .streaming_metrics
             .barrier_sync_latency
             .start_timer();
-        dispatch_state_store!(self.state_store(), store, {
-            store.seal_epoch(epoch);
-        });
         let res = dispatch_state_store!(self.state_store(), store, {
             match store.sync(epoch).await {
-                Ok(sync_result) => Ok((sync_result.uncommitted_ssts, sync_result.sync_succeed)),
+                Ok(sync_result) => Ok(sync_result.uncommitted_ssts),
                 Err(e) => {
                     tracing::error!(
                         "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
@@ -366,7 +363,7 @@ impl LocalStreamManagerCore {
         config: StreamingConfig,
         enable_async_stack_trace: bool,
     ) -> Self {
-        let context = SharedContext::new(addr);
+        let context = SharedContext::new(addr, state_store.clone());
         Self::new_inner(
             state_store,
             context,

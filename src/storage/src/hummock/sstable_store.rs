@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
+use async_stack_trace::StackTrace;
 use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
@@ -352,6 +353,7 @@ impl SstableStore {
                     Ok((Box::new(sst), charge))
                 }
             })
+            .stack_trace("meta_cache_lookup")
             .await
             .map_err(|e| {
                 HummockError::other(format!(

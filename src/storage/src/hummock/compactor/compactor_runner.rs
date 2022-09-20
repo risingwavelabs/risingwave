@@ -53,8 +53,9 @@ impl CompactorRunner {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
+        let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
         if options.compression_algorithm == CompressionAlgorithm::None {
-            options.capacity = std::cmp::min(options.capacity, total_file_size as usize);
+            options.capacity = std::cmp::min(options.capacity, total_file_size);
         }
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),

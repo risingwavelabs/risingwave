@@ -90,7 +90,7 @@ fn build_table(
             policy: CachePolicy::Fill,
         },
     );
-    let mut builder = SstableBuilder::new_for_test(sstable_id, writer, opt);
+    let mut builder = SstableBuilder::for_test(sstable_id, writer, opt);
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch);
     let user_len = full_key.len() - 8;
@@ -163,11 +163,8 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
     };
-    let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
-        32,
-        sstable_store,
-        opt,
-    ));
+    let mut builder =
+        CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(32, sstable_store, opt));
 
     let task_config = TaskConfig {
         key_range: KeyRange::inf(),
