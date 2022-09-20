@@ -184,9 +184,6 @@ impl StreamService for StreamServiceImpl {
                     sst: Some(sst),
                 })
                 .collect_vec(),
-            // TODO: in the future may set it according to whether the barrier is a checkpoint
-            // barrier
-            checkpoint: true,
             worker_id: self.env.worker_id(),
         }))
     }

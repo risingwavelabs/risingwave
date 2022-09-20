@@ -45,11 +45,18 @@ enum ManagedBarrierStateInner {
 }
 
 #[derive(Debug)]
+pub(super) struct BarrierState {
+    prev_epoch: u64,
+    barrier_inner: ManagedBarrierStateInner,
+    checkpoint: bool,
+}
+
+#[derive(Debug)]
 pub(super) struct ManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
     /// The key is curr_epoch, and the first value is prev_epoch
-    epoch_barrier_state_map: BTreeMap<u64, (u64, ManagedBarrierStateInner)>,
+    epoch_barrier_state_map: BTreeMap<u64, BarrierState>,
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, ChainState>>,
@@ -70,18 +77,25 @@ impl ManagedBarrierState {
     /// Notify if we have collected barriers from all actor ids. The state must be `Issued`.
     fn may_notify(&mut self, curr_epoch: u64) {
         let to_notify = match self.epoch_barrier_state_map.get(&curr_epoch) {
-            Some((
-                _,
-                ManagedBarrierStateInner::Issued {
-                    remaining_actors, ..
-                },
-            )) => (remaining_actors.is_empty()),
+            Some(BarrierState {
+                barrier_inner:
+                    ManagedBarrierStateInner::Issued {
+                        remaining_actors, ..
+                    },
+                ..
+            }) => (remaining_actors.is_empty()),
             _ => unreachable!(),
         };
 
         if to_notify {
-            while let Some((_, &(_, ref inner))) = self.epoch_barrier_state_map.first_key_value() {
-                match inner {
+            while let Some((
+                _,
+                &BarrierState {
+                    ref barrier_inner, ..
+                },
+            )) = self.epoch_barrier_state_map.first_key_value()
+            {
+                match barrier_inner {
                     ManagedBarrierStateInner::Issued {
                         remaining_actors, ..
                     } => {
@@ -91,8 +105,7 @@ impl ManagedBarrierState {
                     }
                     _ => break,
                 }
-                let (epoch, (prev_epoch, inner)) =
-                    self.epoch_barrier_state_map.pop_first().unwrap();
+                let (epoch, barrier_state) = self.epoch_barrier_state_map.pop_first().unwrap();
                 let create_mview_progress = self
                     .create_mview_progress
                     .remove(&epoch)
@@ -109,12 +122,10 @@ impl ManagedBarrierState {
                     .collect();
 
                 dispatch_state_store!(&self.state_store, state_store, {
-                    // TODO: set `is_checkpoint` according to whether the barrier is a
-                    // checkpoint barrier
-                    state_store.seal_epoch(prev_epoch, true);
+                    state_store.seal_epoch(barrier_state.prev_epoch, barrier_state.checkpoint);
                 });
 
-                match inner {
+                match barrier_state.barrier_inner {
                     ManagedBarrierStateInner::Issued {
                         collect_notifier, ..
                     } => {
@@ -148,23 +159,27 @@ impl ManagedBarrierState {
         );
 
         match self.epoch_barrier_state_map.get_mut(&barrier.epoch.curr) {
-            Some(&mut (
+            Some(&mut BarrierState {
                 prev_epoch,
-                ManagedBarrierStateInner::Stashed {
-                    ref mut collected_actors,
-                },
-            )) => {
+                barrier_inner:
+                    ManagedBarrierStateInner::Stashed {
+                        ref mut collected_actors,
+                    },
+                ..
+            }) => {
                 let new = collected_actors.insert(actor_id);
                 assert!(new);
                 assert_eq!(prev_epoch, barrier.epoch.prev);
             }
-            Some(&mut (
+            Some(&mut BarrierState {
                 prev_epoch,
-                ManagedBarrierStateInner::Issued {
-                    ref mut remaining_actors,
-                    ..
-                },
-            )) => {
+                barrier_inner:
+                    ManagedBarrierStateInner::Issued {
+                        ref mut remaining_actors,
+                        ..
+                    },
+                ..
+            }) => {
                 let exist = remaining_actors.remove(&actor_id);
                 assert!(
                     exist,
@@ -177,12 +192,13 @@ impl ManagedBarrierState {
             None => {
                 self.epoch_barrier_state_map.insert(
                     barrier.epoch.curr,
-                    (
-                        barrier.epoch.prev,
-                        ManagedBarrierStateInner::Stashed {
+                    BarrierState {
+                        prev_epoch: barrier.epoch.prev,
+                        barrier_inner: ManagedBarrierStateInner::Stashed {
                             collected_actors: once(actor_id).collect(),
                         },
-                    ),
+                        checkpoint: barrier.checkpoint,
+                    },
                 );
             }
         }
@@ -197,12 +213,13 @@ impl ManagedBarrierState {
         collect_notifier: oneshot::Sender<CollectResult>,
     ) {
         let inner = match self.epoch_barrier_state_map.get_mut(&barrier.epoch.curr) {
-            Some(&mut (
-                _,
-                ManagedBarrierStateInner::Stashed {
-                    ref mut collected_actors,
-                },
-            )) => {
+            Some(&mut BarrierState {
+                barrier_inner:
+                    ManagedBarrierStateInner::Stashed {
+                        ref mut collected_actors,
+                    },
+                ..
+            }) => {
                 let remaining_actors = actor_ids_to_collect
                     .into_iter()
                     .filter(|a| !collected_actors.remove(a))
@@ -213,7 +230,10 @@ impl ManagedBarrierState {
                     collect_notifier,
                 }
             }
-            Some(&mut (_, ManagedBarrierStateInner::Issued { .. })) => {
+            Some(&mut BarrierState {
+                barrier_inner: ManagedBarrierStateInner::Issued { .. },
+                ..
+            }) => {
                 panic!(
                     "barrier epochs{:?} state has already been `Issued`",
                     barrier.epoch
@@ -227,8 +247,14 @@ impl ManagedBarrierState {
                 }
             }
         };
-        self.epoch_barrier_state_map
-            .insert(barrier.epoch.curr, (barrier.epoch.prev, inner));
+        self.epoch_barrier_state_map.insert(
+            barrier.epoch.curr,
+            BarrierState {
+                prev_epoch: barrier.epoch.prev,
+                barrier_inner: inner,
+                checkpoint: barrier.checkpoint,
+            },
+        );
         self.may_notify(barrier.epoch.curr);
     }
 }

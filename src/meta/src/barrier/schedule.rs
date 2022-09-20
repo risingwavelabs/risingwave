@@ -219,7 +219,7 @@ impl ScheduledBarriers {
         let mut queue = self.inner.queue.write().await;
         while let Some((_, notifiers)) = queue.pop_front() {
             notifiers.into_iter().for_each(|notify| {
-                notify.notify_collected_failed(anyhow!("Scheduled barrier abort.").into())
+                notify.notify_collection_failed(anyhow!("Scheduled barrier abort.").into())
             })
         }
     }

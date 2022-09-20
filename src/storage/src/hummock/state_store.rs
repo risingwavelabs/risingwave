@@ -602,7 +602,7 @@ impl StateStore for HummockStorage {
         async move { Ok(self.local_version_manager.try_wait_epoch(epoch).await?) }
     }
 
-    fn sync(&self, epoch: u64, is_checkpoint: bool) -> Self::SyncFuture<'_> {
+    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             if epoch == INVALID_EPOCH {
                 warn!("syncing invalid epoch");
