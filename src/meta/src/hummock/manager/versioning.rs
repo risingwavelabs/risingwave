@@ -25,6 +25,7 @@ use risingwave_pb::hummock::{
 #[derive(Default)]
 pub struct Versioning {
     // Volatile states below
+    pub ignore_empty_epoch: bool,
 
     // Newest version
     pub current_version: HummockVersion,

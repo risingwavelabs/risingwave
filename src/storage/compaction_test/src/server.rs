@@ -122,7 +122,8 @@ pub async fn compaction_test_serve(
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
     let mut replay_count: u64 = 0;
-    for id in FIRST_VERSION_ID..version_before_reset.id {
+    // let mut prev_version_id = FIRST_VERSION_ID;
+    for id in (FIRST_VERSION_ID + 1)..version_before_reset.id {
         let (version_id, max_committed_epoch, compaction_groups) =
             meta_client.replay_version_delta(id).await?;
         tracing::info!(

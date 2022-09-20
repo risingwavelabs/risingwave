@@ -50,6 +50,7 @@ pub struct DefaultCompactionSchedulerChannel {
 }
 
 /// A mock channel just swallow all compaction schedule requests
+#[allow(dead_code)]
 pub struct MockCompactionSchedulerChannel {
     tx: UnboundedSender<CompactionGroupId>,
 }

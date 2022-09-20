@@ -1083,6 +1083,10 @@ where
 
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
+        // Prevent commit empty epochs if this flag is set
+        if versioning_guard.ignore_empty_epoch && sstables.is_empty() {
+            return Ok(());
+        }
 
         for (sst_id, context_id) in &sst_to_context {
             #[cfg(test)]
@@ -1362,15 +1366,41 @@ where
     #[named]
     pub async fn reset_current_version(&self) -> Result<HummockVersion> {
         // Reset current version to empty
-        let init_version = HummockVersion {
+        let mut init_version = HummockVersion {
             id: FIRST_VERSION_ID,
             levels: Default::default(),
             max_committed_epoch: INVALID_EPOCH,
             safe_epoch: INVALID_EPOCH,
         };
+
+        // Initialize independent levels via corresponding compaction group' config.
+        for compaction_group in self.compaction_group_manager.compaction_groups().await {
+            let mut levels = vec![];
+            for l in 0..compaction_group.compaction_config().max_level {
+                levels.push(Level {
+                    level_idx: (l + 1) as u32,
+                    level_type: LevelType::Nonoverlapping as i32,
+                    table_infos: vec![],
+                    total_file_size: 0,
+                    sub_level_id: 0,
+                });
+            }
+            init_version.levels.insert(
+                compaction_group.group_id(),
+                Levels {
+                    levels,
+                    l0: Some(OverlappingLevel {
+                        sub_levels: vec![],
+                        total_file_size: 0,
+                    }),
+                },
+            );
+        }
+
         let mut versioning_guard = write_lock!(self, versioning).await;
         let old_version = versioning_guard.current_version.clone();
         versioning_guard.current_version = init_version;
+        versioning_guard.ignore_empty_epoch = true;
         Ok(old_version)
     }
 
@@ -1382,6 +1412,7 @@ where
         &self,
         version_delta_id: HummockVersionId,
     ) -> Result<(HummockVersionId, HummockEpoch, Vec<CompactionGroupId>)> {
+        tracing::info!("Replay version delta: id {}", version_delta_id);
         let result = HummockVersionDelta::select(self.env.meta_store(), &version_delta_id).await?;
         // the version delta must exist
         assert!(result.is_some());
@@ -1389,11 +1420,18 @@ where
         let mut version_delta = result.unwrap();
         let mut versioning_guard = write_lock!(self, versioning).await;
         // ensure the version id is ascending after replay
-        version_delta.id = std::cmp::max(versioning_guard.current_version.id, version_delta.id) + 1;
+        version_delta.id = versioning_guard.current_version.id + 1;
+        version_delta.prev_id = version_delta.id - 1;
+
+        tracing::info!(
+            "adjusted version delta: id {}, prev {}",
+            version_delta.id,
+            version_delta.prev_id
+        );
         versioning_guard
             .current_version
             .apply_version_delta(&version_delta);
-        assert!(versioning_guard.current_version.id > version_delta.id);
+        assert!(versioning_guard.current_version.id >= version_delta_id);
 
         let compaction_group_ids = version_delta.level_deltas.keys().cloned().collect_vec();
         let version_id = versioning_guard.current_version.id;
@@ -1429,10 +1467,10 @@ where
                 match rx.recv().await {
                     Some(sched_status) => {
                         if sched_status == ScheduleStatus::Ok {
-                            tracing::debug!("Compaction schedule Ok");
+                            tracing::info!("Compaction schedule Ok");
                             let mut guard = self.compaction_finish_channel.1.lock().await;
                             if let Some(version_delta) = guard.recv().await {
-                                tracing::debug!(
+                                tracing::info!(
                                     "Compaction task finished. version_id: {}, epoch: {}",
                                     version_delta.id,
                                     version_delta.max_committed_epoch

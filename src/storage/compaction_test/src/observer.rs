@@ -58,6 +58,11 @@ impl ObserverNodeImpl for SimpleObserverNode {
 
         match info.to_owned() {
             Info::HummockVersionDeltas(hummock_version_deltas) => {
+                tracing::info!(
+                    "version deltas notification: {:?}",
+                    hummock_version_deltas.version_deltas
+                );
+
                 self.local_version_manager.try_update_pinned_version(
                     pin_version_response::Payload::VersionDeltas(HummockVersionDeltas {
                         delta: hummock_version_deltas.version_deltas,
@@ -76,8 +81,14 @@ impl ObserverNodeImpl for SimpleObserverNode {
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
+                let version = snapshot.hummock_version.unwrap();
+                tracing::info!(
+                    "Init snapshot: version_id {}, epoch {}",
+                    version.id,
+                    version.max_committed_epoch
+                );
                 self.local_version_manager.try_update_pinned_version(
-                    pin_version_response::Payload::PinnedVersion(snapshot.hummock_version.unwrap()),
+                    pin_version_response::Payload::PinnedVersion(version),
                 );
             }
             _ => {
