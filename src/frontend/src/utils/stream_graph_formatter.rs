@@ -92,7 +92,7 @@ impl StreamGraphFormatter {
                 .join(", ")
         )?;
         writeln!(f, "  primary key: {:?}", tb.order_key)?;
-        writeln!(f, "  values indices: {:?}", tb.value_indices)?;
+        writeln!(f, "  value indices: {:?}", tb.value_indices)?;
         if let Some(vnode_col_idx) = tb.vnode_col_idx {
             writeln!(f, "  vnode column idx: {}", vnode_col_idx)?;
         }
@@ -195,28 +195,26 @@ impl StreamGraphFormatter {
             _ => None,
         };
         if let Some(explain_table_oneline) = explain_table_oneline {
-            writeln!(f, "{}{}", " ".repeat(level * 2 + 1), explain_table_oneline)?;
+            writeln!(f, "{}{}", " ".repeat(level * 2 + 4), explain_table_oneline)?;
         }
 
         if self.verbose {
             writeln!(
                 f,
                 "{}Output: [{}]",
-                " ".repeat(level * 2 + 1),
+                " ".repeat(level * 2 + 4),
                 node.fields.iter().map(|f| f.get_name()).join(", ")
             )?;
             writeln!(
                 f,
-                "{}Stream key: [{}]",
-                " ".repeat(level * 2 + 1),
+                "{}Stream key: [{}], {}",
+                " ".repeat(level * 2 + 4),
                 node.stream_key
                     .iter()
                     .map(|i| node.fields[*i as usize].get_name())
-                    .join(", ")
+                    .join(", "),
+                if node.append_only { "AppendOnly" } else { "" }
             )?;
-            if node.append_only {
-                writeln!(f, "{}AppendOnly", " ".repeat(level * 2 + 1))?;
-            }
         }
         for input in &node.input {
             self.explain_node(level + 1, input, f)?;
