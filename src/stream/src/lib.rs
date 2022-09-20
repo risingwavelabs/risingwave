@@ -17,6 +17,7 @@
 #![feature(backtrace)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
+#![warn(clippy::disallowed_types)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
@@ -53,6 +54,7 @@
 extern crate tracing;
 
 mod common;
+pub mod error;
 pub mod executor;
 mod from_proto;
 pub mod task;

@@ -19,6 +19,11 @@ select ARRAY[null];
 statement error
 select ARRAY[];
 
+query T
+select ARRAY[]::int[];
+----
+{}
+
 statement ok
 create table t (v1 int);
 

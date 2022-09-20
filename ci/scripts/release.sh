@@ -3,20 +3,27 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+echo "--- Install rust"
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain $(cat ./rust-toolchain) -y
+source "$HOME/.cargo/env"
+source ci/scripts/common.env.sh
+
+echo "--- Install protoc3"
+curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
+unzip -o protoc-3.15.8-linux-x86_64.zip -d /usr/local bin/protoc
+
 echo "--- Install gh cli"
-curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
-dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
-tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-apt update -yy && apt install gh -yy
+yum install -y dnf
+dnf install -y 'dnf-command(config-manager)'
+dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+dnf install -y gh
 
 echo "--- Release create"
 gh release create "${BUILDKITE_TAG}" --generate-notes -d -p
 
-echo "--- Download artifacts"
-mkdir -p target/debug && cd target/debug
-buildkite-agent artifact download risingwave-release .
-mv risingwave-release risingwave
+echo "--- Build release asset"
+cargo build -p risingwave_cmd_all --features static-link --profile release
+cd target/release
 chmod +x risingwave
 tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
 

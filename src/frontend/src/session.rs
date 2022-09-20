@@ -16,14 +16,12 @@ use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
-use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 // use tokio::sync::Mutex;
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
@@ -46,9 +44,8 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::info;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
@@ -61,19 +58,14 @@ use crate::monitor::FrontendMetrics;
 use crate::observer::observer_manager::FrontendObserverNode;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
-use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::{
-    HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager, QueryMessage,
-};
+use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
 use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts};
-// use crate::scheduler::QueryMessage;
-
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
@@ -454,11 +446,6 @@ pub struct SessionImpl {
     /// Stores the value of configurations.
     config_map: RwLock<ConfigMap>,
 
-    /// Shutdown channels map
-    /// FIXME: Use weak key hash map to remove query id if query ends.
-    shutdown_receivers_map:
-        Arc<tokio::sync::Mutex<HashMap<QueryId, Option<mpsc::Sender<QueryMessage>>>>>,
-
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
 }
@@ -468,14 +455,13 @@ impl SessionImpl {
         env: FrontendEnv,
         auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
-        id: (i32, i32),
+        id: SessionId,
     ) -> Self {
         Self {
             env,
             auth_context,
             user_authenticator,
             config_map: RwLock::new(Default::default()),
-            shutdown_receivers_map: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             id,
         }
     }
@@ -491,7 +477,6 @@ impl SessionImpl {
             )),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
-            shutdown_receivers_map: Default::default(),
             // Mock session use non-sense id.
             id: (0, 0),
         }
@@ -524,27 +509,6 @@ impl SessionImpl {
     pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
         self.config_map.write().set(key, value)
     }
-
-    pub async fn insert_query_shutdown_sender(
-        &self,
-        query_id: QueryId,
-        shutdown_tx: mpsc::Sender<QueryMessage>,
-    ) {
-        let mut write_guard = self.shutdown_receivers_map.lock().await;
-        write_guard.insert(query_id, Some(shutdown_tx));
-    }
-
-    // // TODO: Support cancel query's in current session. This needs to store query ID in session.
-    // pub fn cancel_running_queries(&self) {
-    //     let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
-    //     for (query_id, sender) in &mut *write_guard {
-    //         if let Some(sender_swap) = mem::take(sender) {
-    //             sender_swap.send(QueryMessage::CancelQuery).await.unwrap();
-    //             info!("Cancel query_id {:?} in query manager", query_id);
-    //         }
-    //     }
-    //     write_guard.clear();
-    // }
 
     pub fn session_id(&self) -> SessionId {
         self.id
@@ -652,16 +616,8 @@ impl SessionManager for SessionManagerImpl {
     }
 
     /// Used when cancel request happened, returned corresponding session ref.
-    fn connect_for_cancel(
-        &self,
-        process_id: i32,
-        secret_key: i32,
-    ) -> PsqlResult<Arc<Self::Session>> {
-        let write_guard = self.env.sessions_map.lock().unwrap();
-        write_guard
-            .get(&(process_id, secret_key))
-            .cloned()
-            .ok_or(PsqlError::CancelNotFound)
+    fn cancel_queries_in_session(&self, session_id: SessionId) {
+        self.env.query_manager.cancel_queries_in_session(session_id);
     }
 }
 
@@ -786,17 +742,6 @@ impl Session for SessionImpl {
 
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
-    }
-
-    async fn cancel_running_queries(&self) {
-        let mut write_guard = self.shutdown_receivers_map.lock().await;
-        for (query_id, sender) in &mut *write_guard {
-            if let Some(sender_swap) = mem::take(sender) {
-                sender_swap.send(QueryMessage::CancelQuery).await.unwrap();
-                info!("Cancel query_id {:?} in query manager", query_id);
-            }
-        }
-        write_guard.clear();
     }
 
     fn id(&self) -> SessionId {

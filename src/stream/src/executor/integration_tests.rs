@@ -14,6 +14,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
@@ -241,7 +242,7 @@ struct MockConsumer {
 }
 
 impl StreamConsumer for MockConsumer {
-    type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
+    type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream {
         let mut input = self.input.execute();
@@ -265,7 +266,7 @@ pub struct SenderConsumer {
 }
 
 impl StreamConsumer for SenderConsumer {
-    type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
+    type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream {
         let mut input = self.input.execute();
@@ -276,7 +277,7 @@ impl StreamConsumer for SenderConsumer {
                 let msg = item?;
                 let barrier = msg.as_barrier().cloned();
 
-                channel.send(msg).await?;
+                channel.send(msg).await.context("failed to send message")?;
 
                 if let Some(barrier) = barrier {
                     yield barrier;

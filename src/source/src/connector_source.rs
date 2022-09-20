@@ -63,8 +63,6 @@ struct InnerConnectorSourceReaderHandle {
     join_handle: JoinHandle<()>,
 }
 
-const CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 512;
-
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or
 /// batch processing. [`ConnectorSource`] introduces schema at this level while
 /// [`SplitReaderImpl`] simply loads raw content from message queue or file system.
@@ -279,6 +277,7 @@ pub struct ConnectorSource {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub parser: Arc<SourceParserImpl>,
+    pub connector_message_buffer_size: usize,
 }
 
 impl ConnectorSource {
@@ -307,7 +306,7 @@ impl ConnectorSource {
         metrics: Arc<SourceMetrics>,
         context: SourceContext,
     ) -> Result<ConnectorSourceReader> {
-        let (tx, rx) = mpsc::channel(CONNECTOR_MESSAGE_BUFFER_SIZE);
+        let (tx, rx) = mpsc::channel(self.connector_message_buffer_size);
         let mut handles = HashMap::with_capacity(if let Some(split) = &splits {
             split.len()
         } else {

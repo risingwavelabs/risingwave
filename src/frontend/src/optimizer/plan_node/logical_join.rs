@@ -100,10 +100,10 @@ impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let out_column_num =
             Self::out_column_num(left.schema().len(), right.schema().len(), join_type);
-        Self::new_with_output_indices(left, right, join_type, on, (0..out_column_num).collect())
+        Self::with_output_indices(left, right, join_type, on, (0..out_column_num).collect())
     }
 
-    pub(crate) fn new_with_output_indices(
+    pub(crate) fn with_output_indices(
         left: PlanRef,
         right: PlanRef,
         join_type: JoinType,
@@ -424,7 +424,7 @@ impl LogicalJoin {
 
     /// Clone with new output indices
     pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
-        Self::new_with_output_indices(
+        Self::with_output_indices(
             self.left.clone(),
             self.right.clone(),
             self.join_type,
@@ -435,7 +435,7 @@ impl LogicalJoin {
 
     /// Clone with new `on` condition
     pub fn clone_with_cond(&self, cond: Condition) -> Self {
-        Self::new_with_output_indices(
+        Self::with_output_indices(
             self.left.clone(),
             self.right.clone(),
             self.join_type,
@@ -660,7 +660,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new_with_output_indices(
+        Self::with_output_indices(
             left,
             right,
             self.join_type,
@@ -695,7 +695,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
             (new_on, new_output_indices)
         };
 
-        let join = Self::new_with_output_indices(
+        let join = Self::with_output_indices(
             left,
             right,
             self.join_type,
@@ -783,7 +783,7 @@ impl ColPrunable for LogicalJoin {
             required_cols.iter().map(|&i| mapping.map(i)).collect_vec()
         };
 
-        LogicalJoin::new_with_output_indices(
+        LogicalJoin::with_output_indices(
             self.left.prune_col(&left_required_cols),
             self.right.prune_col(&right_required_cols),
             self.join_type,
@@ -856,7 +856,7 @@ impl PredicatePushdown for LogicalJoin {
 
         let new_left = self.left.predicate_pushdown(left_predicate);
         let new_right = self.right.predicate_pushdown(right_predicate);
-        let new_join = LogicalJoin::new_with_output_indices(
+        let new_join = LogicalJoin::with_output_indices(
             new_left,
             new_right,
             join_type,

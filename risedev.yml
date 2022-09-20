@@ -20,7 +20,6 @@ risedev:
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
     - use: compute-node
-      enable-in-memory-kv-state-backend: true
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
@@ -582,6 +581,9 @@ template:
 
     # Enable sanity check when SSTs are committed. Disabled by default.
     enable-committed-sst-sanity-check: false
+
+    # Seconds compaction scheduler should stall when there is no available compactor.
+    no-available-compactor-stall-sec: 5
 
   prometheus:
     # Advertise address of Prometheus
