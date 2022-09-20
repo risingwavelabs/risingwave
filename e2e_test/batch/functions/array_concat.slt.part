@@ -773,4 +773,14 @@ select array_prepend('2020-01-01 12:34:56'::timestamp::date, array['2020-01-02 1
 ----
 {2020-01-01 00:00:00,2020-01-02 23:34:56}
 
+query T
+select array_cat(array[1.2], array[array[1]]);
+----
+{{1.2},{1}}
+
+query T
+select array_cat(array[2], array[array[1]]);
+----
+{{1},{1}}
+
 
