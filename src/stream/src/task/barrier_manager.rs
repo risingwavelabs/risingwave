@@ -32,6 +32,7 @@ mod tests;
 
 pub use progress::CreateMviewProgress;
 use risingwave_common::bail;
+use risingwave_storage::StateStoreImpl;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
 /// Note that this option will significantly increase the overhead of tracing.
@@ -73,12 +74,6 @@ pub struct LocalBarrierManager {
         HashMap<u64, (Option<Receiver<CollectResult>>, Option<HistogramTimer>)>,
 }
 
-impl Default for LocalBarrierManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl LocalBarrierManager {
     fn with_state(state: BarrierState) -> Self {
         Self {
@@ -90,8 +85,8 @@ impl LocalBarrierManager {
     }
 
     /// Create a [`LocalBarrierManager`] with managed mode.
-    pub fn new() -> Self {
-        Self::with_state(BarrierState::Managed(ManagedBarrierState::new()))
+    pub fn new(state_store: StateStoreImpl) -> Self {
+        Self::with_state(BarrierState::Managed(ManagedBarrierState::new(state_store)))
     }
 
     /// Register sender for source actors, used to send barriers.
