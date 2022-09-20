@@ -115,16 +115,9 @@ impl UploadHandleManager {
                 range.contains(epoch)
             })
             .collect_vec();
-        ret.into_iter()
-            .map(|fut| {
-                let epoch = *fut.get_extra();
-                *self
-                    .remaining_handle_count
-                    .get_mut(&epoch)
-                    .expect("prev handle count not zero. Should exist") -= 1;
-                fut.into_inner()
-            })
-            .collect_vec()
+        self.remaining_handle_count
+            .drain_filter(|epoch, _| range.contains(epoch));
+        ret.into_iter().map(|fut| fut.into_inner()).collect_vec()
     }
 
     /// Return a `UploadHandleManagerNextFinishedEpoch` future that returns an epoch when all the
@@ -163,6 +156,7 @@ impl<'a> Future for UploadHandleManagerNextFinishedEpoch<'a> {
     type Output = std::result::Result<HummockEpoch, JoinError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        println!("get drive");
         loop {
             let mut select_all_fut = if let Some(select_all_fut) = self.select_all.take() {
                 select_all_fut
@@ -293,38 +287,69 @@ mod tests {
         manager.add_epoch_handle(1, vec![join_handle1, join_handle2].into_iter());
         manager.add_epoch_handle(2, once(join_handle3));
 
+        assert_eq!(3, manager.epoch_upload_handle.len());
+        assert_eq!(2, manager.remaining_handle_count.len());
+        assert_eq!(2, manager.remaining_handle_count[&1]);
+        assert_eq!(1, manager.remaining_handle_count[&2]);
+
         let mut select_all = manager.next_finished_epoch();
         assert!(is_pending(&mut select_all).await);
+        assert_eq!(2, select_all.manager.remaining_handle_count.len());
+        assert_eq!(2, select_all.manager.remaining_handle_count[&1]);
+        assert_eq!(1, select_all.manager.remaining_handle_count[&2]);
+
         tx1.send(()).unwrap();
+        // Call yield_now to drive the spawned tasks.
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
         assert!(is_pending(&mut select_all).await);
+        assert_eq!(2, select_all.manager.remaining_handle_count.len());
+        assert_eq!(1, select_all.manager.remaining_handle_count[&1]);
+        assert_eq!(1, select_all.manager.remaining_handle_count[&2]);
+
         tx3.send(()).unwrap();
+        // Call yield_now to drive the spawned tasks.
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
         assert_eq!(select_all.await.unwrap(), 2);
+        assert_eq!(1, manager.epoch_upload_handle.len());
+        assert_eq!(1, manager.remaining_handle_count.len());
+        assert_eq!(1, manager.remaining_handle_count[&1]);
 
         let mut select_all = manager.next_finished_epoch();
         assert!(is_pending(&mut select_all).await);
         tx2.send(()).unwrap();
+        // Call yield_now to drive the spawned tasks.
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
         assert_eq!(select_all.await.unwrap(), 1);
-
-        assert!(manager.drain_epoch_handle(..).is_empty());
+        assert!(manager.epoch_upload_handle.is_empty());
+        assert!(manager.remaining_handle_count.is_empty());
     }
 
     #[tokio::test]
     async fn test_drain_epoch_handle() {
         let mut manager = UploadHandleManager::new();
-        let join_handle1 = tokio::spawn(async move {});
-        let id1 = join_handle1.id();
-        manager.add_epoch_handle(1, once(join_handle1));
-        let join_handle2 = tokio::spawn(async move {});
-        let id2 = join_handle2.id();
-        manager.add_epoch_handle(2, once(join_handle2));
-        let join_handle3 = tokio::spawn(async move {});
-        let id3 = join_handle3.id();
-        manager.add_epoch_handle(3, once(join_handle3));
+        manager.add_epoch_handle(1, once(tokio::spawn(async move {})));
+        manager.add_epoch_handle(2, once(tokio::spawn(async move {})));
+        manager.add_epoch_handle(3, once(tokio::spawn(async move {})));
+        assert_eq!(3, manager.epoch_upload_handle.len());
+        assert_eq!(3, manager.remaining_handle_count.len());
+        assert_eq!(1, manager.remaining_handle_count[&1]);
+        assert_eq!(1, manager.remaining_handle_count[&2]);
+        assert_eq!(1, manager.remaining_handle_count[&3]);
 
-        assert_eq!(manager.drain_epoch_handle(1..=1).pop().unwrap().id(), id1);
+        assert_eq!(1, manager.drain_epoch_handle(1..=1).len());
+        assert_eq!(2, manager.epoch_upload_handle.len());
+        assert_eq!(2, manager.remaining_handle_count.len());
+        assert_eq!(1, manager.remaining_handle_count[&2]);
+        assert_eq!(1, manager.remaining_handle_count[&3]);
 
-        let mut join_handles = manager.drain_epoch_handle(2..=3);
-        assert_eq!(join_handles.pop().unwrap().id(), id3);
-        assert_eq!(join_handles.pop().unwrap().id(), id2);
+        assert_eq!(2, manager.drain_epoch_handle(2..=3).len());
+        assert!(manager.remaining_handle_count.is_empty());
+        assert!(manager.epoch_upload_handle.is_empty());
     }
 }
