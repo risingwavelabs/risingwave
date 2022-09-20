@@ -315,7 +315,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
     let compactor_manager = Arc::new(
-        hummock::CompactorManager::new_with_meta(env.clone(), max_heartbeat_interval.as_secs())
+        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
             .await
             .unwrap(),
     );

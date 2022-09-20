@@ -162,7 +162,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Create a `Materialize` to write the changes to storage
 
-    let mut materialize = MaterializeExecutor::new_for_test(
+    let mut materialize = MaterializeExecutor::for_test(
         Box::new(stream_source),
         memory_state_store.clone(),
         source_table_id,
@@ -210,7 +210,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         .collect_vec();
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = StorageTable::new_for_test(
+    let table = StorageTable::for_test(
         memory_state_store.clone(),
         source_table_id,
         column_descs.clone(),
@@ -398,7 +398,7 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![OrderType::Ascending],
         vec![0_usize],
     );
-    let table = StorageTable::new_for_test(
+    let table = StorageTable::for_test(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),

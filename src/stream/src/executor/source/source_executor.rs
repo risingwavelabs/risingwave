@@ -780,7 +780,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut materialize = MaterializeExecutor::new_for_test(
+        let mut materialize = MaterializeExecutor::for_test(
             Box::new(source_exec),
             mem_state_store.clone(),
             TableId::from(0x2333),

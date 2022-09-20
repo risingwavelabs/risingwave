@@ -136,14 +136,14 @@ pub fn create_streaming_agg_state(
             ) {
                 $(
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
-                        Box::new(<$state_impl>::new_with_datum(datum)?)
+                        Box::new(<$state_impl>::with_datum(datum)?)
                     }
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
                         Box::new(<$state_impl>::new())
                     }
                 )*
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new_with_datum(datum))
+                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_datum(datum))
                 }
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, None) => {
                     Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new())

@@ -230,7 +230,7 @@ mod tests {
         let builder = ExecutorBuilder::new(
             &plan_node,
             task_id,
-            ComputeNodeContext::new_for_test(),
+            ComputeNodeContext::for_test(),
             u64::MAX,
         );
         let child_plan = &PlanNode {

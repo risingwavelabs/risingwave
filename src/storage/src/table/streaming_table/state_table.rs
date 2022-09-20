@@ -28,7 +28,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
 use risingwave_common::types::VirtualNode;
-use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
@@ -44,7 +43,7 @@ use crate::row_serde::row_serde_util::{
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
 use crate::table::streaming_table::mem_table::MemTableError;
-use crate::table::{compute_vnode, DataTypes, Distribution};
+use crate::table::{compute_chunk_vnode, compute_vnode, DataTypes, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
@@ -499,16 +498,13 @@ impl<S: StateStore> StateTable<S> {
     #[allow(clippy::disallowed_methods)]
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let (chunk, op) = chunk.into_parts();
-        let hash_builder = CRC32FastBuilder {};
 
         let mut vnode_and_pks = vec![vec![]; chunk.capacity()];
 
-        chunk
-            .get_hash_values(&self.dist_key_indices, hash_builder)
-            .unwrap()
+        compute_chunk_vnode(&chunk, &self.dist_key_indices, &self.vnodes)
             .into_iter()
             .zip_eq(vnode_and_pks.iter_mut())
-            .for_each(|(h, vnode_and_pk)| vnode_and_pk.extend(h.to_vnode().to_be_bytes()));
+            .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
         let values = chunk.serialize();
 
         let chunk = chunk.reorder_columns(self.pk_indices());

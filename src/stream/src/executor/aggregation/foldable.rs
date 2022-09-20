@@ -318,7 +318,7 @@ where
         Self::default()
     }
 
-    pub fn new_with_datum(x: Datum) -> StreamExecutorResult<Self> {
+    pub fn with_datum(x: Datum) -> StreamExecutorResult<Self> {
         let mut result = None;
         if let Some(scalar) = x {
             result = Some(R::OwnedItem::try_from(scalar)?);

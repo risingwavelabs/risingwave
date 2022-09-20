@@ -92,7 +92,7 @@ pub async fn get_test_observer_manager<S: MetaStore>(
     worker_type: WorkerType,
 ) -> ObserverManager<TestNotificationClient<S>> {
     let rx = client.subscribe(&addr, worker_type).await.unwrap();
-    ObserverManager::new_with(rx, client, addr, observer_states, worker_type)
+    ObserverManager::with_subscriber(rx, client, addr, observer_states, worker_type)
 }
 
 pub async fn get_observer_manager(
