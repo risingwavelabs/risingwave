@@ -20,6 +20,7 @@ use risingwave_meta::hummock::test_utils::{add_ssts, setup_compute_env};
 use risingwave_meta::hummock::{start_local_notification_receiver, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::SstableIdManager;
 use serial_test::serial;
@@ -145,11 +146,12 @@ async fn test_local_notification_receiver() {
 
     // Test cancel compaction task
     let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-    let task = hummock_manager
+    let mut task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()
         .unwrap();
+    task.task_status = TaskStatus::ManualCanceled as i32;
     assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 1);
     env.notification_manager()
         .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(task))
