@@ -245,6 +245,7 @@ impl Condition {
     /// Keep in mind that range scans can not overlap, otherwise duplicate rows will occur.
     fn disjunctions_to_scan_ranges(
         table_desc: Rc<TableDesc>,
+        max_split_range_gap: u64,
         disjunctions: Vec<ExprImpl>,
     ) -> Result<Option<(Vec<ScanRange>, Self)>> {
         let disjunctions_result: Result<Vec<(Vec<ScanRange>, Self)>> = disjunctions
@@ -253,7 +254,7 @@ impl Condition {
                 Condition {
                     conjunctions: to_conjunctions(x),
                 }
-                .split_to_scan_ranges(table_desc.clone())
+                .split_to_scan_ranges(table_desc.clone(), max_split_range_gap)
             })
             .collect();
 
@@ -306,7 +307,11 @@ impl Condition {
     }
 
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
-    pub fn split_to_scan_ranges(self, table_desc: Rc<TableDesc>) -> Result<(Vec<ScanRange>, Self)> {
+    pub fn split_to_scan_ranges(
+        self,
+        table_desc: Rc<TableDesc>,
+        max_split_range_gap: u64,
+    ) -> Result<(Vec<ScanRange>, Self)> {
         fn false_cond() -> (Vec<ScanRange>, Condition) {
             (vec![], Condition::false_cond())
         }
@@ -314,9 +319,11 @@ impl Condition {
         // It's an OR.
         if self.conjunctions.len() == 1 {
             if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
-                if let Some((scan_ranges, other_condition)) =
-                    Self::disjunctions_to_scan_ranges(table_desc, disjunctions)?
-                {
+                if let Some((scan_ranges, other_condition)) = Self::disjunctions_to_scan_ranges(
+                    table_desc,
+                    max_split_range_gap,
+                    disjunctions,
+                )? {
                     return Ok((scan_ranges, other_condition));
                 } else {
                     return Ok((vec![], self));
@@ -505,7 +512,7 @@ impl Condition {
             if scan_range.is_full_table_scan() {
                 vec![]
             } else if table_desc.columns[order_column_ids[0]].data_type.is_int() {
-                match scan_range.split_small_range() {
+                match scan_range.split_small_range(max_split_range_gap) {
                     Some(scan_ranges) => scan_ranges,
                     None => vec![scan_range],
                 }
