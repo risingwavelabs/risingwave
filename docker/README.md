@@ -1,6 +1,6 @@
 # Docker Images
 
-RisingWave currently *only supports Linux x86_64* for building docker images.
+The docker images for x86_64 are built with AVX2 SIMD extensions, while the images for aarch64 are built with NEON SIMD extensions. These must be available on your machine. If your machine does not support these extensions, do edit the `.cargo/config.toml` file in the `risingwave` repo accordingly.
 
 To build the images, simply run:
 

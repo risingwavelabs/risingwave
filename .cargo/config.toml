@@ -1,8 +1,10 @@
+# Remove "-Ctarget-feature=+avx2" if your x86_64 target does not support AVX2 vector extensions
 [target.x86_64-unknown-linux-gnu]
 rustflags = [
     "-Clink-arg=-fuse-ld=lld", "-Clink-arg=-Wl,--no-rosegment", "-Ctarget-feature=+avx2", "--cfg", "tokio_unstable"
 ]
 
+# Remove "-Ctarget-feature=+neon" if your aarch64 target does not support NEON vector extensions
 [target.aarch64-unknown-linux-gnu]
 rustflags = [
     "-Clink-arg=-fuse-ld=lld", "-Clink-arg=-Wl,--no-rosegment", "-Ctarget-feature=+neon", "--cfg", "tokio_unstable"
