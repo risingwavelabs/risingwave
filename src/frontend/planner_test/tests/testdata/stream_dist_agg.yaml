@@ -25,38 +25,25 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [max(s.v)]
-       Stream key: []
         StreamProject { exprs: [max(s.v)] }
-         Output: [max(s.v)]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [count, max(s.v)] }
            state tables: [0, 1]
-           Output: [count, max(s.v)]
-           Stream key: []
             Chain { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
-             Output: [s.v, s.o, s.t._row_id]
-             Stream key: [s.t._row_id]
               Upstream
-               Output: [k, v, o, s, t._row_id]
-               Stream key: [t._row_id]
               BatchPlanNode
-               Output: [s.v, s.o, s.t._row_id]
-               Stream key: [s.t._row_id]
-               AppendOnly
 
     Table 0
-      columns: [count:bigint]
+      columns: [count]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [s.v:integer, s.t._row_id:bigint]
+      columns: [s.v, s.t._row_id]
       primary key: [$0 DESC, $1 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:integer]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -79,38 +66,25 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [sum(s.v)]
-       Stream key: []
         StreamProject { exprs: [sum(s.v)] }
-         Output: [sum(s.v)]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [count, sum(s.v)] }
            state tables: [0, 1]
-           Output: [count, sum(s.v)]
-           Stream key: []
             Chain { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
-             Output: [s.v, s.o, s.t._row_id]
-             Stream key: [s.t._row_id]
               Upstream
-               Output: [k, v, o, s, t._row_id]
-               Stream key: [t._row_id]
               BatchPlanNode
-               Output: [s.v, s.o, s.t._row_id]
-               Stream key: [s.t._row_id]
-               AppendOnly
 
     Table 0
-      columns: [count:bigint]
+      columns: [count]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [sum(s.v):bigint]
+      columns: [sum(s.v)]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:bigint]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -133,38 +107,25 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [count(s.v)]
-       Stream key: []
         StreamProject { exprs: [count(s.v)] }
-         Output: [count(s.v)]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [count, count(s.v)] }
            state tables: [0, 1]
-           Output: [count, count(s.v)]
-           Stream key: []
             Chain { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
-             Output: [s.v, s.o, s.t._row_id]
-             Stream key: [s.t._row_id]
               Upstream
-               Output: [k, v, o, s, t._row_id]
-               Stream key: [t._row_id]
               BatchPlanNode
-               Output: [s.v, s.o, s.t._row_id]
-               Stream key: [s.t._row_id]
-               AppendOnly
 
     Table 0
-      columns: [count:bigint]
+      columns: [count]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [count(s.v):bigint]
+      columns: [count(s.v)]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:bigint]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -188,41 +149,26 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))]
-       Stream key: []
         StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))] }
-         Output: [string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [count, string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))] }
            state tables: [0, 1]
-           Output: [count, string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))]
-           Stream key: []
             StreamProject { exprs: [s.s, ',':Varchar, s.v, s.t._row_id] }
-             Output: [s.s, ',':Varchar, s.v, s.t._row_id]
-             Stream key: [s.t._row_id]
               Chain { table: s, columns: [s.v, s.s, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
-               Output: [s.v, s.s, s.o, s.t._row_id]
-               Stream key: [s.t._row_id]
                 Upstream
-                 Output: [k, v, o, s, t._row_id]
-                 Stream key: [t._row_id]
                 BatchPlanNode
-                 Output: [s.v, s.s, s.o, s.t._row_id]
-                 Stream key: [s.t._row_id]
-                 AppendOnly
 
     Table 0
-      columns: [count:bigint]
+      columns: [count]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [s.v:integer, s.t._row_id:bigint, s.s:varchar, ',':Varchar:varchar]
+      columns: [s.v, s.t._row_id, s.s, ',':Varchar]
       primary key: [$0 ASC, $1 ASC]
       values indices: [0, 1, 2, 3]
 
     Table 4294967294
-      columns: [a1:varchar]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -248,61 +194,42 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [max(max(t.v))]
-       Stream key: []
         StreamProject { exprs: [max(max(t.v))] }
-         Output: [max(max(t.v))]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [sum(count), max(max(t.v))] }
            state tables: [0, 1]
-           Output: [sum(count), max(max(t.v))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [Vnode(t._row_id), count, max(t.v)]
-             Stream key: [Vnode(t._row_id)]
 
     Fragment 1
       StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max(t.v)] }
        state tables: [2, 3]
-       Output: [Vnode(t._row_id), count, max(t.v)]
-       Stream key: [Vnode(t._row_id)]
         StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id)] }
-         Output: [t.v, t._row_id, Vnode(t._row_id)]
-         Stream key: [t._row_id]
           Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-           Output: [t.v, t._row_id]
-           Stream key: [t._row_id]
             Upstream
-             Output: [k, v, o, s, _row_id]
-             Stream key: [_row_id]
             BatchPlanNode
-             Output: [t.v, t._row_id]
-             Stream key: [t._row_id]
-             AppendOnly
 
     Table 0
-      columns: [sum(count):bigint]
+      columns: [sum(count)]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [max(t.v):integer, Vnode(t._row_id):smallint]
+      columns: [max(t.v), Vnode(t._row_id)]
       primary key: [$0 DESC, $1 ASC]
       values indices: [0, 1]
 
     Table 2
-      columns: [Vnode(t._row_id):smallint, count:bigint]
+      columns: [Vnode(t._row_id), count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 3
-      columns: [Vnode(t._row_id):smallint, t.v:integer, t._row_id:bigint]
+      columns: [Vnode(t._row_id), t.v, t._row_id]
       primary key: [$0 ASC, $1 DESC, $2 ASC]
       values indices: [0, 1, 2]
       vnode column idx: 0
 
     Table 4294967294
-      columns: [a1:integer]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -322,49 +249,29 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [max(max(ao.v))]
-       Stream key: []
         StreamProject { exprs: [max(max(ao.v))] }
-         Output: [max(max(ao.v))]
-         Stream key: []
           StreamAppendOnlyGlobalSimpleAgg { aggs: [sum(count), max(max(ao.v))] }
            state tables: [0, 1]
-           Output: [sum(count), max(max(ao.v))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [count, max(ao.v)]
-             Stream key: []
-             AppendOnly
 
     Fragment 1
       StreamStatelessLocalSimpleAgg { aggs: [count, max(ao.v)] }
-       Output: [count, max(ao.v)]
-       Stream key: []
-       AppendOnly
         Chain { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-         Output: [ao.v, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [ao.v, ao._row_id]
-           Stream key: [ao._row_id]
-           AppendOnly
 
     Table 0
-      columns: [sum(count):bigint]
+      columns: [sum(count)]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [max(max(ao.v)):integer]
+      columns: [max(max(ao.v))]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:integer]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -389,46 +296,29 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [sum(sum(t.v))]
-       Stream key: []
         StreamProject { exprs: [sum(sum(t.v))] }
-         Output: [sum(sum(t.v))]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v))] }
            state tables: [0, 1]
-           Output: [sum(count), sum(sum(t.v))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [count, sum(t.v)]
-             Stream key: []
 
     Fragment 1
       StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v)] }
-       Output: [count, sum(t.v)]
-       Stream key: []
         Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-         Output: [t.v, t._row_id]
-         Stream key: [t._row_id]
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [t.v, t._row_id]
-           Stream key: [t._row_id]
-           AppendOnly
 
     Table 0
-      columns: [sum(count):bigint]
+      columns: [sum(count)]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [sum(sum(t.v)):bigint]
+      columns: [sum(sum(t.v))]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:bigint]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -448,49 +338,29 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [sum(sum(ao.v))]
-       Stream key: []
         StreamProject { exprs: [sum(sum(ao.v))] }
-         Output: [sum(sum(ao.v))]
-         Stream key: []
           StreamAppendOnlyGlobalSimpleAgg { aggs: [sum(count), sum(sum(ao.v))] }
            state tables: [0, 1]
-           Output: [sum(count), sum(sum(ao.v))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [count, sum(ao.v)]
-             Stream key: []
-             AppendOnly
 
     Fragment 1
       StreamStatelessLocalSimpleAgg { aggs: [count, sum(ao.v)] }
-       Output: [count, sum(ao.v)]
-       Stream key: []
-       AppendOnly
         Chain { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-         Output: [ao.v, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [ao.v, ao._row_id]
-           Stream key: [ao._row_id]
-           AppendOnly
 
     Table 0
-      columns: [sum(count):bigint]
+      columns: [sum(count)]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [sum(sum(ao.v)):bigint]
+      columns: [sum(sum(ao.v))]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:bigint]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -515,46 +385,29 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [sum(count(t.v))]
-       Stream key: []
         StreamProject { exprs: [sum(count(t.v))] }
-         Output: [sum(count(t.v))]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [sum(count), sum(count(t.v))] }
            state tables: [0, 1]
-           Output: [sum(count), sum(count(t.v))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [count, count(t.v)]
-             Stream key: []
 
     Fragment 1
       StreamStatelessLocalSimpleAgg { aggs: [count, count(t.v)] }
-       Output: [count, count(t.v)]
-       Stream key: []
         Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-         Output: [t.v, t._row_id]
-         Stream key: [t._row_id]
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [t.v, t._row_id]
-           Stream key: [t._row_id]
-           AppendOnly
 
     Table 0
-      columns: [sum(count):bigint]
+      columns: [sum(count)]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [sum(count(t.v)):bigint]
+      columns: [sum(count(t.v))]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:bigint]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -574,49 +427,29 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [sum(count(ao.v))]
-       Stream key: []
         StreamProject { exprs: [sum(count(ao.v))] }
-         Output: [sum(count(ao.v))]
-         Stream key: []
           StreamAppendOnlyGlobalSimpleAgg { aggs: [sum(count), sum(count(ao.v))] }
            state tables: [0, 1]
-           Output: [sum(count), sum(count(ao.v))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [count, count(ao.v)]
-             Stream key: []
-             AppendOnly
 
     Fragment 1
       StreamStatelessLocalSimpleAgg { aggs: [count, count(ao.v)] }
-       Output: [count, count(ao.v)]
-       Stream key: []
-       AppendOnly
         Chain { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-         Output: [ao.v, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [ao.v, ao._row_id]
-           Stream key: [ao._row_id]
-           AppendOnly
 
     Table 0
-      columns: [sum(count):bigint]
+      columns: [sum(count)]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [sum(count(ao.v)):bigint]
+      columns: [sum(count(ao.v))]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:bigint]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -641,46 +474,29 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))]
-       Stream key: []
         StreamProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-         Output: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [count, string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
            state tables: [0, 1]
-           Output: [count, string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [t.s, ',':Varchar, t.o, t._row_id]
-             Stream key: [t._row_id]
 
     Fragment 1
       StreamProject { exprs: [t.s, ',':Varchar, t.o, t._row_id] }
-       Output: [t.s, ',':Varchar, t.o, t._row_id]
-       Stream key: [t._row_id]
         Chain { table: t, columns: [t.o, t.s, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-         Output: [t.o, t.s, t._row_id]
-         Stream key: [t._row_id]
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [t.o, t.s, t._row_id]
-           Stream key: [t._row_id]
-           AppendOnly
 
     Table 0
-      columns: [count:bigint]
+      columns: [count]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [t.o:integer, t._row_id:bigint, t.s:varchar, ',':Varchar:varchar]
+      columns: [t.o, t._row_id, t.s, ',':Varchar]
       primary key: [$0 ASC, $1 ASC]
       values indices: [0, 1, 2, 3]
 
     Table 4294967294
-      columns: [a1:varchar]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -700,49 +516,29 @@
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
        materialized table: 4294967294
-       Output: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
-       Stream key: []
         StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
-         Output: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
-         Stream key: []
           StreamAppendOnlyGlobalSimpleAgg { aggs: [count, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
            state tables: [0, 1]
-           Output: [count, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [ao.s, ',':Varchar, ao.o, ao._row_id]
-             Stream key: [ao._row_id]
-             AppendOnly
 
     Fragment 1
       StreamProject { exprs: [ao.s, ',':Varchar, ao.o, ao._row_id] }
-       Output: [ao.s, ',':Varchar, ao.o, ao._row_id]
-       Stream key: [ao._row_id]
-       AppendOnly
         Chain { table: ao, columns: [ao.o, ao.s, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-         Output: [ao.o, ao.s, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [ao.o, ao.s, ao._row_id]
-           Stream key: [ao._row_id]
-           AppendOnly
 
     Table 0
-      columns: [count:bigint]
+      columns: [count]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST)):varchar]
+      columns: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:varchar]
+      columns: [a1]
       primary key: []
       values indices: [0]
 
@@ -768,71 +564,52 @@
     Fragment 0
       StreamMaterialize { columns: [a1, a2], pk_columns: [] }
        materialized table: 4294967294
-       Output: [max(max(t.v)), sum(count(t.v))]
-       Stream key: []
         StreamProject { exprs: [max(max(t.v)), sum(count(t.v))] }
-         Output: [max(max(t.v)), sum(count(t.v))]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [sum(count), max(max(t.v)), sum(count(t.v))] }
            state tables: [0, 1, 2]
-           Output: [sum(count), max(max(t.v)), sum(count(t.v))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [Vnode(t._row_id), count, max(t.v), count(t.v)]
-             Stream key: [Vnode(t._row_id)]
 
     Fragment 1
       StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max(t.v), count(t.v)] }
        state tables: [3, 4, 5]
-       Output: [Vnode(t._row_id), count, max(t.v), count(t.v)]
-       Stream key: [Vnode(t._row_id)]
         StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id)] }
-         Output: [t.v, t._row_id, Vnode(t._row_id)]
-         Stream key: [t._row_id]
           Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-           Output: [t.v, t._row_id]
-           Stream key: [t._row_id]
             Upstream
-             Output: [k, v, o, s, _row_id]
-             Stream key: [_row_id]
             BatchPlanNode
-             Output: [t.v, t._row_id]
-             Stream key: [t._row_id]
-             AppendOnly
 
     Table 0
-      columns: [sum(count):bigint]
+      columns: [sum(count)]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [max(t.v):integer, Vnode(t._row_id):smallint]
+      columns: [max(t.v), Vnode(t._row_id)]
       primary key: [$0 DESC, $1 ASC]
       values indices: [0, 1]
 
     Table 2
-      columns: [sum(count(t.v)):bigint]
+      columns: [sum(count(t.v))]
       primary key: []
       values indices: [0]
 
     Table 3
-      columns: [Vnode(t._row_id):smallint, count:bigint]
+      columns: [Vnode(t._row_id), count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4
-      columns: [Vnode(t._row_id):smallint, t.v:integer, t._row_id:bigint]
+      columns: [Vnode(t._row_id), t.v, t._row_id]
       primary key: [$0 ASC, $1 DESC, $2 ASC]
       values indices: [0, 1, 2]
       vnode column idx: 0
 
     Table 5
-      columns: [Vnode(t._row_id):smallint, count(t.v):bigint]
+      columns: [Vnode(t._row_id), count(t.v)]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:integer, a2:bigint]
+      columns: [a1, a2]
       primary key: []
       values indices: [0, 1]
 
@@ -852,54 +629,34 @@
     Fragment 0
       StreamMaterialize { columns: [a1, a2], pk_columns: [] }
        materialized table: 4294967294
-       Output: [max(max(ao.v)), sum(count(ao.v))]
-       Stream key: []
         StreamProject { exprs: [max(max(ao.v)), sum(count(ao.v))] }
-         Output: [max(max(ao.v)), sum(count(ao.v))]
-         Stream key: []
           StreamAppendOnlyGlobalSimpleAgg { aggs: [sum(count), max(max(ao.v)), sum(count(ao.v))] }
            state tables: [0, 1, 2]
-           Output: [sum(count), max(max(ao.v)), sum(count(ao.v))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [count, max(ao.v), count(ao.v)]
-             Stream key: []
-             AppendOnly
 
     Fragment 1
       StreamStatelessLocalSimpleAgg { aggs: [count, max(ao.v), count(ao.v)] }
-       Output: [count, max(ao.v), count(ao.v)]
-       Stream key: []
-       AppendOnly
         Chain { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-         Output: [ao.v, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [ao.v, ao._row_id]
-           Stream key: [ao._row_id]
-           AppendOnly
 
     Table 0
-      columns: [sum(count):bigint]
+      columns: [sum(count)]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [max(max(ao.v)):integer]
+      columns: [max(max(ao.v))]
       primary key: []
       values indices: [0]
 
     Table 2
-      columns: [sum(count(ao.v)):bigint]
+      columns: [sum(count(ao.v))]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:integer, a2:bigint]
+      columns: [a1, a2]
       primary key: []
       values indices: [0, 1]
 
@@ -924,51 +681,34 @@
     Fragment 0
       StreamMaterialize { columns: [a1, a2], pk_columns: [] }
        materialized table: 4294967294
-       Output: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))]
-       Stream key: []
         StreamProject { exprs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-         Output: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [count, count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
            state tables: [0, 1, 2]
-           Output: [count, count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [t.v, t.s, ',':Varchar, t.o, t._row_id]
-             Stream key: [t._row_id]
 
     Fragment 1
       StreamProject { exprs: [t.v, t.s, ',':Varchar, t.o, t._row_id] }
-       Output: [t.v, t.s, ',':Varchar, t.o, t._row_id]
-       Stream key: [t._row_id]
         Chain { table: t, columns: [t.v, t.o, t.s, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-         Output: [t.v, t.o, t.s, t._row_id]
-         Stream key: [t._row_id]
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [t.v, t.o, t.s, t._row_id]
-           Stream key: [t._row_id]
-           AppendOnly
 
     Table 0
-      columns: [count:bigint]
+      columns: [count]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [count(t.v):bigint]
+      columns: [count(t.v)]
       primary key: []
       values indices: [0]
 
     Table 2
-      columns: [t.o:integer, t._row_id:bigint, t.s:varchar, ',':Varchar:varchar]
+      columns: [t.o, t._row_id, t.s, ',':Varchar]
       primary key: [$0 ASC, $1 ASC]
       values indices: [0, 1, 2, 3]
 
     Table 4294967294
-      columns: [a1:bigint, a2:varchar]
+      columns: [a1, a2]
       primary key: []
       values indices: [0, 1]
 
@@ -988,54 +728,34 @@
     Fragment 0
       StreamMaterialize { columns: [a1, a2], pk_columns: [] }
        materialized table: 4294967294
-       Output: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
-       Stream key: []
         StreamProject { exprs: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
-         Output: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
-         Stream key: []
           StreamAppendOnlyGlobalSimpleAgg { aggs: [count, count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
            state tables: [0, 1, 2]
-           Output: [count, count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id]
-             Stream key: [ao._row_id]
-             AppendOnly
 
     Fragment 1
       StreamProject { exprs: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id] }
-       Output: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id]
-       Stream key: [ao._row_id]
-       AppendOnly
         Chain { table: ao, columns: [ao.v, ao.o, ao.s, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-         Output: [ao.v, ao.o, ao.s, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [ao.v, ao.o, ao.s, ao._row_id]
-           Stream key: [ao._row_id]
-           AppendOnly
 
     Table 0
-      columns: [count:bigint]
+      columns: [count]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [count(ao.v):bigint]
+      columns: [count(ao.v)]
       primary key: []
       values indices: [0]
 
     Table 2
-      columns: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST)):varchar]
+      columns: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:bigint, a2:varchar]
+      columns: [a1, a2]
       primary key: []
       values indices: [0, 1]
 
@@ -1060,51 +780,34 @@
     Fragment 0
       StreamMaterialize { columns: [a1, a2], pk_columns: [] }
        materialized table: 4294967294
-       Output: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))]
-       Stream key: []
         StreamProject { exprs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-         Output: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))]
-         Stream key: []
           StreamGlobalSimpleAgg { aggs: [count, max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
            state tables: [0, 1, 2]
-           Output: [count, max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [t.v, t.s, ',':Varchar, t.o, t._row_id]
-             Stream key: [t._row_id]
 
     Fragment 1
       StreamProject { exprs: [t.v, t.s, ',':Varchar, t.o, t._row_id] }
-       Output: [t.v, t.s, ',':Varchar, t.o, t._row_id]
-       Stream key: [t._row_id]
         Chain { table: t, columns: [t.v, t.o, t.s, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-         Output: [t.v, t.o, t.s, t._row_id]
-         Stream key: [t._row_id]
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [t.v, t.o, t.s, t._row_id]
-           Stream key: [t._row_id]
-           AppendOnly
 
     Table 0
-      columns: [count:bigint]
+      columns: [count]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [t.v:integer, t._row_id:bigint]
+      columns: [t.v, t._row_id]
       primary key: [$0 DESC, $1 ASC]
       values indices: [0, 1]
 
     Table 2
-      columns: [t.o:integer, t._row_id:bigint, t.s:varchar, ',':Varchar:varchar]
+      columns: [t.o, t._row_id, t.s, ',':Varchar]
       primary key: [$0 ASC, $1 ASC]
       values indices: [0, 1, 2, 3]
 
     Table 4294967294
-      columns: [a1:integer, a2:varchar]
+      columns: [a1, a2]
       primary key: []
       values indices: [0, 1]
 
@@ -1124,54 +827,34 @@
     Fragment 0
       StreamMaterialize { columns: [a1, a2], pk_columns: [] }
        materialized table: 4294967294
-       Output: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
-       Stream key: []
         StreamProject { exprs: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
-         Output: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
-         Stream key: []
           StreamAppendOnlyGlobalSimpleAgg { aggs: [count, max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
            state tables: [0, 1, 2]
-           Output: [count, max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
-           Stream key: []
             StreamExchange Single from 1
-             Output: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id]
-             Stream key: [ao._row_id]
-             AppendOnly
 
     Fragment 1
       StreamProject { exprs: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id] }
-       Output: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id]
-       Stream key: [ao._row_id]
-       AppendOnly
         Chain { table: ao, columns: [ao.v, ao.o, ao.s, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-         Output: [ao.v, ao.o, ao.s, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [ao.v, ao.o, ao.s, ao._row_id]
-           Stream key: [ao._row_id]
-           AppendOnly
 
     Table 0
-      columns: [count:bigint]
+      columns: [count]
       primary key: []
       values indices: [0]
 
     Table 1
-      columns: [max(ao.v):integer]
+      columns: [max(ao.v)]
       primary key: []
       values indices: [0]
 
     Table 2
-      columns: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST)):varchar]
+      columns: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
       primary key: []
       values indices: [0]
 
     Table 4294967294
-      columns: [a1:integer, a2:varchar]
+      columns: [a1, a2]
       primary key: []
       values indices: [0, 1]
 
@@ -1196,43 +879,28 @@
     Fragment 0
       StreamMaterialize { columns: [a1, t.k(hidden)], pk_columns: [t.k] }
        materialized table: 4294967294
-       Output: [max(t.v), t.k]
-       Stream key: [t.k]
         StreamProject { exprs: [max(t.v), t.k] }
-         Output: [max(t.v), t.k]
-         Stream key: [t.k]
           StreamHashAgg { group_key: [t.k], aggs: [count, max(t.v)] }
            state tables: [0, 1]
-           Output: [t.k, count, max(t.v)]
-           Stream key: [t.k]
             StreamExchange Hash([0]) from 1
-             Output: [t.k, t.v, t._row_id]
-             Stream key: [t._row_id]
 
     Fragment 1
       Chain { table: t, columns: [t.k, t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-       Output: [t.k, t.v, t._row_id]
-       Stream key: [t._row_id]
         Upstream
-         Output: [k, v, o, s, _row_id]
-         Stream key: [_row_id]
         BatchPlanNode
-         Output: [t.k, t.v, t._row_id]
-         Stream key: [t._row_id]
-         AppendOnly
 
     Table 0
-      columns: [t.k:integer, count:bigint]
+      columns: [t.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [t.k:integer, t.v:integer, t._row_id:bigint]
+      columns: [t.k, t.v, t._row_id]
       primary key: [$0 ASC, $1 DESC, $2 ASC]
       values indices: [0, 1, 2]
 
     Table 4294967294
-      columns: [a1:integer, t.k:integer]
+      columns: [a1, t.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1255,38 +923,25 @@
     Fragment 0
       StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
        materialized table: 4294967294
-       Output: [max(tk.v), tk.k]
-       Stream key: [tk.k]
         StreamProject { exprs: [max(tk.v), tk.k] }
-         Output: [max(tk.v), tk.k]
-         Stream key: [tk.k]
           StreamHashAgg { group_key: [tk.k], aggs: [count, max(tk.v)] }
            state tables: [0, 1]
-           Output: [tk.k, count, max(tk.v)]
-           Stream key: [tk.k]
             Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-             Output: [tk.k, tk.v, tk.t._row_id]
-             Stream key: [tk.t._row_id]
               Upstream
-               Output: [k, v, o, s, t._row_id]
-               Stream key: [t._row_id]
               BatchPlanNode
-               Output: [tk.k, tk.v, tk.t._row_id]
-               Stream key: [tk.t._row_id]
-               AppendOnly
 
     Table 0
-      columns: [tk.k:integer, count:bigint]
+      columns: [tk.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [tk.k:integer, tk.v:integer, tk.t._row_id:bigint]
+      columns: [tk.k, tk.v, tk.t._row_id]
       primary key: [$0 ASC, $1 DESC, $2 ASC]
       values indices: [0, 1, 2]
 
     Table 4294967294
-      columns: [a1:integer, tk.k:integer]
+      columns: [a1, tk.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1310,43 +965,28 @@
     Fragment 0
       StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
        materialized table: 4294967294
-       Output: [max(s.v), s.k]
-       Stream key: [s.k]
         StreamProject { exprs: [max(s.v), s.k] }
-         Output: [max(s.v), s.k]
-         Stream key: [s.k]
           StreamHashAgg { group_key: [s.k], aggs: [count, max(s.v)] }
            state tables: [0, 1]
-           Output: [s.k, count, max(s.v)]
-           Stream key: [s.k]
             StreamExchange Hash([0]) from 1
-             Output: [s.k, s.v, s.o, s.t._row_id]
-             Stream key: [s.t._row_id]
 
     Fragment 1
       Chain { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
-       Output: [s.k, s.v, s.o, s.t._row_id]
-       Stream key: [s.t._row_id]
         Upstream
-         Output: [k, v, o, s, t._row_id]
-         Stream key: [t._row_id]
         BatchPlanNode
-         Output: [s.k, s.v, s.o, s.t._row_id]
-         Stream key: [s.t._row_id]
-         AppendOnly
 
     Table 0
-      columns: [s.k:integer, count:bigint]
+      columns: [s.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [s.k:integer, s.v:integer, s.t._row_id:bigint]
+      columns: [s.k, s.v, s.t._row_id]
       primary key: [$0 ASC, $1 DESC, $2 ASC]
       values indices: [0, 1, 2]
 
     Table 4294967294
-      columns: [a1:integer, s.k:integer]
+      columns: [a1, s.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1365,45 +1005,28 @@
     Fragment 0
       StreamMaterialize { columns: [a1, ao.k(hidden)], pk_columns: [ao.k] }
        materialized table: 4294967294
-       Output: [max(ao.v), ao.k]
-       Stream key: [ao.k]
         StreamProject { exprs: [max(ao.v), ao.k] }
-         Output: [max(ao.v), ao.k]
-         Stream key: [ao.k]
           StreamAppendOnlyHashAgg { group_key: [ao.k], aggs: [count, max(ao.v)] }
            state tables: [0, 1]
-           Output: [ao.k, count, max(ao.v)]
-           Stream key: [ao.k]
             StreamExchange Hash([0]) from 1
-             Output: [ao.k, ao.v, ao._row_id]
-             Stream key: [ao._row_id]
-             AppendOnly
 
     Fragment 1
       Chain { table: ao, columns: [ao.k, ao.v, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-       Output: [ao.k, ao.v, ao._row_id]
-       Stream key: [ao._row_id]
-       AppendOnly
         Upstream
-         Output: [k, v, o, s, _row_id]
-         Stream key: [_row_id]
         BatchPlanNode
-         Output: [ao.k, ao.v, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
 
     Table 0
-      columns: [ao.k:integer, count:bigint]
+      columns: [ao.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [ao.k:integer, max(ao.v):integer]
+      columns: [ao.k, max(ao.v)]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:integer, ao.k:integer]
+      columns: [a1, ao.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1428,43 +1051,28 @@
     Fragment 0
       StreamMaterialize { columns: [a1, t.k(hidden)], pk_columns: [t.k] }
        materialized table: 4294967294
-       Output: [sum(t.v), t.k]
-       Stream key: [t.k]
         StreamProject { exprs: [sum(t.v), t.k] }
-         Output: [sum(t.v), t.k]
-         Stream key: [t.k]
           StreamHashAgg { group_key: [t.k], aggs: [count, sum(t.v)] }
            state tables: [0, 1]
-           Output: [t.k, count, sum(t.v)]
-           Stream key: [t.k]
             StreamExchange Hash([0]) from 1
-             Output: [t.k, t.v, t._row_id]
-             Stream key: [t._row_id]
 
     Fragment 1
       Chain { table: t, columns: [t.k, t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-       Output: [t.k, t.v, t._row_id]
-       Stream key: [t._row_id]
         Upstream
-         Output: [k, v, o, s, _row_id]
-         Stream key: [_row_id]
         BatchPlanNode
-         Output: [t.k, t.v, t._row_id]
-         Stream key: [t._row_id]
-         AppendOnly
 
     Table 0
-      columns: [t.k:integer, count:bigint]
+      columns: [t.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [t.k:integer, sum(t.v):bigint]
+      columns: [t.k, sum(t.v)]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:bigint, t.k:integer]
+      columns: [a1, t.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1487,38 +1095,25 @@
     Fragment 0
       StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
        materialized table: 4294967294
-       Output: [sum(tk.v), tk.k]
-       Stream key: [tk.k]
         StreamProject { exprs: [sum(tk.v), tk.k] }
-         Output: [sum(tk.v), tk.k]
-         Stream key: [tk.k]
           StreamHashAgg { group_key: [tk.k], aggs: [count, sum(tk.v)] }
            state tables: [0, 1]
-           Output: [tk.k, count, sum(tk.v)]
-           Stream key: [tk.k]
             Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-             Output: [tk.k, tk.v, tk.t._row_id]
-             Stream key: [tk.t._row_id]
               Upstream
-               Output: [k, v, o, s, t._row_id]
-               Stream key: [t._row_id]
               BatchPlanNode
-               Output: [tk.k, tk.v, tk.t._row_id]
-               Stream key: [tk.t._row_id]
-               AppendOnly
 
     Table 0
-      columns: [tk.k:integer, count:bigint]
+      columns: [tk.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [tk.k:integer, sum(tk.v):bigint]
+      columns: [tk.k, sum(tk.v)]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:bigint, tk.k:integer]
+      columns: [a1, tk.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1542,43 +1137,28 @@
     Fragment 0
       StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
        materialized table: 4294967294
-       Output: [sum(s.v), s.k]
-       Stream key: [s.k]
         StreamProject { exprs: [sum(s.v), s.k] }
-         Output: [sum(s.v), s.k]
-         Stream key: [s.k]
           StreamHashAgg { group_key: [s.k], aggs: [count, sum(s.v)] }
            state tables: [0, 1]
-           Output: [s.k, count, sum(s.v)]
-           Stream key: [s.k]
             StreamExchange Hash([0]) from 1
-             Output: [s.k, s.v, s.o, s.t._row_id]
-             Stream key: [s.t._row_id]
 
     Fragment 1
       Chain { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
-       Output: [s.k, s.v, s.o, s.t._row_id]
-       Stream key: [s.t._row_id]
         Upstream
-         Output: [k, v, o, s, t._row_id]
-         Stream key: [t._row_id]
         BatchPlanNode
-         Output: [s.k, s.v, s.o, s.t._row_id]
-         Stream key: [s.t._row_id]
-         AppendOnly
 
     Table 0
-      columns: [s.k:integer, count:bigint]
+      columns: [s.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [s.k:integer, sum(s.v):bigint]
+      columns: [s.k, sum(s.v)]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:bigint, s.k:integer]
+      columns: [a1, s.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1597,45 +1177,28 @@
     Fragment 0
       StreamMaterialize { columns: [a1, ao.k(hidden)], pk_columns: [ao.k] }
        materialized table: 4294967294
-       Output: [sum(ao.v), ao.k]
-       Stream key: [ao.k]
         StreamProject { exprs: [sum(ao.v), ao.k] }
-         Output: [sum(ao.v), ao.k]
-         Stream key: [ao.k]
           StreamAppendOnlyHashAgg { group_key: [ao.k], aggs: [count, sum(ao.v)] }
            state tables: [0, 1]
-           Output: [ao.k, count, sum(ao.v)]
-           Stream key: [ao.k]
             StreamExchange Hash([0]) from 1
-             Output: [ao.k, ao.v, ao._row_id]
-             Stream key: [ao._row_id]
-             AppendOnly
 
     Fragment 1
       Chain { table: ao, columns: [ao.k, ao.v, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-       Output: [ao.k, ao.v, ao._row_id]
-       Stream key: [ao._row_id]
-       AppendOnly
         Upstream
-         Output: [k, v, o, s, _row_id]
-         Stream key: [_row_id]
         BatchPlanNode
-         Output: [ao.k, ao.v, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
 
     Table 0
-      columns: [ao.k:integer, count:bigint]
+      columns: [ao.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [ao.k:integer, sum(ao.v):bigint]
+      columns: [ao.k, sum(ao.v)]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:bigint, ao.k:integer]
+      columns: [a1, ao.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1660,43 +1223,28 @@
     Fragment 0
       StreamMaterialize { columns: [a1, t.k(hidden)], pk_columns: [t.k] }
        materialized table: 4294967294
-       Output: [count(t.v), t.k]
-       Stream key: [t.k]
         StreamProject { exprs: [count(t.v), t.k] }
-         Output: [count(t.v), t.k]
-         Stream key: [t.k]
           StreamHashAgg { group_key: [t.k], aggs: [count, count(t.v)] }
            state tables: [0, 1]
-           Output: [t.k, count, count(t.v)]
-           Stream key: [t.k]
             StreamExchange Hash([0]) from 1
-             Output: [t.k, t.v, t._row_id]
-             Stream key: [t._row_id]
 
     Fragment 1
       Chain { table: t, columns: [t.k, t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-       Output: [t.k, t.v, t._row_id]
-       Stream key: [t._row_id]
         Upstream
-         Output: [k, v, o, s, _row_id]
-         Stream key: [_row_id]
         BatchPlanNode
-         Output: [t.k, t.v, t._row_id]
-         Stream key: [t._row_id]
-         AppendOnly
 
     Table 0
-      columns: [t.k:integer, count:bigint]
+      columns: [t.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [t.k:integer, count(t.v):bigint]
+      columns: [t.k, count(t.v)]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:bigint, t.k:integer]
+      columns: [a1, t.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1719,38 +1267,25 @@
     Fragment 0
       StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
        materialized table: 4294967294
-       Output: [count(tk.v), tk.k]
-       Stream key: [tk.k]
         StreamProject { exprs: [count(tk.v), tk.k] }
-         Output: [count(tk.v), tk.k]
-         Stream key: [tk.k]
           StreamHashAgg { group_key: [tk.k], aggs: [count, count(tk.v)] }
            state tables: [0, 1]
-           Output: [tk.k, count, count(tk.v)]
-           Stream key: [tk.k]
             Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-             Output: [tk.k, tk.v, tk.t._row_id]
-             Stream key: [tk.t._row_id]
               Upstream
-               Output: [k, v, o, s, t._row_id]
-               Stream key: [t._row_id]
               BatchPlanNode
-               Output: [tk.k, tk.v, tk.t._row_id]
-               Stream key: [tk.t._row_id]
-               AppendOnly
 
     Table 0
-      columns: [tk.k:integer, count:bigint]
+      columns: [tk.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [tk.k:integer, count(tk.v):bigint]
+      columns: [tk.k, count(tk.v)]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:bigint, tk.k:integer]
+      columns: [a1, tk.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1774,43 +1309,28 @@
     Fragment 0
       StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
        materialized table: 4294967294
-       Output: [count(s.v), s.k]
-       Stream key: [s.k]
         StreamProject { exprs: [count(s.v), s.k] }
-         Output: [count(s.v), s.k]
-         Stream key: [s.k]
           StreamHashAgg { group_key: [s.k], aggs: [count, count(s.v)] }
            state tables: [0, 1]
-           Output: [s.k, count, count(s.v)]
-           Stream key: [s.k]
             StreamExchange Hash([0]) from 1
-             Output: [s.k, s.v, s.o, s.t._row_id]
-             Stream key: [s.t._row_id]
 
     Fragment 1
       Chain { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
-       Output: [s.k, s.v, s.o, s.t._row_id]
-       Stream key: [s.t._row_id]
         Upstream
-         Output: [k, v, o, s, t._row_id]
-         Stream key: [t._row_id]
         BatchPlanNode
-         Output: [s.k, s.v, s.o, s.t._row_id]
-         Stream key: [s.t._row_id]
-         AppendOnly
 
     Table 0
-      columns: [s.k:integer, count:bigint]
+      columns: [s.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [s.k:integer, count(s.v):bigint]
+      columns: [s.k, count(s.v)]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:bigint, s.k:integer]
+      columns: [a1, s.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1829,45 +1349,28 @@
     Fragment 0
       StreamMaterialize { columns: [a1, ao.k(hidden)], pk_columns: [ao.k] }
        materialized table: 4294967294
-       Output: [count(ao.v), ao.k]
-       Stream key: [ao.k]
         StreamProject { exprs: [count(ao.v), ao.k] }
-         Output: [count(ao.v), ao.k]
-         Stream key: [ao.k]
           StreamAppendOnlyHashAgg { group_key: [ao.k], aggs: [count, count(ao.v)] }
            state tables: [0, 1]
-           Output: [ao.k, count, count(ao.v)]
-           Stream key: [ao.k]
             StreamExchange Hash([0]) from 1
-             Output: [ao.k, ao.v, ao._row_id]
-             Stream key: [ao._row_id]
-             AppendOnly
 
     Fragment 1
       Chain { table: ao, columns: [ao.k, ao.v, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-       Output: [ao.k, ao.v, ao._row_id]
-       Stream key: [ao._row_id]
-       AppendOnly
         Upstream
-         Output: [k, v, o, s, _row_id]
-         Stream key: [_row_id]
         BatchPlanNode
-         Output: [ao.k, ao.v, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
 
     Table 0
-      columns: [ao.k:integer, count:bigint]
+      columns: [ao.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [ao.k:integer, count(ao.v):bigint]
+      columns: [ao.k, count(ao.v)]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:bigint, ao.k:integer]
+      columns: [a1, ao.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1894,46 +1397,29 @@
     Fragment 0
       StreamMaterialize { columns: [a1, t.k(hidden)], pk_columns: [t.k] }
        materialized table: 4294967294
-       Output: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST)), t.k]
-       Stream key: [t.k]
         StreamProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST)), t.k] }
-         Output: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST)), t.k]
-         Stream key: [t.k]
           StreamHashAgg { group_key: [t.k], aggs: [count, string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
            state tables: [0, 1]
-           Output: [t.k, count, string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))]
-           Stream key: [t.k]
             StreamExchange Hash([0]) from 1
-             Output: [t.k, t.s, ',':Varchar, t.o, t._row_id]
-             Stream key: [t._row_id]
 
     Fragment 1
       StreamProject { exprs: [t.k, t.s, ',':Varchar, t.o, t._row_id] }
-       Output: [t.k, t.s, ',':Varchar, t.o, t._row_id]
-       Stream key: [t._row_id]
         Chain { table: t, columns: [t.k, t.o, t.s, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-         Output: [t.k, t.o, t.s, t._row_id]
-         Stream key: [t._row_id]
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [t.k, t.o, t.s, t._row_id]
-           Stream key: [t._row_id]
-           AppendOnly
 
     Table 0
-      columns: [t.k:integer, count:bigint]
+      columns: [t.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [t.k:integer, t.o:integer, t._row_id:bigint, t.s:varchar, ',':Varchar:varchar]
+      columns: [t.k, t.o, t._row_id, t.s, ',':Varchar]
       primary key: [$0 ASC, $1 ASC, $2 ASC]
       values indices: [0, 1, 2, 3, 4]
 
     Table 4294967294
-      columns: [a1:varchar, t.k:integer]
+      columns: [a1, t.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -1958,41 +1444,26 @@
     Fragment 0
       StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
        materialized table: 4294967294
-       Output: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST)), tk.k]
-       Stream key: [tk.k]
         StreamProject { exprs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST)), tk.k] }
-         Output: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST)), tk.k]
-         Stream key: [tk.k]
           StreamHashAgg { group_key: [tk.k], aggs: [count, string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
            state tables: [0, 1]
-           Output: [tk.k, count, string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))]
-           Stream key: [tk.k]
             StreamProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o, tk.t._row_id] }
-             Output: [tk.k, tk.s, ',':Varchar, tk.o, tk.t._row_id]
-             Stream key: [tk.t._row_id]
               Chain { table: tk, columns: [tk.k, tk.o, tk.s, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-               Output: [tk.k, tk.o, tk.s, tk.t._row_id]
-               Stream key: [tk.t._row_id]
                 Upstream
-                 Output: [k, v, o, s, t._row_id]
-                 Stream key: [t._row_id]
                 BatchPlanNode
-                 Output: [tk.k, tk.o, tk.s, tk.t._row_id]
-                 Stream key: [tk.t._row_id]
-                 AppendOnly
 
     Table 0
-      columns: [tk.k:integer, count:bigint]
+      columns: [tk.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [tk.k:integer, tk.o:integer, tk.t._row_id:bigint, tk.s:varchar, ',':Varchar:varchar]
+      columns: [tk.k, tk.o, tk.t._row_id, tk.s, ',':Varchar]
       primary key: [$0 ASC, $1 ASC, $2 ASC]
       values indices: [0, 1, 2, 3, 4]
 
     Table 4294967294
-      columns: [a1:varchar, tk.k:integer]
+      columns: [a1, tk.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -2018,46 +1489,29 @@
     Fragment 0
       StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
        materialized table: 4294967294
-       Output: [string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST)), s.k]
-       Stream key: [s.k]
         StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST)), s.k] }
-         Output: [string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST)), s.k]
-         Stream key: [s.k]
           StreamHashAgg { group_key: [s.k], aggs: [count, string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST))] }
            state tables: [0, 1]
-           Output: [s.k, count, string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST))]
-           Stream key: [s.k]
             StreamExchange Hash([0]) from 1
-             Output: [s.k, s.s, ',':Varchar, s.o, s.t._row_id]
-             Stream key: [s.t._row_id]
 
     Fragment 1
       StreamProject { exprs: [s.k, s.s, ',':Varchar, s.o, s.t._row_id] }
-       Output: [s.k, s.s, ',':Varchar, s.o, s.t._row_id]
-       Stream key: [s.t._row_id]
         Chain { table: s, columns: [s.k, s.o, s.s, s.t._row_id], pk: [s.t._row_id], distribution: Single }
-         Output: [s.k, s.o, s.s, s.t._row_id]
-         Stream key: [s.t._row_id]
           Upstream
-           Output: [k, v, o, s, t._row_id]
-           Stream key: [t._row_id]
           BatchPlanNode
-           Output: [s.k, s.o, s.s, s.t._row_id]
-           Stream key: [s.t._row_id]
-           AppendOnly
 
     Table 0
-      columns: [s.k:integer, count:bigint]
+      columns: [s.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [s.k:integer, s.o:integer, s.t._row_id:bigint, s.s:varchar, ',':Varchar:varchar]
+      columns: [s.k, s.o, s.t._row_id, s.s, ',':Varchar]
       primary key: [$0 ASC, $1 ASC, $2 ASC]
       values indices: [0, 1, 2, 3, 4]
 
     Table 4294967294
-      columns: [a1:varchar, s.k:integer]
+      columns: [a1, s.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
@@ -2077,49 +1531,29 @@
     Fragment 0
       StreamMaterialize { columns: [a1, ao.k(hidden)], pk_columns: [ao.k] }
        materialized table: 4294967294
-       Output: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST)), ao.k]
-       Stream key: [ao.k]
         StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST)), ao.k] }
-         Output: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST)), ao.k]
-         Stream key: [ao.k]
           StreamAppendOnlyHashAgg { group_key: [ao.k], aggs: [count, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
            state tables: [0, 1]
-           Output: [ao.k, count, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
-           Stream key: [ao.k]
             StreamExchange Hash([0]) from 1
-             Output: [ao.k, ao.s, ',':Varchar, ao.o, ao._row_id]
-             Stream key: [ao._row_id]
-             AppendOnly
 
     Fragment 1
       StreamProject { exprs: [ao.k, ao.s, ',':Varchar, ao.o, ao._row_id] }
-       Output: [ao.k, ao.s, ',':Varchar, ao.o, ao._row_id]
-       Stream key: [ao._row_id]
-       AppendOnly
         Chain { table: ao, columns: [ao.k, ao.o, ao.s, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
-         Output: [ao.k, ao.o, ao.s, ao._row_id]
-         Stream key: [ao._row_id]
-         AppendOnly
           Upstream
-           Output: [k, v, o, s, _row_id]
-           Stream key: [_row_id]
           BatchPlanNode
-           Output: [ao.k, ao.o, ao.s, ao._row_id]
-           Stream key: [ao._row_id]
-           AppendOnly
 
     Table 0
-      columns: [ao.k:integer, count:bigint]
+      columns: [ao.k, count]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 1
-      columns: [ao.k:integer, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST)):varchar]
+      columns: [ao.k, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))]
       primary key: [$0 ASC]
       values indices: [0, 1]
 
     Table 4294967294
-      columns: [a1:varchar, ao.k:integer]
+      columns: [a1, ao.k]
       primary key: [$1 ASC]
       values indices: [0, 1]
 
