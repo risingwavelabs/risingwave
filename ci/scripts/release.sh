@@ -22,6 +22,7 @@ echo "--- Release create"
 gh release create "${BUILDKITE_TAG}" --generate-notes -d -p
 
 echo "--- Build release asset"
+unset RUSTFLAGS # We want to use the `.cargo/config.toml` settings 
 cargo build -p risingwave_cmd_all --features static-link --profile release
 cd target/release
 chmod +x risingwave
