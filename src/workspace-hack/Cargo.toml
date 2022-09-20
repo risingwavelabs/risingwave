@@ -70,12 +70,15 @@ phf = { version = "0.11", features = ["std", "uncased"] }
 phf_shared = { version = "0.11", features = ["std", "uncased"] }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
-prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
+prost-93f6ce9d446188ac = { package = "prost", version = "0.10", features = ["prost-derive", "std"] }
+prost-a6292c17cd707f01 = { package = "prost", version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
+prost-types = { version = "0.10", features = ["std"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 rand_core = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "std"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 reqwest = { version = "0.11", features = ["__tls", "default-tls", "hyper-tls", "json", "native-tls-crate", "serde_json", "tokio-native-tls"] }
+ring = { version = "0.16", features = ["alloc", "dev_urandom_fallback", "once_cell", "std"] }
 rust_decimal = { version = "1", features = ["byteorder", "bytes", "db-tokio-postgres", "postgres", "serde", "std", "tokio-postgres"] }
 scopeguard = { version = "1", features = ["use_std"] }
 serde = { version = "1", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
@@ -86,10 +89,10 @@ strum = { version = "0.24", features = ["derive", "std", "strum_macros"] }
 tikv-jemalloc-sys = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tikv-jemallocator = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 time = { version = "0.3", features = ["alloc", "formatting", "itoa", "parsing", "std"] }
-tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
+tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
-tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
+tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "filter", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "tower", "util"] }
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_trace", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
@@ -154,12 +157,15 @@ phf_shared = { version = "0.11", features = ["std", "uncased"] }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 proc-macro2 = { version = "1", features = ["proc-macro", "span-locations"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
-prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
+prost-93f6ce9d446188ac = { package = "prost", version = "0.10", features = ["prost-derive", "std"] }
+prost-a6292c17cd707f01 = { package = "prost", version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
+prost-types = { version = "0.10", features = ["std"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 rand_core = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "std"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 reqwest = { version = "0.11", features = ["__tls", "default-tls", "hyper-tls", "json", "native-tls-crate", "serde_json", "tokio-native-tls"] }
+ring = { version = "0.16", features = ["alloc", "dev_urandom_fallback", "once_cell", "std"] }
 rust_decimal = { version = "1", features = ["byteorder", "bytes", "db-tokio-postgres", "postgres", "serde", "std", "tokio-postgres"] }
 scopeguard = { version = "1", features = ["use_std"] }
 serde = { version = "1", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
@@ -171,10 +177,10 @@ syn = { version = "1", features = ["clone-impls", "derive", "extra-traits", "ful
 tikv-jemalloc-sys = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tikv-jemallocator = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 time = { version = "0.3", features = ["alloc", "formatting", "itoa", "parsing", "std"] }
-tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
+tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
-tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
+tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "filter", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "tower", "util"] }
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_trace", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
