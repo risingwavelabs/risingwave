@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::util::compress::decompress_data;
-use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
 use smallvec::{smallvec, SmallVec};
@@ -543,11 +543,10 @@ impl Dispatcher for HashDataDispatcher {
             let num_outputs = self.outputs.len();
 
             // get hash value of every line by its key
-            let hash_builder = CRC32FastBuilder {};
+            let hash_builder = Crc32FastBuilder {};
             let vnodes = chunk
                 .data_chunk()
                 .get_hash_values(&self.keys, hash_builder)
-                .unwrap()
                 .into_iter()
                 .map(|hash| hash.to_vnode())
                 .collect_vec();
@@ -1126,7 +1125,7 @@ mod tests {
         let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
         let mut output_ops = vec![vec![]; num_outputs];
         for op in &ops {
-            let hash_builder = CRC32FastBuilder {};
+            let hash_builder = Crc32FastBuilder {};
             let mut hasher = hash_builder.build_hasher();
             let one_row = (0..dimension).map(|_| start.next().unwrap()).collect_vec();
             for key_idx in key_indices.iter() {

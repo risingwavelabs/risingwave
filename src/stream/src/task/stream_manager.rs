@@ -233,9 +233,10 @@ impl LocalStreamManager {
             .streaming_metrics
             .barrier_sync_latency
             .start_timer();
-        dispatch_state_store!(self.state_store(), store, {
-            store.seal_epoch(epoch);
-        });
+        // TODO: may remove it. `seal_epoch` will be included in sync
+        // dispatch_state_store!(self.state_store(), store, {
+        //     store.seal_epoch(epoch);
+        // });
         let res = dispatch_state_store!(self.state_store(), store, {
             match store.sync(epoch).await {
                 Ok(sync_result) => Ok((sync_result.uncommitted_ssts, sync_result.sync_succeed)),
