@@ -302,6 +302,10 @@ impl DataType {
         )
     }
 
+    pub fn is_int(&self) -> bool {
+        matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
+    }
+
     /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
     pub fn mem_cmp_eq_value_enc(&self) -> bool {
         use DataType::*;
