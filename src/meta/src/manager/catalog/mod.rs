@@ -40,7 +40,7 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
-use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamJobId, StreamingJob};
+use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, StreamingJobId};
 use crate::model::{MetadataModel, MetadataModelResult, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
@@ -166,10 +166,12 @@ where
         }
     }
 
+    /// return id of streaming jobs in the database which need to be dropped in
+    /// `StreamingJobBackgroundDeleter`.
     pub async fn drop_database(
         &self,
         database_id: DatabaseId,
-    ) -> MetaResult<(NotificationVersion, Vec<StreamJobId>)> {
+    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -281,13 +283,13 @@ where
             catalog_deleted_ids.extend(
                 valid_tables
                     .into_iter()
-                    .map(|table| StreamJobId::TableId(table.id.into())),
+                    .map(|table| StreamingJobId::TableId(table.id.into())),
             );
-            catalog_deleted_ids.extend(source_ids.into_iter().map(StreamJobId::SourceId));
+            catalog_deleted_ids.extend(source_ids.into_iter().map(StreamingJobId::SourceId));
             catalog_deleted_ids.extend(
                 sinks
                     .into_iter()
-                    .map(|sink| StreamJobId::SinkId(sink.id.into())),
+                    .map(|sink| StreamingJobId::SinkId(sink.id.into())),
             );
 
             Ok((version, catalog_deleted_ids))

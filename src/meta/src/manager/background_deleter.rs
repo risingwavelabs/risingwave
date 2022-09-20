@@ -28,21 +28,25 @@ use crate::MetaResult;
 pub type StreamingJobBackgroundDeleterRef = Arc<StreamingJobBackgroundDeleter>;
 
 #[derive(Debug)]
-// TODO(zehua): just use `TableId` instead of `StreamJobId` after we remove source manager.
-pub enum StreamJobId {
+// TODO(zehua): just use `TableId` instead of `StreamingJobId` after we remove source manager.
+pub enum StreamingJobId {
     TableId(TableId),
     SinkId(TableId),
     SourceId(SourceId),
 }
 
-pub struct StreamingJobBackgroundDeleter(mpsc::UnboundedSender<Vec<StreamJobId>>);
+/// Used to delete actor, fragment, source and so on.
+/// When we drop a streaming job in a frontend, meta will drop it from meta store and notify
+/// frontends that object is dropped. The other things in compute node or storage related to the
+/// object will be drop in `StreamingJobBackgroundDeleter` in the background thread asynchronously.
+pub struct StreamingJobBackgroundDeleter(mpsc::UnboundedSender<Vec<StreamingJobId>>);
 
 impl StreamingJobBackgroundDeleter {
     pub async fn new<S: MetaStore>(
         stream_manager: GlobalStreamManagerRef<S>,
         source_manager: SourceManagerRef<S>,
     ) -> MetaResult<(Self, JoinHandle<()>, Sender<()>)> {
-        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<StreamJobId>>();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<StreamingJobId>>();
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
 
         let join_handle = tokio::spawn(async move {
@@ -73,18 +77,18 @@ impl StreamingJobBackgroundDeleter {
         Ok((background_deleter, join_handle, shutdown_tx))
     }
 
-    pub fn delete(&self, streaming_job_ids: Vec<StreamJobId>) {
+    pub fn delete(&self, streaming_job_ids: Vec<StreamingJobId>) {
         self.0.send(streaming_job_ids).unwrap()
     }
 
     async fn handle_streaming_job_ids<S: MetaStore>(
-        ids: Vec<StreamJobId>,
+        ids: Vec<StreamingJobId>,
         stream_manager: &GlobalStreamManagerRef<S>,
         source_manager: &SourceManagerRef<S>,
     ) -> MetaResult<()> {
         let (source_ids, table_ids): (Vec<_>, Vec<_>) = ids.iter().partition_map(|id| match id {
-            StreamJobId::SourceId(id) => either::Either::Left(id),
-            StreamJobId::TableId(id) | StreamJobId::SinkId(id) => either::Either::Right(id),
+            StreamingJobId::SourceId(id) => either::Either::Left(id),
+            StreamingJobId::TableId(id) | StreamingJobId::SinkId(id) => either::Either::Right(id),
         });
 
         // TODO(zehua): add batch.

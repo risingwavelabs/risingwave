@@ -31,8 +31,8 @@ use tonic::{Request, Response, Status};
 
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
-    MetaSrvEnv, NotificationVersion, SourceId, StreamJobId, StreamingJob,
-    StreamingJobBackgroundDeleterRef, TableId,
+    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, StreamingJobBackgroundDeleterRef,
+    StreamingJobId, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -195,7 +195,7 @@ where
 
         // 2. Drop source in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamJobId::SourceId(source_id)]);
+            .delete(vec![StreamingJobId::SourceId(source_id)]);
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -237,7 +237,7 @@ where
 
         // 2. drop sink in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamJobId::SinkId(sink_id.into())]);
+            .delete(vec![StreamingJobId::SinkId(sink_id.into())]);
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -290,7 +290,7 @@ where
 
         // 2. drop mv in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamJobId::TableId(table_id.into())]);
+            .delete(vec![StreamingJobId::TableId(table_id.into())]);
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -346,7 +346,7 @@ where
 
         // 2. drop mv(index) in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamJobId::TableId(index_table_id.into())]);
+            .delete(vec![StreamingJobId::TableId(index_table_id.into())]);
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -711,8 +711,8 @@ where
         // Note: we need to drop the materialized view to unmap the source_id to fragment_ids before
         // we can drop the source.
         self.table_background_deleter.delete(vec![
-            StreamJobId::TableId(table_id.into()),
-            StreamJobId::SourceId(source_id),
+            StreamingJobId::TableId(table_id.into()),
+            StreamingJobId::SourceId(source_id),
         ]);
 
         Ok(version)
