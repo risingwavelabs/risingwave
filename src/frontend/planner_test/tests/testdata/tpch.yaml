@@ -149,12 +149,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], pk_columns: [l_returnflag, l_linestatus] }
+       materialized table: 4294967294
        Output: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32), RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32), RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32), count]
        Stream key: [lineitem.l_returnflag, lineitem.l_linestatus]
         StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32), RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32), RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32), count] }
          Output: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32), RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32), RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32), count]
          Stream key: [lineitem.l_returnflag, lineitem.l_linestatus]
           StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [count, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
+           state tables: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
            Output: [lineitem.l_returnflag, lineitem.l_linestatus, count, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count]
            Stream key: [lineitem.l_returnflag, lineitem.l_linestatus]
             StreamExchange Hash([0, 1]) from 1
@@ -178,6 +180,71 @@
              Output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate]
              Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
              AppendOnly
+
+    Table 0
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, count:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 1
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, sum(lineitem.l_quantity):numeric]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 2
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, sum(lineitem.l_extendedprice):numeric]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 3
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 4
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))):numeric]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 5
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, sum(lineitem.l_quantity):numeric]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 6
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, count(lineitem.l_quantity):bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 7
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, sum(lineitem.l_extendedprice):numeric]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 8
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, count(lineitem.l_extendedprice):bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 9
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, sum(lineitem.l_discount):numeric]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 10
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, count(lineitem.l_discount):bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 11
+      columns: [lineitem.l_returnflag:varchar, lineitem.l_linestatus:varchar, count:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 4294967294
+      columns: [l_returnflag:varchar, l_linestatus:varchar, sum_qty:numeric, sum_base_price:numeric, sum_disc_price:numeric, sum_charge:numeric, avg_qty:numeric, avg_price:numeric, avg_disc:numeric, count_order:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 - id: tpch_q2
   before:
@@ -383,12 +450,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, partsupp.ps_partkey(hidden), partsupp.ps_suppkey(hidden), supplier.s_suppkey(hidden), part.p_partkey(hidden), partsupp.ps_supplycost(hidden), min(partsupp.ps_supplycost)(hidden), nation.n_nationkey(hidden), supplier.s_nationkey(hidden), nation.n_regionkey(hidden), region.r_regionkey(hidden)], pk_columns: [partsupp.ps_partkey, partsupp.ps_suppkey, p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey], order_descs: [s_acctbal, n_name, s_name, p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey] }
+       materialized table: 4294967294
        Output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
         StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey] }
          Output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey]
          Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
           StreamTopN { order: "[supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC]", limit: 100, offset: 0 }
+           state table: 0
            Output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey, Vnode(nation.n_regionkey)]
            Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
             StreamExchange Single from 1
@@ -397,12 +466,14 @@
 
     Fragment 1
       StreamGroupTopN { order: "[supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC]", limit: 100, offset: 0, group_key: [18] }
+       state table: 1
        Output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey, Vnode(nation.n_regionkey)]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
         StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey, Vnode(nation.n_regionkey)] }
          Output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey, Vnode(nation.n_regionkey)]
          Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
           StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey] }
+           left table: 2, right table 4, left degree table: 3, right degree table: 5,
            Output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey]
            Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
             StreamExchange Hash([8]) from 2
@@ -414,6 +485,7 @@
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), supplier.s_nationkey, nation.n_nationkey] }
+       left table: 6, right table 8, left degree table: 7, right degree table: 9,
        Output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), supplier.s_nationkey, nation.n_nationkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey]
         StreamExchange Hash([4]) from 3
@@ -425,6 +497,7 @@
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey AND partsupp.ps_supplycost = min(partsupp.ps_supplycost), output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, partsupp.ps_supplycost, part.p_partkey, min(partsupp.ps_supplycost)] }
+       left table: 10, right table 12, left degree table: 11, right degree table: 13,
        Output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, partsupp.ps_supplycost, part.p_partkey, min(partsupp.ps_supplycost)]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost)]
         StreamExchange Hash([1]) from 4
@@ -439,6 +512,7 @@
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey] }
+       left table: 14, right table 16, left degree table: 15, right degree table: 17,
        Output: [partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey]
         StreamExchange Hash([0]) from 5
@@ -450,6 +524,7 @@
 
     Fragment 5
       StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, partsupp.ps_partkey] }
+       left table: 18, right table 20, left degree table: 19, right degree table: 21,
        Output: [partsupp.ps_suppkey, partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, partsupp.ps_partkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey]
         StreamExchange Hash([0]) from 6
@@ -503,6 +578,7 @@
 
     Fragment 9
       StreamHashAgg { group_key: [part.p_partkey], aggs: [count, min(partsupp.ps_supplycost)] }
+       state tables: [22, 23]
        Output: [part.p_partkey, count, min(partsupp.ps_supplycost)]
        Stream key: [part.p_partkey]
         StreamExchange NoShuffle from 10
@@ -511,6 +587,7 @@
 
     Fragment 10
       StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey] }
+       left table: 24, right table 26, left degree table: 25, right degree table: 27,
        Output: [part.p_partkey, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
        Stream key: [part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
         StreamExchange Hash([0]) from 11
@@ -525,6 +602,7 @@
        Output: [part.p_partkey]
        Stream key: [part.p_partkey]
         StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
+         state tables: [28]
          Output: [part.p_partkey, count]
          Stream key: [part.p_partkey]
           StreamExchange NoShuffle from 12
@@ -545,6 +623,7 @@
 
     Fragment 13
       StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey] }
+       left table: 29, right table 31, left degree table: 30, right degree table: 32,
        Output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey]
         StreamExchange Hash([2]) from 14
@@ -556,6 +635,7 @@
 
     Fragment 14
       StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
+       left table: 33, right table 35, left degree table: 34, right degree table: 36,
        Output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
         StreamExchange Hash([2]) from 15
@@ -567,6 +647,7 @@
 
     Fragment 15
       StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
+       left table: 37, right table 39, left degree table: 38, right degree table: 40,
        Output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
         StreamExchange Hash([1]) from 16
@@ -662,6 +743,216 @@
              Output: [region.r_regionkey, region.r_name]
              Stream key: [region.r_regionkey]
              AppendOnly
+
+    Table 0
+      columns: [supplier.s_acctbal:numeric, supplier.s_name:varchar, nation.n_name:varchar, part.p_partkey:integer, part.p_mfgr:varchar, supplier.s_address:varchar, supplier.s_phone:varchar, supplier.s_comment:varchar, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, part.p_partkey_0:integer, partsupp.ps_supplycost:numeric, min(partsupp.ps_supplycost):numeric, nation.n_nationkey:integer, supplier.s_nationkey:integer, nation.n_regionkey:integer, region.r_regionkey:integer, Vnode(nation.n_regionkey):smallint]
+      primary key: [$0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+
+    Table 1
+      columns: [supplier.s_acctbal:numeric, supplier.s_name:varchar, nation.n_name:varchar, part.p_partkey:integer, part.p_mfgr:varchar, supplier.s_address:varchar, supplier.s_phone:varchar, supplier.s_comment:varchar, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, part.p_partkey_0:integer, partsupp.ps_supplycost:numeric, min(partsupp.ps_supplycost):numeric, nation.n_nationkey:integer, supplier.s_nationkey:integer, nation.n_regionkey:integer, region.r_regionkey:integer, Vnode(nation.n_regionkey):smallint]
+      primary key: [$18 ASC, $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+
+    Table 2
+      columns: [part.p_partkey:integer, part.p_mfgr:varchar, supplier.s_name:varchar, supplier.s_address:varchar, supplier.s_phone:varchar, supplier.s_acctbal:numeric, supplier.s_comment:varchar, nation.n_name:varchar, nation.n_regionkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, part.p_partkey_0:integer, partsupp.ps_supplycost:numeric, min(partsupp.ps_supplycost):numeric, supplier.s_nationkey:integer, nation.n_nationkey:integer]
+      primary key: [$8 ASC, $9 ASC, $10 ASC, $0 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $16 ASC, $15 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+
+    Table 3
+      columns: [nation.n_regionkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, part.p_partkey:integer, supplier.s_suppkey:integer, part.p_partkey_0:integer, partsupp.ps_supplycost:numeric, min(partsupp.ps_supplycost):numeric, nation.n_nationkey:integer, supplier.s_nationkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC]
+      values indices: [10]
+
+    Table 4
+      columns: [region.r_regionkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 5
+      columns: [region.r_regionkey:integer, region.r_regionkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 6
+      columns: [part.p_partkey:integer, part.p_mfgr:varchar, supplier.s_name:varchar, supplier.s_address:varchar, supplier.s_nationkey:integer, supplier.s_phone:varchar, supplier.s_acctbal:numeric, supplier.s_comment:varchar, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, partsupp.ps_supplycost:numeric, part.p_partkey_0:integer, min(partsupp.ps_supplycost):numeric]
+      primary key: [$4 ASC, $8 ASC, $9 ASC, $0 ASC, $10 ASC, $12 ASC, $11 ASC, $13 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+
+    Table 7
+      columns: [supplier.s_nationkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, part.p_partkey:integer, supplier.s_suppkey:integer, part.p_partkey_0:integer, partsupp.ps_supplycost:numeric, min(partsupp.ps_supplycost):numeric, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC]
+      values indices: [8]
+
+    Table 8
+      columns: [nation.n_nationkey:integer, nation.n_name:varchar, nation.n_regionkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1, 2]
+
+    Table 9
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 10
+      columns: [partsupp.ps_supplycost:numeric, part.p_partkey:integer, part.p_mfgr:varchar, supplier.s_name:varchar, supplier.s_address:varchar, supplier.s_nationkey:integer, supplier.s_phone:varchar, supplier.s_acctbal:numeric, supplier.s_comment:varchar, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer]
+      primary key: [$1 ASC, $0 ASC, $9 ASC, $10 ASC, $1 ASC, $11 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+    Table 11
+      columns: [part.p_partkey:integer, partsupp.ps_supplycost:numeric, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, part.p_partkey_0:integer, supplier.s_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC]
+      values indices: [6]
+
+    Table 12
+      columns: [part.p_partkey:integer, min(partsupp.ps_supplycost):numeric]
+      primary key: [$0 ASC, $1 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 13
+      columns: [part.p_partkey:integer, min(partsupp.ps_supplycost):numeric, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 14
+      columns: [partsupp.ps_suppkey:integer, partsupp.ps_supplycost:numeric, part.p_partkey:integer, part.p_mfgr:varchar, partsupp.ps_partkey:integer]
+      primary key: [$0 ASC, $4 ASC, $0 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 15
+      columns: [partsupp.ps_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey_0:integer, part.p_partkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 16
+      columns: [supplier.s_suppkey:integer, supplier.s_name:varchar, supplier.s_address:varchar, supplier.s_nationkey:integer, supplier.s_phone:varchar, supplier.s_acctbal:numeric, supplier.s_comment:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6]
+
+    Table 17
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 18
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, partsupp.ps_supplycost:numeric]
+      primary key: [$0 ASC, $0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 19
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_partkey_0:integer, partsupp.ps_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 20
+      columns: [part.p_partkey:integer, part.p_mfgr:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 21
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 22
+      columns: [part.p_partkey:integer, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 23
+      columns: [part.p_partkey:integer, partsupp.ps_supplycost:numeric, part.p_partkey_0:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, region.r_regionkey:integer, nation.n_regionkey:integer]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+    Table 24
+      columns: [part.p_partkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 25
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 26
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_supplycost:numeric, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, nation.n_regionkey:integer, region.r_regionkey:integer]
+      primary key: [$0 ASC, $0 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $7 ASC, $6 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    Table 27
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_partkey_0:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, region.r_regionkey:integer, nation.n_regionkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC]
+      values indices: [8]
+
+    Table 28
+      columns: [part.p_partkey:integer, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 29
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_supplycost:numeric, nation.n_regionkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, supplier.s_nationkey:integer, nation.n_nationkey:integer]
+      primary key: [$2 ASC, $0 ASC, $3 ASC, $4 ASC, $6 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6]
+
+    Table 30
+      columns: [nation.n_regionkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC]
+      values indices: [6]
+
+    Table 31
+      columns: [region.r_regionkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 32
+      columns: [region.r_regionkey:integer, region.r_regionkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 33
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_supplycost:numeric, supplier.s_nationkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer]
+      primary key: [$2 ASC, $0 ASC, $3 ASC, $4 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 34
+      columns: [supplier.s_nationkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 35
+      columns: [nation.n_nationkey:integer, nation.n_regionkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 36
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 37
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, partsupp.ps_supplycost:numeric]
+      primary key: [$1 ASC, $0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 38
+      columns: [partsupp.ps_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 39
+      columns: [supplier.s_suppkey:integer, supplier.s_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 40
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [s_acctbal:numeric, s_name:varchar, n_name:varchar, p_partkey:integer, p_mfgr:varchar, s_address:varchar, s_phone:varchar, s_comment:varchar, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, part.p_partkey:integer, partsupp.ps_supplycost:numeric, min(partsupp.ps_supplycost):numeric, nation.n_nationkey:integer, supplier.s_nationkey:integer, nation.n_regionkey:integer, region.r_regionkey:integer]
+      primary key: [$0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
 
 - id: tpch_q3
   before:
@@ -761,12 +1052,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], pk_columns: [l_orderkey, o_orderdate, o_shippriority], order_descs: [revenue, o_orderdate, l_orderkey, o_shippriority] }
+       materialized table: 4294967294
        Output: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority]
        Stream key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority]
         StreamProject { exprs: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority] }
          Output: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority]
          Stream key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority]
           StreamTopN { order: "[sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))) DESC, orders.o_orderdate ASC]", limit: 10, offset: 0 }
+           state table: 0
            Output: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority)]
            Stream key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority]
             StreamExchange Single from 1
@@ -775,6 +1068,7 @@
 
     Fragment 1
       StreamGroupTopN { order: "[sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))) DESC, orders.o_orderdate ASC]", limit: 10, offset: 0, group_key: [4] }
+       state table: 1
        Output: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority)]
        Stream key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority]
         StreamProject { exprs: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority)] }
@@ -784,6 +1078,7 @@
            Output: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority]
            Stream key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority]
             StreamHashAgg { group_key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+             state tables: [2, 3]
              Output: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
              Stream key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority]
               StreamExchange Hash([0, 1, 2]) from 2
@@ -795,6 +1090,7 @@
        Output: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_linenumber]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber]
         StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderdate, orders.o_shippriority, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_linenumber] }
+         left table: 4, right table 6, left degree table: 5, right degree table: 7,
          Output: [orders.o_orderdate, orders.o_shippriority, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_linenumber]
          Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber]
           StreamExchange Hash([0]) from 3
@@ -806,6 +1102,7 @@
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [orders.o_orderkey, orders.o_orderdate, orders.o_shippriority, customer.c_custkey, orders.o_custkey] }
+       left table: 8, right table 10, left degree table: 9, right degree table: 11,
        Output: [orders.o_orderkey, orders.o_orderdate, orders.o_shippriority, customer.c_custkey, orders.o_custkey]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey]
         StreamExchange Hash([0]) from 4
@@ -865,6 +1162,71 @@
              Output: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_shipdate]
              Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
              AppendOnly
+
+    Table 0
+      columns: [lineitem.l_orderkey:bigint, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric, orders.o_orderdate:date, orders.o_shippriority:integer, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority):smallint]
+      primary key: [$1 DESC, $2 ASC, $0 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 1
+      columns: [lineitem.l_orderkey:bigint, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric, orders.o_orderdate:date, orders.o_shippriority:integer, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority):smallint]
+      primary key: [$4 ASC, $1 DESC, $2 ASC, $0 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 2
+      columns: [lineitem.l_orderkey:bigint, orders.o_orderdate:date, orders.o_shippriority:integer, count:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 3
+      columns: [lineitem.l_orderkey:bigint, orders.o_orderdate:date, orders.o_shippriority:integer, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 4
+      columns: [orders.o_orderkey:bigint, orders.o_orderdate:date, orders.o_shippriority:integer, customer.c_custkey:integer, orders.o_custkey:integer]
+      primary key: [$0 ASC, $3 ASC, $0 ASC, $4 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 5
+      columns: [orders.o_orderkey:bigint, customer.c_custkey:integer, orders.o_orderkey_0:bigint, orders.o_custkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 6
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $0 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 7
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 8
+      columns: [customer.c_custkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 9
+      columns: [customer.c_custkey:integer, customer.c_custkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 10
+      columns: [orders.o_orderkey:bigint, orders.o_custkey:integer, orders.o_orderdate:date, orders.o_shippriority:integer]
+      primary key: [$1 ASC, $0 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 11
+      columns: [orders.o_custkey:integer, orders.o_orderkey:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [l_orderkey:bigint, revenue:numeric, o_orderdate:date, o_shippriority:integer]
+      primary key: [$1 DESC, $2 ASC, $0 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3]
 
 - id: tpch_q4
   before:
@@ -937,12 +1299,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [o_orderpriority, order_count], pk_columns: [o_orderpriority] }
+       materialized table: 4294967294
        Output: [orders.o_orderpriority, count]
        Stream key: [orders.o_orderpriority]
         StreamProject { exprs: [orders.o_orderpriority, count] }
          Output: [orders.o_orderpriority, count]
          Stream key: [orders.o_orderpriority]
           StreamHashAgg { group_key: [orders.o_orderpriority], aggs: [count, count] }
+           state tables: [0, 1]
            Output: [orders.o_orderpriority, count, count]
            Stream key: [orders.o_orderpriority]
             StreamExchange Hash([0]) from 1
@@ -951,6 +1315,7 @@
 
     Fragment 1
       StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderpriority, orders.o_orderkey] }
+       left table: 2, right table 4, left degree table: 3, right degree table: 5,
        Output: [orders.o_orderpriority, orders.o_orderkey]
        Stream key: [orders.o_orderkey]
         StreamExchange Hash([0]) from 2
@@ -995,6 +1360,41 @@
              Output: [lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate]
              Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
              AppendOnly
+
+    Table 0
+      columns: [orders.o_orderpriority:varchar, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 1
+      columns: [orders.o_orderpriority:varchar, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 2
+      columns: [orders.o_orderkey:bigint, orders.o_orderpriority:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 3
+      columns: [orders.o_orderkey:bigint, orders.o_orderkey_0:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $0 ASC, $1 ASC]
+      values indices: [0, 1]
+
+    Table 5
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 4294967294
+      columns: [o_orderpriority:varchar, order_count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
 
 - id: tpch_q5
   before:
@@ -1119,12 +1519,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [n_name, revenue], pk_columns: [n_name], order_descs: [revenue, n_name] }
+       materialized table: 4294967294
        Output: [nation.n_name, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
        Stream key: [nation.n_name]
         StreamProject { exprs: [nation.n_name, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
          Output: [nation.n_name, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
          Stream key: [nation.n_name]
           StreamHashAgg { group_key: [nation.n_name], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+           state tables: [0, 1]
            Output: [nation.n_name, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
            Stream key: [nation.n_name]
             StreamExchange Hash([0]) from 1
@@ -1136,6 +1538,7 @@
        Output: [nation.n_name, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, region.r_regionkey, nation.n_regionkey]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, region.r_regionkey, nation.n_regionkey]
         StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, nation.n_regionkey, region.r_regionkey] }
+         left table: 2, right table 4, left degree table: 3, right degree table: 5,
          Output: [lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, nation.n_regionkey, region.r_regionkey]
          Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, region.r_regionkey, nation.n_regionkey]
           StreamExchange Hash([3]) from 2
@@ -1147,6 +1550,7 @@
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, nation.n_regionkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey] }
+       left table: 6, right table 8, left degree table: 7, right degree table: 9,
        Output: [lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, nation.n_regionkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey]
         StreamExchange Hash([0]) from 3
@@ -1158,6 +1562,7 @@
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey AND supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_nationkey, lineitem.l_extendedprice, lineitem.l_discount, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey] }
+       left table: 10, right table 12, left degree table: 11, right degree table: 13,
        Output: [supplier.s_nationkey, lineitem.l_extendedprice, lineitem.l_discount, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey]
         StreamExchange Hash([0, 1]) from 4
@@ -1169,6 +1574,7 @@
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: customer.c_nationkey = supplier.s_nationkey, output: [orders.o_orderkey, supplier.s_suppkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, customer.c_nationkey] }
+       left table: 14, right table 16, left degree table: 15, right degree table: 17,
        Output: [orders.o_orderkey, supplier.s_suppkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, customer.c_nationkey]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey]
         StreamExchange Hash([0]) from 5
@@ -1180,6 +1586,7 @@
 
     Fragment 5
       StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey] }
+       left table: 18, right table 20, left degree table: 19, right degree table: 21,
        Output: [customer.c_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey]
         StreamExchange Hash([0]) from 6
@@ -1273,6 +1680,121 @@
              Stream key: [region.r_regionkey]
              AppendOnly
 
+    Table 0
+      columns: [nation.n_name:varchar, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 1
+      columns: [nation.n_name:varchar, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 2
+      columns: [lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, nation.n_name:varchar, nation.n_regionkey:integer, customer.c_custkey:integer, orders.o_orderkey:bigint, orders.o_custkey:integer, supplier.s_suppkey:integer, customer.c_nationkey:integer, supplier.s_nationkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, nation.n_nationkey:integer]
+      primary key: [$3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+
+    Table 3
+      columns: [nation.n_regionkey:integer, customer.c_custkey:integer, orders.o_orderkey:bigint, orders.o_custkey:integer, supplier.s_suppkey:integer, customer.c_nationkey:integer, supplier.s_nationkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, nation.n_nationkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC]
+      values indices: [11]
+
+    Table 4
+      columns: [region.r_regionkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 5
+      columns: [region.r_regionkey:integer, region.r_regionkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 6
+      columns: [supplier.s_nationkey:integer, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, customer.c_custkey:integer, orders.o_orderkey:bigint, orders.o_custkey:integer, supplier.s_suppkey:integer, customer.c_nationkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer]
+      primary key: [$0 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $0 ASC, $8 ASC, $9 ASC, $10 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    Table 7
+      columns: [supplier.s_nationkey:integer, customer.c_custkey:integer, orders.o_orderkey:bigint, orders.o_custkey:integer, supplier.s_suppkey:integer, customer.c_nationkey:integer, supplier.s_nationkey_0:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC]
+      values indices: [10]
+
+    Table 8
+      columns: [nation.n_nationkey:integer, nation.n_name:varchar, nation.n_regionkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1, 2]
+
+    Table 9
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 10
+      columns: [orders.o_orderkey:bigint, supplier.s_suppkey:integer, supplier.s_nationkey:integer, customer.c_custkey:integer, orders.o_custkey:integer, customer.c_nationkey:integer]
+      primary key: [$0 ASC, $1 ASC, $3 ASC, $0 ASC, $4 ASC, $1 ASC, $5 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 11
+      columns: [orders.o_orderkey:bigint, supplier.s_suppkey:integer, customer.c_custkey:integer, orders.o_orderkey_0:bigint, orders.o_custkey:integer, supplier.s_suppkey_0:integer, customer.c_nationkey:integer, supplier.s_nationkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC]
+      values indices: [8]
+
+    Table 12
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $1 ASC, $0 ASC, $4 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 13
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 14
+      columns: [customer.c_nationkey:integer, orders.o_orderkey:bigint, customer.c_custkey:integer, orders.o_custkey:integer]
+      primary key: [$0 ASC, $2 ASC, $1 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 15
+      columns: [customer.c_nationkey:integer, customer.c_custkey:integer, orders.o_orderkey:bigint, orders.o_custkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 16
+      columns: [supplier.s_suppkey:integer, supplier.s_nationkey:integer]
+      primary key: [$1 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 17
+      columns: [supplier.s_nationkey:integer, supplier.s_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 18
+      columns: [customer.c_custkey:integer, customer.c_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 19
+      columns: [customer.c_custkey:integer, customer.c_custkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 20
+      columns: [orders.o_orderkey:bigint, orders.o_custkey:integer]
+      primary key: [$1 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 21
+      columns: [orders.o_custkey:integer, orders.o_orderkey:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [n_name:varchar, revenue:numeric]
+      primary key: [$1 DESC, $0 ASC]
+      values indices: [0, 1]
+
 - id: tpch_q6
   before:
   - create_tables
@@ -1315,12 +1837,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [revenue], pk_columns: [] }
+       materialized table: 4294967294
        Output: [sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))]
        Stream key: []
         StreamProject { exprs: [sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))] }
          Output: [sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))]
          Stream key: []
           StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))] }
+           state tables: [0, 1]
            Output: [sum(count), sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))]
            Stream key: []
             StreamExchange Single from 1
@@ -1347,6 +1871,21 @@
                Output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_shipdate]
                Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
                AppendOnly
+
+    Table 0
+      columns: [sum(count):bigint]
+      primary key: []
+      values indices: [0]
+
+    Table 1
+      columns: [sum(sum((lineitem.l_extendedprice * lineitem.l_discount))):numeric]
+      primary key: []
+      values indices: [0]
+
+    Table 4294967294
+      columns: [revenue:numeric]
+      primary key: []
+      values indices: [0]
 
 - id: tpch_q7
   before:
@@ -1483,12 +2022,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], pk_columns: [supp_nation, cust_nation, l_year] }
+       materialized table: 4294967294
        Output: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
        Stream key: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate)]
         StreamProject { exprs: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
          Output: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
          Stream key: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate)]
           StreamHashAgg { group_key: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate)], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+           state tables: [0, 1]
            Output: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate), count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
            Stream key: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate)]
             StreamExchange Hash([0, 1, 2]) from 1
@@ -1503,6 +2044,7 @@
          Output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, customer.c_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, orders.o_custkey, customer.c_custkey, nation.n_nationkey, nation.n_name]
          Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey]
           StreamHashJoin { type: Inner, predicate: customer.c_nationkey = nation.n_nationkey, output: all }
+           left table: 2, right table 4, left degree table: 3, right degree table: 5,
            Output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, customer.c_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, orders.o_custkey, customer.c_custkey, nation.n_nationkey, nation.n_name]
            Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey]
             StreamExchange Hash([4]) from 2
@@ -1514,6 +2056,7 @@
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: orders.o_custkey = customer.c_custkey, output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, customer.c_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, orders.o_custkey, customer.c_custkey] }
+       left table: 6, right table 8, left degree table: 7, right degree table: 9,
        Output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, customer.c_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, orders.o_custkey, customer.c_custkey]
        Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey]
         StreamExchange Hash([4]) from 3
@@ -1525,6 +2068,7 @@
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey, output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, orders.o_custkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey] }
+       left table: 10, right table 12, left degree table: 11, right degree table: 13,
        Output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, orders.o_custkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
        Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
         StreamExchange Hash([0]) from 4
@@ -1536,6 +2080,7 @@
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, supplier.s_suppkey, lineitem.l_linenumber, lineitem.l_suppkey, supplier.s_nationkey, nation.n_nationkey] }
+       left table: 14, right table 16, left degree table: 15, right degree table: 17,
        Output: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, supplier.s_suppkey, lineitem.l_linenumber, lineitem.l_suppkey, supplier.s_nationkey, nation.n_nationkey]
        Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey]
         StreamExchange Hash([0]) from 5
@@ -1547,6 +2092,7 @@
 
     Fragment 5
       StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, supplier.s_suppkey, lineitem.l_linenumber, lineitem.l_suppkey] }
+       left table: 18, right table 20, left degree table: 19, right degree table: 21,
        Output: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, supplier.s_suppkey, lineitem.l_linenumber, lineitem.l_suppkey]
        Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey]
         StreamExchange Hash([0]) from 6
@@ -1630,6 +2176,121 @@
          Output: [nation.n_nationkey, nation.n_name]
          Stream key: [nation.n_nationkey]
          AppendOnly
+
+    Table 0
+      columns: [nation.n_name:varchar, nation.n_name_0:varchar, Extract('YEAR':Varchar, lineitem.l_shipdate):numeric, count:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 1
+      columns: [nation.n_name:varchar, nation.n_name_0:varchar, Extract('YEAR':Varchar, lineitem.l_shipdate):numeric, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 2
+      columns: [lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_shipdate:date, nation.n_name:varchar, customer.c_nationkey:integer, supplier.s_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, orders.o_orderkey:bigint, orders.o_custkey:integer, customer.c_custkey:integer]
+      primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $13 ASC, $12 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+
+    Table 3
+      columns: [customer.c_nationkey:integer, supplier.s_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, orders.o_orderkey:bigint, customer.c_custkey:integer, orders.o_custkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC]
+      values indices: [10]
+
+    Table 4
+      columns: [nation.n_nationkey:integer, nation.n_name:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 5
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 6
+      columns: [lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_shipdate:date, nation.n_name:varchar, orders.o_custkey:integer, supplier.s_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, orders.o_orderkey:bigint]
+      primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+    Table 7
+      columns: [orders.o_custkey:integer, supplier.s_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, orders.o_orderkey:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC]
+      values indices: [8]
+
+    Table 8
+      columns: [customer.c_custkey:integer, customer.c_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 9
+      columns: [customer.c_custkey:integer, customer.c_custkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 10
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_shipdate:date, nation.n_name:varchar, supplier.s_suppkey:integer, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, supplier.s_nationkey:integer, nation.n_nationkey:integer]
+      primary key: [$0 ASC, $5 ASC, $0 ASC, $6 ASC, $7 ASC, $9 ASC, $8 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+    Table 11
+      columns: [lineitem.l_orderkey:bigint, supplier.s_suppkey:integer, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC]
+      values indices: [7]
+
+    Table 12
+      columns: [orders.o_orderkey:bigint, orders.o_custkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 13
+      columns: [orders.o_orderkey:bigint, orders.o_orderkey_0:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 14
+      columns: [supplier.s_nationkey:integer, lineitem.l_orderkey:bigint, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_shipdate:date, supplier.s_suppkey:integer, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer]
+      primary key: [$0 ASC, $5 ASC, $1 ASC, $6 ASC, $7 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    Table 15
+      columns: [supplier.s_nationkey:integer, supplier.s_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC]
+      values indices: [5]
+
+    Table 16
+      columns: [nation.n_nationkey:integer, nation.n_name:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 17
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 18
+      columns: [supplier.s_suppkey:integer, supplier.s_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 19
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 20
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_shipdate:date, lineitem.l_linenumber:integer]
+      primary key: [$1 ASC, $0 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 21
+      columns: [lineitem.l_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 4294967294
+      columns: [supp_nation:varchar, cust_nation:varchar, l_year:numeric, revenue:numeric]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3]
 
 - id: tpch_q8
   before:
@@ -1798,12 +2459,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [o_year, mkt_share], pk_columns: [o_year] }
+       materialized table: 4294967294
        Output: [Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit((sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)) / sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), 6:Int32)]
        Stream key: [Extract('YEAR':Varchar, orders.o_orderdate)]
         StreamProject { exprs: [Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit((sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)) / sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), 6:Int32)] }
          Output: [Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit((sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)) / sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), 6:Int32)]
          Stream key: [Extract('YEAR':Varchar, orders.o_orderdate)]
           StreamHashAgg { group_key: [Extract('YEAR':Varchar, orders.o_orderdate)], aggs: [count, sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+           state tables: [0, 1, 2]
            Output: [Extract('YEAR':Varchar, orders.o_orderdate), count, sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
            Stream key: [Extract('YEAR':Varchar, orders.o_orderdate)]
             StreamExchange Hash([0]) from 1
@@ -1815,6 +2478,7 @@
        Output: [Extract('YEAR':Varchar, orders.o_orderdate), Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, region.r_regionkey, nation.n_regionkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, region.r_regionkey, nation.n_regionkey]
         StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, nation.n_regionkey, region.r_regionkey] }
+         left table: 3, right table 5, left degree table: 4, right degree table: 6,
          Output: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, nation.n_regionkey, region.r_regionkey]
          Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, region.r_regionkey, nation.n_regionkey]
           StreamExchange Hash([4]) from 2
@@ -1826,6 +2490,7 @@
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: customer.c_nationkey = nation.n_nationkey, output: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, nation.n_regionkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, customer.c_nationkey, nation.n_nationkey] }
+       left table: 7, right table 9, left degree table: 8, right degree table: 10,
        Output: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, nation.n_regionkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, customer.c_nationkey, nation.n_nationkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey]
         StreamExchange Hash([4]) from 3
@@ -1837,6 +2502,7 @@
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: orders.o_custkey = customer.c_custkey, output: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, orders.o_custkey, customer.c_custkey] }
+       left table: 11, right table 13, left degree table: 12, right degree table: 14,
        Output: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, orders.o_custkey, customer.c_custkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey]
         StreamExchange Hash([2]) from 4
@@ -1848,6 +2514,7 @@
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey, orders.o_orderdate, nation.n_name, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, supplier.s_nationkey, nation.n_nationkey] }
+       left table: 15, right table 17, left degree table: 16, right degree table: 18,
        Output: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey, orders.o_orderdate, nation.n_name, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, supplier.s_nationkey, nation.n_nationkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey]
         StreamExchange Hash([2]) from 5
@@ -1859,6 +2526,7 @@
 
     Fragment 5
       StreamHashJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey, output: [lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, orders.o_custkey, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey] }
+       left table: 19, right table 21, left degree table: 20, right degree table: 22,
        Output: [lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, orders.o_custkey, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey]
         StreamExchange Hash([0]) from 6
@@ -1870,6 +2538,7 @@
 
     Fragment 6
       StreamHashJoin { type: Inner, predicate: lineitem.l_suppkey = supplier.s_suppkey, output: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, lineitem.l_suppkey, supplier.s_suppkey] }
+       left table: 23, right table 25, left degree table: 24, right degree table: 26,
        Output: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, lineitem.l_suppkey, supplier.s_suppkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey]
         StreamExchange Hash([1]) from 7
@@ -1881,6 +2550,7 @@
 
     Fragment 7
       StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey] }
+       left table: 27, right table 29, left degree table: 28, right degree table: 30,
        Output: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
         StreamExchange Hash([1]) from 8
@@ -2000,6 +2670,166 @@
              Output: [region.r_regionkey, region.r_name]
              Stream key: [region.r_regionkey]
              AppendOnly
+
+    Table 0
+      columns: [Extract('YEAR':Varchar, orders.o_orderdate):numeric, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 1
+      columns: [Extract('YEAR':Varchar, orders.o_orderdate):numeric, sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)):numeric]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 2
+      columns: [Extract('YEAR':Varchar, orders.o_orderdate):numeric, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 3
+      columns: [lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, orders.o_orderdate:date, nation.n_name:varchar, nation.n_regionkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, orders.o_orderkey:bigint, nation.n_nationkey:integer, supplier.s_nationkey:integer, customer.c_custkey:integer, orders.o_custkey:integer, customer.c_nationkey:integer, nation.n_nationkey_0:integer]
+      primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+
+    Table 4
+      columns: [nation.n_regionkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, orders.o_orderkey:bigint, nation.n_nationkey:integer, supplier.s_nationkey:integer, customer.c_custkey:integer, orders.o_custkey:integer, nation.n_nationkey_0:integer, customer.c_nationkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC]
+      values indices: [14]
+
+    Table 5
+      columns: [region.r_regionkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 6
+      columns: [region.r_regionkey:integer, region.r_regionkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 7
+      columns: [lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, orders.o_orderdate:date, nation.n_name:varchar, customer.c_nationkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, orders.o_orderkey:bigint, nation.n_nationkey:integer, supplier.s_nationkey:integer, orders.o_custkey:integer, customer.c_custkey:integer]
+      primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $15 ASC, $14 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+    Table 8
+      columns: [customer.c_nationkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, orders.o_orderkey:bigint, nation.n_nationkey:integer, supplier.s_nationkey:integer, customer.c_custkey:integer, orders.o_custkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC]
+      values indices: [12]
+
+    Table 9
+      columns: [nation.n_nationkey:integer, nation.n_regionkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 10
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 11
+      columns: [lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, orders.o_custkey:integer, orders.o_orderdate:date, nation.n_name:varchar, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, orders.o_orderkey:bigint, supplier.s_nationkey:integer, nation.n_nationkey:integer]
+      primary key: [$2 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $13 ASC, $12 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+
+    Table 12
+      columns: [orders.o_custkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, orders.o_orderkey:bigint, nation.n_nationkey:integer, supplier.s_nationkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC]
+      values indices: [10]
+
+    Table 13
+      columns: [customer.c_custkey:integer, customer.c_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 14
+      columns: [customer.c_custkey:integer, customer.c_custkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 15
+      columns: [lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, supplier.s_nationkey:integer, orders.o_custkey:integer, orders.o_orderdate:date, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, orders.o_orderkey:bigint]
+      primary key: [$2 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+    Table 16
+      columns: [supplier.s_nationkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, orders.o_orderkey:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC]
+      values indices: [8]
+
+    Table 17
+      columns: [nation.n_nationkey:integer, nation.n_name:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 18
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 19
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, supplier.s_nationkey:integer, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, lineitem.l_suppkey:integer, supplier.s_suppkey:integer]
+      primary key: [$0 ASC, $0 ASC, $4 ASC, $5 ASC, $6 ASC, $8 ASC, $7 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+    Table 20
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC]
+      values indices: [7]
+
+    Table 21
+      columns: [orders.o_orderkey:bigint, orders.o_custkey:integer, orders.o_orderdate:date]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1, 2]
+
+    Table 22
+      columns: [orders.o_orderkey:bigint, orders.o_orderkey_0:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 23
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_linenumber:integer, lineitem.l_partkey:integer, part.p_partkey:integer]
+      primary key: [$1 ASC, $0 ASC, $4 ASC, $6 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6]
+
+    Table 24
+      columns: [lineitem.l_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC]
+      values indices: [5]
+
+    Table 25
+      columns: [supplier.s_suppkey:integer, supplier.s_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 26
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 27
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_partkey:integer, lineitem.l_suppkey:integer, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_linenumber:integer]
+      primary key: [$1 ASC, $0 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 28
+      columns: [lineitem.l_partkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 29
+      columns: [part.p_partkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 30
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [o_year:numeric, mkt_share:numeric]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
 
 - id: tpch_q9
   before:
@@ -2131,12 +2961,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [nation, o_year, sum_profit], pk_columns: [nation, o_year] }
+       materialized table: 4294967294
        Output: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit(sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))), 2:Int32)]
        Stream key: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate)]
         StreamProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit(sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))), 2:Int32)] }
          Output: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit(sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))), 2:Int32)]
          Stream key: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate)]
           StreamHashAgg { group_key: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate)], aggs: [count, sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))] }
+           state tables: [0, 1]
            Output: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), count, sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))]
            Stream key: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate)]
             StreamExchange Hash([0, 1]) from 1
@@ -2148,6 +2980,7 @@
        Output: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)), lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey]
         StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, partsupp.ps_supplycost, orders.o_orderdate, nation.n_name, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey, supplier.s_nationkey, nation.n_nationkey] }
+         left table: 2, right table 4, left degree table: 3, right degree table: 5,
          Output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, partsupp.ps_supplycost, orders.o_orderdate, nation.n_name, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey, supplier.s_nationkey, nation.n_nationkey]
          Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey]
           StreamExchange Hash([3]) from 2
@@ -2159,6 +2992,7 @@
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey] }
+       left table: 6, right table 8, left degree table: 7, right degree table: 9,
        Output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey]
         StreamExchange Hash([0]) from 3
@@ -2170,6 +3004,7 @@
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: lineitem.l_suppkey = partsupp.ps_suppkey AND lineitem.l_partkey = partsupp.ps_partkey, output: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey] }
+       left table: 10, right table 12, left degree table: 11, right degree table: 13,
        Output: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamExchange NoShuffle from 4
@@ -2181,6 +3016,7 @@
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: lineitem.l_suppkey = supplier.s_suppkey, output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, part.p_partkey, supplier.s_suppkey] }
+       left table: 14, right table 16, left degree table: 15, right degree table: 17,
        Output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, part.p_partkey, supplier.s_suppkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey]
         StreamExchange Hash([2]) from 5
@@ -2192,6 +3028,7 @@
 
     Fragment 5
       StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: all }
+       left table: 18, right table 20, left degree table: 19, right degree table: 21,
        Output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, part.p_partkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
         StreamExchange Hash([1]) from 6
@@ -2278,6 +3115,121 @@
          Output: [nation.n_nationkey, nation.n_name]
          Stream key: [nation.n_nationkey]
          AppendOnly
+
+    Table 0
+      columns: [nation.n_name:varchar, Extract('YEAR':Varchar, orders.o_orderdate):numeric, count:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 1
+      columns: [nation.n_name:varchar, Extract('YEAR':Varchar, orders.o_orderdate):numeric, sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))):numeric]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 2
+      columns: [lineitem.l_quantity:numeric, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, supplier.s_nationkey:integer, partsupp.ps_supplycost:numeric, orders.o_orderdate:date, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, orders.o_orderkey:bigint]
+      primary key: [$3 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+
+    Table 3
+      columns: [supplier.s_nationkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, orders.o_orderkey:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC]
+      values indices: [10]
+
+    Table 4
+      columns: [nation.n_nationkey:integer, nation.n_name:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 5
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 6
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_quantity:numeric, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, supplier.s_nationkey:integer, partsupp.ps_supplycost:numeric, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer]
+      primary key: [$0 ASC, $0 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+    Table 7
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC]
+      values indices: [9]
+
+    Table 8
+      columns: [orders.o_orderkey:bigint, orders.o_orderdate:date]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 9
+      columns: [orders.o_orderkey:bigint, orders.o_orderkey_0:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 10
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_partkey:integer, lineitem.l_suppkey:integer, lineitem.l_quantity:numeric, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, supplier.s_nationkey:integer, lineitem.l_linenumber:integer, part.p_partkey:integer, supplier.s_suppkey:integer]
+      primary key: [$2 ASC, $1 ASC, $0 ASC, $7 ASC, $8 ASC, $1 ASC, $9 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+    Table 11
+      columns: [lineitem.l_suppkey:integer, lineitem.l_partkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey_0:integer, supplier.s_suppkey:integer, lineitem.l_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC]
+      values indices: [8]
+
+    Table 12
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, partsupp.ps_supplycost:numeric]
+      primary key: [$1 ASC, $0 ASC, $0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 13
+      columns: [partsupp.ps_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_partkey_0:integer, partsupp.ps_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 14
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_partkey:integer, lineitem.l_suppkey:integer, lineitem.l_quantity:numeric, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_linenumber:integer, part.p_partkey:integer]
+      primary key: [$2 ASC, $0 ASC, $6 ASC, $7 ASC, $1 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    Table 15
+      columns: [lineitem.l_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey:integer, lineitem.l_partkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC]
+      values indices: [5]
+
+    Table 16
+      columns: [supplier.s_suppkey:integer, supplier.s_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 17
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 18
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_partkey:integer, lineitem.l_suppkey:integer, lineitem.l_quantity:numeric, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_linenumber:integer]
+      primary key: [$1 ASC, $0 ASC, $6 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6]
+
+    Table 19
+      columns: [lineitem.l_partkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 20
+      columns: [part.p_partkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 21
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [nation:varchar, o_year:numeric, sum_profit:numeric]
+      primary key: [$0 ASC, $1 DESC]
+      values indices: [0, 1, 2]
 
 - id: tpch_q10
   before:
@@ -2396,12 +3348,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], pk_columns: [c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], order_descs: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment] }
+       materialized table: 4294967294
        Output: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment]
        Stream key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment]
         StreamProject { exprs: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment] }
          Output: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment]
          Stream key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment]
           StreamTopN { order: "[sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))) DESC]", limit: 20, offset: 0 }
+           state table: 0
            Output: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment)]
            Stream key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment]
             StreamExchange Single from 1
@@ -2410,6 +3364,7 @@
 
     Fragment 1
       StreamGroupTopN { order: "[sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))) DESC]", limit: 20, offset: 0, group_key: [8] }
+       state table: 1
        Output: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment)]
        Stream key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment]
         StreamProject { exprs: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment)] }
@@ -2419,6 +3374,7 @@
            Output: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment]
            Stream key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment]
             StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment], aggs: [count, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)))] }
+             state tables: [2, 3]
              Output: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, count, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)))]
              Stream key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment]
               StreamExchange Hash([0, 1, 2, 3, 4, 5, 6]) from 2
@@ -2430,6 +3386,7 @@
        Output: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, (lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)), orders.o_orderkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber]
         StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, orders.o_orderkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+         left table: 4, right table 6, left degree table: 5, right degree table: 7,
          Output: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, orders.o_orderkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber]
          Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber]
           StreamExchange Hash([6]) from 3
@@ -2441,6 +3398,7 @@
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: customer.c_nationkey = nation.n_nationkey, output: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, orders.o_orderkey, nation.n_name, orders.o_custkey, customer.c_nationkey, nation.n_nationkey] }
+       left table: 8, right table 10, left degree table: 9, right degree table: 11,
        Output: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, orders.o_orderkey, nation.n_name, orders.o_custkey, customer.c_nationkey, nation.n_nationkey]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, nation.n_nationkey, customer.c_nationkey]
         StreamExchange Hash([3]) from 4
@@ -2452,6 +3410,7 @@
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: all }
+       left table: 12, right table 14, left degree table: 13, right degree table: 15,
        Output: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment, orders.o_orderkey, orders.o_custkey]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey]
         StreamExchange Hash([0]) from 5
@@ -2520,6 +3479,91 @@
              Output: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_returnflag]
              Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
              AppendOnly
+
+    Table 0
+      columns: [customer.c_custkey:integer, customer.c_name:varchar, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))):numeric, customer.c_acctbal:numeric, nation.n_name:varchar, customer.c_address:varchar, customer.c_phone:varchar, customer.c_comment:varchar, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment):smallint]
+      primary key: [$2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+    Table 1
+      columns: [customer.c_custkey:integer, customer.c_name:varchar, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))):numeric, customer.c_acctbal:numeric, nation.n_name:varchar, customer.c_address:varchar, customer.c_phone:varchar, customer.c_comment:varchar, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment):smallint]
+      primary key: [$8 ASC, $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+    Table 2
+      columns: [customer.c_custkey:integer, customer.c_name:varchar, customer.c_acctbal:numeric, customer.c_phone:varchar, nation.n_name:varchar, customer.c_address:varchar, customer.c_comment:varchar, count:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    Table 3
+      columns: [customer.c_custkey:integer, customer.c_name:varchar, customer.c_acctbal:numeric, customer.c_phone:varchar, nation.n_name:varchar, customer.c_address:varchar, customer.c_comment:varchar, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))):numeric]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    Table 4
+      columns: [customer.c_custkey:integer, customer.c_name:varchar, customer.c_address:varchar, customer.c_phone:varchar, customer.c_acctbal:numeric, customer.c_comment:varchar, orders.o_orderkey:bigint, nation.n_name:varchar, orders.o_custkey:integer, customer.c_nationkey:integer, nation.n_nationkey:integer]
+      primary key: [$6 ASC, $0 ASC, $6 ASC, $8 ASC, $10 ASC, $9 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    Table 5
+      columns: [orders.o_orderkey:bigint, customer.c_custkey:integer, orders.o_orderkey_0:bigint, orders.o_custkey:integer, nation.n_nationkey:integer, customer.c_nationkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC]
+      values indices: [6]
+
+    Table 6
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $0 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 7
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 8
+      columns: [customer.c_custkey:integer, customer.c_name:varchar, customer.c_address:varchar, customer.c_nationkey:integer, customer.c_phone:varchar, customer.c_acctbal:numeric, customer.c_comment:varchar, orders.o_orderkey:bigint, orders.o_custkey:integer]
+      primary key: [$3 ASC, $0 ASC, $7 ASC, $8 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+    Table 9
+      columns: [customer.c_nationkey:integer, customer.c_custkey:integer, orders.o_orderkey:bigint, orders.o_custkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 10
+      columns: [nation.n_nationkey:integer, nation.n_name:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 11
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 12
+      columns: [customer.c_custkey:integer, customer.c_name:varchar, customer.c_address:varchar, customer.c_nationkey:integer, customer.c_phone:varchar, customer.c_acctbal:numeric, customer.c_comment:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6]
+
+    Table 13
+      columns: [customer.c_custkey:integer, customer.c_custkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 14
+      columns: [orders.o_orderkey:bigint, orders.o_custkey:integer]
+      primary key: [$1 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 15
+      columns: [orders.o_custkey:integer, orders.o_orderkey:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [c_custkey:integer, c_name:varchar, revenue:numeric, c_acctbal:numeric, n_name:varchar, c_address:varchar, c_phone:varchar, c_comment:varchar]
+      primary key: [$2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7]
 
 - id: tpch_q11
   before:
@@ -2664,12 +3708,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey] }
+       materialized table: 4294967294
        Output: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))]
        Stream key: [partsupp.ps_partkey]
         StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
          Output: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))]
          Stream key: [partsupp.ps_partkey]
           StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)) }
+           left table: 0, right table 1
            Output: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))]
            Stream key: [partsupp.ps_partkey]
             StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
@@ -2684,6 +3730,7 @@
 
     Fragment 1
       StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
+       state tables: [2, 3, 4]
        Output: [partsupp.ps_partkey, count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))]
        Stream key: [partsupp.ps_partkey]
         StreamExchange Hash([0]) from 2
@@ -2695,6 +3742,7 @@
        Output: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty), partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
         StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
+         left table: 5, right table 7, left degree table: 6, right degree table: 8,
          Output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey]
          Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
           StreamExchange Hash([3]) from 3
@@ -2706,6 +3754,7 @@
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
+       left table: 9, right table 11, left degree table: 10, right degree table: 12,
        Output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
         StreamExchange Hash([1]) from 4
@@ -2762,6 +3811,7 @@
        Output: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)]
        Stream key: []
         StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))] }
+         state tables: [13, 14]
          Output: [sum(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))]
          Stream key: []
           StreamExchange Single from 8
@@ -2776,6 +3826,7 @@
          Output: [(partsupp.ps_supplycost * partsupp.ps_availqty), partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
          Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
           StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
+           left table: 15, right table 17, left degree table: 16, right degree table: 18,
            Output: [partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey]
            Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
             StreamExchange Hash([2]) from 9
@@ -2787,6 +3838,7 @@
 
     Fragment 9
       StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey] }
+       left table: 19, right table 21, left degree table: 20, right degree table: 22,
        Output: [partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey]
         StreamExchange Hash([0]) from 10
@@ -2837,6 +3889,126 @@
              Output: [nation.n_nationkey, nation.n_name]
              Stream key: [nation.n_nationkey]
              AppendOnly
+
+    Table 0
+      columns: [partsupp.ps_partkey:integer, sum((partsupp.ps_supplycost * partsupp.ps_availqty)):numeric, sum((partsupp.ps_supplycost * partsupp.ps_availqty))_0:numeric]
+      primary key: [$2 ASC, $0 ASC]
+      values indices: [0, 1, 2]
+
+    Table 1
+      columns: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal):numeric]
+      primary key: []
+      values indices: [0]
+
+    Table 2
+      columns: [partsupp.ps_partkey:integer, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 3
+      columns: [partsupp.ps_partkey:integer, sum((partsupp.ps_supplycost * partsupp.ps_availqty)):numeric]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 4
+      columns: [partsupp.ps_partkey:integer, sum((partsupp.ps_supplycost * partsupp.ps_availqty)):numeric]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 5
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_availqty:integer, partsupp.ps_supplycost:numeric, supplier.s_nationkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer]
+      primary key: [$3 ASC, $0 ASC, $4 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 6
+      columns: [supplier.s_nationkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 7
+      columns: [nation.n_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 8
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 9
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, partsupp.ps_availqty:integer, partsupp.ps_supplycost:numeric]
+      primary key: [$1 ASC, $0 ASC, $1 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 10
+      columns: [partsupp.ps_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 11
+      columns: [supplier.s_suppkey:integer, supplier.s_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 12
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 13
+      columns: [sum(count):bigint]
+      primary key: []
+      values indices: [0]
+
+    Table 14
+      columns: [sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))):numeric]
+      primary key: []
+      values indices: [0]
+
+    Table 15
+      columns: [partsupp.ps_availqty:integer, partsupp.ps_supplycost:numeric, supplier.s_nationkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer]
+      primary key: [$2 ASC, $3 ASC, $4 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 16
+      columns: [supplier.s_nationkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, supplier.s_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 17
+      columns: [nation.n_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 18
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 19
+      columns: [partsupp.ps_suppkey:integer, partsupp.ps_availqty:integer, partsupp.ps_supplycost:numeric, partsupp.ps_partkey:integer]
+      primary key: [$0 ASC, $3 ASC, $0 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 20
+      columns: [partsupp.ps_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 21
+      columns: [supplier.s_suppkey:integer, supplier.s_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 22
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [ps_partkey:integer, value:numeric]
+      primary key: [$1 DESC, $0 ASC]
+      values indices: [0, 1]
 
 - id: tpch_q12
   before:
@@ -2913,12 +4085,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [l_shipmode, high_line_count, low_line_count], pk_columns: [l_shipmode] }
+       materialized table: 4294967294
        Output: [lineitem.l_shipmode, sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32)), sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32))]
        Stream key: [lineitem.l_shipmode]
         StreamProject { exprs: [lineitem.l_shipmode, sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32)), sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32))] }
          Output: [lineitem.l_shipmode, sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32)), sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32))]
          Stream key: [lineitem.l_shipmode]
           StreamHashAgg { group_key: [lineitem.l_shipmode], aggs: [count, sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32)), sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32))] }
+           state tables: [0, 1, 2]
            Output: [lineitem.l_shipmode, count, sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32)), sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32))]
            Stream key: [lineitem.l_shipmode]
             StreamExchange Hash([0]) from 1
@@ -2930,6 +4104,7 @@
        Output: [lineitem.l_shipmode, Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32), orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber]
        Stream key: [orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber]
         StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderpriority, lineitem.l_shipmode, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+         left table: 3, right table 5, left degree table: 4, right degree table: 6,
          Output: [orders.o_orderpriority, lineitem.l_shipmode, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber]
          Stream key: [orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber]
           StreamExchange Hash([0]) from 2
@@ -2968,6 +4143,46 @@
              Output: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate]
              Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
              AppendOnly
+
+    Table 0
+      columns: [lineitem.l_shipmode:varchar, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 1
+      columns: [lineitem.l_shipmode:varchar, sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32)):bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 2
+      columns: [lineitem.l_shipmode:varchar, sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32)):bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 3
+      columns: [orders.o_orderkey:bigint, orders.o_orderpriority:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 4
+      columns: [orders.o_orderkey:bigint, orders.o_orderkey_0:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 5
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_shipmode:varchar, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $0 ASC, $2 ASC]
+      values indices: [0, 1, 2]
+
+    Table 6
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 4294967294
+      columns: [l_shipmode:varchar, high_line_count:bigint, low_line_count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1, 2]
 
 - id: tpch_q13
   before:
@@ -3041,12 +4256,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [c_count, custdist], pk_columns: [c_count], order_descs: [custdist, c_count] }
+       materialized table: 4294967294
        Output: [count(orders.o_orderkey), count]
        Stream key: [count(orders.o_orderkey)]
         StreamProject { exprs: [count(orders.o_orderkey), count] }
          Output: [count(orders.o_orderkey), count]
          Stream key: [count(orders.o_orderkey)]
           StreamHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count, count] }
+           state tables: [0, 1]
            Output: [count(orders.o_orderkey), count, count]
            Stream key: [count(orders.o_orderkey)]
             StreamExchange Hash([0]) from 1
@@ -3058,6 +4275,7 @@
        Output: [count(orders.o_orderkey), customer.c_custkey]
        Stream key: [customer.c_custkey]
         StreamHashAgg { group_key: [customer.c_custkey], aggs: [count, count(orders.o_orderkey)] }
+         state tables: [2, 3]
          Output: [customer.c_custkey, count, count(orders.o_orderkey)]
          Stream key: [customer.c_custkey]
           StreamExchange NoShuffle from 2
@@ -3066,6 +4284,7 @@
 
     Fragment 2
       StreamHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: all }
+       left table: 4, right table 6, left degree table: 5, right degree table: 7,
        Output: [customer.c_custkey, orders.o_orderkey, orders.o_custkey]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey]
         StreamExchange Hash([0]) from 3
@@ -3104,6 +4323,51 @@
              Output: [orders.o_orderkey, orders.o_custkey, orders.o_comment]
              Stream key: [orders.o_orderkey]
              AppendOnly
+
+    Table 0
+      columns: [count(orders.o_orderkey):bigint, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 1
+      columns: [count(orders.o_orderkey):bigint, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 2
+      columns: [customer.c_custkey:integer, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 3
+      columns: [customer.c_custkey:integer, count(orders.o_orderkey):bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 4
+      columns: [customer.c_custkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 5
+      columns: [customer.c_custkey:integer, customer.c_custkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 6
+      columns: [orders.o_orderkey:bigint, orders.o_custkey:integer]
+      primary key: [$1 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 7
+      columns: [orders.o_custkey:integer, orders.o_orderkey:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [c_count:bigint, custdist:bigint]
+      primary key: [$1 DESC, $0 DESC]
+      values indices: [0, 1]
 
 - id: tpch_q14
   before:
@@ -3167,12 +4431,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [promo_revenue], pk_columns: [] }
+       materialized table: 4294967294
        Output: [((100.00:Decimal * sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)))) / sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
        Stream key: []
         StreamProject { exprs: [((100.00:Decimal * sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)))) / sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
          Output: [((100.00:Decimal * sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)))) / sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
          Stream key: []
           StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
+           state tables: [0, 1, 2]
            Output: [sum(count), sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))]
            Stream key: []
             StreamExchange Single from 1
@@ -3187,6 +4453,7 @@
          Output: [Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
          Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
           StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_extendedprice, lineitem.l_discount, part.p_type, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey] }
+           left table: 3, right table 5, left degree table: 4, right degree table: 6,
            Output: [lineitem.l_extendedprice, lineitem.l_discount, part.p_type, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey]
            Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
             StreamExchange Hash([0]) from 2
@@ -3225,6 +4492,46 @@
          Output: [part.p_partkey, part.p_type]
          Stream key: [part.p_partkey]
          AppendOnly
+
+    Table 0
+      columns: [sum(count):bigint]
+      primary key: []
+      values indices: [0]
+
+    Table 1
+      columns: [sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))):numeric]
+      primary key: []
+      values indices: [0]
+
+    Table 2
+      columns: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))):numeric]
+      primary key: []
+      values indices: [0]
+
+    Table 3
+      columns: [lineitem.l_partkey:integer, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $3 ASC, $4 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 4
+      columns: [lineitem.l_partkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 5
+      columns: [part.p_partkey:integer, part.p_type:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 6
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [promo_revenue:numeric]
+      primary key: []
+      values indices: [0]
 
 - id: tpch_q15
   before:
@@ -3343,9 +4650,11 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey(hidden), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))(hidden)], pk_columns: [s_suppkey, lineitem.l_suppkey, total_revenue, max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
+       materialized table: 4294967294
        Output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey, max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
        Stream key: [supplier.s_suppkey, lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
         StreamHashJoin { type: Inner, predicate: sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))) = max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))), output: all }
+         left table: 0, right table 2, left degree table: 1, right degree table: 3,
          Output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey, max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
          Stream key: [supplier.s_suppkey, lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
           StreamExchange Hash([4]) from 1
@@ -3357,6 +4666,7 @@
 
     Fragment 1
       StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey] }
+       left table: 4, right table 6, left degree table: 5, right degree table: 7,
        Output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey]
        Stream key: [supplier.s_suppkey, lineitem.l_suppkey]
         StreamExchange Hash([0]) from 2
@@ -3383,6 +4693,7 @@
 
     Fragment 3
       StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+       state tables: [8, 9]
        Output: [lineitem.l_suppkey, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
        Stream key: [lineitem.l_suppkey]
         StreamExchange Hash([0]) from 4
@@ -3412,6 +4723,7 @@
        Output: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
        Stream key: []
         StreamGlobalSimpleAgg { aggs: [sum(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
+         state tables: [10, 11]
          Output: [sum(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))]
          Stream key: []
           StreamExchange Single from 6
@@ -3420,6 +4732,7 @@
 
     Fragment 6
       StreamHashAgg { group_key: [Vnode(lineitem.l_suppkey)], aggs: [count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
+       state tables: [12, 13]
        Output: [Vnode(lineitem.l_suppkey), count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))]
        Stream key: [Vnode(lineitem.l_suppkey)]
         StreamProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey, Vnode(lineitem.l_suppkey)] }
@@ -3434,6 +4747,7 @@
 
     Fragment 7
       StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+       state tables: [14, 15]
        Output: [lineitem.l_suppkey, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))]
        Stream key: [lineitem.l_suppkey]
         StreamExchange Hash([0]) from 8
@@ -3457,6 +4771,92 @@
              Output: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate]
              Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
              AppendOnly
+
+    Table 0
+      columns: [supplier.s_suppkey:integer, supplier.s_name:varchar, supplier.s_address:varchar, supplier.s_phone:varchar, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric, lineitem.l_suppkey:integer]
+      primary key: [$4 ASC, $0 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 1
+      columns: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric, supplier.s_suppkey:integer, lineitem.l_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 2
+      columns: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))):numeric]
+      primary key: [$0 ASC]
+      values indices: [0]
+
+    Table 3
+      columns: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))):numeric, _degree:bigint]
+      primary key: [$0 ASC]
+      values indices: [1]
+
+    Table 4
+      columns: [supplier.s_suppkey:integer, supplier.s_name:varchar, supplier.s_address:varchar, supplier.s_phone:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 5
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 6
+      columns: [lineitem.l_suppkey:integer, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 7
+      columns: [lineitem.l_suppkey:integer, lineitem.l_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 8
+      columns: [lineitem.l_suppkey:integer, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 9
+      columns: [lineitem.l_suppkey:integer, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 10
+      columns: [sum(count):bigint]
+      primary key: []
+      values indices: [0]
+
+    Table 11
+      columns: [max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))):numeric, Vnode(lineitem.l_suppkey):smallint]
+      primary key: [$0 DESC, $1 ASC]
+      values indices: [0, 1]
+
+    Table 12
+      columns: [Vnode(lineitem.l_suppkey):smallint, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 13
+      columns: [Vnode(lineitem.l_suppkey):smallint, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric, lineitem.l_suppkey:integer]
+      primary key: [$0 ASC, $1 DESC, $2 ASC]
+      values indices: [0, 1, 2]
+      vnode column idx: 0
+
+    Table 14
+      columns: [lineitem.l_suppkey:integer, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 15
+      columns: [lineitem.l_suppkey:integer, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))):numeric]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 4294967294
+      columns: [s_suppkey:integer, s_name:varchar, s_address:varchar, s_phone:varchar, total_revenue:numeric, lineitem.l_suppkey:integer, max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))):numeric]
+      primary key: [$0 ASC, $5 ASC, $4 ASC, $6 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6]
 
 - id: tpch_q16
   before:
@@ -3552,12 +4952,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size] }
+       materialized table: 4294967294
        Output: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)]
        Stream key: [part.p_brand, part.p_type, part.p_size]
         StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)] }
          Output: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)]
          Stream key: [part.p_brand, part.p_type, part.p_size]
           StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count, count(partsupp.ps_suppkey)] }
+           state tables: [0, 1]
            Output: [part.p_brand, part.p_type, part.p_size, count, count(partsupp.ps_suppkey)]
            Stream key: [part.p_brand, part.p_type, part.p_size]
             StreamExchange Hash([0, 1, 2]) from 1
@@ -3569,6 +4971,7 @@
        Output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]
        Stream key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]
         StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [count] }
+         state tables: [2]
          Output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, count]
          Stream key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]
           StreamExchange NoShuffle from 2
@@ -3577,6 +4980,7 @@
 
     Fragment 2
       StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp.ps_partkey, part.p_partkey] }
+       left table: 3, right table 5, left degree table: 4, right degree table: 6,
        Output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp.ps_partkey, part.p_partkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey]
         StreamExchange Hash([0]) from 3
@@ -3588,6 +4992,7 @@
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey] }
+       left table: 7, right table 9, left degree table: 8, right degree table: 10,
        Output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey]
         StreamExchange Hash([0]) from 4
@@ -3641,6 +5046,66 @@
              Output: [supplier.s_suppkey, supplier.s_comment]
              Stream key: [supplier.s_suppkey]
              AppendOnly
+
+    Table 0
+      columns: [part.p_brand:varchar, part.p_type:varchar, part.p_size:integer, count:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 1
+      columns: [part.p_brand:varchar, part.p_type:varchar, part.p_size:integer, count(partsupp.ps_suppkey):bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 2
+      columns: [part.p_brand:varchar, part.p_type:varchar, part.p_size:integer, partsupp.ps_suppkey:integer, count:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 3
+      columns: [partsupp.ps_suppkey:integer, part.p_brand:varchar, part.p_type:varchar, part.p_size:integer, partsupp.ps_partkey:integer, part.p_partkey:integer]
+      primary key: [$0 ASC, $4 ASC, $0 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 4
+      columns: [partsupp.ps_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey_0:integer, part.p_partkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 5
+      columns: [supplier.s_suppkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 6
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 7
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer]
+      primary key: [$0 ASC, $0 ASC, $1 ASC]
+      values indices: [0, 1]
+
+    Table 8
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_partkey_0:integer, partsupp.ps_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 9
+      columns: [part.p_partkey:integer, part.p_brand:varchar, part.p_type:varchar, part.p_size:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 10
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [p_brand:varchar, p_type:varchar, p_size:integer, supplier_cnt:bigint]
+      primary key: [$3 DESC, $0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3]
 
 - id: tpch_q17
   before:
@@ -3745,12 +5210,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [avg_yearly], pk_columns: [] }
+       materialized table: 4294967294
        Output: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32)]
        Stream key: []
         StreamProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32)] }
          Output: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32)]
          Stream key: []
           StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(lineitem.l_extendedprice))] }
+           state tables: [0, 1]
            Output: [sum(count), sum(sum(lineitem.l_extendedprice))]
            Stream key: []
             StreamExchange Single from 1
@@ -3768,6 +5235,7 @@
            Output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))]
            Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, part.p_partkey]
             StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey, output: all }
+             left table: 2, right table 4, left degree table: 3, right degree table: 5,
              Output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))]
              Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, part.p_partkey]
               StreamExchange Hash([2]) from 2
@@ -3782,6 +5250,7 @@
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
+       left table: 6, right table 8, left degree table: 7, right degree table: 9,
        Output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey]
        Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
         StreamExchange Hash([0]) from 3
@@ -3823,6 +5292,7 @@
 
     Fragment 5
       StreamHashAgg { group_key: [part.p_partkey], aggs: [count, sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
+       state tables: [10, 11, 12]
        Output: [part.p_partkey, count, sum(lineitem.l_quantity), count(lineitem.l_quantity)]
        Stream key: [part.p_partkey]
         StreamExchange NoShuffle from 6
@@ -3831,6 +5301,7 @@
 
     Fragment 6
       StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
+       left table: 13, right table 15, left degree table: 14, right degree table: 16,
        Output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey]
        Stream key: [part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey]
         StreamExchange Hash([0]) from 7
@@ -3845,6 +5316,7 @@
        Output: [part.p_partkey]
        Stream key: [part.p_partkey]
         StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
+         state tables: [17]
          Output: [part.p_partkey, count]
          Stream key: [part.p_partkey]
           StreamExchange NoShuffle from 8
@@ -3877,6 +5349,101 @@
            Output: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber]
            Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
            AppendOnly
+
+    Table 0
+      columns: [sum(count):bigint]
+      primary key: []
+      values indices: [0]
+
+    Table 1
+      columns: [sum(sum(lineitem.l_extendedprice)):numeric]
+      primary key: []
+      values indices: [0]
+
+    Table 2
+      columns: [lineitem.l_quantity:numeric, lineitem.l_extendedprice:numeric, part.p_partkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_partkey:integer]
+      primary key: [$2 ASC, $3 ASC, $4 ASC, $2 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 3
+      columns: [part.p_partkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, part.p_partkey_0:integer, lineitem.l_partkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC]
+      values indices: [5]
+
+    Table 4
+      columns: [part.p_partkey:integer, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity))):numeric]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 5
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 6
+      columns: [lineitem.l_partkey:integer, lineitem.l_quantity:numeric, lineitem.l_extendedprice:numeric, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $3 ASC, $4 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 7
+      columns: [lineitem.l_partkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 8
+      columns: [part.p_partkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 9
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 10
+      columns: [part.p_partkey:integer, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 11
+      columns: [part.p_partkey:integer, sum(lineitem.l_quantity):numeric]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 12
+      columns: [part.p_partkey:integer, count(lineitem.l_quantity):bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 13
+      columns: [part.p_partkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 14
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 15
+      columns: [lineitem.l_partkey:integer, lineitem.l_quantity:numeric, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $2 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 16
+      columns: [lineitem.l_partkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 17
+      columns: [part.p_partkey:integer, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 4294967294
+      columns: [avg_yearly:numeric]
+      primary key: []
+      values indices: [0]
 
 - id: tpch_q18
   before:
@@ -3994,12 +5561,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], pk_columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], order_descs: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey] }
+       materialized table: 4294967294
        Output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)]
        Stream key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice]
         StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)] }
          Output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)]
          Stream key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice]
           StreamTopN { order: "[orders.o_totalprice DESC, orders.o_orderdate ASC]", limit: 100, offset: 0 }
+           state table: 0
            Output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey)]
            Stream key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice]
             StreamExchange Single from 1
@@ -4008,6 +5577,7 @@
 
     Fragment 1
       StreamGroupTopN { order: "[orders.o_totalprice DESC, orders.o_orderdate ASC]", limit: 100, offset: 0, group_key: [6] }
+       state table: 1
        Output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey)]
        Stream key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice]
         StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey)] }
@@ -4017,6 +5587,7 @@
            Output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)]
            Stream key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice]
             StreamHashAgg { group_key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice], aggs: [count, sum(lineitem.l_quantity)] }
+             state tables: [2, 3]
              Output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, count, sum(lineitem.l_quantity)]
              Stream key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice]
               StreamExchange NoShuffle from 2
@@ -4025,6 +5596,7 @@
 
     Fragment 2
       StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+       left table: 4, right table 6, left degree table: 5, right degree table: 7,
        Output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber]
         StreamExchange NoShuffle from 3
@@ -4045,6 +5617,7 @@
 
     Fragment 3
       StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+       left table: 8, right table 10, left degree table: 9, right degree table: 11,
        Output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber]
         StreamExchange Hash([2]) from 4
@@ -4056,6 +5629,7 @@
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, orders.o_custkey] }
+       left table: 12, right table 14, left degree table: 13, right degree table: 15,
        Output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, orders.o_custkey]
        Stream key: [customer.c_custkey, orders.o_orderkey, orders.o_custkey]
         StreamExchange Hash([0]) from 5
@@ -4103,6 +5677,7 @@
 
     Fragment 8
       StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [count, sum(lineitem.l_quantity)] }
+       state tables: [16, 17]
        Output: [lineitem.l_orderkey, count, sum(lineitem.l_quantity)]
        Stream key: [lineitem.l_orderkey]
         StreamExchange Hash([0]) from 9
@@ -4120,6 +5695,101 @@
          Output: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber]
          Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
          AppendOnly
+
+    Table 0
+      columns: [customer.c_name:varchar, customer.c_custkey:integer, orders.o_orderkey:bigint, orders.o_orderdate:date, orders.o_totalprice:numeric, sum(lineitem.l_quantity):numeric, Vnode(orders.o_orderkey):smallint]
+      primary key: [$4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6]
+
+    Table 1
+      columns: [customer.c_name:varchar, customer.c_custkey:integer, orders.o_orderkey:bigint, orders.o_orderdate:date, orders.o_totalprice:numeric, sum(lineitem.l_quantity):numeric, Vnode(orders.o_orderkey):smallint]
+      primary key: [$6 ASC, $4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6]
+
+    Table 2
+      columns: [customer.c_name:varchar, customer.c_custkey:integer, orders.o_orderkey:bigint, orders.o_orderdate:date, orders.o_totalprice:numeric, count:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 3
+      columns: [customer.c_name:varchar, customer.c_custkey:integer, orders.o_orderkey:bigint, orders.o_orderdate:date, orders.o_totalprice:numeric, sum(lineitem.l_quantity):numeric]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 4
+      columns: [customer.c_custkey:integer, customer.c_name:varchar, orders.o_orderkey:bigint, orders.o_totalprice:numeric, orders.o_orderdate:date, lineitem.l_quantity:numeric, orders.o_custkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer]
+      primary key: [$2 ASC, $0 ASC, $2 ASC, $6 ASC, $7 ASC, $8 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+    Table 5
+      columns: [orders.o_orderkey:bigint, customer.c_custkey:integer, orders.o_orderkey_0:bigint, orders.o_custkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC]
+      values indices: [6]
+
+    Table 6
+      columns: [lineitem.l_orderkey:bigint]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 7
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_orderkey_0:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 8
+      columns: [customer.c_custkey:integer, customer.c_name:varchar, orders.o_orderkey:bigint, orders.o_totalprice:numeric, orders.o_orderdate:date, orders.o_custkey:integer]
+      primary key: [$2 ASC, $0 ASC, $2 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 9
+      columns: [orders.o_orderkey:bigint, customer.c_custkey:integer, orders.o_orderkey_0:bigint, orders.o_custkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 10
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_quantity:numeric, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $0 ASC, $2 ASC]
+      values indices: [0, 1, 2]
+
+    Table 11
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 12
+      columns: [customer.c_custkey:integer, customer.c_name:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1]
+
+    Table 13
+      columns: [customer.c_custkey:integer, customer.c_custkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 14
+      columns: [orders.o_orderkey:bigint, orders.o_custkey:integer, orders.o_totalprice:numeric, orders.o_orderdate:date]
+      primary key: [$1 ASC, $0 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 15
+      columns: [orders.o_custkey:integer, orders.o_orderkey:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 16
+      columns: [lineitem.l_orderkey:bigint, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 17
+      columns: [lineitem.l_orderkey:bigint, sum(lineitem.l_quantity):numeric]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 4294967294
+      columns: [c_name:varchar, c_custkey:integer, o_orderkey:bigint, o_orderdate:date, o_totalprice:numeric, quantity:numeric]
+      primary key: [$4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
 
 - id: tpch_q19
   before:
@@ -4207,12 +5877,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [revenue], pk_columns: [] }
+       materialized table: 4294967294
        Output: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))]
        Stream key: []
         StreamProject { exprs: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
          Output: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))]
          Stream key: []
           StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
+           state tables: [0, 1]
            Output: [sum(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))]
            Stream key: []
             StreamExchange Single from 1
@@ -4230,6 +5902,7 @@
            Output: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, part.p_brand, part.p_size, part.p_container]
            Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
             StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: all }
+             left table: 2, right table 4, left degree table: 3, right degree table: 5,
              Output: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, part.p_brand, part.p_size, part.p_container]
              Stream key: [lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey]
               StreamExchange Hash([0]) from 2
@@ -4271,6 +5944,41 @@
            Output: [part.p_partkey, part.p_brand, part.p_size, part.p_container]
            Stream key: [part.p_partkey]
            AppendOnly
+
+    Table 0
+      columns: [sum(count):bigint]
+      primary key: []
+      values indices: [0]
+
+    Table 1
+      columns: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))):numeric]
+      primary key: []
+      values indices: [0]
+
+    Table 2
+      columns: [lineitem.l_partkey:integer, lineitem.l_quantity:numeric, lineitem.l_extendedprice:numeric, lineitem.l_discount:numeric, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $4 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 3
+      columns: [lineitem.l_partkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 4
+      columns: [part.p_partkey:integer, part.p_brand:varchar, part.p_size:integer, part.p_container:varchar]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 5
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 4294967294
+      columns: [revenue:numeric]
+      primary key: []
+      values indices: [0]
 
 - id: tpch_q20
   before:
@@ -4419,9 +6127,11 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), nation.n_nationkey(hidden), supplier.s_nationkey(hidden)], pk_columns: [supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], order_descs: [s_name, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
+       materialized table: 4294967294
        Output: [supplier.s_name, supplier.s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
        Stream key: [supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
         StreamHashJoin { type: LeftSemi, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: [supplier.s_name, supplier.s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
+         left table: 0, right table 2, left degree table: 1, right degree table: 3,
          Output: [supplier.s_name, supplier.s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
          Stream key: [supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
           StreamExchange Hash([0]) from 1
@@ -4433,6 +6143,7 @@
 
     Fragment 1
       StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: all }
+       left table: 4, right table 6, left degree table: 5, right degree table: 7,
        Output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, nation.n_nationkey]
        Stream key: [supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey]
         StreamExchange Hash([3]) from 2
@@ -4480,6 +6191,7 @@
          Output: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))]
          Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey]
           StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM partsupp.ps_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM partsupp.ps_suppkey, output: all }
+           left table: 8, right table 10, left degree table: 9, right degree table: 11,
            Output: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))]
            Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey]
             StreamExchange Hash([0, 1]) from 5
@@ -4494,6 +6206,7 @@
 
     Fragment 5
       StreamHashJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey, output: all }
+       left table: 12, right table 14, left degree table: 13, right degree table: 15,
        Output: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamExchange Hash([0]) from 6
@@ -4535,6 +6248,7 @@
 
     Fragment 8
       StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count, sum(lineitem.l_quantity)] }
+       state tables: [16, 17]
        Output: [partsupp.ps_partkey, partsupp.ps_suppkey, count, sum(lineitem.l_quantity)]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamExchange NoShuffle from 9
@@ -4543,6 +6257,7 @@
 
     Fragment 9
       StreamHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM lineitem.l_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, lineitem.l_suppkey] }
+       left table: 18, right table 20, left degree table: 19, right degree table: 21,
        Output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, lineitem.l_suppkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, lineitem.l_suppkey]
         StreamExchange Hash([0, 1]) from 10
@@ -4557,6 +6272,7 @@
        Output: [partsupp.ps_partkey, partsupp.ps_suppkey]
        Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
         StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count] }
+         state tables: [22]
          Output: [partsupp.ps_partkey, partsupp.ps_suppkey, count]
          Stream key: [partsupp.ps_partkey, partsupp.ps_suppkey]
           StreamExchange NoShuffle from 11
@@ -4592,6 +6308,126 @@
              Output: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate]
              Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
              AppendOnly
+
+    Table 0
+      columns: [supplier.s_suppkey:integer, supplier.s_name:varchar, supplier.s_address:varchar, supplier.s_nationkey:integer, nation.n_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC, $4 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 1
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 2
+      columns: [partsupp.ps_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_partkey_0:integer, partsupp.ps_suppkey_0:integer]
+      primary key: [$0 ASC, $1 ASC, $0 ASC, $2 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 3
+      columns: [partsupp.ps_suppkey:integer, partsupp.ps_partkey:integer, partsupp.ps_suppkey_0:integer, partsupp.ps_partkey_0:integer, partsupp.ps_suppkey_1:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC]
+      values indices: [5]
+
+    Table 4
+      columns: [supplier.s_suppkey:integer, supplier.s_name:varchar, supplier.s_address:varchar, supplier.s_nationkey:integer]
+      primary key: [$3 ASC, $0 ASC]
+      values indices: [0, 1, 2, 3]
+
+    Table 5
+      columns: [supplier.s_nationkey:integer, supplier.s_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 6
+      columns: [nation.n_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 7
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 8
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, partsupp.ps_availqty:integer]
+      primary key: [$0 ASC, $1 ASC, $0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 9
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, partsupp.ps_partkey_0:integer, partsupp.ps_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 10
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, (0.5:Decimal * sum(lineitem.l_quantity)):numeric]
+      primary key: [$0 ASC, $1 ASC, $0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 11
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, partsupp.ps_partkey_0:integer, partsupp.ps_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 12
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, partsupp.ps_availqty:integer]
+      primary key: [$0 ASC, $0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 13
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_partkey_0:integer, partsupp.ps_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 14
+      columns: [part.p_partkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 15
+      columns: [part.p_partkey:integer, part.p_partkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 16
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, count:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 17
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, sum(lineitem.l_quantity):numeric]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 18
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer]
+      primary key: [$0 ASC, $1 ASC, $0 ASC, $1 ASC]
+      values indices: [0, 1]
+
+    Table 19
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, partsupp.ps_partkey_0:integer, partsupp.ps_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 20
+      columns: [lineitem.l_partkey:integer, lineitem.l_suppkey:integer, lineitem.l_quantity:numeric, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $1 ASC, $3 ASC, $4 ASC]
+      values indices: [0, 1, 2, 3, 4]
+
+    Table 21
+      columns: [lineitem.l_partkey:integer, lineitem.l_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC]
+      values indices: [4]
+
+    Table 22
+      columns: [partsupp.ps_partkey:integer, partsupp.ps_suppkey:integer, count:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [0, 1, 2]
+
+    Table 4294967294
+      columns: [s_name:varchar, s_address:varchar, supplier.s_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer]
+      primary key: [$0 ASC, $2 ASC, $3 ASC, $4 ASC]
+      values indices: [0, 1, 2, 3, 4]
 
 - id: tpch_q21
   before:
@@ -4745,12 +6581,14 @@
   stream_dist_plan: |+
     Fragment 0
       StreamMaterialize { columns: [s_name, numwait], pk_columns: [s_name], order_descs: [numwait, s_name] }
+       materialized table: 4294967294
        Output: [supplier.s_name, count]
        Stream key: [supplier.s_name]
         StreamProject { exprs: [supplier.s_name, count] }
          Output: [supplier.s_name, count]
          Stream key: [supplier.s_name]
           StreamTopN { order: "[count DESC, supplier.s_name ASC]", limit: 100, offset: 0 }
+           state table: 0
            Output: [supplier.s_name, count, Vnode(supplier.s_name)]
            Stream key: [supplier.s_name]
             StreamExchange Single from 1
@@ -4759,6 +6597,7 @@
 
     Fragment 1
       StreamGroupTopN { order: "[count DESC, supplier.s_name ASC]", limit: 100, offset: 0, group_key: [2] }
+       state table: 1
        Output: [supplier.s_name, count, Vnode(supplier.s_name)]
        Stream key: [supplier.s_name]
         StreamProject { exprs: [supplier.s_name, count, Vnode(supplier.s_name)] }
@@ -4768,6 +6607,7 @@
            Output: [supplier.s_name, count]
            Stream key: [supplier.s_name]
             StreamHashAgg { group_key: [supplier.s_name], aggs: [count, count] }
+             state tables: [2, 3]
              Output: [supplier.s_name, count, count]
              Stream key: [supplier.s_name]
               StreamExchange Hash([0]) from 2
@@ -4776,6 +6616,7 @@
 
     Fragment 2
       StreamHashJoin { type: LeftAnti, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: [supplier.s_name, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey] }
+       left table: 4, right table 6, left degree table: 5, right degree table: 7,
        Output: [supplier.s_name, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
        Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
         StreamExchange NoShuffle from 3
@@ -4787,6 +6628,7 @@
 
     Fragment 3
       StreamHashJoin { type: LeftSemi, predicate: lineitem.l_orderkey = lineitem.l_orderkey AND (lineitem.l_suppkey <> lineitem.l_suppkey), output: all }
+       left table: 8, right table 10, left degree table: 9, right degree table: 11,
        Output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
        Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
         StreamExchange NoShuffle from 4
@@ -4798,6 +6640,7 @@
 
     Fragment 4
       StreamHashJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey, output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey] }
+       left table: 12, right table 14, left degree table: 13, right degree table: 15,
        Output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
        Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey]
         StreamExchange Hash([1]) from 5
@@ -4809,6 +6652,7 @@
 
     Fragment 5
       StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, supplier.s_nationkey, nation.n_nationkey] }
+       left table: 16, right table 18, left degree table: 17, right degree table: 19,
        Output: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, supplier.s_nationkey, nation.n_nationkey]
        Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey]
         StreamExchange Hash([1]) from 6
@@ -4820,6 +6664,7 @@
 
     Fragment 6
       StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_name, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber] }
+       left table: 20, right table 22, left degree table: 21, right degree table: 23,
        Output: [supplier.s_name, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber]
        Stream key: [supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey]
         StreamExchange Hash([0]) from 7
@@ -4924,6 +6769,131 @@
              Output: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate]
              Stream key: [lineitem.l_orderkey, lineitem.l_linenumber]
              AppendOnly
+
+    Table 0
+      columns: [supplier.s_name:varchar, count:bigint, Vnode(supplier.s_name):smallint]
+      primary key: [$1 DESC, $0 ASC]
+      values indices: [0, 1, 2]
+
+    Table 1
+      columns: [supplier.s_name:varchar, count:bigint, Vnode(supplier.s_name):smallint]
+      primary key: [$2 ASC, $1 DESC, $0 ASC]
+      values indices: [0, 1, 2]
+
+    Table 2
+      columns: [supplier.s_name:varchar, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 3
+      columns: [supplier.s_name:varchar, count:bigint]
+      primary key: [$0 ASC]
+      values indices: [0, 1]
+
+    Table 4
+      columns: [supplier.s_name:varchar, lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, supplier.s_suppkey:integer, lineitem.l_linenumber:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, orders.o_orderkey:bigint]
+      primary key: [$1 ASC, $3 ASC, $1 ASC, $4 ASC, $2 ASC, $5 ASC, $6 ASC, $7 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    Table 5
+      columns: [lineitem.l_orderkey:bigint, supplier.s_suppkey:integer, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, orders.o_orderkey:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC]
+      values indices: [8]
+
+    Table 6
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $0 ASC, $2 ASC]
+      values indices: [0, 1, 2]
+
+    Table 7
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 8
+      columns: [supplier.s_name:varchar, lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, supplier.s_suppkey:integer, lineitem.l_linenumber:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, orders.o_orderkey:bigint]
+      primary key: [$1 ASC, $3 ASC, $1 ASC, $4 ASC, $2 ASC, $5 ASC, $6 ASC, $7 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    Table 9
+      columns: [lineitem.l_orderkey:bigint, supplier.s_suppkey:integer, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, orders.o_orderkey:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC]
+      values indices: [8]
+
+    Table 10
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, lineitem.l_linenumber:integer]
+      primary key: [$0 ASC, $0 ASC, $2 ASC]
+      values indices: [0, 1, 2]
+
+    Table 11
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 12
+      columns: [supplier.s_name:varchar, lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, supplier.s_suppkey:integer, lineitem.l_linenumber:integer, supplier.s_nationkey:integer, nation.n_nationkey:integer]
+      primary key: [$1 ASC, $3 ASC, $1 ASC, $4 ASC, $2 ASC, $6 ASC, $5 ASC]
+      values indices: [0, 1, 2, 3, 4, 5, 6]
+
+    Table 13
+      columns: [lineitem.l_orderkey:bigint, supplier.s_suppkey:integer, lineitem.l_orderkey_0:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, nation.n_nationkey:integer, supplier.s_nationkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC]
+      values indices: [7]
+
+    Table 14
+      columns: [orders.o_orderkey:bigint]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 15
+      columns: [orders.o_orderkey:bigint, orders.o_orderkey_0:bigint, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 16
+      columns: [supplier.s_name:varchar, supplier.s_nationkey:integer, lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, supplier.s_suppkey:integer, lineitem.l_linenumber:integer]
+      primary key: [$1 ASC, $4 ASC, $2 ASC, $5 ASC, $3 ASC]
+      values indices: [0, 1, 2, 3, 4, 5]
+
+    Table 17
+      columns: [supplier.s_nationkey:integer, supplier.s_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, lineitem.l_suppkey:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC]
+      values indices: [5]
+
+    Table 18
+      columns: [nation.n_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0]
+
+    Table 19
+      columns: [nation.n_nationkey:integer, nation.n_nationkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 20
+      columns: [supplier.s_suppkey:integer, supplier.s_name:varchar, supplier.s_nationkey:integer]
+      primary key: [$0 ASC, $0 ASC]
+      values indices: [0, 1, 2]
+
+    Table 21
+      columns: [supplier.s_suppkey:integer, supplier.s_suppkey_0:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC]
+      values indices: [2]
+
+    Table 22
+      columns: [lineitem.l_orderkey:bigint, lineitem.l_suppkey:integer, lineitem.l_linenumber:integer]
+      primary key: [$1 ASC, $0 ASC, $2 ASC]
+      values indices: [0, 1, 2]
+
+    Table 23
+      columns: [lineitem.l_suppkey:integer, lineitem.l_orderkey:bigint, lineitem.l_linenumber:integer, _degree:bigint]
+      primary key: [$0 ASC, $1 ASC, $2 ASC]
+      values indices: [3]
+
+    Table 4294967294
+      columns: [s_name:varchar, numwait:bigint]
+      primary key: [$1 DESC, $0 ASC]
+      values indices: [0, 1]
 
 - id: tpch_q22
   before:
