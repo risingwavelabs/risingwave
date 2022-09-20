@@ -246,39 +246,30 @@ impl Stream for SelectReceivers {
                     poll_count += 1;
                     continue;
                 }
-                Poll::Ready(item) => {
-                    match item {
-                        None => return Poll::Ready(None),
-                        Some(Err(e)) => return Poll::Ready(Some(Err(e))),
-                        _ => {}
-                    }
-
-                    let message = item.unwrap().unwrap();
-                    match message {
-                        Message::Barrier(barrier) => {
-                            let rc = self.upstreams.swap_remove(idx);
-                            self.blocks.push(rc);
-                            if let Some(current_barrier) = self.barrier.as_ref() {
-                                if current_barrier.epoch != barrier.epoch {
-                                    return Poll::Ready(Some(Err(
-                                        StreamExecutorError::align_barrier(
-                                            current_barrier.clone(),
-                                            barrier,
-                                        ),
-                                    )));
-                                }
-                            } else {
-                                self.barrier = Some(barrier);
+                Poll::Ready(item) => match item {
+                    None => return Poll::Ready(None),
+                    Some(Err(e)) => return Poll::Ready(Some(Err(e))),
+                    Some(Ok(Message::Barrier(barrier))) => {
+                        let rc = self.upstreams.swap_remove(idx);
+                        self.blocks.push(rc);
+                        if let Some(current_barrier) = self.barrier.as_ref() {
+                            if current_barrier.epoch != barrier.epoch {
+                                return Poll::Ready(Some(Err(StreamExecutorError::align_barrier(
+                                    current_barrier.clone(),
+                                    barrier,
+                                ))));
                             }
-                            poll_count = 0;
+                        } else {
+                            self.barrier = Some(barrier);
                         }
-                        Message::Chunk(chunk) => {
-                            let message = Message::Chunk(chunk);
-                            self.last_base = (idx + 1) % self.upstreams.len();
-                            return Poll::Ready(Some(Ok(message)));
-                        }
+                        poll_count = 0;
                     }
-                }
+                    Some(Ok(Message::Chunk(chunk))) => {
+                        let message = Message::Chunk(chunk);
+                        self.last_base = (idx + 1) % self.upstreams.len();
+                        return Poll::Ready(Some(Ok(message)));
+                    }
+                },
             }
         }
         if self.upstreams.is_empty() {
