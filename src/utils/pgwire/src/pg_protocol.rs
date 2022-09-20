@@ -429,6 +429,7 @@ where
                 portal_name.clone(),
                 &msg.params,
                 msg.result_format_code,
+                msg.param_format_code,
             )
             .await?;
 

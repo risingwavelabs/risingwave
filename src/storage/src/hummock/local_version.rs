@@ -203,10 +203,14 @@ impl LocalVersion {
     pub fn seal_epoch(&mut self, epoch: HummockEpoch, is_checkpoint: bool) {
         // TODO: remove it when non-checkpoint barrier is enabled
         assert!(is_checkpoint, "current seal_epoch must be a checkpoint");
-        self.sealed_epoch = self.sealed_epoch.max(epoch);
-        if self.advance_max_sync_epoch(epoch).is_none() {
-            tracing::trace!("trivial advance max sync epoch: {}", epoch);
-        }
+        assert!(
+            epoch > self.sealed_epoch,
+            "sealed epoch not advance. new epoch: {}, current {}",
+            epoch,
+            self.sealed_epoch
+        );
+        self.sealed_epoch = epoch;
+        self.advance_max_sync_epoch(epoch)
     }
 
     pub fn get_sealed_epoch(&self) -> HummockEpoch {
@@ -221,24 +225,25 @@ impl LocalVersion {
     ///
     /// Return `Some(prev max_sync_epoch)` if `new_epoch > max_sync_epoch`
     /// Return `None` if `new_epoch <= max_sync_epoch`
-    pub fn advance_max_sync_epoch(&mut self, new_epoch: HummockEpoch) -> Option<HummockEpoch> {
-        if self.max_sync_epoch >= new_epoch {
-            None
-        } else {
-            let last_epoch = self.max_sync_epoch;
-            let mut shared_buffer_to_sync = self.shared_buffer.split_off(&(new_epoch + 1));
-            // After `split_off`, epochs greater than `epoch` will be in `shared_buffer_to_sync`. We
-            // want epoch with `epoch > new_sync_epoch` to stay in `self.shared_buffer`, so we
-            // use a swap to reach the expected setting.
-            swap(&mut shared_buffer_to_sync, &mut self.shared_buffer);
-            let insert_result = self.sync_uncommitted_data.insert(
-                new_epoch,
-                SyncUncommittedData::new(new_epoch, last_epoch, shared_buffer_to_sync),
-            );
-            assert_matches!(insert_result, None);
-            self.max_sync_epoch = new_epoch;
-            Some(last_epoch)
-        }
+    pub fn advance_max_sync_epoch(&mut self, new_epoch: HummockEpoch) {
+        assert!(
+            new_epoch > self.max_sync_epoch,
+            "max sync epoch not advance. new epoch: {}, current max sync epoch {}",
+            new_epoch,
+            self.max_sync_epoch
+        );
+        let last_epoch = self.max_sync_epoch;
+        let mut shared_buffer_to_sync = self.shared_buffer.split_off(&(new_epoch + 1));
+        // After `split_off`, epochs greater than `epoch` will be in `shared_buffer_to_sync`. We
+        // want epoch with `epoch > new_sync_epoch` to stay in `self.shared_buffer`, so we
+        // use a swap to reach the expected setting.
+        swap(&mut shared_buffer_to_sync, &mut self.shared_buffer);
+        let insert_result = self.sync_uncommitted_data.insert(
+            new_epoch,
+            SyncUncommittedData::new(new_epoch, last_epoch, shared_buffer_to_sync),
+        );
+        assert_matches!(insert_result, None);
+        self.max_sync_epoch = new_epoch;
     }
 
     pub fn get_prev_max_sync_epoch(&self, epoch: HummockEpoch) -> Option<HummockEpoch> {
