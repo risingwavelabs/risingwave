@@ -41,6 +41,8 @@ pub struct TableDesc {
     pub appendonly: bool,
 
     pub retention_seconds: u32,
+
+    pub value_indices: Vec<usize>,
 }
 
 impl TableDesc {
@@ -67,6 +69,7 @@ impl TableDesc {
             order_key: self.order_key.iter().map(|v| v.to_protobuf()).collect(),
             dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
             retention_seconds: self.retention_seconds,
+            value_indices: self.value_indices.iter().map(|&v| v as u32).collect(),
         }
     }
 

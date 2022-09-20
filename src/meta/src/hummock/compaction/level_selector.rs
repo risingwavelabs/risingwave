@@ -588,7 +588,7 @@ pub mod tests {
         assert_eq!(compaction.input.target_level, 0);
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
-        let config = CompactionConfigBuilder::new_with(config)
+        let config = CompactionConfigBuilder::with_config(config)
             .max_bytes_for_level_base(100)
             .level0_trigger_file_number(8)
             .compaction_filter_mask(compaction_filter_flag.into())
