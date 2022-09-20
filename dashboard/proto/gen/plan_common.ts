@@ -211,6 +211,7 @@ export interface StorageTableDesc {
   orderKey: ColumnOrder[];
   distKeyIndices: number[];
   retentionSeconds: number;
+  valueIndices: number[];
 }
 
 export interface ColumnOrder {
@@ -322,7 +323,7 @@ export const ColumnCatalog = {
 };
 
 function createBaseStorageTableDesc(): StorageTableDesc {
-  return { tableId: 0, columns: [], orderKey: [], distKeyIndices: [], retentionSeconds: 0 };
+  return { tableId: 0, columns: [], orderKey: [], distKeyIndices: [], retentionSeconds: 0, valueIndices: [] };
 }
 
 export const StorageTableDesc = {
@@ -333,6 +334,7 @@ export const StorageTableDesc = {
       orderKey: Array.isArray(object?.orderKey) ? object.orderKey.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       distKeyIndices: Array.isArray(object?.distKeyIndices) ? object.distKeyIndices.map((e: any) => Number(e)) : [],
       retentionSeconds: isSet(object.retentionSeconds) ? Number(object.retentionSeconds) : 0,
+      valueIndices: Array.isArray(object?.valueIndices) ? object.valueIndices.map((e: any) => Number(e)) : [],
     };
   },
 
@@ -355,6 +357,11 @@ export const StorageTableDesc = {
       obj.distKeyIndices = [];
     }
     message.retentionSeconds !== undefined && (obj.retentionSeconds = Math.round(message.retentionSeconds));
+    if (message.valueIndices) {
+      obj.valueIndices = message.valueIndices.map((e) => Math.round(e));
+    } else {
+      obj.valueIndices = [];
+    }
     return obj;
   },
 
@@ -365,6 +372,7 @@ export const StorageTableDesc = {
     message.orderKey = object.orderKey?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.distKeyIndices = object.distKeyIndices?.map((e) => e) || [];
     message.retentionSeconds = object.retentionSeconds ?? 0;
+    message.valueIndices = object.valueIndices?.map((e) => e) || [];
     return message;
   },
 };
