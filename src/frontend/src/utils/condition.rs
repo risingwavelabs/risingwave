@@ -22,8 +22,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::error::Result;
-use risingwave_common::types::ScalarImpl;
-use risingwave_common::util::scan_range::{full_range, is_full_range, ScanRange};
+use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
@@ -505,29 +504,10 @@ impl Condition {
         Ok((
             if scan_range.is_full_table_scan() {
                 vec![]
-            } else if scan_range.eq_conds.is_empty()
-                && table_desc.columns[order_column_ids[0]].data_type.is_int()
-            {
-                // Optimize small range scan.
-                match scan_range.range {
-                    (
-                        Bound::Included(ScalarImpl::Int32(ref left)),
-                        Bound::Included(ScalarImpl::Int32(ref right)),
-                    ) => {
-                        let gap = right - left;
-                        if gap <= 8 {
-                            (0..gap)
-                                .into_iter()
-                                .map(|i| ScanRange {
-                                    eq_conds: vec![Some(ScalarImpl::Int32(left + i))],
-                                    range: full_range(),
-                                })
-                                .collect()
-                        } else {
-                            vec![scan_range]
-                        }
-                    }
-                    _ => vec![scan_range],
+            } else if table_desc.columns[order_column_ids[0]].data_type.is_int() {
+                match scan_range.split_small_range() {
+                    Some(scan_ranges) => scan_ranges,
+                    None => vec![scan_range],
                 }
             } else {
                 vec![scan_range]

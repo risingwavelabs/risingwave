@@ -72,6 +72,69 @@ impl ScanRange {
         }
     }
 
+    /// `Precondition`: make sure the first order key is int if you call this method.
+    /// Optimize small range scan. It turns x between 0 and 5 into x in (0, 1, 2, 3, 4, 5).
+    pub fn split_small_range(&self) -> Option<Vec<Self>> {
+        if self.eq_conds.is_empty() {
+            match self.range {
+                (
+                    Bound::Included(ScalarImpl::Int16(ref left)),
+                    Bound::Included(ScalarImpl::Int16(ref right)),
+                ) => {
+                    let gap = right - left + 1;
+                    if gap <= 8 {
+                        return Some(
+                            (0..gap)
+                                .into_iter()
+                                .map(|i| ScanRange {
+                                    eq_conds: vec![Some(ScalarImpl::Int16(left + i))],
+                                    range: full_range(),
+                                })
+                                .collect(),
+                        );
+                    }
+                }
+                (
+                    Bound::Included(ScalarImpl::Int32(ref left)),
+                    Bound::Included(ScalarImpl::Int32(ref right)),
+                ) => {
+                    let gap = right - left + 1;
+                    if gap <= 8 {
+                        return Some(
+                            (0..gap)
+                                .into_iter()
+                                .map(|i| ScanRange {
+                                    eq_conds: vec![Some(ScalarImpl::Int32(left + i))],
+                                    range: full_range(),
+                                })
+                                .collect(),
+                        );
+                    }
+                }
+                (
+                    Bound::Included(ScalarImpl::Int64(ref left)),
+                    Bound::Included(ScalarImpl::Int64(ref right)),
+                ) => {
+                    let gap = right - left + 1;
+                    if gap <= 8 {
+                        return Some(
+                            (0..gap)
+                                .into_iter()
+                                .map(|i| ScanRange {
+                                    eq_conds: vec![Some(ScalarImpl::Int64(left + i))],
+                                    range: full_range(),
+                                })
+                                .collect(),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        None
+    }
+
     pub fn try_compute_vnode(
         &self,
         dist_key_indices: &[usize],
