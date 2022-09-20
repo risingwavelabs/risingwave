@@ -19,8 +19,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_stack_trace::{StackTraceManager, StackTraceReport};
-use futures::future::{join_all, BoxFuture};
-use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::bail;
@@ -39,6 +37,7 @@ use tokio::task::JoinHandle;
 use super::{unique_executor_id, unique_operator_id, CollectResult};
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::subtask::SubtaskHandle;
 use crate::executor::*;
 use crate::from_proto::create_executor;
 use crate::task::{
@@ -51,7 +50,6 @@ pub static LOCAL_TEST_ADDR: std::sync::LazyLock<HostAddr> =
     std::sync::LazyLock::new(|| "127.0.0.1:2333".parse().unwrap());
 
 pub type ActorHandle = JoinHandle<()>;
-pub type ActorSubHandle = BoxFuture<'static, ()>;
 
 pub struct LocalStreamManagerCore {
     /// Runtime for the streaming actors.
@@ -112,10 +110,10 @@ pub struct ExecutorParams {
     /// Metrics
     pub executor_stats: Arc<StreamingMetrics>,
 
-    // Actor context
+    /// Actor context
     pub actor_context: ActorContextRef,
 
-    // Vnodes owned by this executor. Represented in bitmap.
+    /// Vnodes owned by this executor. Represented in bitmap.
     pub vnode_bitmap: Option<Bitmap>,
 }
 
@@ -436,7 +434,7 @@ impl LocalStreamManagerCore {
         input: BoxedExecutor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
-    ) -> StreamResult<impl StreamConsumer> {
+    ) -> StreamResult<DispatchExecutor> {
         let dispatcher_impls = dispatchers
             .iter()
             .map(|dispatcher| DispatcherImpl::new(&self.context, actor_id, dispatcher))
@@ -463,24 +461,25 @@ impl LocalStreamManagerCore {
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
         has_stateful: bool,
-        sub_handles: &mut Vec<ActorSubHandle>,
+        subtasks: &mut Vec<SubtaskHandle>,
     ) -> StreamResult<BoxedExecutor> {
+        // The "stateful" here means that the executor may issue read operations to the state store
+        // massively and continuosly. Used to decide whether to apply the optimization of subtasks.
         fn is_stateful_executor(stream_node: &StreamNode) -> bool {
             matches!(
                 stream_node.get_node_body().unwrap(),
                 NodeBody::HashAgg(_)
                     | NodeBody::HashJoin(_)
                     | NodeBody::DeltaIndexJoin(_)
+                    | NodeBody::Lookup(_)
                     | NodeBody::Chain(_)
                     | NodeBody::DynamicFilter(_)
+                    | NodeBody::GroupTopN(_)
             )
         }
-
         let is_stateful = is_stateful_executor(node);
 
-        let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
-        // The node with no input must be a `get_receive_message`
         let input: Vec<_> = node
             .input
             .iter()
@@ -495,11 +494,12 @@ impl LocalStreamManagerCore {
                     actor_context,
                     vnode_bitmap.clone(),
                     has_stateful || is_stateful,
-                    sub_handles,
+                    subtasks,
                 )
             })
             .try_collect()?;
 
+        let op_info = node.get_identity().clone();
         let pk_indices = node
             .get_stream_key()
             .iter()
@@ -511,6 +511,7 @@ impl LocalStreamManagerCore {
         let executor_id = unique_executor_id(actor_context.id, node.operator_id);
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
 
+        // Build the executor with params.
         let executor_params = ExecutorParams {
             env: env.clone(),
             pk_indices,
@@ -523,30 +524,27 @@ impl LocalStreamManagerCore {
             actor_context: actor_context.clone(),
             vnode_bitmap,
         };
+        let executor = create_executor(executor_params, self, node, store)?;
 
-        let executor = {
-            let executor = create_executor(executor_params, self, node, store)?;
-            if has_stateful && is_stateful {
-                tracing::warn!(
-                    "cut into sub-handles after {} in fragment {fragment_id}",
-                    executor.identity()
-                );
-                let (sub_handle, executor) = pair(executor);
-                sub_handles.push(sub_handle);
-                executor
-            } else {
-                executor
-            }
+        // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
+        let executor = if has_stateful && is_stateful {
+            let (subtask, executor) = subtask::wrap(executor);
+            subtasks.push(subtask);
+            executor.boxed()
+        } else {
+            executor
         };
 
-        let executor = Self::wrap_executor_for_debug(
+        // Wrap the executor for debug purpose.
+        let executor = WrapperExecutor::new(
             executor,
+            input_pos,
             actor_context.id,
             executor_id,
-            input_pos,
             self.streaming_metrics.clone(),
             self.config.developer.enable_executor_row_count,
-        );
+        )
+        .boxed();
 
         Ok(executor)
     }
@@ -559,8 +557,8 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-    ) -> StreamResult<(BoxedExecutor, Vec<ActorSubHandle>)> {
-        let mut sub_handles = vec![];
+    ) -> StreamResult<(BoxedExecutor, Vec<SubtaskHandle>)> {
+        let mut subtasks = vec![];
 
         let executor = dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(
@@ -572,30 +570,11 @@ impl LocalStreamManagerCore {
                 actor_context,
                 vnode_bitmap,
                 false,
-                &mut sub_handles,
+                &mut subtasks,
             )
         })?;
 
-        Ok((executor, sub_handles))
-    }
-
-    fn wrap_executor_for_debug(
-        executor: BoxedExecutor,
-        actor_id: ActorId,
-        executor_id: u64,
-        input_pos: usize,
-        streaming_metrics: Arc<StreamingMetrics>,
-        enable_executor_row_count: bool,
-    ) -> BoxedExecutor {
-        WrapperExecutor::new(
-            executor,
-            input_pos,
-            actor_id,
-            executor_id,
-            streaming_metrics,
-            enable_executor_row_count,
-        )
-        .boxed()
+        Ok((executor, subtasks))
     }
 
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> StreamResult<()> {
@@ -608,7 +587,8 @@ impl LocalStreamManagerCore {
                 .map(|b| b.try_into())
                 .transpose()
                 .context("failed to decode vnode bitmap")?;
-            let (executor, sub_handles) = self.create_nodes(
+
+            let (executor, subtasks) = self.create_nodes(
                 actor.fragment_id,
                 actor.get_nodes()?,
                 env.clone(),
@@ -616,13 +596,10 @@ impl LocalStreamManagerCore {
                 vnode_bitmap,
             )?;
 
-            if !sub_handles.is_empty() {
-                tracing::warn!("{} sub-handles for actor {}!", sub_handles.len(), actor_id);
-            }
-
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
             let actor = Actor::new(
                 dispatcher,
+                subtasks,
                 actor_id,
                 self.context.clone(),
                 self.streaming_metrics.clone(),
@@ -636,12 +613,10 @@ impl LocalStreamManagerCore {
                 .map(|m| m.register(actor_id));
 
             let handle = {
+                // unwrap the actor result to panic on error
                 let actor = async move {
-                    tokio::join!(
-                        // unwrap the actor result to panic on error
-                        actor.run().map(|r| r.expect("actor failed")),
-                        join_all(sub_handles)
-                    );
+                    // unwrap the actor result to panic on error
+                    actor.run().await.expect("actor failed")
                 };
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {
@@ -663,50 +638,51 @@ impl LocalStreamManagerCore {
             let metrics = self.streaming_metrics.clone();
             let actor_monitor_task = self.runtime.spawn(async move {
                 loop {
+                    let task_metrics = monitor.cumulative();
                     metrics
                         .actor_execution_time
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_poll_duration.as_secs_f64());
+                        .set(task_metrics.total_poll_duration.as_secs_f64());
                     metrics
                         .actor_fast_poll_duration
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_fast_poll_duration.as_secs_f64());
+                        .set(task_metrics.total_fast_poll_duration.as_secs_f64());
                     metrics
                         .actor_fast_poll_cnt
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_fast_poll_count as i64);
+                        .set(task_metrics.total_fast_poll_count as i64);
                     metrics
                         .actor_slow_poll_duration
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_slow_poll_duration.as_secs_f64());
+                        .set(task_metrics.total_slow_poll_duration.as_secs_f64());
                     metrics
                         .actor_slow_poll_cnt
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_slow_poll_count as i64);
+                        .set(task_metrics.total_slow_poll_count as i64);
                     metrics
                         .actor_poll_duration
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_poll_duration.as_secs_f64());
+                        .set(task_metrics.total_poll_duration.as_secs_f64());
                     metrics
                         .actor_poll_cnt
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_poll_count as i64);
+                        .set(task_metrics.total_poll_count as i64);
                     metrics
                         .actor_idle_duration
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_idle_duration.as_secs_f64());
+                        .set(task_metrics.total_idle_duration.as_secs_f64());
                     metrics
                         .actor_idle_cnt
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_idled_count as i64);
+                        .set(task_metrics.total_idled_count as i64);
                     metrics
                         .actor_scheduled_duration
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_scheduled_duration.as_secs_f64());
+                        .set(task_metrics.total_scheduled_duration.as_secs_f64());
                     metrics
                         .actor_scheduled_cnt
                         .with_label_values(&[&actor_id_str])
-                        .set(monitor.cumulative().total_scheduled_count as i64);
+                        .set(task_metrics.total_scheduled_count as i64);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             });
