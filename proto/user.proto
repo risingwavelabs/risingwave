@@ -10,10 +10,9 @@ option optimize_for = SPEED;
 message AuthInfo {
   enum EncryptionType {
     UNSPECIFIED = 0;
-    UNKNOWN = 1;
-    PLAINTEXT = 2;
-    SHA256 = 3;
-    MD5 = 4;
+    PLAINTEXT = 1;
+    SHA256 = 2;
+    MD5 = 3;
   }
   EncryptionType encryption_type = 1;
   bytes encrypted_value = 2;
@@ -37,13 +36,12 @@ message UserInfo {
 message GrantPrivilege {
   enum Action {
     UNSPECIFIED = 0;
-    UNKNOWN = 1;
-    SELECT = 2;
-    INSERT = 3;
-    UPDATE = 4;
-    DELETE = 5;
-    CREATE = 6;
-    CONNECT = 7;
+    SELECT = 1;
+    INSERT = 2;
+    UPDATE = 3;
+    DELETE = 4;
+    CREATE = 5;
+    CONNECT = 6;
   }
 
   message ActionWithGrantOption {
@@ -83,7 +81,7 @@ message DropUserResponse {
 
 message UpdateUserRequest {
   enum UpdateField {
-    UNKNOWN = 0;
+    UNSPECIFIED = 0;
     SUPER = 1;
     LOGIN = 2;
     CREATE_DB = 3;

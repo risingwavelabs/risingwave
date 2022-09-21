@@ -1,5 +1,6 @@
 [server]
 heartbeat_interval_ms = 1000
+connection_pool_size = 16
 
 [batch]
 
@@ -26,3 +27,4 @@ cache_meta_fallocate_unit_mb = 16
 
 [streaming.developer]
 enable_executor_row_count = false
+connector_message_buffer_size = 16

@@ -129,6 +129,9 @@ impl LogicalTopN {
         let field_order = &self.order.field_order;
         let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
+        internal_table_catalog_builder
+            .set_properties(self.ctx().inner().with_options.internal_table_subset());
+
         columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });

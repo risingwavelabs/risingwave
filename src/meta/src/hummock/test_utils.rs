@@ -248,12 +248,12 @@ pub async fn setup_compute_env_with_config(
     );
 
     let compaction_group_manager = Arc::new(
-        CompactionGroupManager::new_with_config(env.clone(), config.clone())
+        CompactionGroupManager::with_config(env.clone(), config.clone())
             .await
             .unwrap(),
     );
 
-    let compactor_manager = Arc::new(CompactorManager::new_for_test());
+    let compactor_manager = Arc::new(CompactorManager::for_test());
 
     let hummock_manager = Arc::new(
         HummockManager::new(

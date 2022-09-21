@@ -251,6 +251,7 @@ export interface ListAllNodesResponse {
 export interface SubscribeRequest {
   workerType: WorkerType;
   host: HostAddress | undefined;
+  workerId: number;
 }
 
 export interface MetaSnapshot {
@@ -380,6 +381,25 @@ export interface GetClusterInfoResponse_ActorSplitsEntry {
 export interface GetClusterInfoResponse_StreamSourceInfosEntry {
   key: number;
   value: StreamSourceInfo | undefined;
+}
+
+export interface RescheduleRequest {
+  /** reschedule plan for each fragment */
+  reschedules: { [key: number]: RescheduleRequest_Reschedule };
+}
+
+export interface RescheduleRequest_Reschedule {
+  addedParallelUnits: number[];
+  removedParallelUnits: number[];
+}
+
+export interface RescheduleRequest_ReschedulesEntry {
+  key: number;
+  value: RescheduleRequest_Reschedule | undefined;
+}
+
+export interface RescheduleResponse {
+  success: boolean;
 }
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
@@ -1211,7 +1231,7 @@ export const ListAllNodesResponse = {
 };
 
 function createBaseSubscribeRequest(): SubscribeRequest {
-  return { workerType: WorkerType.UNSPECIFIED, host: undefined };
+  return { workerType: WorkerType.UNSPECIFIED, host: undefined, workerId: 0 };
 }
 
 export const SubscribeRequest = {
@@ -1219,6 +1239,7 @@ export const SubscribeRequest = {
     return {
       workerType: isSet(object.workerType) ? workerTypeFromJSON(object.workerType) : WorkerType.UNSPECIFIED,
       host: isSet(object.host) ? HostAddress.fromJSON(object.host) : undefined,
+      workerId: isSet(object.workerId) ? Number(object.workerId) : 0,
     };
   },
 
@@ -1226,6 +1247,7 @@ export const SubscribeRequest = {
     const obj: any = {};
     message.workerType !== undefined && (obj.workerType = workerTypeToJSON(message.workerType));
     message.host !== undefined && (obj.host = message.host ? HostAddress.toJSON(message.host) : undefined);
+    message.workerId !== undefined && (obj.workerId = Math.round(message.workerId));
     return obj;
   },
 
@@ -1235,6 +1257,7 @@ export const SubscribeRequest = {
     message.host = (object.host !== undefined && object.host !== null)
       ? HostAddress.fromPartial(object.host)
       : undefined;
+    message.workerId = object.workerId ?? 0;
     return message;
   },
 };
@@ -1791,6 +1814,143 @@ export const GetClusterInfoResponse_StreamSourceInfosEntry = {
     message.value = (object.value !== undefined && object.value !== null)
       ? StreamSourceInfo.fromPartial(object.value)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseRescheduleRequest(): RescheduleRequest {
+  return { reschedules: {} };
+}
+
+export const RescheduleRequest = {
+  fromJSON(object: any): RescheduleRequest {
+    return {
+      reschedules: isObject(object.reschedules)
+        ? Object.entries(object.reschedules).reduce<{ [key: number]: RescheduleRequest_Reschedule }>(
+          (acc, [key, value]) => {
+            acc[Number(key)] = RescheduleRequest_Reschedule.fromJSON(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+    };
+  },
+
+  toJSON(message: RescheduleRequest): unknown {
+    const obj: any = {};
+    obj.reschedules = {};
+    if (message.reschedules) {
+      Object.entries(message.reschedules).forEach(([k, v]) => {
+        obj.reschedules[k] = RescheduleRequest_Reschedule.toJSON(v);
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RescheduleRequest>, I>>(object: I): RescheduleRequest {
+    const message = createBaseRescheduleRequest();
+    message.reschedules = Object.entries(object.reschedules ?? {}).reduce<
+      { [key: number]: RescheduleRequest_Reschedule }
+    >((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[Number(key)] = RescheduleRequest_Reschedule.fromPartial(value);
+      }
+      return acc;
+    }, {});
+    return message;
+  },
+};
+
+function createBaseRescheduleRequest_Reschedule(): RescheduleRequest_Reschedule {
+  return { addedParallelUnits: [], removedParallelUnits: [] };
+}
+
+export const RescheduleRequest_Reschedule = {
+  fromJSON(object: any): RescheduleRequest_Reschedule {
+    return {
+      addedParallelUnits: Array.isArray(object?.addedParallelUnits)
+        ? object.addedParallelUnits.map((e: any) => Number(e))
+        : [],
+      removedParallelUnits: Array.isArray(object?.removedParallelUnits)
+        ? object.removedParallelUnits.map((e: any) => Number(e))
+        : [],
+    };
+  },
+
+  toJSON(message: RescheduleRequest_Reschedule): unknown {
+    const obj: any = {};
+    if (message.addedParallelUnits) {
+      obj.addedParallelUnits = message.addedParallelUnits.map((e) => Math.round(e));
+    } else {
+      obj.addedParallelUnits = [];
+    }
+    if (message.removedParallelUnits) {
+      obj.removedParallelUnits = message.removedParallelUnits.map((e) => Math.round(e));
+    } else {
+      obj.removedParallelUnits = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RescheduleRequest_Reschedule>, I>>(object: I): RescheduleRequest_Reschedule {
+    const message = createBaseRescheduleRequest_Reschedule();
+    message.addedParallelUnits = object.addedParallelUnits?.map((e) => e) || [];
+    message.removedParallelUnits = object.removedParallelUnits?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseRescheduleRequest_ReschedulesEntry(): RescheduleRequest_ReschedulesEntry {
+  return { key: 0, value: undefined };
+}
+
+export const RescheduleRequest_ReschedulesEntry = {
+  fromJSON(object: any): RescheduleRequest_ReschedulesEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? RescheduleRequest_Reschedule.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: RescheduleRequest_ReschedulesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined &&
+      (obj.value = message.value ? RescheduleRequest_Reschedule.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RescheduleRequest_ReschedulesEntry>, I>>(
+    object: I,
+  ): RescheduleRequest_ReschedulesEntry {
+    const message = createBaseRescheduleRequest_ReschedulesEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? RescheduleRequest_Reschedule.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseRescheduleResponse(): RescheduleResponse {
+  return { success: false };
+}
+
+export const RescheduleResponse = {
+  fromJSON(object: any): RescheduleResponse {
+    return { success: isSet(object.success) ? Boolean(object.success) : false };
+  },
+
+  toJSON(message: RescheduleResponse): unknown {
+    const obj: any = {};
+    message.success !== undefined && (obj.success = message.success);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RescheduleResponse>, I>>(object: I): RescheduleResponse {
+    const message = createBaseRescheduleResponse();
+    message.success = object.success ?? false;
     return message;
   },
 };

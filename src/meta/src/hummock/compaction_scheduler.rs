@@ -143,8 +143,15 @@ where
                 }
             };
             sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
-            self.pick_and_assign(compaction_group, request_channel.clone())
+            let status = self
+                .pick_and_assign(compaction_group, request_channel.clone())
                 .await;
+            if let ScheduleStatus::NoAvailableCompactor(_) = status {
+                tokio::time::sleep(Duration::from_secs(
+                    self.env.opts.no_available_compactor_stall_sec,
+                ))
+                .await;
+            }
         }
         tracing::info!("Compaction scheduler is stopped");
     }
@@ -296,12 +303,10 @@ mod tests {
     use assert_matches::assert_matches;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::CompactionGroupId;
-    use risingwave_pb::hummock::compact_task::TaskStatus;
 
     use crate::hummock::compaction_scheduler::{CompactionRequestChannel, ScheduleStatus};
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::hummock::CompactionScheduler;
-    use crate::manager::LocalNotification;
 
     #[tokio::test]
     async fn test_pick_and_assign() {
@@ -409,6 +414,10 @@ mod tests {
     #[tokio::test]
     #[cfg(all(test, feature = "failpoints"))]
     async fn test_failpoints() {
+        use risingwave_pb::hummock::compact_task::TaskStatus;
+
+        use crate::manager::LocalNotification;
+
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();

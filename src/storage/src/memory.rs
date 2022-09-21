@@ -334,13 +334,12 @@ impl StateStore for MemoryStateStore {
         async move {
             // memory backend doesn't need to push to S3, so this is a no-op
             Ok(SyncResult {
-                sync_succeed: true,
                 ..Default::default()
             })
         }
     }
 
-    fn seal_epoch(&self, _epoch: u64) {}
+    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move { Ok(()) }
@@ -398,14 +397,8 @@ mod tests {
         state_store
             .ingest_batch(
                 vec![
-                    (
-                        b"a".to_vec().into(),
-                        StorageValue::new_default_put(b"v1".to_vec()),
-                    ),
-                    (
-                        b"b".to_vec().into(),
-                        StorageValue::new_default_put(b"v1".to_vec()),
-                    ),
+                    (b"a".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
+                    (b"b".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
                 ],
                 WriteOptions {
                     epoch: 0,
@@ -417,11 +410,8 @@ mod tests {
         state_store
             .ingest_batch(
                 vec![
-                    (
-                        b"a".to_vec().into(),
-                        StorageValue::new_default_put(b"v2".to_vec()),
-                    ),
-                    (b"b".to_vec().into(), StorageValue::new_default_delete()),
+                    (b"a".to_vec().into(), StorageValue::new_put(b"v2".to_vec())),
+                    (b"b".to_vec().into(), StorageValue::new_delete()),
                 ],
                 WriteOptions {
                     epoch: 1,

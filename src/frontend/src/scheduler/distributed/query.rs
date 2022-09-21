@@ -18,13 +18,14 @@ use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use pgwire::pg_server::SessionId;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use super::{QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
@@ -74,6 +75,11 @@ pub struct QueryExecution {
     stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
+
+    shutdown_tx: Sender<QueryMessage>,
+
+    /// Identified by process_id, secret_key. Query in the same session should have same key.
+    pub session_id: SessionId,
 }
 
 struct QueryRunner {
@@ -92,7 +98,8 @@ struct QueryRunner {
 }
 
 impl QueryExecution {
-    pub async fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
         context: ExecutionContextRef,
         query: Query,
         epoch: u64,
@@ -100,6 +107,7 @@ impl QueryExecution {
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
+        session_id: SessionId,
     ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
@@ -130,15 +138,6 @@ impl QueryExecution {
             Arc::new(stage_executions)
         };
 
-        // Insert shutdown channel into channel map so able to cancel it outside.
-        // TODO: Find a way to delete it when query ends.
-        {
-            let session_ctx = context.session.clone();
-            session_ctx
-                .insert_query_shutdown_sender(query.query_id.clone(), sender)
-                .await;
-        }
-
         let state = QueryState::Pending {
             msg_receiver: receiver,
         };
@@ -150,6 +149,8 @@ impl QueryExecution {
             epoch,
             compute_client_pool,
             hummock_snapshot_manager,
+            shutdown_tx: sender,
+            session_id,
         }
     }
 
@@ -201,9 +202,17 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
-    #[expect(clippy::unused_async)]
-    pub async fn abort(&mut self) -> SchedulerResult<()> {
-        todo!()
+    pub async fn abort(self: Arc<Self>) {
+        if self
+            .shutdown_tx
+            .send(QueryMessage::CancelQuery)
+            .await
+            .is_err()
+        {
+            warn!("Send cancel query request failed: the query has ended");
+        } else {
+            info!("Send cancel request to query-{:?}", self.query.query_id);
+        };
     }
 }
 
@@ -388,7 +397,7 @@ mod tests {
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(1024));
+        let compute_client_pool = Arc::new(ComputeClientPool::default());
         let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
         let query_execution = QueryExecution::new(
             ExecutionContext::new(SessionImpl::mock().into()).into(),
@@ -400,8 +409,8 @@ mod tests {
             ))),
             compute_client_pool,
             catalog_reader,
-        )
-        .await;
+            (0, 0),
+        );
         assert!(query_execution.start().await.is_err());
     }
 
@@ -441,6 +450,7 @@ mod tests {
                 distribution_key: vec![],
                 appendonly: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
+                value_indices: vec![0, 1],
             }),
             vec![],
             ctx,

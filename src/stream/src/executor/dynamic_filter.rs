@@ -16,7 +16,7 @@ use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::StreamExt;
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
@@ -38,7 +38,7 @@ use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
-use crate::executor::PROCESSING_WINDOW_SIZE;
+use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
 
 pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
@@ -250,7 +250,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
         let mut current_epoch_row = None;
-        let mut epoch: u64 = 0;
 
         let aligned_stream = barrier_align(
             input_l.execute(),
@@ -258,6 +257,15 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             self.ctx.id,
             self.metrics.clone(),
         );
+
+        pin_mut!(aligned_stream);
+
+        let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
+        self.right_table.init_epoch(barrier.epoch.prev);
+        self.range_cache.init(barrier.epoch);
+
+        // The first barrier message should be propagated.
+        yield Message::Barrier(barrier);
 
         let mut stream_chunk_builder =
             StreamChunkBuilder::new(PROCESSING_WINDOW_SIZE, &self.schema.data_types(), 0, 0)?;
@@ -335,9 +343,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     if self.is_right_table_writer {
                         if let Some(row) = current_epoch_row.take() {
-                            assert_eq!(epoch, barrier.epoch.prev);
                             self.right_table.insert(row);
-                            self.right_table.commit(epoch).await?;
+                            self.right_table.commit(barrier.epoch.prev).await?;
                         }
                     }
 
@@ -345,7 +352,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     // We have flushed all the state for the prev epoch. We can now update the
                     // epochs.
-                    epoch = barrier.epoch.curr;
                     self.range_cache.update_epoch(barrier.epoch.curr);
 
                     prev_epoch_value = Some(curr);

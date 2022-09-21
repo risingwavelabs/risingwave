@@ -15,7 +15,10 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 
+use risingwave_common::types::DataType;
 use thiserror::Error;
+
+use crate::row_serde::row_serde_util::streaming_deserialize;
 
 #[derive(Clone, Debug)]
 pub enum RowOp {
@@ -154,5 +157,26 @@ impl MemTable {
         R: RangeBounds<Vec<u8>> + 'a,
     {
         self.buffer.range(key_range)
+    }
+}
+
+impl RowOp {
+    /// Print as debug string
+    pub fn debug_fmt(&self, data_types: &[DataType]) -> String {
+        match self {
+            Self::Insert(after) => {
+                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
+                format!("Insert({:?})", &after)
+            }
+            Self::Delete(before) => {
+                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
+                format!("Delete({:?})", &before)
+            }
+            Self::Update((before, after)) => {
+                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
+                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
+                format!("Update({:?}, {:?})", &before, &after)
+            }
+        }
     }
 }

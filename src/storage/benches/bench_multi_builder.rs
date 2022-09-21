@@ -73,7 +73,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
             .writer_factory
             .create_sst_writer(id, writer_options)
             .unwrap();
-        let builder = SstableBuilder::new_for_test(id, writer, self.options.clone());
+        let builder = SstableBuilder::for_test(id, writer, self.options.clone());
 
         Ok(builder)
     }
@@ -139,7 +139,7 @@ fn bench_builder(
     if enable_streaming_upload {
         group.bench_function(format!("bench_streaming_upload_{}mb", capacity_mb), |b| {
             b.to_async(&runtime).iter(|| {
-                build_tables(CapacitySplitTableBuilder::new_for_test(
+                build_tables(CapacitySplitTableBuilder::for_test(
                     LocalTableBuilderFactory::new(
                         1,
                         StreamingSstableWriterFactory::new(sstable_store.clone()),
@@ -151,7 +151,7 @@ fn bench_builder(
     } else {
         group.bench_function(format!("bench_batch_upload_{}mb", capacity_mb), |b| {
             b.to_async(&runtime).iter(|| {
-                build_tables(CapacitySplitTableBuilder::new_for_test(
+                build_tables(CapacitySplitTableBuilder::for_test(
                     LocalTableBuilderFactory::new(
                         1,
                         BatchSstableWriterFactory::new(sstable_store.clone()),

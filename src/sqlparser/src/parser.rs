@@ -404,6 +404,9 @@ impl Parser {
                 Keyword::ARRAY => Ok(Expr::Array(
                     self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
                 )),
+                k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
+                    parser_err!(format!("syntax error at or near \"{w}\""))
+                }
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token() {
@@ -1543,7 +1546,7 @@ impl Parser {
         let mut include = vec![];
         if self.parse_keyword(Keyword::INCLUDE) {
             self.expect_token(&Token::LParen)?;
-            include = self.parse_comma_separated(Parser::parse_identifier)?;
+            include = self.parse_comma_separated(Parser::parse_identifier_non_reserved)?;
             self.expect_token(&Token::RParen)?;
         }
         Ok(Statement::CreateIndex {
@@ -1615,7 +1618,7 @@ impl Parser {
     }
 
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
-        let name = self.parse_identifier()?;
+        let name = self.parse_identifier_non_reserved()?;
         let data_type = self.parse_data_type()?;
 
         let collation = if self.parse_keyword(Keyword::COLLATE) {
@@ -1626,7 +1629,7 @@ impl Parser {
         let mut options = vec![];
         loop {
             if self.parse_keyword(Keyword::CONSTRAINT) {
-                let name = Some(self.parse_identifier()?);
+                let name = Some(self.parse_identifier_non_reserved()?);
                 if let Some(option) = self.parse_optional_column_option()? {
                     options.push(ColumnOptionDef { name, option });
                 } else {
@@ -1717,7 +1720,7 @@ impl Parser {
         &mut self,
     ) -> Result<Option<TableConstraint>, ParserError> {
         let name = if self.parse_keyword(Keyword::CONSTRAINT) {
-            Some(self.parse_identifier()?)
+            Some(self.parse_identifier_non_reserved()?)
         } else {
             None
         };
@@ -1826,18 +1829,18 @@ impl Parser {
             }
         } else if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::CONSTRAINT) {
-                let old_name = self.parse_identifier()?;
+                let old_name = self.parse_identifier_non_reserved()?;
                 self.expect_keyword(Keyword::TO)?;
-                let new_name = self.parse_identifier()?;
+                let new_name = self.parse_identifier_non_reserved()?;
                 AlterTableOperation::RenameConstraint { old_name, new_name }
             } else if self.parse_keyword(Keyword::TO) {
                 let table_name = self.parse_object_name()?;
                 AlterTableOperation::RenameTable { table_name }
             } else {
                 let _ = self.parse_keyword(Keyword::COLUMN);
-                let old_column_name = self.parse_identifier()?;
+                let old_column_name = self.parse_identifier_non_reserved()?;
                 self.expect_keyword(Keyword::TO)?;
-                let new_column_name = self.parse_identifier()?;
+                let new_column_name = self.parse_identifier_non_reserved()?;
                 AlterTableOperation::RenameColumn {
                     old_column_name,
                     new_column_name,
@@ -1851,7 +1854,7 @@ impl Parser {
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
             let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
-            let column_name = self.parse_identifier()?;
+            let column_name = self.parse_identifier_non_reserved()?;
             let cascade = self.parse_keyword(Keyword::CASCADE);
             AlterTableOperation::DropColumn {
                 column_name,
@@ -1860,7 +1863,7 @@ impl Parser {
             }
         } else if self.parse_keyword(Keyword::ALTER) {
             let _ = self.parse_keyword(Keyword::COLUMN);
-            let column_name = self.parse_identifier()?;
+            let column_name = self.parse_identifier_non_reserved()?;
 
             let op = if self.parse_keywords(&[Keyword::SET, Keyword::NOT, Keyword::NULL]) {
                 AlterColumnOperation::SetNotNull {}
@@ -2036,7 +2039,7 @@ impl Parser {
 
         loop {
             if let Token::Word(_) = self.peek_token() {
-                let name = self.parse_identifier()?;
+                let name = self.parse_identifier_non_reserved()?;
                 let data_type = self.parse_data_type()?;
                 columns.push(StructField { name, data_type })
             } else {
@@ -2250,13 +2253,26 @@ impl Parser {
         }
     }
 
+    /// Parse a simple one-word identifier (possibly quoted, possibly a non-reserved keyword)
+    pub fn parse_identifier_non_reserved(&mut self) -> Result<Ident, ParserError> {
+        match self.next_token() {
+            Token::Word(w) => {
+                match keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&w.keyword) {
+                    true => parser_err!(format!("syntax error at or near \"{w}\"")),
+                    false => Ok(w.to_ident()),
+                }
+            }
+            unexpected => self.expected("identifier", unexpected),
+        }
+    }
+
     /// Parse a parenthesized comma-separated list of unqualified, possibly quoted identifiers
     pub fn parse_parenthesized_column_list(
         &mut self,
         optional: IsOptional,
     ) -> Result<Vec<Ident>, ParserError> {
         if self.consume_token(&Token::LParen) {
-            let cols = self.parse_comma_separated(Parser::parse_identifier)?;
+            let cols = self.parse_comma_separated(Parser::parse_identifier_non_reserved)?;
             self.expect_token(&Token::RParen)?;
             Ok(cols)
         } else if optional == Optional {
@@ -2267,36 +2283,29 @@ impl Parser {
     }
 
     pub fn parse_row_expr(&mut self) -> Result<Expr, ParserError> {
-        if self.consume_token(&Token::LParen) {
-            if self.consume_token(&Token::RParen) {
-                Ok(Expr::Row(vec![]))
-            } else {
-                self.prev_token();
-                Ok(Expr::Row(self.parse_token_wrapped_exprs(
-                    &Token::LParen,
-                    &Token::RParen,
-                )?))
-            }
-        } else {
-            self.expected("(", self.peek_token())
-        }
+        Ok(Expr::Row(self.parse_token_wrapped_exprs(
+            &Token::LParen,
+            &Token::RParen,
+        )?))
     }
 
-    /// Parse a comma-separated list from a wrapped expression
+    /// Parse a comma-separated list (maybe empty) from a wrapped expression
     pub fn parse_token_wrapped_exprs(
         &mut self,
         left: &Token,
         right: &Token,
     ) -> Result<Vec<Expr>, ParserError> {
         if self.consume_token(left) {
-            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-            self.expect_token(right)?;
+            let exprs = if self.consume_token(right) {
+                vec![]
+            } else {
+                let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+                self.expect_token(right)?;
+                exprs
+            };
             Ok(exprs)
         } else {
-            self.expected(
-                format!("an array of expressions in {} and {}", left, right).as_str(),
-                self.peek_token(),
-            )
+            self.expected(left.to_string().as_str(), self.peek_token())
         }
     }
 
@@ -2465,7 +2474,7 @@ impl Parser {
 
     /// Parse a CTE (`alias [( col1, col2, ... )] AS (subquery)`)
     fn parse_cte(&mut self) -> Result<Cte, ParserError> {
-        let name = self.parse_identifier()?;
+        let name = self.parse_identifier_non_reserved()?;
 
         let mut cte = if self.parse_keyword(Keyword::AS) {
             self.expect_token(&Token::LParen)?;
@@ -2750,7 +2759,7 @@ impl Parser {
     /// `from` then use default schema name.
     pub fn parse_from_and_identifier(&mut self) -> Result<Option<Ident>, ParserError> {
         if self.parse_keyword(Keyword::FROM) {
-            Ok(Some(self.parse_identifier()?))
+            Ok(Some(self.parse_identifier_non_reserved()?))
         } else {
             Ok(None)
         }
