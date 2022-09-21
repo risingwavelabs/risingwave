@@ -15,12 +15,13 @@
 use std::ops::{Bound, RangeBounds};
 
 use itertools::Itertools;
+use paste::paste;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
 use crate::array::Row;
 use crate::types::{Datum, ScalarImpl, VirtualNode};
-use crate::util::hash_util::CRC32FastBuilder;
+use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::serialize_datum;
 
 /// See also [`ScanRangeProst`]
@@ -102,7 +103,7 @@ impl ScanRange {
 
         let pk_prefix_value = Row(self.eq_conds.clone());
         let vnode = pk_prefix_value
-            .hash_by_indices(&dist_key_in_pk_indices, &CRC32FastBuilder {})
+            .hash_by_indices(&dist_key_in_pk_indices, &Crc32FastBuilder {})
             .to_vnode();
         Some(vnode)
     }
@@ -116,6 +117,57 @@ pub fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
     matches!(bounds.start_bound(), Bound::Unbounded)
         && matches!(bounds.end_bound(), Bound::Unbounded)
 }
+
+macro_rules! for_all_scalar_int_variants {
+    ($macro:ident $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*],
+            { Int16 },
+            { Int32 },
+            { Int64 }
+        }
+    };
+}
+
+macro_rules! impl_split_small_range {
+    ([], $( { $type_name:ident} ),*) => {
+        paste! {
+            impl ScanRange {
+                /// `Precondition`: make sure the first order key is int type if you call this method.
+                /// Optimize small range scan. It turns x between 0 and 5 into x in (0, 1, 2, 3, 4, 5).s
+                pub fn split_small_range(&self, max_gap: u64) -> Option<Vec<Self>> {
+                     if self.eq_conds.is_empty() {
+                        match self.range {
+                            $(
+                                (
+                                    Bound::Included(ScalarImpl::$type_name(ref left)),
+                                    Bound::Included(ScalarImpl::$type_name(ref right)),
+                                ) => {
+                                    if (right - left + 1) as u64 <= max_gap {
+                                        return Some(
+                                            (*left..=*right)
+                                                .into_iter()
+                                                .map(|i| ScanRange {
+                                                    eq_conds: vec![Some(ScalarImpl::$type_name(i))],
+                                                    range: full_range(),
+                                                })
+                                                .collect(),
+                                        );
+                                    }
+                                }
+                            )*
+                            _ => {}
+                        }
+                    }
+
+                    None
+                }
+            }
+        }
+    };
+}
+
+for_all_scalar_int_variants! { impl_split_small_range }
 
 #[cfg(test)]
 mod tests {
@@ -138,7 +190,7 @@ mod tests {
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
         ])
-        .hash_by_indices(&[0, 1], &CRC32FastBuilder {})
+        .hash_by_indices(&[0, 1], &Crc32FastBuilder {})
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }
@@ -164,7 +216,7 @@ mod tests {
             Some(ScalarImpl::from(514)),
             Some(ScalarImpl::from(114514)),
         ])
-        .hash_by_indices(&[2, 1], &CRC32FastBuilder {})
+        .hash_by_indices(&[2, 1], &Crc32FastBuilder {})
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }

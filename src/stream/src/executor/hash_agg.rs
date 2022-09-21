@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use futures::{stream, StreamExt};
@@ -26,7 +27,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
-use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -38,6 +39,7 @@ use crate::executor::aggregation::{
     generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
 /// Limit number of cached entries (one per group key)
@@ -91,6 +93,13 @@ struct HashAggExecutorExtra<S: StateStore> {
 
     /// State table column mappings for each aggregation calls,
     state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
+
+    /// How many times have we hit the cache of join executor
+    lookup_miss_count: AtomicU64,
+
+    total_lookup_count: AtomicU64,
+
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -122,6 +131,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         key_indices: Vec<usize>,
         mut state_tables: Vec<StateTable<S>>,
         state_table_col_mappings: Vec<Vec<usize>>,
+        metrics: Arc<StreamingMetrics>,
     ) -> StreamResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
@@ -148,6 +158,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     .map(StateTableColumnMapping::new)
                     .map(Arc::new)
                     .collect(),
+                lookup_miss_count: AtomicU64::new(0),
+                total_lookup_count: AtomicU64::new(0),
+                metrics,
             },
             _phantom: PhantomData,
         })
@@ -216,6 +229,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             state_tables,
             ref state_table_col_mappings,
             pk_indices: _,
+            lookup_miss_count,
+            total_lookup_count,
+            metrics: _,
         }: &mut HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         chunk: StreamChunk,
@@ -223,7 +239,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let (data_chunk, ops) = chunk.into_parts();
 
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
-        let hash_codes = data_chunk.get_hash_values(key_indices, CRC32FastBuilder)?;
+        let hash_codes = data_chunk.get_hash_values(key_indices, Crc32FastBuilder);
         let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
         let capacity = data_chunk.capacity();
         let (columns, vis) = data_chunk.into_parts();
@@ -242,6 +258,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for (key, _hash_code, _) in &unique_keys {
             // Retrieve previous state from the KeyedState.
             let states = state_map.put(key.to_owned(), None);
+            total_lookup_count.fetch_add(1, Ordering::Relaxed);
 
             let key = key.clone();
             // To leverage more parallelism in IO operations, fetching and updating states for every
@@ -252,16 +269,19 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 let mut states = {
                     match states {
                         Some(s) => s.unwrap(),
-                        None => Box::new(
-                            generate_managed_agg_state(
-                                Some(&key.clone().deserialize(key_data_types.iter())?),
-                                agg_calls,
-                                input_pk_indices.clone(),
-                                state_tables,
-                                state_table_col_mappings,
+                        None => {
+                            lookup_miss_count.fetch_add(1, Ordering::Relaxed);
+                            Box::new(
+                                generate_managed_agg_state(
+                                    Some(&key.clone().deserialize(key_data_types.iter())?),
+                                    agg_calls,
+                                    input_pk_indices.clone(),
+                                    state_tables,
+                                    state_table_col_mappings,
+                                )
+                                .await?,
                             )
-                            .await?,
-                        ),
+                        }
                     }
                 };
 
@@ -312,14 +332,31 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn flush_data<'a>(
         &mut HashAggExecutorExtra::<S> {
+            ref ctx,
             ref key_indices,
             ref schema,
             ref mut state_tables,
+            ref lookup_miss_count,
+            ref total_lookup_count,
+            ref metrics,
             ..
         }: &'a mut HashAggExecutorExtra<S>,
         state_map: &'a mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         epoch: u64,
     ) {
+        let actor_id_str = ctx.id.to_string();
+        metrics
+            .agg_lookup_miss_count
+            .with_label_values(&[&actor_id_str])
+            .inc_by(lookup_miss_count.swap(0, Ordering::Relaxed));
+        metrics
+            .agg_total_lookup_count
+            .with_label_values(&[&actor_id_str])
+            .inc_by(total_lookup_count.swap(0, Ordering::Relaxed));
+        metrics
+            .agg_cached_keys
+            .with_label_values(&[&actor_id_str])
+            .set(state_map.values().map(|_| 1).sum());
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been
         // fully flushed.
@@ -454,6 +491,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use itertools::Itertools;
@@ -467,6 +506,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::monitor::StreamingMetrics;
     use crate::executor::test_utils::agg_executor::create_state_table;
     use crate::executor::test_utils::*;
     use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
@@ -503,6 +543,7 @@ mod tests {
             key_indices,
             state_tables,
             state_table_col_mappings,
+            Arc::new(StreamingMetrics::unused()),
         )
         .unwrap()
         .boxed()

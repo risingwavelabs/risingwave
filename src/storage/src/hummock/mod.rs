@@ -67,7 +67,9 @@ pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::{CompactionGroupClient, DummyCompactionGroupClient};
+use crate::hummock::compaction_group_client::{
+    CompactionGroupClientImpl, DummyCompactionGroupClient,
+};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -90,7 +92,7 @@ pub struct HummockStorage {
     /// Statistics
     stats: Arc<StateStoreMetrics>,
 
-    compaction_group_client: Arc<dyn CompactionGroupClient>,
+    compaction_group_client: Arc<CompactionGroupClientImpl>,
 
     sstable_id_manager: SstableIdManagerRef,
 
@@ -111,8 +113,8 @@ impl HummockStorage {
             sstable_store,
             hummock_meta_client,
             Arc::new(StateStoreMetrics::unused()),
-            Arc::new(DummyCompactionGroupClient::new(
-                StaticCompactionGroupId::StateDefault.into(),
+            Arc::new(CompactionGroupClientImpl::Dummy(
+                DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
             )),
             filter_key_extractor_manager,
         )
@@ -125,7 +127,7 @@ impl HummockStorage {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
-        compaction_group_client: Arc<dyn CompactionGroupClient>,
+        compaction_group_client: Arc<CompactionGroupClientImpl>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to

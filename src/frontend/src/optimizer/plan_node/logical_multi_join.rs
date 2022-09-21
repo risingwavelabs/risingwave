@@ -41,7 +41,7 @@ pub struct LogicalMultiJoin {
     on: Condition,
     output_indices: Vec<usize>,
     inner2output: ColIndexMapping,
-    // XXX(st1page): these fields will be used in prune_col and
+    // NOTE(st1page): these fields will be used in prune_col and
     // pk_derive soon.
     /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
     /// not consider output_indices**

@@ -381,7 +381,7 @@ impl RowDeserializer {
 mod tests {
     use super::*;
     use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
-    use crate::util::hash_util::CRC32FastBuilder;
+    use crate::util::hash_util::Crc32FastBuilder;
 
     #[test]
     fn row_value_encode_decode() {
@@ -416,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_hash_row() {
-        let hash_builder = CRC32FastBuilder {};
+        let hash_builder = Crc32FastBuilder {};
 
         let row1 = Row(vec![
             Some(ScalarImpl::Utf8("string".into())),

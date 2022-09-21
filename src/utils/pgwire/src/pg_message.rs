@@ -77,7 +77,10 @@ pub struct FeQueryMessage {
 
 #[derive(Debug)]
 pub struct FeBindMessage {
-    pub format_codes: Vec<i16>,
+    // param_format_code:
+    //  false: text
+    //  true: binary
+    pub param_format_code: bool,
 
     // result_format_code:
     //  false: text
@@ -168,7 +171,20 @@ impl FeBindMessage {
         let statement_name = read_null_terminated(&mut buf)?;
         // Read FormatCode
         let len = buf.get_i16();
-        let format_codes = (0..len).map(|_| buf.get_i16()).collect();
+
+        let param_format_code = if len == 0 || len == 1 {
+            if len == 0 {
+                false
+            } else {
+                buf.get_i16() == 1
+            }
+        } else {
+            let first_value = buf.get_i16();
+            for _ in 1..len {
+                assert!(buf.get_i16() == first_value,"Only support uniform param format (TEXT or BINARY), can't support mix format now.");
+            }
+            first_value == 1
+        };
         // Read Params
         let len = buf.get_i16();
         let params = (0..len)
@@ -180,7 +196,7 @@ impl FeBindMessage {
         // Read ResultFormatCode
         let len = buf.get_i16();
 
-        assert!(len==0||len==1,"Only support default format(len==0) or uniform format(len==1), can't support mix format now.");
+        assert!(len==0||len==1,"Only support default result format(len==0) or uniform result format(len==1), can't support mix format now.");
 
         let result_format_code = if len == 0 {
             // default format:text
@@ -190,7 +206,7 @@ impl FeBindMessage {
         };
 
         Ok(FeMessage::Bind(FeBindMessage {
-            format_codes,
+            param_format_code,
             params,
             result_format_code,
             portal_name,

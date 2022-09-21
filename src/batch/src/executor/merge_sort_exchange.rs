@@ -271,7 +271,7 @@ mod tests {
             FakeCreateSource,
             ComputeNodeContext,
         > {
-            context: ComputeNodeContext::new_for_test(),
+            context: ComputeNodeContext::for_test(),
             source_inputs: vec![None; proto_sources.len()],
             order_pairs,
             min_heap: BinaryHeap::new(),
