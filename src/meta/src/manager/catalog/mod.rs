@@ -496,7 +496,9 @@ where
                         }))
                         .await
                         .into_iter()
-                        .map_ok(|table| table.unwrap())
+                        // FIXME(zehua): use `map_ok(|table| table.unwrap())` instead of this after
+                        // source node's state table has catalog.
+                        .filter_map_ok(|table| table)
                         .collect::<MetadataModelResult<Vec<_>>>()?;
                     tables_to_drop.push(table);
 
@@ -582,7 +584,10 @@ where
                             }))
                             .await
                             .into_iter()
-                            .map_ok(|table| table.unwrap())
+                            // FIXME(zehua): use `map_ok(|table| table.unwrap())` instead of this
+                            // after source node's state table has
+                            // catalog.
+                            .filter_map_ok(|table| table)
                             .collect::<MetadataModelResult<Vec<_>>>()?;
                         tables_to_drop.push(table);
 
