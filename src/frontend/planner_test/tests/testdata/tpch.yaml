@@ -162,19 +162,19 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 1 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 2 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_extendedprice)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 3 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 4 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 5 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 6 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 7 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_extendedprice)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 8 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count(lineitem.l_extendedprice)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 9 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_discount)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 10 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count(lineitem.l_discount)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 11 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 4294967294 { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }
+     Table 0 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 1 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 2 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_extendedprice)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 3 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 4 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 5 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 6 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 7 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_extendedprice)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 8 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count(lineitem.l_extendedprice)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 9 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_discount)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 10 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count(lineitem.l_discount)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 11 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 4294967294 { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0, 1] }
 - id: tpch_q2
   before:
   - create_tables
@@ -502,48 +502,48 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey_0, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey, Vnode(nation.n_regionkey)], primary key: [$0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] }
-     Table 1 { columns: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey_0, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey, Vnode(nation.n_regionkey)], primary key: [$18 ASC, $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], vnode column idx: 18 }
-     Table 2 { columns: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey_0, partsupp.ps_supplycost, min(partsupp.ps_supplycost), supplier.s_nationkey, nation.n_nationkey], primary key: [$8 ASC, $9 ASC, $10 ASC, $0 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $16 ASC, $15 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] }
-     Table 3 { columns: [nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey_0, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10] }
-     Table 4 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 5 { columns: [region.r_regionkey, region.r_regionkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 6 { columns: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, partsupp.ps_supplycost, part.p_partkey_0, min(partsupp.ps_supplycost)], primary key: [$4 ASC, $8 ASC, $9 ASC, $0 ASC, $10 ASC, $12 ASC, $11 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] }
-     Table 7 { columns: [supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey_0, partsupp.ps_supplycost, min(partsupp.ps_supplycost), _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8] }
-     Table 8 { columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2] }
-     Table 9 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 10 { columns: [partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey], primary key: [$1 ASC, $0 ASC, $9 ASC, $10 ASC, $1 ASC, $11 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }
-     Table 11 { columns: [part.p_partkey, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey_0, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6] }
-     Table 12 { columns: [part.p_partkey, min(partsupp.ps_supplycost)], primary key: [$0 ASC, $1 ASC, $0 ASC], value indices: [0, 1] }
-     Table 13 { columns: [part.p_partkey, min(partsupp.ps_supplycost), part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 14 { columns: [partsupp.ps_suppkey, partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, partsupp.ps_partkey], primary key: [$0 ASC, $4 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4] }
-     Table 15 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, part.p_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 16 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6] }
-     Table 17 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 18 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 19 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 20 { columns: [part.p_partkey, part.p_mfgr], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 21 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 22 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 23 { columns: [part.p_partkey, partsupp.ps_supplycost, part.p_partkey_0, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }
-     Table 24 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 25 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 26 { columns: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey], primary key: [$0 ASC, $0 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $7 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7] }
-     Table 27 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8] }
-     Table 28 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 29 { columns: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey], primary key: [$2 ASC, $0 ASC, $3 ASC, $4 ASC, $6 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5, 6] }
-     Table 30 { columns: [nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6] }
-     Table 31 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 32 { columns: [region.r_regionkey, region.r_regionkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 33 { columns: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey], primary key: [$2 ASC, $0 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4] }
-     Table 34 { columns: [supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 35 { columns: [nation.n_nationkey, nation.n_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 36 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 37 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], primary key: [$1 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 38 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 39 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 40 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey], primary key: [$0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] }
+     Table 0 { columns: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey_0, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey, Vnode(nation.n_regionkey)], primary key: [$0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], distribution key: [] }
+     Table 1 { columns: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey_0, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey, Vnode(nation.n_regionkey)], primary key: [$18 ASC, $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], distribution key: [] }
+     Table 2 { columns: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey_0, partsupp.ps_supplycost, min(partsupp.ps_supplycost), supplier.s_nationkey, nation.n_nationkey], primary key: [$8 ASC, $9 ASC, $10 ASC, $0 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $16 ASC, $15 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], distribution key: [8] }
+     Table 3 { columns: [nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey_0, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10], distribution key: [0] }
+     Table 4 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 5 { columns: [region.r_regionkey, region.r_regionkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 6 { columns: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, partsupp.ps_supplycost, part.p_partkey_0, min(partsupp.ps_supplycost)], primary key: [$4 ASC, $8 ASC, $9 ASC, $0 ASC, $10 ASC, $12 ASC, $11 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [4] }
+     Table 7 { columns: [supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey, supplier.s_suppkey, part.p_partkey_0, partsupp.ps_supplycost, min(partsupp.ps_supplycost), _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8], distribution key: [0] }
+     Table 8 { columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 9 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 10 { columns: [partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey], primary key: [$1 ASC, $0 ASC, $9 ASC, $10 ASC, $1 ASC, $11 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [1] }
+     Table 11 { columns: [part.p_partkey, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, part.p_partkey_0, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6], distribution key: [0] }
+     Table 12 { columns: [part.p_partkey, min(partsupp.ps_supplycost)], primary key: [$0 ASC, $1 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 13 { columns: [part.p_partkey, min(partsupp.ps_supplycost), part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 14 { columns: [partsupp.ps_suppkey, partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, partsupp.ps_partkey], primary key: [$0 ASC, $4 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
+     Table 15 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, part.p_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 16 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0] }
+     Table 17 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 18 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 19 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 20 { columns: [part.p_partkey, part.p_mfgr], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 21 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 22 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 23 { columns: [part.p_partkey, partsupp.ps_supplycost, part.p_partkey_0, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0] }
+     Table 24 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 25 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 26 { columns: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey], primary key: [$0 ASC, $0 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $7 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [0] }
+     Table 27 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8], distribution key: [0] }
+     Table 28 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 29 { columns: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey], primary key: [$2 ASC, $0 ASC, $3 ASC, $4 ASC, $6 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [2] }
+     Table 30 { columns: [nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6], distribution key: [0] }
+     Table 31 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 32 { columns: [region.r_regionkey, region.r_regionkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 33 { columns: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey], primary key: [$2 ASC, $0 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2] }
+     Table 34 { columns: [supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 35 { columns: [nation.n_nationkey, nation.n_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 36 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 37 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], primary key: [$1 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [1] }
+     Table 38 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 39 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 40 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey], primary key: [$0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], distribution key: [] }
 - id: tpch_q3
   before:
   - create_tables
@@ -690,19 +690,19 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority)], primary key: [$1 DESC, $2 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4] }
-     Table 1 { columns: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority)], primary key: [$4 ASC, $1 DESC, $2 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4], vnode column idx: 4 }
-     Table 2 { columns: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3] }
-     Table 3 { columns: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3] }
-     Table 4 { columns: [orders.o_orderkey, orders.o_orderdate, orders.o_shippriority, customer.c_custkey, orders.o_custkey], primary key: [$0 ASC, $3 ASC, $0 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4] }
-     Table 5 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 6 { columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3] }
-     Table 7 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 8 { columns: [customer.c_custkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 9 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 10 { columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate, orders.o_shippriority], primary key: [$1 ASC, $0 ASC], value indices: [0, 1, 2, 3] }
-     Table 11 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], primary key: [$1 DESC, $2 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3] }
+     Table 0 { columns: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority)], primary key: [$1 DESC, $2 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [] }
+     Table 1 { columns: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority)], primary key: [$4 ASC, $1 DESC, $2 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [] }
+     Table 2 { columns: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1, 2] }
+     Table 3 { columns: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1, 2] }
+     Table 4 { columns: [orders.o_orderkey, orders.o_orderdate, orders.o_shippriority, customer.c_custkey, orders.o_custkey], primary key: [$0 ASC, $3 ASC, $0 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
+     Table 5 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 6 { columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 7 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 8 { columns: [customer.c_custkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 9 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 10 { columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate, orders.o_shippriority], primary key: [$1 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [1] }
+     Table 11 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], primary key: [$1 DESC, $2 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
 - id: tpch_q4
   before:
   - create_tables
@@ -800,13 +800,13 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [orders.o_orderpriority, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 1 { columns: [orders.o_orderpriority, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 2 { columns: [orders.o_orderkey, orders.o_orderpriority], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 3 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4 { columns: [lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1] }
-     Table 5 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 4294967294 { columns: [o_orderpriority, order_count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 0 { columns: [orders.o_orderpriority, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 1 { columns: [orders.o_orderpriority, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 2 { columns: [orders.o_orderkey, orders.o_orderpriority], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 3 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4 { columns: [lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 5 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 4294967294 { columns: [o_orderpriority, order_count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
 - id: tpch_q5
   before:
   - create_tables
@@ -1001,29 +1001,29 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [nation.n_name, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 1 { columns: [nation.n_name, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 2 { columns: [lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, nation.n_regionkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey], primary key: [$3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] }
-     Table 3 { columns: [nation.n_regionkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [11] }
-     Table 4 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 5 { columns: [region.r_regionkey, region.r_regionkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 6 { columns: [supplier.s_nationkey, lineitem.l_extendedprice, lineitem.l_discount, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey], primary key: [$0 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $0 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }
-     Table 7 { columns: [supplier.s_nationkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey_0, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10] }
-     Table 8 { columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2] }
-     Table 9 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 10 { columns: [orders.o_orderkey, supplier.s_suppkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, customer.c_nationkey], primary key: [$0 ASC, $1 ASC, $3 ASC, $0 ASC, $4 ASC, $1 ASC, $5 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 11 { columns: [orders.o_orderkey, supplier.s_suppkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, supplier.s_suppkey_0, customer.c_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8] }
-     Table 12 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$0 ASC, $1 ASC, $0 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4] }
-     Table 13 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 14 { columns: [customer.c_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey], primary key: [$0 ASC, $2 ASC, $1 ASC, $3 ASC], value indices: [0, 1, 2, 3] }
-     Table 15 { columns: [customer.c_nationkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 16 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$1 ASC, $0 ASC], value indices: [0, 1] }
-     Table 17 { columns: [supplier.s_nationkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 18 { columns: [customer.c_custkey, customer.c_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 19 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 20 { columns: [orders.o_orderkey, orders.o_custkey], primary key: [$1 ASC, $0 ASC], value indices: [0, 1] }
-     Table 21 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [n_name, revenue], primary key: [$1 DESC, $0 ASC], value indices: [0, 1] }
+     Table 0 { columns: [nation.n_name, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 1 { columns: [nation.n_name, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 2 { columns: [lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, nation.n_regionkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey], primary key: [$3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [3] }
+     Table 3 { columns: [nation.n_regionkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [11], distribution key: [0] }
+     Table 4 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 5 { columns: [region.r_regionkey, region.r_regionkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 6 { columns: [supplier.s_nationkey, lineitem.l_extendedprice, lineitem.l_discount, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey], primary key: [$0 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $0 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0] }
+     Table 7 { columns: [supplier.s_nationkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey_0, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10], distribution key: [0] }
+     Table 8 { columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 9 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 10 { columns: [orders.o_orderkey, supplier.s_suppkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, customer.c_nationkey], primary key: [$0 ASC, $1 ASC, $3 ASC, $0 ASC, $4 ASC, $1 ASC, $5 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0, 1] }
+     Table 11 { columns: [orders.o_orderkey, supplier.s_suppkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, supplier.s_suppkey_0, customer.c_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8], distribution key: [0, 1] }
+     Table 12 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$0 ASC, $1 ASC, $0 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0, 1] }
+     Table 13 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1] }
+     Table 14 { columns: [customer.c_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey], primary key: [$0 ASC, $2 ASC, $1 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 15 { columns: [customer.c_nationkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 16 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [1] }
+     Table 17 { columns: [supplier.s_nationkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 18 { columns: [customer.c_custkey, customer.c_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 19 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 20 { columns: [orders.o_orderkey, orders.o_custkey], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [1] }
+     Table 21 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [n_name, revenue], primary key: [$1 DESC, $0 ASC], value indices: [0, 1], distribution key: [0] }
 - id: tpch_q6
   before:
   - create_tables
@@ -1080,9 +1080,9 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [sum(count)], primary key: [], value indices: [0] }
-     Table 1 { columns: [sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))], primary key: [], value indices: [0] }
-     Table 4294967294 { columns: [revenue], primary key: [], value indices: [0] }
+     Table 0 { columns: [sum(count)], primary key: [], value indices: [0], distribution key: [] }
+     Table 1 { columns: [sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))], primary key: [], value indices: [0], distribution key: [] }
+     Table 4294967294 { columns: [revenue], primary key: [], value indices: [0], distribution key: [] }
 - id: tpch_q7
   before:
   - create_tables
@@ -1287,29 +1287,29 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [nation.n_name, nation.n_name_0, Extract('YEAR':Varchar, lineitem.l_shipdate), count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3] }
-     Table 1 { columns: [nation.n_name, nation.n_name_0, Extract('YEAR':Varchar, lineitem.l_shipdate), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3] }
-     Table 2 { columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, customer.c_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, orders.o_custkey, customer.c_custkey], primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $13 ASC, $12 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] }
-     Table 3 { columns: [customer.c_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10] }
-     Table 4 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 5 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 6 { columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, orders.o_custkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey], primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }
-     Table 7 { columns: [orders.o_custkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8] }
-     Table 8 { columns: [customer.c_custkey, customer.c_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 9 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 10 { columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, supplier.s_suppkey, lineitem.l_linenumber, lineitem.l_suppkey, supplier.s_nationkey, nation.n_nationkey], primary key: [$0 ASC, $5 ASC, $0 ASC, $6 ASC, $7 ASC, $9 ASC, $8 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }
-     Table 11 { columns: [lineitem.l_orderkey, supplier.s_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [7] }
-     Table 12 { columns: [orders.o_orderkey, orders.o_custkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 13 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 14 { columns: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, supplier.s_suppkey, lineitem.l_linenumber, lineitem.l_suppkey], primary key: [$0 ASC, $5 ASC, $1 ASC, $6 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7] }
-     Table 15 { columns: [supplier.s_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5] }
-     Table 16 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 17 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 18 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 19 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 20 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, lineitem.l_linenumber], primary key: [$1 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 21 { columns: [lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 4294967294 { columns: [supp_nation, cust_nation, l_year, revenue], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3] }
+     Table 0 { columns: [nation.n_name, nation.n_name_0, Extract('YEAR':Varchar, lineitem.l_shipdate), count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1, 2] }
+     Table 1 { columns: [nation.n_name, nation.n_name_0, Extract('YEAR':Varchar, lineitem.l_shipdate), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1, 2] }
+     Table 2 { columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, customer.c_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, orders.o_custkey, customer.c_custkey], primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $13 ASC, $12 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [4] }
+     Table 3 { columns: [customer.c_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10], distribution key: [0] }
+     Table 4 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 5 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 6 { columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, orders.o_custkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey], primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [4] }
+     Table 7 { columns: [orders.o_custkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8], distribution key: [0] }
+     Table 8 { columns: [customer.c_custkey, customer.c_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 9 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 10 { columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, supplier.s_suppkey, lineitem.l_linenumber, lineitem.l_suppkey, supplier.s_nationkey, nation.n_nationkey], primary key: [$0 ASC, $5 ASC, $0 ASC, $6 ASC, $7 ASC, $9 ASC, $8 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0] }
+     Table 11 { columns: [lineitem.l_orderkey, supplier.s_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [7], distribution key: [0] }
+     Table 12 { columns: [orders.o_orderkey, orders.o_custkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 13 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 14 { columns: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, supplier.s_suppkey, lineitem.l_linenumber, lineitem.l_suppkey], primary key: [$0 ASC, $5 ASC, $1 ASC, $6 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [0] }
+     Table 15 { columns: [supplier.s_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5], distribution key: [0] }
+     Table 16 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 17 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 18 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 19 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 20 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, lineitem.l_linenumber], primary key: [$1 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [1] }
+     Table 21 { columns: [lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 4294967294 { columns: [supp_nation, cust_nation, l_year, revenue], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1, 2] }
 - id: tpch_q8
   before:
   - create_tables
@@ -1571,38 +1571,38 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [Extract('YEAR':Varchar, orders.o_orderdate), count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 1 { columns: [Extract('YEAR':Varchar, orders.o_orderdate), sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 2 { columns: [Extract('YEAR':Varchar, orders.o_orderdate), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 3 { columns: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, nation.n_regionkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, customer.c_nationkey, nation.n_nationkey_0], primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] }
-     Table 4 { columns: [nation.n_regionkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey_0, customer.c_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC], value indices: [14] }
-     Table 5 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 6 { columns: [region.r_regionkey, region.r_regionkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 7 { columns: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, orders.o_custkey, customer.c_custkey], primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $15 ASC, $14 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] }
-     Table 8 { columns: [customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC], value indices: [12] }
-     Table 9 { columns: [nation.n_nationkey, nation.n_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 10 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 11 { columns: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey, orders.o_orderdate, nation.n_name, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, supplier.s_nationkey, nation.n_nationkey], primary key: [$2 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $13 ASC, $12 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] }
-     Table 12 { columns: [orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10] }
-     Table 13 { columns: [customer.c_custkey, customer.c_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 14 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 15 { columns: [lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, orders.o_custkey, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey], primary key: [$2 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }
-     Table 16 { columns: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8] }
-     Table 17 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 18 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 19 { columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, lineitem.l_suppkey, supplier.s_suppkey], primary key: [$0 ASC, $0 ASC, $4 ASC, $5 ASC, $6 ASC, $8 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8] }
-     Table 20 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [7] }
-     Table 21 { columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2] }
-     Table 22 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 23 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey], primary key: [$1 ASC, $0 ASC, $4 ASC, $6 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5, 6] }
-     Table 24 { columns: [lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5] }
-     Table 25 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 26 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 27 { columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$1 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 28 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 29 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 30 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [o_year, mkt_share], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 0 { columns: [Extract('YEAR':Varchar, orders.o_orderdate), count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 1 { columns: [Extract('YEAR':Varchar, orders.o_orderdate), sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 2 { columns: [Extract('YEAR':Varchar, orders.o_orderdate), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 3 { columns: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, nation.n_regionkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, customer.c_nationkey, nation.n_nationkey_0], primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], distribution key: [4] }
+     Table 4 { columns: [nation.n_regionkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey_0, customer.c_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC], value indices: [14], distribution key: [0] }
+     Table 5 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 6 { columns: [region.r_regionkey, region.r_regionkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 7 { columns: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, orders.o_custkey, customer.c_custkey], primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $15 ASC, $14 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], distribution key: [4] }
+     Table 8 { columns: [customer.c_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC], value indices: [12], distribution key: [0] }
+     Table 9 { columns: [nation.n_nationkey, nation.n_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 10 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 11 { columns: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey, orders.o_orderdate, nation.n_name, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, supplier.s_nationkey, nation.n_nationkey], primary key: [$2 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $13 ASC, $12 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [2] }
+     Table 12 { columns: [orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10], distribution key: [0] }
+     Table 13 { columns: [customer.c_custkey, customer.c_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 14 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 15 { columns: [lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, orders.o_custkey, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey], primary key: [$2 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [2] }
+     Table 16 { columns: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8], distribution key: [0] }
+     Table 17 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 18 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 19 { columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, lineitem.l_suppkey, supplier.s_suppkey], primary key: [$0 ASC, $0 ASC, $4 ASC, $5 ASC, $6 ASC, $8 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0] }
+     Table 20 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [7], distribution key: [0] }
+     Table 21 { columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 22 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 23 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey], primary key: [$1 ASC, $0 ASC, $4 ASC, $6 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [1] }
+     Table 24 { columns: [lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5], distribution key: [0] }
+     Table 25 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 26 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 27 { columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$1 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [1] }
+     Table 28 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 29 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 30 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [o_year, mkt_share], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
 - id: tpch_q9
   before:
   - create_tables
@@ -1799,29 +1799,29 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 1 { columns: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 2 { columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey], primary key: [$3 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] }
-     Table 3 { columns: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10] }
-     Table 4 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 5 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 6 { columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey], primary key: [$0 ASC, $0 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] }
-     Table 7 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC], value indices: [9] }
-     Table 8 { columns: [orders.o_orderkey, orders.o_orderdate], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 9 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 10 { columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, part.p_partkey, supplier.s_suppkey], primary key: [$2 ASC, $1 ASC, $0 ASC, $7 ASC, $8 ASC, $1 ASC, $9 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }
-     Table 11 { columns: [lineitem.l_suppkey, lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey_0, supplier.s_suppkey, lineitem.l_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8] }
-     Table 12 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], primary key: [$1 ASC, $0 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 13 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 14 { columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, part.p_partkey], primary key: [$2 ASC, $0 ASC, $6 ASC, $7 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7] }
-     Table 15 { columns: [lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5] }
-     Table 16 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 17 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 18 { columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$1 ASC, $0 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6] }
-     Table 19 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 20 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 21 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [nation, o_year, sum_profit], primary key: [$0 ASC, $1 DESC], value indices: [0, 1, 2] }
+     Table 0 { columns: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 1 { columns: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 2 { columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey], primary key: [$3 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], distribution key: [3] }
+     Table 3 { columns: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10], distribution key: [0] }
+     Table 4 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 5 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 6 { columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey], primary key: [$0 ASC, $0 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], distribution key: [0] }
+     Table 7 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC], value indices: [9], distribution key: [0] }
+     Table 8 { columns: [orders.o_orderkey, orders.o_orderdate], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 9 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 10 { columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, part.p_partkey, supplier.s_suppkey], primary key: [$2 ASC, $1 ASC, $0 ASC, $7 ASC, $8 ASC, $1 ASC, $9 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [2] }
+     Table 11 { columns: [lineitem.l_suppkey, lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey_0, supplier.s_suppkey, lineitem.l_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8], distribution key: [0] }
+     Table 12 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], primary key: [$1 ASC, $0 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [1] }
+     Table 13 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 14 { columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, part.p_partkey], primary key: [$2 ASC, $0 ASC, $6 ASC, $7 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [2] }
+     Table 15 { columns: [lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5], distribution key: [0] }
+     Table 16 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 17 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 18 { columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$1 ASC, $0 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [1] }
+     Table 19 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 20 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 21 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [nation, o_year, sum_profit], primary key: [$0 ASC, $1 DESC], value indices: [0, 1, 2], distribution key: [0, 1] }
 - id: tpch_q10
   before:
   - create_tables
@@ -1997,23 +1997,23 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment)], primary key: [$2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8] }
-     Table 1 { columns: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment)], primary key: [$8 ASC, $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], vnode column idx: 8 }
-     Table 2 { columns: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7] }
-     Table 3 { columns: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7] }
-     Table 4 { columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, orders.o_orderkey, nation.n_name, orders.o_custkey, customer.c_nationkey, nation.n_nationkey], primary key: [$6 ASC, $0 ASC, $6 ASC, $8 ASC, $10 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }
-     Table 5 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6] }
-     Table 6 { columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3] }
-     Table 7 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 8 { columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment, orders.o_orderkey, orders.o_custkey], primary key: [$3 ASC, $0 ASC, $7 ASC, $8 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8] }
-     Table 9 { columns: [customer.c_nationkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 10 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 11 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 12 { columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6] }
-     Table 13 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 14 { columns: [orders.o_orderkey, orders.o_custkey], primary key: [$1 ASC, $0 ASC], value indices: [0, 1] }
-     Table 15 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], primary key: [$2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7] }
+     Table 0 { columns: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment)], primary key: [$2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [] }
+     Table 1 { columns: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment)], primary key: [$8 ASC, $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [] }
+     Table 2 { columns: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [0, 1, 2, 3, 4, 5, 6] }
+     Table 3 { columns: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [0, 1, 2, 3, 4, 5, 6] }
+     Table 4 { columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, orders.o_orderkey, nation.n_name, orders.o_custkey, customer.c_nationkey, nation.n_nationkey], primary key: [$6 ASC, $0 ASC, $6 ASC, $8 ASC, $10 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [6] }
+     Table 5 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6], distribution key: [0] }
+     Table 6 { columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 7 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 8 { columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment, orders.o_orderkey, orders.o_custkey], primary key: [$3 ASC, $0 ASC, $7 ASC, $8 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [3] }
+     Table 9 { columns: [customer.c_nationkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 10 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 11 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 12 { columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0] }
+     Table 13 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 14 { columns: [orders.o_orderkey, orders.o_custkey], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [1] }
+     Table 15 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], primary key: [$2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [] }
 - id: tpch_q11
   before:
   - create_tables
@@ -2234,30 +2234,30 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))_0], primary key: [$2 ASC, $0 ASC], value indices: [0, 1, 2] }
-     Table 1 { columns: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)], primary key: [], value indices: [0] }
-     Table 2 { columns: [partsupp.ps_partkey, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 3 { columns: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 4 { columns: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 5 { columns: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey], primary key: [$3 ASC, $0 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 6 { columns: [supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 7 { columns: [nation.n_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 8 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 9 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], primary key: [$1 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3] }
-     Table 10 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 11 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 12 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 13 { columns: [sum(count)], primary key: [], value indices: [0] }
-     Table 14 { columns: [sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))], primary key: [], value indices: [0] }
-     Table 15 { columns: [partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey], primary key: [$2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 16 { columns: [supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 17 { columns: [nation.n_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 18 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 19 { columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey], primary key: [$0 ASC, $3 ASC, $0 ASC], value indices: [0, 1, 2, 3] }
-     Table 20 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 21 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 22 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [ps_partkey, value], primary key: [$1 DESC, $0 ASC], value indices: [0, 1] }
+     Table 0 { columns: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))_0], primary key: [$2 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 1 { columns: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)], primary key: [], value indices: [0], distribution key: [] }
+     Table 2 { columns: [partsupp.ps_partkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 3 { columns: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4 { columns: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 5 { columns: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey], primary key: [$3 ASC, $0 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [3] }
+     Table 6 { columns: [supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 7 { columns: [nation.n_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 8 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 9 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], primary key: [$1 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [1] }
+     Table 10 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 11 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 12 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 13 { columns: [sum(count)], primary key: [], value indices: [0], distribution key: [] }
+     Table 14 { columns: [sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))], primary key: [], value indices: [0], distribution key: [] }
+     Table 15 { columns: [partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey], primary key: [$2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [2] }
+     Table 16 { columns: [supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 17 { columns: [nation.n_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 18 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 19 { columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey], primary key: [$0 ASC, $3 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 20 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 21 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 22 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [ps_partkey, value], primary key: [$1 DESC, $0 ASC], value indices: [0, 1], distribution key: [0] }
 - id: tpch_q12
   before:
   - create_tables
@@ -2358,14 +2358,14 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [lineitem.l_shipmode, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 1 { columns: [lineitem.l_shipmode, sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32))], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 2 { columns: [lineitem.l_shipmode, sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32))], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 3 { columns: [orders.o_orderkey, orders.o_orderpriority], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 4 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 5 { columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2] }
-     Table 6 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 4294967294 { columns: [l_shipmode, high_line_count, low_line_count], primary key: [$0 ASC], value indices: [0, 1, 2] }
+     Table 0 { columns: [lineitem.l_shipmode, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 1 { columns: [lineitem.l_shipmode, sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 2 { columns: [lineitem.l_shipmode, sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 3 { columns: [orders.o_orderkey, orders.o_orderpriority], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 5 { columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 6 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 4294967294 { columns: [l_shipmode, high_line_count, low_line_count], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
 - id: tpch_q13
   before:
   - create_tables
@@ -2465,15 +2465,15 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [count(orders.o_orderkey), count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 1 { columns: [count(orders.o_orderkey), count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 2 { columns: [customer.c_custkey, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 3 { columns: [customer.c_custkey, count(orders.o_orderkey)], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 4 { columns: [customer.c_custkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 5 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 6 { columns: [orders.o_orderkey, orders.o_custkey], primary key: [$1 ASC, $0 ASC], value indices: [0, 1] }
-     Table 7 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [c_count, custdist], primary key: [$1 DESC, $0 DESC], value indices: [0, 1] }
+     Table 0 { columns: [count(orders.o_orderkey), count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 1 { columns: [count(orders.o_orderkey), count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 2 { columns: [customer.c_custkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 3 { columns: [customer.c_custkey, count(orders.o_orderkey)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4 { columns: [customer.c_custkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 5 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 6 { columns: [orders.o_orderkey, orders.o_custkey], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [1] }
+     Table 7 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [c_count, custdist], primary key: [$1 DESC, $0 DESC], value indices: [0, 1], distribution key: [0] }
 - id: tpch_q14
   before:
   - create_tables
@@ -2562,14 +2562,14 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [sum(count)], primary key: [], value indices: [0] }
-     Table 1 { columns: [sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)))], primary key: [], value indices: [0] }
-     Table 2 { columns: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [], value indices: [0] }
-     Table 3 { columns: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4] }
-     Table 4 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 5 { columns: [part.p_partkey, part.p_type], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 6 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [promo_revenue], primary key: [], value indices: [0] }
+     Table 0 { columns: [sum(count)], primary key: [], value indices: [0], distribution key: [] }
+     Table 1 { columns: [sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)))], primary key: [], value indices: [0], distribution key: [] }
+     Table 2 { columns: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [], value indices: [0], distribution key: [] }
+     Table 3 { columns: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
+     Table 4 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 5 { columns: [part.p_partkey, part.p_type], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 6 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [promo_revenue], primary key: [], value indices: [0], distribution key: [] }
 - id: tpch_q15
   before:
   - create_tables
@@ -2736,23 +2736,23 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey], primary key: [$4 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 1 { columns: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), supplier.s_suppkey, lineitem.l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 2 { columns: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))], primary key: [$0 ASC], value indices: [0] }
-     Table 3 { columns: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))), _degree], primary key: [$0 ASC], value indices: [1] }
-     Table 4 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3] }
-     Table 5 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 6 { columns: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 7 { columns: [lineitem.l_suppkey, lineitem.l_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 8 { columns: [lineitem.l_suppkey, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 9 { columns: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 10 { columns: [sum(count)], primary key: [], value indices: [0] }
-     Table 11 { columns: [max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), Vnode(lineitem.l_suppkey)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1] }
-     Table 12 { columns: [Vnode(lineitem.l_suppkey), count], primary key: [$0 ASC], value indices: [0, 1], vnode column idx: 0 }
-     Table 13 { columns: [Vnode(lineitem.l_suppkey), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], vnode column idx: 0 }
-     Table 14 { columns: [lineitem.l_suppkey, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 15 { columns: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 4294967294 { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey, max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))], primary key: [$0 ASC, $5 ASC, $4 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6] }
+     Table 0 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey], primary key: [$4 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [4] }
+     Table 1 { columns: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), supplier.s_suppkey, lineitem.l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 2 { columns: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))], primary key: [$0 ASC], value indices: [0], distribution key: [0] }
+     Table 3 { columns: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))), _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
+     Table 4 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 5 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 6 { columns: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 7 { columns: [lineitem.l_suppkey, lineitem.l_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 8 { columns: [lineitem.l_suppkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 9 { columns: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 10 { columns: [sum(count)], primary key: [], value indices: [0], distribution key: [] }
+     Table 11 { columns: [max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), Vnode(lineitem.l_suppkey)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
+     Table 12 { columns: [Vnode(lineitem.l_suppkey), count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
+     Table 13 { columns: [Vnode(lineitem.l_suppkey), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [2], vnode column idx: 0 }
+     Table 14 { columns: [lineitem.l_suppkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 15 { columns: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4294967294 { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey, max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))], primary key: [$0 ASC, $5 ASC, $4 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [4] }
 - id: tpch_q16
   before:
   - create_tables
@@ -2886,18 +2886,18 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [part.p_brand, part.p_type, part.p_size, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3] }
-     Table 1 { columns: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3] }
-     Table 2 { columns: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4] }
-     Table 3 { columns: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey], primary key: [$0 ASC, $4 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 4 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, part.p_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 5 { columns: [supplier.s_suppkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 6 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 7 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1] }
-     Table 8 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 9 { columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3] }
-     Table 10 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [p_brand, p_type, p_size, supplier_cnt], primary key: [$3 DESC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3] }
+     Table 0 { columns: [part.p_brand, part.p_type, part.p_size, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1, 2] }
+     Table 1 { columns: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1, 2] }
+     Table 2 { columns: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [3] }
+     Table 3 { columns: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey], primary key: [$0 ASC, $4 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0] }
+     Table 4 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, part.p_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 5 { columns: [supplier.s_suppkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 6 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 7 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 8 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 9 { columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 10 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [p_brand, p_type, p_size, supplier_cnt], primary key: [$3 DESC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1, 2] }
 - id: tpch_q17
   before:
   - create_tables
@@ -3054,25 +3054,25 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [sum(count)], primary key: [], value indices: [0] }
-     Table 1 { columns: [sum(sum(lineitem.l_extendedprice))], primary key: [], value indices: [0] }
-     Table 2 { columns: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey], primary key: [$2 ASC, $3 ASC, $4 ASC, $2 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 3 { columns: [part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey_0, lineitem.l_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5] }
-     Table 4 { columns: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 5 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 6 { columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4] }
-     Table 7 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 8 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 9 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 10 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 11 { columns: [part.p_partkey, sum(lineitem.l_quantity)], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 12 { columns: [part.p_partkey, count(lineitem.l_quantity)], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 13 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 14 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 15 { columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3] }
-     Table 16 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 17 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 4294967294 { columns: [avg_yearly], primary key: [], value indices: [0] }
+     Table 0 { columns: [sum(count)], primary key: [], value indices: [0], distribution key: [] }
+     Table 1 { columns: [sum(sum(lineitem.l_extendedprice))], primary key: [], value indices: [0], distribution key: [] }
+     Table 2 { columns: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey], primary key: [$2 ASC, $3 ASC, $4 ASC, $2 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [2] }
+     Table 3 { columns: [part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey_0, lineitem.l_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5], distribution key: [0] }
+     Table 4 { columns: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 5 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 6 { columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
+     Table 7 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 8 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 9 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 10 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 11 { columns: [part.p_partkey, sum(lineitem.l_quantity)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 12 { columns: [part.p_partkey, count(lineitem.l_quantity)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 13 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 14 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 15 { columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 16 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 17 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4294967294 { columns: [avg_yearly], primary key: [], value indices: [0], distribution key: [] }
 - id: tpch_q18
   before:
   - create_tables
@@ -3241,25 +3241,25 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey)], primary key: [$4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5, 6] }
-     Table 1 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey)], primary key: [$6 ASC, $4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], vnode column idx: 6 }
-     Table 2 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 3 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 4 { columns: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$2 ASC, $0 ASC, $2 ASC, $6 ASC, $7 ASC, $8 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8] }
-     Table 5 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6] }
-     Table 6 { columns: [lineitem.l_orderkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 7 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 8 { columns: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, orders.o_custkey], primary key: [$2 ASC, $0 ASC, $2 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 9 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 10 { columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2] }
-     Table 11 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 12 { columns: [customer.c_custkey, customer.c_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1] }
-     Table 13 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 14 { columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate], primary key: [$1 ASC, $0 ASC], value indices: [0, 1, 2, 3] }
-     Table 15 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 16 { columns: [lineitem.l_orderkey, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 17 { columns: [lineitem.l_orderkey, sum(lineitem.l_quantity)], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 4294967294 { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], primary key: [$4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5] }
+     Table 0 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey)], primary key: [$4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [] }
+     Table 1 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey)], primary key: [$6 ASC, $4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [] }
+     Table 2 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [2] }
+     Table 3 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [2] }
+     Table 4 { columns: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$2 ASC, $0 ASC, $2 ASC, $6 ASC, $7 ASC, $8 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [2] }
+     Table 5 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6], distribution key: [0] }
+     Table 6 { columns: [lineitem.l_orderkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 7 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 8 { columns: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, orders.o_custkey], primary key: [$2 ASC, $0 ASC, $2 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [2] }
+     Table 9 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 10 { columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 11 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 12 { columns: [customer.c_custkey, customer.c_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 13 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 14 { columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate], primary key: [$1 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [1] }
+     Table 15 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 16 { columns: [lineitem.l_orderkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 17 { columns: [lineitem.l_orderkey, sum(lineitem.l_quantity)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4294967294 { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], primary key: [$4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [] }
 - id: tpch_q19
   before:
   - create_tables
@@ -3374,13 +3374,13 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [sum(count)], primary key: [], value indices: [0] }
-     Table 1 { columns: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [], value indices: [0] }
-     Table 2 { columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 3 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 4 { columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3] }
-     Table 5 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 4294967294 { columns: [revenue], primary key: [], value indices: [0] }
+     Table 0 { columns: [sum(count)], primary key: [], value indices: [0], distribution key: [] }
+     Table 1 { columns: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [], value indices: [0], distribution key: [] }
+     Table 2 { columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0] }
+     Table 3 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 4 { columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 5 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [revenue], primary key: [], value indices: [0], distribution key: [] }
 - id: tpch_q20
   before:
   - create_tables
@@ -3599,30 +3599,30 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, nation.n_nationkey], primary key: [$0 ASC, $0 ASC, $4 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4] }
-     Table 1 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 2 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0], primary key: [$0 ASC, $1 ASC, $0 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3] }
-     Table 3 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, partsupp.ps_partkey_0, partsupp.ps_suppkey_1, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5] }
-     Table 4 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], primary key: [$3 ASC, $0 ASC], value indices: [0, 1, 2, 3] }
-     Table 5 { columns: [supplier.s_nationkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 6 { columns: [nation.n_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 7 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 8 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], primary key: [$0 ASC, $1 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 9 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 10 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))], primary key: [$0 ASC, $1 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 11 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 12 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 13 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 14 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 15 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 16 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 17 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 18 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey], primary key: [$0 ASC, $1 ASC, $0 ASC, $1 ASC], value indices: [0, 1] }
-     Table 19 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 20 { columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $1 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4] }
-     Table 21 { columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4] }
-     Table 22 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
-     Table 4294967294 { columns: [s_name, s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], primary key: [$0 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4] }
+     Table 0 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, nation.n_nationkey], primary key: [$0 ASC, $0 ASC, $4 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
+     Table 1 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 2 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0], primary key: [$0 ASC, $1 ASC, $0 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 3 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, partsupp.ps_partkey_0, partsupp.ps_suppkey_1, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5], distribution key: [0] }
+     Table 4 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], primary key: [$3 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [3] }
+     Table 5 { columns: [supplier.s_nationkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 6 { columns: [nation.n_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 7 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 8 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], primary key: [$0 ASC, $1 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 9 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1] }
+     Table 10 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))], primary key: [$0 ASC, $1 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 11 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1] }
+     Table 12 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 13 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 14 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 15 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 16 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 17 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 18 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey], primary key: [$0 ASC, $1 ASC, $0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0, 1] }
+     Table 19 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1] }
+     Table 20 { columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $1 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0, 1] }
+     Table 21 { columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1] }
+     Table 22 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 4294967294 { columns: [s_name, s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], primary key: [$0 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2] }
 - id: tpch_q21
   before:
   - create_tables
@@ -3852,31 +3852,31 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [supplier.s_name, count, Vnode(supplier.s_name)], primary key: [$1 DESC, $0 ASC], value indices: [0, 1, 2] }
-     Table 1 { columns: [supplier.s_name, count, Vnode(supplier.s_name)], primary key: [$2 ASC, $1 DESC, $0 ASC], value indices: [0, 1, 2], vnode column idx: 2 }
-     Table 2 { columns: [supplier.s_name, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 3 { columns: [supplier.s_name, count], primary key: [$0 ASC], value indices: [0, 1] }
-     Table 4 { columns: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey], primary key: [$1 ASC, $3 ASC, $1 ASC, $4 ASC, $2 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7] }
-     Table 5 { columns: [lineitem.l_orderkey, supplier.s_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8] }
-     Table 6 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2] }
-     Table 7 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 8 { columns: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey], primary key: [$1 ASC, $3 ASC, $1 ASC, $4 ASC, $2 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7] }
-     Table 9 { columns: [lineitem.l_orderkey, supplier.s_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8] }
-     Table 10 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2] }
-     Table 11 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 12 { columns: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, supplier.s_nationkey, nation.n_nationkey], primary key: [$1 ASC, $3 ASC, $1 ASC, $4 ASC, $2 ASC, $6 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5, 6] }
-     Table 13 { columns: [lineitem.l_orderkey, supplier.s_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [7] }
-     Table 14 { columns: [orders.o_orderkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 15 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 16 { columns: [supplier.s_name, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber], primary key: [$1 ASC, $4 ASC, $2 ASC, $5 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4, 5] }
-     Table 17 { columns: [supplier.s_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5] }
-     Table 18 { columns: [nation.n_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0] }
-     Table 19 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 20 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2] }
-     Table 21 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
-     Table 22 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], primary key: [$1 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2] }
-     Table 23 { columns: [lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3] }
-     Table 4294967294 { columns: [s_name, numwait], primary key: [$1 DESC, $0 ASC], value indices: [0, 1] }
+     Table 0 { columns: [supplier.s_name, count, Vnode(supplier.s_name)], primary key: [$1 DESC, $0 ASC], value indices: [0, 1, 2], distribution key: [] }
+     Table 1 { columns: [supplier.s_name, count, Vnode(supplier.s_name)], primary key: [$2 ASC, $1 DESC, $0 ASC], value indices: [0, 1, 2], distribution key: [] }
+     Table 2 { columns: [supplier.s_name, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 3 { columns: [supplier.s_name, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4 { columns: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey], primary key: [$1 ASC, $3 ASC, $1 ASC, $4 ASC, $2 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [1] }
+     Table 5 { columns: [lineitem.l_orderkey, supplier.s_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8], distribution key: [0] }
+     Table 6 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 7 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 8 { columns: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey], primary key: [$1 ASC, $3 ASC, $1 ASC, $4 ASC, $2 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [1] }
+     Table 9 { columns: [lineitem.l_orderkey, supplier.s_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8], distribution key: [0] }
+     Table 10 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 11 { columns: [lineitem.l_orderkey, lineitem.l_orderkey_0, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 12 { columns: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, supplier.s_nationkey, nation.n_nationkey], primary key: [$1 ASC, $3 ASC, $1 ASC, $4 ASC, $2 ASC, $6 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [1] }
+     Table 13 { columns: [lineitem.l_orderkey, supplier.s_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [7], distribution key: [0] }
+     Table 14 { columns: [orders.o_orderkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 15 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 16 { columns: [supplier.s_name, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber], primary key: [$1 ASC, $4 ASC, $2 ASC, $5 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [1] }
+     Table 17 { columns: [supplier.s_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5], distribution key: [0] }
+     Table 18 { columns: [nation.n_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
+     Table 19 { columns: [nation.n_nationkey, nation.n_nationkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 20 { columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 21 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 22 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], primary key: [$1 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [1] }
+     Table 23 { columns: [lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 4294967294 { columns: [s_name, numwait], primary key: [$1 DESC, $0 ASC], value indices: [0, 1], distribution key: [] }
 - id: tpch_q22
   before:
   - create_tables

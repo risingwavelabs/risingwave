@@ -34,10 +34,6 @@ use crate::executor::managed_state::aggregation::array_agg::ManagedArrayAggState
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
 use crate::executor::PkIndices;
 
-/// Limit number of the cached entries in an extreme aggregation call
-// TODO: estimate a good cache size instead of hard-coding
-const EXTREME_CACHE_SIZE: usize = 1024;
-
 mod array_agg;
 mod extreme;
 mod string_agg;
@@ -182,12 +178,14 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Create a managed state from `agg_call`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_managed_state(
         agg_call: AggCall,
         row_count: Option<usize>,
         pk_indices: PkIndices,
         is_row_count: bool,
         group_key: Option<&Row>,
+        extreme_cache_size: usize,
         state_table: &StateTable<S>,
         state_table_col_mapping: Arc<StateTableColumnMapping>,
     ) -> StreamExecutorResult<Self> {
@@ -213,7 +211,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 pk_indices,
                 state_table_col_mapping,
                 row_count.unwrap(),
-                EXTREME_CACHE_SIZE,
+                extreme_cache_size,
             )))),
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
                 agg_call,

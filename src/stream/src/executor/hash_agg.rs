@@ -42,9 +42,6 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
-/// Limit number of cached entries (one per group key)
-const HASH_AGG_CACHE_SIZE: usize = 1 << 16;
-
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
 ///
@@ -100,6 +97,12 @@ struct HashAggExecutorExtra<S: StateStore> {
     total_lookup_count: AtomicU64,
 
     metrics: Arc<StreamingMetrics>,
+
+    /// Cache size (one per group by key)
+    group_by_key_cache_size: usize,
+
+    /// Extreme state cache size
+    extreme_cache_size: usize,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -129,6 +132,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
+        group_by_key_cache_size: usize,
+        extreme_cache_size: usize,
         mut state_tables: Vec<StateTable<S>>,
         state_table_col_mappings: Vec<Vec<usize>>,
         metrics: Arc<StreamingMetrics>,
@@ -152,6 +157,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 _input_schema: input_info.schema,
                 agg_calls,
                 key_indices,
+                group_by_key_cache_size,
+                extreme_cache_size,
                 state_tables,
                 state_table_col_mappings: state_table_col_mappings
                     .into_iter()
@@ -224,6 +231,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref key_indices,
             ref agg_calls,
             ref input_pk_indices,
+            group_by_key_cache_size: _,
+            ref extreme_cache_size,
             ref _input_schema,
             ref schema,
             state_tables,
@@ -276,6 +285,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                     Some(&key.clone().deserialize(key_data_types.iter())?),
                                     agg_calls,
                                     input_pk_indices.clone(),
+                                    *extreme_cache_size,
                                     state_tables,
                                     state_table_col_mappings,
                                 )
@@ -447,7 +457,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } = self;
 
         // The cached states. `HashKey -> (prev_value, value)`.
-        let mut state_map = EvictableHashMap::new(HASH_AGG_CACHE_SIZE);
+        let mut state_map = EvictableHashMap::new(extra.group_by_key_cache_size);
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
@@ -511,12 +521,15 @@ mod tests {
     use crate::executor::test_utils::*;
     use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
 
+    #[allow(clippy::too_many_arguments)]
     fn new_boxed_hash_agg_executor(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
         keyspace_gen: Vec<(MemoryStateStore, TableId)>,
         pk_indices: PkIndices,
+        group_by_cache_size: usize,
+        extreme_cache_size: usize,
         executor_id: u64,
     ) -> Box<dyn Executor> {
         let (state_tables, state_table_col_mappings) = keyspace_gen
@@ -541,6 +554,8 @@ mod tests {
             pk_indices,
             executor_id,
             key_indices,
+            group_by_cache_size,
+            extreme_cache_size,
             state_tables,
             state_table_col_mappings,
             Arc::new(StreamingMetrics::unused()),
@@ -622,8 +637,16 @@ mod tests {
             },
         ];
 
-        let hash_agg =
-            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
+        let hash_agg = new_boxed_hash_agg_executor(
+            Box::new(source),
+            agg_calls,
+            keys,
+            keyspace,
+            vec![],
+            1 << 16,
+            1 << 10,
+            1,
+        );
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -722,6 +745,8 @@ mod tests {
             key_indices,
             keyspace,
             vec![],
+            1 << 16,
+            1 << 10,
             1,
         );
         let mut hash_agg = hash_agg.execute();
@@ -808,8 +833,16 @@ mod tests {
             },
         ];
 
-        let hash_agg =
-            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![2], 1);
+        let hash_agg = new_boxed_hash_agg_executor(
+            Box::new(source),
+            agg_calls,
+            keys,
+            keyspace,
+            vec![2],
+            1 << 16,
+            1 << 10,
+            1,
+        );
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -901,8 +934,16 @@ mod tests {
             },
         ];
 
-        let hash_agg =
-            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![2], 1);
+        let hash_agg = new_boxed_hash_agg_executor(
+            Box::new(source),
+            agg_calls,
+            keys,
+            keyspace,
+            vec![2],
+            1 << 16,
+            1 << 10,
+            1,
+        );
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
