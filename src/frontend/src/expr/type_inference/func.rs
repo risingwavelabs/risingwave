@@ -205,7 +205,7 @@ fn infer_type_for_special(
                         // found common type
                         let common_ele_type = common_ele_type.unwrap();
                         let most_nested = get_most_nested(left_type.clone(), right_type.clone());
-                        let array_type = add_nesting(common_ele_type.clone(), most_nested.clone());
+                        let array_type = add_nesting(common_ele_type.clone(), most_nested);
 
                         // try to cast inputs to inputs to common type
                         let inputs_owned = std::mem::take(inputs);
@@ -308,7 +308,6 @@ fn infer_type_for_special(
             let common_ele_type = common_ele_type.unwrap();
             let most_nested = get_most_nested(left_type.clone(), right_type.clone());
             let array_type = add_nesting(common_ele_type.clone(), most_nested);
-
 
             // try to cast inputs to inputs to common type
             let inputs_owned = std::mem::take(inputs);

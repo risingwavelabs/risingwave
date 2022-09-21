@@ -21,12 +21,12 @@ use risingwave_common::types::{DataType, DataTypeName};
 
 use crate::expr::{Expr as _, ExprImpl};
 
-/// Find the nested inner DataType of a List
+/// Find the nested inner `DataType` of a List
 ///
 /// Examples:
-/// get_inner_type(DataType::Boolean) -> Boolean
-/// get_inner_type(List{DataType::Boolean}) -> Boolean
-/// get_inner_type(List{List{DataType::Boolean}}) -> Boolean
+/// `get_inner_type(DataType::Boolean) -> Boolean`
+/// `get_inner_type(List{DataType::Boolean}) -> Boolean`
+/// `get_inner_type(List{List{DataType::Boolean}}) -> Boolean`
 pub fn get_inner_type(dt: DataType) -> DataType {
     let return_val = match dt {
         DataType::List { datatype: inner } => Some(get_inner_type(*inner)),
@@ -38,7 +38,7 @@ pub fn get_inner_type(dt: DataType) -> DataType {
 // helper for determine_nesting_level
 fn calc_nesting_level_inner(dt: DataType, level: i32) -> i32 {
     let return_val: i32 = match dt {
-        DataType::List { datatype: inner } => calc_nesting_level_inner(*(inner.clone()), level + 1),
+        DataType::List { datatype: inner } => calc_nesting_level_inner(*inner, level + 1),
         _ => level,
     };
     return_val
@@ -47,9 +47,9 @@ fn calc_nesting_level_inner(dt: DataType, level: i32) -> i32 {
 /// True if lhs is more nested, else false
 ///
 /// Examples:
-/// calc_nesting_level(DataType::Boolean) -> 0
-/// calc_nesting_level(List{DataType::Int16}) -> 1
-/// calc_nesting_level(List{List{DataType::Boolean}}) -> 2
+/// `calc_nesting_level(DataType::Boolean) -> 0`
+/// `calc_nesting_level(List{DataType::Int16}) -> 1`
+/// `calc_nesting_level(List{List{DataType::Boolean}}) -> 2`
 fn calc_nesting_level(dt: DataType) -> i32 {
     calc_nesting_level_inner(dt, 0)
 }
@@ -57,22 +57,22 @@ fn calc_nesting_level(dt: DataType) -> i32 {
 /// True if lhs is more nested, else false
 ///
 /// Examples:
-/// lhs_is_more_nested(DataType::Boolean, DataType::Boolean) -> false
-/// lhs_is_more_nested(List{List{DataType::Boolean}}, DataType::Date) -> true
-/// lhs_is_more_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> false
+/// `lhs_is_more_nested(DataType::Boolean, DataType::Boolean) -> false`
+/// `lhs_is_more_nested(List{List{DataType::Boolean}}, DataType::Date) -> true`
+/// `lhs_is_more_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> false`
 fn lhs_is_more_nested(lhs: DataType, rhs: DataType) -> bool {
-    let lhs_level = calc_nesting_level(lhs.clone());
-    let rhs_level = calc_nesting_level(rhs.clone());
+    let lhs_level = calc_nesting_level(lhs);
+    let rhs_level = calc_nesting_level(rhs);
     lhs_level > rhs_level
 }
 
 /// Get the more nested element. Returns lhs if both are equally nested
 ///
 /// Examples:
-/// get_most_nested(DataType::Boolean, DataType::Boolean) -> DataType::Boolean
-/// get_most_nested(DataType::Date, List{List{DataType::Boolean}}) -> List{List{DataType::Boolean}}
-/// get_most_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) ->
-/// List{List{DataType::Boolean}}
+/// `get_most_nested(DataType::Boolean, DataType::Boolean) -> DataType::Boolean`
+/// `get_most_nested(DataType::Date, List{List{DataType::Boolean}}) ->
+/// List{List{DataType::Boolean}}` `get_most_nested(List{DataType::Int16},
+/// List{List{DataType::Boolean}}) -> List{List{DataType::Boolean}}`
 pub fn get_most_nested(lhs: DataType, rhs: DataType) -> DataType {
     if lhs_is_more_nested(lhs.clone(), rhs.clone()) {
         return lhs;
@@ -94,13 +94,13 @@ pub fn add_nesting_inner(target_dt: DataType, target_nesting: DataType, level: i
     )
 }
 
-/// Add levels to target dt until it is as nested as target_nesting
+/// Add levels to target dt until it is as nested as `target_nesting`
 ///
 /// Examples:
-/// add_nesting(DataType::Boolean, DataType::Boolean) -> DataType::Boolean
-/// add_nesting(DataType::Date, List{List{DataType::Boolean}}) -> List{List{DataType::Date}}
-/// add_nesting(List{List{DataType::Int16}}, DataType::Interval) -> List{List{DataType::Int16}} //
-/// already more nested
+/// `add_nesting(DataType::Boolean, DataType::Boolean) -> DataType::Boolean`
+/// `add_nesting(DataType::Date, List{List{DataType::Boolean}}) -> List{List{DataType::Date}}`
+/// `add_nesting(List{List{DataType::Int16}}, DataType::Interval) -> List{List{DataType::Int16}} //
+/// already more nested`
 pub fn add_nesting(target_dt: DataType, target_nesting: DataType) -> DataType {
     let target_dt_level = calc_nesting_level(target_dt.clone());
     let target_nesting_level = calc_nesting_level(target_nesting.clone());
@@ -437,9 +437,9 @@ mod tests {
         // negated
         assert!(!lhs_is_more_nested(dt.clone(), nested_3.clone()));
         assert!(!lhs_is_more_nested(dt.clone(), nested_1.clone()));
-        assert!(!lhs_is_more_nested(dt.clone(), nested_2.clone()));
-        assert!(!lhs_is_more_nested(nested_2.clone(), nested_3.clone()));
-        assert!(!lhs_is_more_nested(nested_1.clone(), nested_3.clone()));
+        assert!(!lhs_is_more_nested(dt, nested_2.clone()));
+        assert!(!lhs_is_more_nested(nested_2, nested_3.clone()));
+        assert!(!lhs_is_more_nested(nested_1, nested_3));
     }
 
     #[test]
