@@ -142,7 +142,9 @@ impl Executor for ReceiverExecutor {
                         );
                         barrier.passed_actors.push(actor_id);
 
-                        if let Some(update) = barrier.as_update_merge(self.actor_context.id) {
+                        if let Some(update) = barrier
+                            .as_update_merge(self.actor_context.id, self.upstream_fragment_id)
+                        {
                             assert_eq!(
                                 update.removed_upstream_actor_id,
                                 vec![self.input.actor_id()],
@@ -206,6 +208,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
+    // use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
     use super::*;
     use crate::executor::{ActorContext, Barrier, Executor, Mutation};
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
@@ -230,14 +233,24 @@ mod tests {
         }
         add_local_channels(ctx.clone(), vec![(old, actor_id), (new, actor_id)]);
 
-        let input = new_input(&ctx, metrics.clone(), actor_id, 0, old, 0).unwrap();
+        let (upstream_fragment_id, fragment_id) = (10, 18);
+
+        let input = new_input(
+            &ctx,
+            metrics.clone(),
+            actor_id,
+            fragment_id,
+            old,
+            upstream_fragment_id,
+        )
+        .unwrap();
 
         let receiver = ReceiverExecutor::new(
             schema,
             vec![],
             ActorContext::create(actor_id),
-            0,
-            0,
+            fragment_id,
+            upstream_fragment_id,
             input,
             ctx.clone(),
             233,
@@ -285,7 +298,9 @@ mod tests {
 
         // 4. Send a configuration change barrier.
         let merge_updates = maplit::hashmap! {
-            actor_id => MergeUpdate {
+            (actor_id, upstream_fragment_id) => MergeUpdate {
+                actor_id,
+                upstream_fragment_id,
                 added_upstream_actor_id: vec![new],
                 removed_upstream_actor_id: vec![old],
             }
