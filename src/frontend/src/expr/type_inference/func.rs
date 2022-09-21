@@ -251,8 +251,8 @@ fn infer_type_for_special(
             // cast to least restrictive type or return error
             let common_ele_type = least_restrictive(*left_ele_type.clone(), right_type.clone());
             let nesting_level_diff = (calc_nesting_level(left_type.clone())
-                            - calc_nesting_level(right_type.clone()))
-                        .abs();
+                - calc_nesting_level(right_type.clone()))
+            .abs();
             if common_ele_type.is_err() || nesting_level_diff > 1 {
                 return Err(ErrorCode::BindError(format!(
                     "unable to find least restrictive type between {} and {}",
@@ -305,8 +305,8 @@ fn infer_type_for_special(
             // cast to least restrictive type or return error
             let common_ele_type = least_restrictive(*right_ele_type.clone(), left_type.clone());
             let nesting_level_diff = (calc_nesting_level(left_type.clone())
-                            - calc_nesting_level(right_type.clone()))
-                        .abs();
+                - calc_nesting_level(right_type.clone()))
+            .abs();
             if common_ele_type.is_err() || nesting_level_diff > 1 {
                 return Err(ErrorCode::BindError(format!(
                     "unable to find least restrictive type between {} and {}",
