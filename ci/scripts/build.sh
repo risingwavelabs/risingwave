@@ -33,6 +33,8 @@ cargo hakari verify
 echo "--- Rust format check"
 cargo fmt --all -- --check
 
+echo "--- Rust clippy check"
+
 echo "--- Build Rust components"
 cargo build \
     -p risingwave_cmd_all \
