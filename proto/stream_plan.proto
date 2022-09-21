@@ -39,8 +39,6 @@ message UpdateMutation {
     // Removed downstream actors.
     repeated uint32 removed_downstream_actor_id = 5;
   }
-  // TODO: These actor ids should be the same as those in `DispatcherUpdate`.
-  // We may find a way to deduplicate this.
   message MergeUpdate {
     // Merge executor can be uniquely identified by a combination of actor id and upstream fragment id.
     uint32 actor_id = 1;
@@ -50,10 +48,10 @@ message UpdateMutation {
     // Removed upstream actors.
     repeated uint32 removed_upstream_actor_id = 4;
   }
-  // Dispatcher updates for each upstream actor.
-  repeated DispatcherUpdate actor_dispatcher_update = 1;
-  // Merge updates for each downstream actor.
-  repeated MergeUpdate actor_merge_update = 2;
+  // Dispatcher updates.
+  repeated DispatcherUpdate dispatcher_update = 1;
+  // Merge updates.
+  repeated MergeUpdate merge_update = 2;
   // Vnode bitmap updates for each actor.
   map<uint32, common.Buffer> actor_vnode_bitmap_update = 3;
   // All actors to be dropped in this update.

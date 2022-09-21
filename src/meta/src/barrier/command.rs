@@ -241,7 +241,7 @@ where
             }
 
             Command::RescheduleFragment(reschedules) => {
-                let mut actor_dispatcher_update = HashMap::new();
+                let mut dispatcher_update = HashMap::new();
                 for (_fragment_id, reschedule) in reschedules.iter() {
                     for &(upstream_fragment_id, dispatcher_id) in
                         &reschedule.upstream_fragment_dispatcher_ids
@@ -255,7 +255,7 @@ where
                         // Record updates for all actors.
                         for actor_id in upstream_actor_ids {
                             // Index with the dispatcher id to check duplicates.
-                            actor_dispatcher_update
+                            dispatcher_update
                                 .try_insert(
                                     (actor_id, dispatcher_id),
                                     DispatcherUpdate {
@@ -274,9 +274,9 @@ where
                         }
                     }
                 }
-                let actor_dispatcher_update = actor_dispatcher_update.into_values().collect();
+                let dispatcher_update = dispatcher_update.into_values().collect();
 
-                let mut actor_merge_update = HashMap::new();
+                let mut merge_update = HashMap::new();
                 for (&fragment_id, reschedule) in reschedules.iter() {
                     if let Some(downstream_fragment_id) = reschedule.downstream_fragment_id {
                         // Find the actors of the downstream fragment.
@@ -306,7 +306,7 @@ where
                             }
 
                             // Index with the fragment id to check duplicates.
-                            actor_merge_update
+                            merge_update
                                 .try_insert(
                                     (actor_id, fragment_id),
                                     MergeUpdate {
@@ -322,7 +322,7 @@ where
                         }
                     }
                 }
-                let actor_merge_update = actor_merge_update.into_values().collect();
+                let merge_update = merge_update.into_values().collect();
 
                 let mut actor_vnode_bitmap_update = HashMap::new();
                 for (_fragment_id, reschedule) in reschedules.iter() {
@@ -341,8 +341,8 @@ where
                     .collect();
 
                 let mutation = Mutation::Update(UpdateMutation {
-                    actor_dispatcher_update,
-                    actor_merge_update,
+                    dispatcher_update,
+                    merge_update,
                     actor_vnode_bitmap_update,
                     dropped_actors,
                 });

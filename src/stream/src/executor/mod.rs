@@ -369,8 +369,8 @@ impl Mutation {
                 vnode_bitmaps,
                 dropped_actors,
             } => ProstMutation::Update(UpdateMutation {
-                actor_dispatcher_update: dispatchers.values().flatten().cloned().collect(),
-                actor_merge_update: merges.values().cloned().collect(),
+                dispatcher_update: dispatchers.values().flatten().cloned().collect(),
+                merge_update: merges.values().cloned().collect(),
                 actor_vnode_bitmap_update: vnode_bitmaps
                     .iter()
                     .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
@@ -424,12 +424,12 @@ impl Mutation {
 
             ProstMutation::Update(update) => Mutation::Update {
                 dispatchers: update
-                    .actor_dispatcher_update
+                    .dispatcher_update
                     .iter()
                     .map(|u| (u.actor_id, u.clone()))
                     .into_group_map(),
                 merges: update
-                    .actor_merge_update
+                    .merge_update
                     .iter()
                     .map(|u| ((u.actor_id, u.upstream_fragment_id), u.clone()))
                     .collect(),
