@@ -59,7 +59,7 @@ pub struct DatabaseManager<S: MetaStore> {
     indexes: HashSet<IndexKey>,
     /// Relation refer count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
-    relation_ref_count: HashMap<RelationId, usize>,
+    pub(super) relation_ref_count: HashMap<RelationId, usize>,
 
     // In-progress creation tracker
     in_progress_creation_tracker: HashSet<RelationKey>,

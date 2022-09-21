@@ -91,7 +91,6 @@ impl HummockIterator for BackwardSstableIterator {
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            self.stats.skip_key_count += 1;
             let block_iter = self.block_iter.as_mut().expect("no block iter");
             block_iter.prev();
 

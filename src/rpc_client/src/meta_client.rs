@@ -644,6 +644,10 @@ impl GrpcMetaClient {
     const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
     // Max retry interval in ms for connecting to meta server.
     const CONN_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+    // See `Endpoint::http2_keep_alive_interval`
+    const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
+    // See `Endpoint::keep_alive_timeout`
+    const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
 
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
@@ -655,6 +659,10 @@ impl GrpcMetaClient {
         let channel = tokio_retry::Retry::spawn(retry_strategy, || async {
             let endpoint = endpoint.clone();
             endpoint
+                .http2_keep_alive_interval(Duration::from_secs(
+                    Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
+                ))
+                .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
                 .connect_timeout(Duration::from_secs(5))
                 .connect()
                 .await
