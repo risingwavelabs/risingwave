@@ -73,14 +73,14 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
         let index_table = index.index_table.clone();
 
         let index_column_s = index_table
-            .order_key
+            .pk
             .iter()
             .filter(|x| !index_table.columns[x.index].is_hidden)
             .map(|x| index_table.columns[x.index].name().to_string())
             .collect_vec();
 
-        let order_key_column_index_set = index_table
-            .order_key
+        let pk_column_index_set = index_table
+            .pk
             .iter()
             .map(|x| x.index)
             .collect::<HashSet<_>>();
@@ -89,7 +89,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             .columns
             .iter()
             .enumerate()
-            .filter(|(i, _)| !order_key_column_index_set.contains(i))
+            .filter(|(i, _)| !pk_column_index_set.contains(i))
             .filter(|(_, x)| !x.is_hidden)
             .map(|(_, x)| x.name().to_string())
             .collect_vec();

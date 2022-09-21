@@ -481,16 +481,6 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_executor_row_count[$__rate_interval]) > 0", "{{actor_id}}->{{executor_id}}"
                 ),
             ]),
-            panels.timeseries_ns("Actor Sampled Deserialization Time", [
-                panels.target(
-                    "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
-                ),
-            ]),
-            panels.timeseries_ns("Actor Sampled Serialization Time", [
-                panels.target(
-                    "actor_sampled_serialize_duration_ns", "{{actor_id}}"
-                ),
-            ]),
             panels.timeseries_percentage("Actor Backpressure", [
                 panels.target(
                     "rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
