@@ -445,7 +445,10 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
             return match op {
                 BTreeMapOp::Delete => None,
                 BTreeMapOp::Insert(_) => match self.staging.remove(&key).unwrap() {
-                    BTreeMapOp::Insert(v) => Some(v),
+                    BTreeMapOp::Insert(v) => {
+                        self.staging.insert(key, BTreeMapOp::Delete);
+                        Some(v)
+                    }
                     BTreeMapOp::Delete => {
                         unreachable!("we have checked that the op of the key is `Insert`, so it's impossible to be Delete")
                     }
