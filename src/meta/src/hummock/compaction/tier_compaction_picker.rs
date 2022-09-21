@@ -78,8 +78,8 @@ impl TierCompactionPicker {
                     break;
                 }
 
-                if level.level_type == non_overlapping_type
-                    && level.total_file_size > self.config.sub_level_max_compaction_bytes
+                if other.level_type == non_overlapping_type
+                    && other.total_file_size > self.config.sub_level_max_compaction_bytes
                 {
                     break;
                 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod background_deleter;
 mod catalog;
 mod cluster;
 mod env;
@@ -19,6 +20,7 @@ mod id;
 mod idle;
 mod notification;
 mod streaming_job;
+pub use background_deleter::*;
 pub use catalog::*;
 pub use cluster::*;
 pub use env::*;
