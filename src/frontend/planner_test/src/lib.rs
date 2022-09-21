@@ -450,8 +450,9 @@ impl TestCase {
                     context,
                     q,
                     ObjectName(vec!["test".into()]),
+                    false,
                 ) {
-                    Ok((stream_plan, _table)) => stream_plan,
+                    Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {
                         ret.stream_error = Some(err.to_string());
                         break 'stream;
