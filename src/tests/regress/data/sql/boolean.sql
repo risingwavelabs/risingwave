@@ -83,10 +83,10 @@ SELECT bool 'f' < bool 't' AS true;
 SELECT bool 'f' <= bool 't' AS true;
 
 -- explicit casts to/from text
--- SELECT 'TrUe'::text::boolean AS true, 'fAlse'::text::boolean AS false;
--- SELECT '    true   '::text::boolean AS true,
---        '     FALSE'::text::boolean AS false;
--- SELECT true::boolean::text AS true, false::boolean::text AS false;
+SELECT 'TrUe'::text::boolean AS true, 'fAlse'::text::boolean AS false;
+SELECT '    true   '::text::boolean AS true,
+       '     FALSE'::text::boolean AS false;
+SELECT true::boolean::text AS true, false::boolean::text AS false;
 
 -- SELECT '  tru e '::text::boolean AS invalid;    -- error
 -- SELECT ''::text::boolean AS invalid;            -- error
@@ -204,20 +204,20 @@ SELECT f1
 --
 -- Tests for BooleanTest
 --
--- CREATE TABLE BOOLTBL3 (d text, b bool, o int);
--- INSERT INTO BOOLTBL3 (d, b, o) VALUES ('true', true, 1);
--- INSERT INTO BOOLTBL3 (d, b, o) VALUES ('false', false, 2);
--- INSERT INTO BOOLTBL3 (d, b, o) VALUES ('null', null, 3);
+CREATE TABLE BOOLTBL3 (d text, b bool, o int);
+INSERT INTO BOOLTBL3 (d, b, o) VALUES ('true', true, 1);
+INSERT INTO BOOLTBL3 (d, b, o) VALUES ('false', false, 2);
+INSERT INTO BOOLTBL3 (d, b, o) VALUES ('null', null, 3);
 
--- SELECT
---     d,
---     b IS TRUE AS istrue,
---     b IS NOT TRUE AS isnottrue,
---     b IS FALSE AS isfalse,
---     b IS NOT FALSE AS isnotfalse,
---     b IS UNKNOWN AS isunknown,
---     b IS NOT UNKNOWN AS isnotunknown
--- FROM booltbl3 ORDER BY o;
+SELECT
+    d,
+    b IS TRUE AS istrue,
+    b IS NOT TRUE AS isnottrue,
+    b IS FALSE AS isfalse,
+    b IS NOT FALSE AS isnotfalse,
+    b IS NULL AS isunknown,
+    b IS NOT NULL AS isnotunknown
+FROM booltbl3 ORDER BY o;
 
 
 -- Test to make sure short-circuiting and NULL handling is
@@ -257,6 +257,6 @@ DROP TABLE  BOOLTBL1;
 
 DROP TABLE  BOOLTBL2;
 
--- DROP TABLE  BOOLTBL3;
+DROP TABLE  BOOLTBL3;
 
 DROP TABLE  BOOLTBL4;
