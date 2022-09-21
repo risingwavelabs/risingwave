@@ -169,6 +169,43 @@ pub struct TopNCache<const WITH_TIES: bool> {
     pub sort_key_len: usize,
 }
 
+/// This trait is used as a bound. It is needed since
+/// `TopNCache::<true>::f` and `TopNCache::<false>::f`
+/// don't imply `TopNCache::<WITH_TIES>::f`.
+#[async_trait]
+pub(super) trait TopNCacheTrait {
+    /// Insert input row to corresponding cache range according to its order key.
+    ///
+    /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
+    /// used to generate messages to be sent to downstream operators.
+    fn insert(
+        &mut self,
+        ordered_pk_row: OrderedRow,
+        row: Row,
+        res_ops: &mut Vec<Op>,
+        res_rows: &mut Vec<Row>,
+    );
+
+    /// Delete input row from the cache.
+    ///
+    /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
+    /// used to generate messages to be sent to downstream operators.
+    ///
+    /// Because we may need to add data from the state table to `self.high` during the delete
+    /// operation, we need to pass in `pk_prefix`, `epoch` and `managed_state` to do a prefix
+    /// scan of the state table.
+    #[allow(clippy::too_many_arguments)]
+    async fn delete<S: StateStore>(
+        &mut self,
+        pk_prefix: Option<&Row>,
+        managed_state: &mut ManagedTopNState<S>,
+        ordered_pk_row: OrderedRow,
+        row: Row,
+        res_ops: &mut Vec<Op>,
+        res_rows: &mut Vec<Row>,
+    ) -> StreamExecutorResult<()>;
+}
+
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     pub fn new(offset: usize, limit: usize, sort_key_len: usize) -> Self {
         assert!(limit != 0);
@@ -220,83 +257,17 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         }
         full
     }
-
-    /// Insert input row to corresponding cache range according to its order key.
-    ///
-    /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
-    /// used to generate messages to be sent to downstream operators.
-    pub fn insert(
-        &mut self,
-        ordered_pk_row: OrderedRow,
-        row: Row,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<Row>,
-    ) {
-        // Note: rust doesn't auto-implement T::<FLAG>::f() even when
-        // T::<true>::f() and T::<false>::f() are both present.
-        // So we workaround it here by using 2 functions.
-        if WITH_TIES {
-            self.insert_with_ties(ordered_pk_row, row, res_ops, res_rows);
-        } else {
-            self.insert_without_ties(ordered_pk_row, row, res_ops, res_rows);
-        }
-    }
-
-    /// Delete input row from the cache.
-    ///
-    /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
-    /// used to generate messages to be sent to downstream operators.
-    ///
-    /// Because we may need to add data from the state table to `self.high` during the delete
-    /// operation, we need to pass in `pk_prefix`, `epoch` and `managed_state` to do a prefix
-    /// scan of the state table.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn delete<S: StateStore>(
-        &mut self,
-        pk_prefix: Option<&Row>,
-        managed_state: &mut ManagedTopNState<S>,
-        ordered_pk_row: OrderedRow,
-        row: Row,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<Row>,
-    ) -> StreamExecutorResult<()> {
-        // Note: rust doesn't auto-implement T::<FLAG>::f() even when
-        // T::<true>::f() and T::<false>::f() are both present.
-        // So we workaround it here by using 2 functions.
-        if WITH_TIES {
-            self.delete_with_ties(
-                pk_prefix,
-                managed_state,
-                ordered_pk_row,
-                row,
-                res_ops,
-                res_rows,
-            )
-            .await
-        } else {
-            self.delete_without_ties(
-                pk_prefix,
-                managed_state,
-                ordered_pk_row,
-                row,
-                res_ops,
-                res_rows,
-            )
-            .await
-        }
-    }
 }
 
-// not WITH_TIES version
-impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
-    pub fn insert_without_ties(
+#[async_trait]
+impl TopNCacheTrait for TopNCache<false> {
+    fn insert(
         &mut self,
         ordered_pk_row: OrderedRow,
         row: Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<Row>,
     ) {
-        assert!(!WITH_TIES);
         if !self.is_low_cache_full() {
             self.low.insert(ordered_pk_row, row);
             return;
@@ -355,7 +326,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn delete_without_ties<S: StateStore>(
+    async fn delete<S: StateStore>(
         &mut self,
         pk_prefix: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
@@ -364,7 +335,6 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<Row>,
     ) -> StreamExecutorResult<()> {
-        assert!(!WITH_TIES);
         if self.is_middle_cache_full() && ordered_pk_row > *self.middle.last_key_value().unwrap().0
         {
             // The row is in high
@@ -433,16 +403,15 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     }
 }
 
-// WITH_TIES version
-impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
-    pub fn insert_with_ties(
+#[async_trait]
+impl TopNCacheTrait for TopNCache<true> {
+    fn insert(
         &mut self,
         ordered_pk_row: OrderedRow,
         row: Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<Row>,
     ) {
-        assert!(WITH_TIES);
         debug_assert!(self.low.is_empty());
 
         let elem_to_compare_with_middle = (ordered_pk_row, row);
@@ -513,7 +482,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn delete_with_ties<S: StateStore>(
+    async fn delete<S: StateStore>(
         &mut self,
         pk_prefix: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
@@ -522,7 +491,6 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<Row>,
     ) -> StreamExecutorResult<()> {
-        assert!(WITH_TIES);
         // Since low cache is always empty for WITH_TIES, this unwrap is safe.
         let middle_last_sort_key = self
             .middle
@@ -651,7 +619,10 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
 }
 
 #[async_trait]
-impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecutorNew<S, WITH_TIES> {
+impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecutorNew<S, WITH_TIES>
+where
+    TopNCache<WITH_TIES>: TopNCacheTrait,
+{
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.cache.limit);
         let mut res_rows = Vec::with_capacity(self.cache.limit);

@@ -28,7 +28,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
 use super::managed_state::top_n::ManagedTopNState;
-use super::top_n::{generate_executor_pk_indices_info, TopNCache};
+use super::top_n::{generate_executor_pk_indices_info, TopNCache, TopNCacheTrait};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 use crate::error::StreamResult;
@@ -182,6 +182,8 @@ impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIE
 #[async_trait]
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase
     for InnerGroupTopNExecutorNew<S, WITH_TIES>
+where
+    TopNCache<WITH_TIES>: TopNCacheTrait,
 {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit);
