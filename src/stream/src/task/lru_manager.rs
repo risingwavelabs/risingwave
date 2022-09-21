@@ -256,6 +256,7 @@ impl LruManager {
     }
 
     fn set_watermark_time(&self, time: u64) {
+        dbg!{format!("watermark time: {}", time)};
         let epoch = Epoch::from_physical_time(time).0;
         let watermark_epoch = self.watermark_epoch.as_ref();
         watermark_epoch.store(epoch, Ordering::Relaxed);
@@ -271,7 +272,7 @@ impl LruManager {
 
         loop {
             // Wait for a while to check if need eviction.
-            sleep(Duration::from_micros(self.barrier_interval_ms as u64)).await;
+            sleep(Duration::from_millis(self.barrier_interval_ms as u64)).await;
 
             let stats = INSTRUMENTED_JEMALLOC.stats();
             let cur_total_bytes_used = stats.bytes_allocated - stats.bytes_deallocated;

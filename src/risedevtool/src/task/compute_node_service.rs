@@ -63,6 +63,10 @@ impl ComputeNodeService {
             cmd.arg("--enable-async-stack-trace");
         }
 
+        if config.enable_managed_cache {
+            cmd.arg("--enable_managed_cache");
+        }
+
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {
             0 => {}
