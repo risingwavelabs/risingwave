@@ -486,8 +486,13 @@ impl LogicalScan {
             required_order.enforce_if_not_satisfies(BatchSeqScan::new(self.clone(), vec![]).into())
         } else {
             let (scan_ranges, predicate) = self.predicate.clone().split_to_scan_ranges(
-                &self.table_desc.order_column_indices(),
-                self.table_desc.columns.len(),
+                self.table_desc.clone(),
+                self.base
+                    .ctx
+                    .inner()
+                    .session_ctx
+                    .config()
+                    .get_max_split_range_gap(),
             )?;
             let mut scan = self.clone();
             scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.

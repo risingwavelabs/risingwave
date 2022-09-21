@@ -132,12 +132,9 @@
     Fragment 1
       StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max(t.v)] }
         StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id)] }
-          StreamExchange NoShuffle from 2
-
-    Fragment 2
-      Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-        Upstream
-        BatchPlanNode
+          Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            Upstream
+            BatchPlanNode
 
 - id: extreme_on_AO
   before:
@@ -357,12 +354,9 @@
     Fragment 1
       StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max(t.v), count(t.v)] }
         StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id)] }
-          StreamExchange NoShuffle from 2
-
-    Fragment 2
-      Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-        Upstream
-        BatchPlanNode
+          Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            Upstream
+            BatchPlanNode
 
 - id: extreme_count_on_AO
   before:
@@ -548,12 +542,9 @@
       StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
         StreamProject { exprs: [max(tk.v), tk.k] }
           StreamHashAgg { group_key: [tk.k], aggs: [count, max(tk.v)] }
-            StreamExchange NoShuffle from 1
-
-    Fragment 1
-      Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-        Upstream
-        BatchPlanNode
+            Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+              Upstream
+              BatchPlanNode
 
 - id: extreme_on_S_by_k
   before:
@@ -655,12 +646,9 @@
       StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
         StreamProject { exprs: [sum(tk.v), tk.k] }
           StreamHashAgg { group_key: [tk.k], aggs: [count, sum(tk.v)] }
-            StreamExchange NoShuffle from 1
-
-    Fragment 1
-      Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-        Upstream
-        BatchPlanNode
+            Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+              Upstream
+              BatchPlanNode
 
 - id: sum_on_S_by_k
   before:
@@ -762,12 +750,9 @@
       StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
         StreamProject { exprs: [count(tk.v), tk.k] }
           StreamHashAgg { group_key: [tk.k], aggs: [count, count(tk.v)] }
-            StreamExchange NoShuffle from 1
-
-    Fragment 1
-      Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-        Upstream
-        BatchPlanNode
+            Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+              Upstream
+              BatchPlanNode
 
 - id: cnt_on_S_by_k
   before:
@@ -875,12 +860,9 @@
         StreamProject { exprs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST)), tk.k] }
           StreamHashAgg { group_key: [tk.k], aggs: [count, string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
             StreamProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o, tk.t._row_id] }
-              StreamExchange NoShuffle from 1
-
-    Fragment 1
-      Chain { table: tk, columns: [tk.k, tk.o, tk.s, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
-        Upstream
-        BatchPlanNode
+              Chain { table: tk, columns: [tk.k, tk.o, tk.s, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+                Upstream
+                BatchPlanNode
 
 - id: string_agg_on_S_by_k
   before:

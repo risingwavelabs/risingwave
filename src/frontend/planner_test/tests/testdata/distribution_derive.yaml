@@ -180,12 +180,9 @@
       StreamMaterialize { columns: [max_v, ak1.k1(hidden)], pk_columns: [ak1.k1] }
         StreamProject { exprs: [max(ak1.v), ak1.k1] }
           StreamHashAgg { group_key: [ak1.k1], aggs: [count, max(ak1.v)] }
-            StreamExchange NoShuffle from 1
-
-    Fragment 1
-      Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
-        Upstream
-        BatchPlanNode
+            Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
+              Upstream
+              BatchPlanNode
 
 - id: aggk1_from_Ak1k2
   before:
@@ -271,12 +268,9 @@
       StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], pk_columns: [ak1k2.k1, ak1k2.k2] }
         StreamProject { exprs: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2] }
           StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [count, sum(ak1k2.v)] }
-            StreamExchange NoShuffle from 1
-
-    Fragment 1
-      Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
-        Upstream
-        BatchPlanNode
+            Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+              Upstream
+              BatchPlanNode
 
 - id: aggk1k2_from_Ak1
   before:
@@ -300,12 +294,9 @@
       StreamMaterialize { columns: [sum_v, ak1.k1(hidden), ak1.k2(hidden)], pk_columns: [ak1.k1, ak1.k2] }
         StreamProject { exprs: [sum(ak1.v), ak1.k1, ak1.k2] }
           StreamHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [count, sum(ak1.v)] }
-            StreamExchange NoShuffle from 1
-
-    Fragment 1
-      Chain { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
-        Upstream
-        BatchPlanNode
+            Chain { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
+              Upstream
+              BatchPlanNode
 
 - id: aggk1_from_aggk1
   before:
@@ -341,13 +332,10 @@
         StreamProject { exprs: [max(count), a.k1] }
           StreamHashAgg { group_key: [a.k1], aggs: [count, max(count)] }
             StreamProject { exprs: [a.k1, count] }
-              StreamExchange NoShuffle from 1
+              StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+                StreamExchange Hash([0]) from 1
 
     Fragment 1
-      StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
-        StreamExchange Hash([0]) from 2
-
-    Fragment 2
       Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
         Upstream
         BatchPlanNode
@@ -482,13 +470,10 @@
         StreamProject { exprs: [max(count), a.k1, a.k2] }
           StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, max(count)] }
             StreamProject { exprs: [a.k1, a.k2, count] }
-              StreamExchange NoShuffle from 1
+              StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, count] }
+                StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
-      StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, count] }
-        StreamExchange Hash([0, 1]) from 2
-
-    Fragment 2
       Chain { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
         Upstream
         BatchPlanNode
@@ -528,7 +513,8 @@
         StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] }
           StreamExchange Hash([0]) from 1
           StreamProject { exprs: [count, a.k1] }
-            StreamExchange NoShuffle from 2
+            StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+              StreamExchange Hash([0]) from 2
 
     Fragment 1
       Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
@@ -536,10 +522,6 @@
         BatchPlanNode
 
     Fragment 2
-      StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
-        StreamExchange Hash([0]) from 3
-
-    Fragment 3
       Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
         Upstream
         BatchPlanNode
@@ -578,19 +560,16 @@
       StreamMaterialize { columns: [v, bv, a.k1(hidden), ak1.a._row_id(hidden), ak1.k1(hidden)], pk_columns: [a.k1, ak1.a._row_id, ak1.k1] }
         StreamHashJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count, a.k1, ak1.a._row_id, ak1.k1] }
           StreamProject { exprs: [count, a.k1] }
-            StreamExchange NoShuffle from 1
-          StreamExchange Hash([0]) from 3
+            StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+              StreamExchange Hash([0]) from 1
+          StreamExchange Hash([0]) from 2
 
     Fragment 1
-      StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
-        StreamExchange Hash([0]) from 2
-
-    Fragment 2
       Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
         Upstream
         BatchPlanNode
 
-    Fragment 3
+    Fragment 2
       Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
         Upstream
         BatchPlanNode
@@ -638,24 +617,18 @@
       StreamMaterialize { columns: [num, bv, a.k1(hidden), b.k1(hidden)], pk_columns: [a.k1, b.k1] }
         StreamHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count, a.k1, b.k1] }
           StreamProject { exprs: [count, a.k1] }
-            StreamExchange NoShuffle from 1
+            StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+              StreamExchange Hash([0]) from 1
           StreamProject { exprs: [count, b.k1] }
-            StreamExchange NoShuffle from 3
+            StreamHashAgg { group_key: [b.k1], aggs: [count, count] }
+              StreamExchange Hash([0]) from 2
 
     Fragment 1
-      StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
-        StreamExchange Hash([0]) from 2
-
-    Fragment 2
       Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
         Upstream
         BatchPlanNode
 
-    Fragment 3
-      StreamHashAgg { group_key: [b.k1], aggs: [count, count] }
-        StreamExchange Hash([0]) from 4
-
-    Fragment 4
+    Fragment 2
       Chain { table: b, columns: [b.k1, b._row_id], pk: [b._row_id], distribution: UpstreamHashShard(b._row_id) }
         Upstream
         BatchPlanNode
