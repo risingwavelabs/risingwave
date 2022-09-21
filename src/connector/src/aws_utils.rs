@@ -198,7 +198,8 @@ pub fn s3_client(
 ) -> aws_sdk_s3::Client {
     let s3_config_obj = if let Some(config) = config_pairs {
         let s3_config = AwsCustomConfig::from(config);
-        let retry_conf = aws_config::RetryConfig::standard().with_max_attempts(s3_config.retry_times);
+        let retry_conf =
+            aws_config::RetryConfig::standard().with_max_attempts(s3_config.retry_times);
         let timeout_conf = aws_config::timeout::Config::new().with_http_timeouts(
             Http::new()
                 .with_connect_timeout(TriState::Set(s3_config.conn_timeout))
