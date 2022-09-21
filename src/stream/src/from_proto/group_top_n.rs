@@ -49,7 +49,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             .map(|idx| *idx as usize)
             .collect();
 
-        Ok(GroupTopNExecutor::new(
+        Ok(GroupTopNExecutor::new_without_ties(
             params.input.remove(0),
             order_pairs,
             (node.offset as usize, node.limit as usize),

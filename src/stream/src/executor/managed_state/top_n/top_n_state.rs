@@ -128,10 +128,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         Ok(())
     }
 
-    pub async fn init_topn_cache(
+    pub async fn init_topn_cache<const WITH_TIES: bool>(
         &self,
         pk_prefix: Option<&Row>,
-        topn_cache: &mut TopNCache,
+        topn_cache: &mut TopNCache<WITH_TIES>,
     ) -> StreamExecutorResult<()> {
         assert!(topn_cache.low.is_empty());
         assert!(topn_cache.middle.is_empty());

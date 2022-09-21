@@ -45,7 +45,7 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
             .iter()
             .map(|idx| *idx as usize)
             .collect();
-        Ok(TopNExecutor::new(
+        Ok(TopNExecutor::new_without_ties(
             input,
             order_pairs,
             (node.offset as usize, node.limit as usize),
