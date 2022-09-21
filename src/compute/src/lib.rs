@@ -86,7 +86,7 @@ pub struct ComputeNodeOpts {
     pub file_cache_dir: String,
 
     /// Enable managed lru cache, or use local lru cache.
-    #[clap(long, default_value = "")]
+    #[clap(long)]
     pub enable_managed_cache: bool,
 }
 

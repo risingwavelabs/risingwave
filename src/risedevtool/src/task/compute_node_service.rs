@@ -64,7 +64,7 @@ impl ComputeNodeService {
         }
 
         if config.enable_managed_cache {
-            cmd.arg("--enable_managed_cache");
+            cmd.arg("--enable-managed-cache");
         }
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
