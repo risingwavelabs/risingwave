@@ -35,7 +35,7 @@ use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Epoch, Executor, Message, PkIndices,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, EpochPair, Executor, Message, PkIndices,
     PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
@@ -199,7 +199,7 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         // self.ht.clear();
     }
 
-    pub fn init(&mut self, epoch: Epoch) {
+    pub fn init(&mut self, epoch: EpochPair) {
         self.ht.init(epoch);
     }
 }
@@ -935,7 +935,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::{ActorContext, Barrier, Epoch, Message};
+    use crate::executor::{ActorContext, Barrier, EpochPair, Message};
 
     fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
@@ -2161,7 +2161,7 @@ mod tests {
         tx_r.push_barrier(2, false);
 
         // get the aligned barrier here
-        let expected_epoch = Epoch::new_test_epoch(2);
+        let expected_epoch = EpochPair::new_test_epoch(2);
         assert!(matches!(
             hash_join.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier {
@@ -2258,7 +2258,7 @@ mod tests {
         tx_r.push_barrier(2, false);
 
         // get the aligned barrier here
-        let expected_epoch = Epoch::new_test_epoch(2);
+        let expected_epoch = EpochPair::new_test_epoch(2);
         assert!(matches!(
             hash_join.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier {

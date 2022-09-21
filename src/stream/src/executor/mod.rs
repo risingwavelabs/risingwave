@@ -210,12 +210,12 @@ pub enum Mutation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Epoch {
+pub struct EpochPair {
     pub curr: u64,
     pub prev: u64,
 }
 
-impl Epoch {
+impl EpochPair {
     pub fn new(curr: u64, prev: u64) -> Self {
         assert!(curr > prev);
         Self { curr, prev }
@@ -235,7 +235,7 @@ impl Epoch {
     }
 }
 
-impl Default for Epoch {
+impl Default for EpochPair {
     fn default() -> Self {
         Self {
             curr: 1,
@@ -246,7 +246,7 @@ impl Default for Epoch {
 
 #[derive(Debug, Clone, Default)]
 pub struct Barrier {
-    pub epoch: Epoch,
+    pub epoch: EpochPair,
     pub mutation: Option<Arc<Mutation>>,
     pub checkpoint: bool,
 
@@ -258,7 +258,7 @@ impl Barrier {
     /// Create a plain barrier.
     pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
-            epoch: Epoch::new_test_epoch(epoch),
+            epoch: EpochPair::new_test_epoch(epoch),
             checkpoint: true,
             ..Default::default()
         }
@@ -528,7 +528,7 @@ impl Barrier {
         let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {
             checkpoint: prost.checkpoint,
-            epoch: Epoch::new(epoch.curr, epoch.prev),
+            epoch: EpochPair::new(epoch.curr, epoch.prev),
             mutation,
             passed_actors: prost.get_passed_actors().clone(),
         })

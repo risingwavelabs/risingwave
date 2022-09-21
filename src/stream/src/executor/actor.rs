@@ -25,7 +25,7 @@ use tokio_stream::StreamExt;
 use super::monitor::StreamingMetrics;
 use super::StreamConsumer;
 use crate::error::StreamResult;
-use crate::executor::Epoch;
+use crate::executor::EpochPair;
 use crate::task::{ActorId, SharedContext};
 
 /// Shared by all operators of an actor.
@@ -97,7 +97,7 @@ where
             span
         };
 
-        let mut last_epoch: Option<Epoch> = None;
+        let mut last_epoch: Option<EpochPair> = None;
 
         let stream = Box::new(self.consumer).execute();
         pin_mut!(stream);

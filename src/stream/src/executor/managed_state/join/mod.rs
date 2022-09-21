@@ -41,7 +41,7 @@ use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use self::iter_utils::zip_by_order_key;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::Epoch;
+use crate::executor::EpochPair;
 use crate::task::ActorId;
 
 type DegreeType = u64;
@@ -325,7 +325,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.alloc.bytes_in_use()
     }
 
-    pub fn init(&mut self, epoch: Epoch) {
+    pub fn init(&mut self, epoch: EpochPair) {
         self.current_epoch = epoch.curr;
         self.state.table.init_epoch(epoch.prev);
         self.degree_state.table.init_epoch(epoch.prev);

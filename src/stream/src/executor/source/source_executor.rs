@@ -546,7 +546,10 @@ mod tests {
         barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
 
         let msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(msg.into_barrier().unwrap().epoch, Epoch::new_test_epoch(1));
+        assert_eq!(
+            msg.into_barrier().unwrap().epoch,
+            EpochPair::new_test_epoch(1)
+        );
 
         // Write 1st chunk
         write_chunk(chunk1);

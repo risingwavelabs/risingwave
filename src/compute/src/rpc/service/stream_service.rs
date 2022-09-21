@@ -22,7 +22,7 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::{Barrier, Epoch, Mutation};
+use risingwave_stream::executor::{Barrier, EpochPair, Mutation};
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
@@ -119,7 +119,7 @@ impl StreamService for StreamServiceImpl {
         let epoch = req.epoch.unwrap();
 
         let barrier = &Barrier {
-            epoch: Epoch {
+            epoch: EpochPair {
                 curr: epoch.curr,
                 prev: epoch.prev,
             },

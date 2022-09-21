@@ -237,7 +237,7 @@ mod tests {
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
     use crate::executor::top_n_appendonly::AppendOnlyTopNExecutor;
-    use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices};
+    use crate::executor::{Barrier, EpochPair, Executor, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -290,17 +290,17 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(1),
+                    epoch: EpochPair::new_test_epoch(1),
                     ..Barrier::default()
                 }),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(2),
+                    epoch: EpochPair::new_test_epoch(2),
                     ..Barrier::default()
                 }),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(3),
+                    epoch: EpochPair::new_test_epoch(3),
                     ..Barrier::default()
                 }),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
