@@ -94,7 +94,8 @@ impl<S: StateStore> TopNExecutor<S, true> {
         })
     }
 
-    /// It only has 1 capacity for high cache. Used to test recovery is correct.
+    /// It only has 1 capacity for high cache. Used to test the case where the last element in high
+    /// has ties.
     #[allow(clippy::too_many_arguments)]
     #[cfg(test)]
     pub fn new_with_ties_for_test(
@@ -158,8 +159,14 @@ pub struct TopNCache<const WITH_TIES: bool> {
     /// Rows in the range `[0, offset)`
     pub low: BTreeMap<OrderedRow, Row>,
     /// Rows in the range `[offset, offset+limit)`
+    ///
+    /// When `WITH_TIES` is true, it also stores ties for the last element,
+    /// and thus the size can be larger than `limit`.
     pub middle: BTreeMap<OrderedRow, Row>,
     /// Rows in the range `[offset+limit, offset+limit+high_capacity)`
+    ///
+    /// When `WITH_TIES` is true, it also stores ties for the last element,
+    /// and thus the size can be larger than `high_capacity`.
     pub high: BTreeMap<OrderedRow, Row>,
     pub high_capacity: usize,
     pub offset: usize,
@@ -236,8 +243,11 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     }
 
     pub fn is_middle_cache_full(&self) -> bool {
-        debug_assert!(self.middle.len() <= self.limit);
-        let full = self.middle.len() == self.limit;
+        // For WITH_TIES, the middle cache can exceed the capacity.
+        if !WITH_TIES {
+            debug_assert!(self.middle.len() <= self.limit);
+        }
+        let full = self.middle.len() >= self.limit;
         if full {
             debug_assert!(self.is_low_cache_full());
         } else {
@@ -247,7 +257,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     }
 
     pub fn is_high_cache_full(&self) -> bool {
-        // For WITH_TIES, the high cache can overflow the capacity.
+        // For WITH_TIES, the high cache can exceed the capacity.
         if !WITH_TIES {
             debug_assert!(self.high.len() <= self.high_capacity);
         }
@@ -430,25 +440,21 @@ impl TopNCacheTrait for TopNCache<true> {
         let middle_last = self.middle.last_key_value().unwrap();
         let middle_last_sort_key = middle_last.0.prefix(self.sort_key_len);
 
-        let ord = sort_key.cmp(&middle_last_sort_key);
-        match ord {
+        match sort_key.cmp(&middle_last_sort_key) {
             Ordering::Less => {
-                // We need to trigger deletes for all rows with prefix `middle_last_sort_key`.
-                // They can be in middle and also high cache.
-
-                // First, move all from `self.middle` to `self.high`.
+                // The row is in middle, and need to evict the last row in middle and also its ties.
                 while let Some(middle_last) = self.middle.last_entry()
                     && middle_last.key().starts_with(&middle_last_sort_key) {
                     let middle_last = middle_last.remove_entry();
+                    res_ops.push(Op::Delete);
+                    res_rows.push(middle_last.1.clone());
                     self.high.insert(middle_last.0, middle_last.1);
                 }
-                // Then, scan high cache to trigger delete operations.
-                for (ordered_pk_row, row) in &self.high {
-                    if !ordered_pk_row.starts_with(&middle_last_sort_key) {
-                        break;
-                    }
-                    res_ops.push(Op::Delete);
-                    res_rows.push(row.clone());
+                if self.high.len() >= self.high_capacity {
+                    let high_last = self.high.pop_last().unwrap();
+                    let high_last_sort_key = high_last.0.prefix(self.sort_key_len);
+                    self.high
+                        .drain_filter(|k, _| k.starts_with(&high_last_sort_key));
                 }
 
                 res_ops.push(Op::Insert);
@@ -456,15 +462,15 @@ impl TopNCacheTrait for TopNCache<true> {
                 self.middle
                     .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
             }
-            Ordering::Equal | Ordering::Greater => {
-                if ord == Ordering::Equal {
-                    // We need to trigger an insert, but no delete is needed.
-                    res_ops.push(Op::Insert);
-                    res_rows.push(elem_to_compare_with_middle.1.clone());
-                    // We will simply insert it to high cache.
-                    // NOTE: this means that the high cache may have elems larger than
-                    // the elems in middle cache.
-                }
+            Ordering::Equal => {
+                // The row is in middle.
+                res_ops.push(Op::Insert);
+                res_rows.push(elem_to_compare_with_middle.1.clone());
+                self.middle
+                    .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
+            }
+            Ordering::Greater => {
+                // The row is in high.
                 let elem_to_compare_with_high = elem_to_compare_with_middle;
                 if !self.is_high_cache_full() {
                     self.high
@@ -492,19 +498,24 @@ impl TopNCacheTrait for TopNCache<true> {
         res_rows: &mut Vec<Row>,
     ) -> StreamExecutorResult<()> {
         // Since low cache is always empty for WITH_TIES, this unwrap is safe.
-        let middle_last_sort_key = self
-            .middle
-            .last_key_value()
-            .unwrap()
-            .0
-            .prefix(self.sort_key_len);
-        if self.is_middle_cache_full() && ordered_pk_row > middle_last_sort_key {
-            // The row is in high, and sort key > last sort key in middle.
+
+        let middle_last = self.middle.last_key_value().unwrap();
+        let middle_last_sort_key = middle_last.0.prefix(self.sort_key_len);
+
+        let sort_key = ordered_pk_row.prefix(self.sort_key_len);
+        if sort_key > middle_last_sort_key {
+            // The row is in high.
             self.high.remove(&ordered_pk_row);
         } else {
-            // The row is either:
-            // - in mid
-            // - in high and sort key = last sort key in middle.
+            // The row is in middle
+            self.middle.remove(&ordered_pk_row);
+            res_ops.push(Op::Delete);
+            res_rows.push(row.clone());
+            if self.middle.len() >= self.limit {
+                // This can happen when there are ties.
+                return Ok(());
+            }
+
             // Try to fill the high cache if it is empty
             if self.high.is_empty() {
                 managed_state
@@ -517,33 +528,29 @@ impl TopNCacheTrait for TopNCache<true> {
                     .await?;
             }
 
-            let in_middle = self.middle.remove(&ordered_pk_row).is_some();
-            if !in_middle {
-                self.high.remove(&ordered_pk_row);
-            }
-            res_ops.push(Op::Delete);
-            res_rows.push(row.clone());
-
-            // Bring one element, if any, from high cache to middle cache
-            if in_middle && !self.high.is_empty() {
+            // Bring elements with the same sort key, if any, from high cache to middle cache.
+            if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
-                // If the row's sort key is different, trigger insert Op.
-                // Otherwise it is a tie.
-                if !high_first.0.starts_with(&middle_last_sort_key) {
-                    res_ops.push(Op::Insert);
-                    res_rows.push(high_first.1.clone());
-                    let high_first_sort_key = high_first.0.prefix(self.sort_key_len);
-                    // We need to trigger insert for all rows with prefix `high_first_sort_key`
-                    // in high cache.
-                    for (ordered_pk_row, row) in &self.high {
-                        if !ordered_pk_row.starts_with(&high_first_sort_key) {
-                            break;
-                        }
-                        res_ops.push(Op::Insert);
-                        res_rows.push(row.clone());
-                    }
-                }
+                let high_first_sort_key = high_first.0.prefix(self.sort_key_len);
+                debug_assert!(high_first_sort_key > middle_last_sort_key);
+
+                res_ops.push(Op::Insert);
+                res_rows.push(high_first.1.clone());
                 self.middle.insert(high_first.0, high_first.1);
+
+                // We need to trigger insert for all rows with prefix `high_first_sort_key`
+                // in high cache.
+                for (ordered_pk_row, row) in self
+                    .high
+                    .drain_filter(|k, _| k.starts_with(&high_first_sort_key))
+                {
+                    if !ordered_pk_row.starts_with(&high_first_sort_key) {
+                        break;
+                    }
+                    res_ops.push(Op::Insert);
+                    res_rows.push(row.clone());
+                    self.middle.insert(ordered_pk_row, row);
+                }
             }
         }
 
@@ -1528,7 +1535,7 @@ mod tests {
                 &[0, 1],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new_with_ties(
+                TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
                     order_types,
                     (0, 3),
@@ -1560,8 +1567,8 @@ mod tests {
                 StreamChunk::from_pretty(
                     " I I
                     + 3 8
-                    - 3 2
                     - 3 8
+                    - 3 2
                     + 1 6
                     + 2 7"
                 )
@@ -1576,6 +1583,7 @@ mod tests {
                 )
             );
 
+            // High cache has only one capacity, but we need to trigger 2 inserts here!
             let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
                 *res.as_chunk().unwrap(),
@@ -1704,8 +1712,8 @@ mod tests {
                 StreamChunk::from_pretty(
                     " I I
                     + 3 8
-                    - 3 2
                     - 3 8
+                    - 3 2
                     + 1 6
                     + 2 7"
                 )
