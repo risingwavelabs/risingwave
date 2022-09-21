@@ -63,7 +63,7 @@ pub struct TableCatalog {
     pub columns: Vec<ColumnCatalog>,
 
     /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
-    pub order_key: Vec<FieldOrder>,
+    pub pk: Vec<FieldOrder>,
 
     /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
@@ -119,8 +119,8 @@ impl TableCatalog {
     }
 
     /// Get a reference to the table catalog's pk desc.
-    pub fn order_key(&self) -> &[FieldOrder] {
-        self.order_key.as_ref()
+    pub fn pk(&self) -> &[FieldOrder] {
+        self.pk.as_ref()
     }
 
     /// Get a [`TableDesc`] of the table.
@@ -131,11 +131,7 @@ impl TableCatalog {
 
         TableDesc {
             table_id: self.id,
-            order_key: self
-                .order_key
-                .iter()
-                .map(FieldOrder::to_order_pair)
-                .collect(),
+            pk: self.pk.iter().map(FieldOrder::to_order_pair).collect(),
             stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
@@ -171,7 +167,7 @@ impl TableCatalog {
             database_id,
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
-            order_key: self.order_key.iter().map(|o| o.to_protobuf()).collect(),
+            pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
@@ -216,13 +212,13 @@ impl From<ProstTable> for TableCatalog {
             col_index.insert(col_id, idx);
         }
 
-        let order_key = tb.order_key.iter().map(FieldOrder::from_protobuf).collect();
+        let pk = tb.pk.iter().map(FieldOrder::from_protobuf).collect();
 
         Self {
             id: id.into(),
             associated_source_id: associated_source_id.map(Into::into),
             name,
-            order_key,
+            pk,
             columns,
             is_index_on: if tb.is_index {
                 Some(tb.index_on_id.into())
@@ -306,7 +302,7 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            order_key: vec![FieldOrder {
+            pk: vec![FieldOrder {
                 index: 0,
                 direct: Direction::Asc,
             }
@@ -367,7 +363,7 @@ mod tests {
                     }
                 ],
                 stream_key: vec![0],
-                order_key: vec![FieldOrder {
+                pk: vec![FieldOrder {
                     index: 0,
                     direct: Direction::Asc,
                 }],

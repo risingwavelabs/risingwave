@@ -28,7 +28,7 @@ use crate::utils::WithOptions;
 pub struct TableCatalogBuilder {
     columns: Vec<ColumnCatalog>,
     column_names: HashMap<String, i32>,
-    order_key: Vec<FieldOrder>,
+    pk: Vec<FieldOrder>,
     // FIXME(stonepage): stream_key should be meaningless in internal state table, check if we
     // can remove it later
     stream_key: Vec<usize>,
@@ -66,7 +66,7 @@ impl TableCatalogBuilder {
     /// semantics and they are encoded as storage key.
     pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
         self.stream_key.push(index);
-        self.order_key.push(FieldOrder {
+        self.pk.push(FieldOrder {
             index,
             direct: match order_type {
                 OrderType::Ascending => Direction::Asc,
@@ -104,7 +104,7 @@ impl TableCatalogBuilder {
             associated_source_id: None,
             name: String::new(),
             columns: self.columns.clone(),
-            order_key: self.order_key,
+            pk: self.pk,
             stream_key: self.stream_key,
             is_index_on: None,
             distribution_key,
@@ -131,7 +131,7 @@ impl TableCatalogBuilder {
             associated_source_id: None,
             name: String::new(),
             columns: self.columns.clone(),
-            order_key: self.order_key,
+            pk: self.pk,
             stream_key: self.stream_key,
             is_index_on: None,
             distribution_key,

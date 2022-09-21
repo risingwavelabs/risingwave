@@ -117,7 +117,7 @@ impl<S: StateStore> StateTable<S> {
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
         let order_types: Vec<OrderType> = table_catalog
-            .order_key
+            .pk
             .iter()
             .map(|col_order| {
                 OrderType::from_prost(
@@ -132,7 +132,7 @@ impl<S: StateStore> StateTable<S> {
             .collect();
 
         let pk_indices = table_catalog
-            .order_key
+            .pk
             .iter()
             .map(|col_order| col_order.index as usize)
             .collect_vec();
