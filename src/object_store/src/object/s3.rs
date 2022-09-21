@@ -65,6 +65,12 @@ pub struct S3StreamingUploader {
     next_part_id: PartId,
     /// Join handles for part uploads.
     join_handles: Vec<JoinHandle<ObjectResult<(PartId, UploadPartOutput)>>>,
+    /// Fail-fast when any error occurs in any of the `join_handles`.
+    ///
+    /// Despite the usage of `Mutex`, the contention should be extremely low.
+    ///
+    /// `ObjectError` does not implement `Clone`, so we will just store the error message.
+    upload_part_err: Arc<parking_lot::Mutex<Option<String>>>,
     /// Buffer for data. It will store at least `part_size` bytes of data before wrapping itself
     /// into a stream and upload to object store as a part.
     buf: Vec<Bytes>,
@@ -90,6 +96,7 @@ impl S3StreamingUploader {
             upload_id: None,
             next_part_id: MIN_PART_ID,
             join_handles: Default::default(),
+            upload_part_err: Arc::new(parking_lot::Mutex::new(None)),
             buf: Default::default(),
             not_uploaded_len: 0,
             metrics,
@@ -128,6 +135,7 @@ impl S3StreamingUploader {
         let bucket = self.bucket.clone();
         let key = self.key.clone();
         let upload_id = self.upload_id.clone().unwrap();
+        let upload_part_err = self.upload_part_err.clone();
 
         let metrics = self.metrics.clone();
         metrics
@@ -140,6 +148,7 @@ impl S3StreamingUploader {
                 .operation_latency
                 .with_label_values(&["s3", operation_type])
                 .start_timer();
+
             let upload_output_res = client_cloned
                 .upload_part()
                 .bucket(bucket)
@@ -151,7 +160,11 @@ impl S3StreamingUploader {
                 .send()
                 .await
                 .map_err(ObjectError::s3);
+
             try_update_failure_metric(&metrics, &upload_output_res, operation_type);
+            if let Err(err) = upload_output_res.as_ref() {
+                upload_part_err.lock().get_or_insert(format!("{:?}", err));
+            }
             Ok((part_id, upload_output_res?))
         }));
 
@@ -221,6 +234,19 @@ impl S3StreamingUploader {
             .await?;
         Ok(())
     }
+
+    fn fail_fast(&self) -> ObjectResult<()> {
+        self.upload_part_err
+            .lock()
+            .as_ref()
+            .map(|err| {
+                Err(ObjectError::internal(format!(
+                    "some part already failed to be uploaded: {:?}",
+                    err,
+                )))
+            })
+            .unwrap_or(Ok(()))
+    }
 }
 
 #[async_trait::async_trait]
@@ -229,6 +255,9 @@ impl StreamingUploader for S3StreamingUploader {
         fail_point!("s3_write_bytes_err", |_| Err(ObjectError::internal(
             "s3 write bytes error"
         )));
+
+        self.fail_fast()?;
+
         let data_len = data.len();
         self.not_uploaded_len += data_len;
         self.buf.push(data);
@@ -247,6 +276,9 @@ impl StreamingUploader for S3StreamingUploader {
         fail_point!("s3_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("s3 finish streaming upload error")
         ));
+
+        self.fail_fast()?;
+
         // If the multipart upload has not been initiated, we can use `Put` instead to save the
         // `CreateMultipartUpload` and `CompleteMultipartUpload` requests.
         if self.upload_id.is_none() {

@@ -4737,6 +4737,7 @@ dependencies = [
  "hyper",
  "itertools",
  "madsim-tokio",
+ "parking_lot 0.12.1",
  "prometheus",
  "risingwave_common",
  "spin 0.9.4",
