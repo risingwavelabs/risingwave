@@ -783,4 +783,41 @@ select array_cat(array[2], array[array[1]]);
 ----
 {{2},{1}}
 
+query T
+select array_cat(array[array[2]], array[array[array[1]]]);
+----
+{{{2}},{{1}}}
+
+query T
+select array_cat(array[array[2.1]], array[array[array[1]]]);
+----
+{{{2.1}},{{1}}}
+
+query T
+select array_prepend(array[array[2]], array[array[array[1]]]);
+----
+{{{2}},{{1}}}
+
+query T
+select array_prepend(array[array[2.1]], array[array[array[1]]]);
+----
+{{{2.1}},{{1}}}
+
+query T
+select array_append(array[array[array[1]]], array[array[2]]);
+----
+{{{1}},{{2}}}
+
+query T
+select array_append(array[array[array[1]]], array[array[2.1]]);
+----
+{{{1}},{{2.1}}}
+
+query T
+select array_cat(array[array[2.1]], array[array[1]]);
+----
+{{2.1},{1}}
+
+
+
 
