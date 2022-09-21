@@ -111,8 +111,8 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_default_put("test")),
-                (Bytes::from("2"), StorageValue::new_default_put("test")),
+                (Bytes::from("1"), StorageValue::new_put("test")),
+                (Bytes::from("2"), StorageValue::new_put("test")),
             ],
             WriteOptions {
                 epoch: epoch1,
@@ -122,7 +122,11 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         .await
         .unwrap();
     if enable_sync {
-        let ssts = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
+        let ssts = hummock_storage
+            .seal_and_sync_epoch(epoch1)
+            .await
+            .unwrap()
+            .uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch1, ssts)
@@ -139,9 +143,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_default_delete()),
-                (Bytes::from("3"), StorageValue::new_default_put("test")),
-                (Bytes::from("4"), StorageValue::new_default_put("test")),
+                (Bytes::from("1"), StorageValue::new_delete()),
+                (Bytes::from("3"), StorageValue::new_put("test")),
+                (Bytes::from("4"), StorageValue::new_put("test")),
             ],
             WriteOptions {
                 epoch: epoch2,
@@ -151,7 +155,11 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         .await
         .unwrap();
     if enable_sync {
-        let ssts = hummock_storage.sync(epoch2).await.unwrap().uncommitted_ssts;
+        let ssts = hummock_storage
+            .seal_and_sync_epoch(epoch2)
+            .await
+            .unwrap()
+            .uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch2, ssts)
@@ -169,9 +177,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("2"), StorageValue::new_default_delete()),
-                (Bytes::from("3"), StorageValue::new_default_delete()),
-                (Bytes::from("4"), StorageValue::new_default_delete()),
+                (Bytes::from("2"), StorageValue::new_delete()),
+                (Bytes::from("3"), StorageValue::new_delete()),
+                (Bytes::from("4"), StorageValue::new_delete()),
             ],
             WriteOptions {
                 epoch: epoch3,
@@ -181,7 +189,11 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         .await
         .unwrap();
     if enable_sync {
-        let ssts = hummock_storage.sync(epoch3).await.unwrap().uncommitted_ssts;
+        let ssts = hummock_storage
+            .seal_and_sync_epoch(epoch3)
+            .await
+            .unwrap()
+            .uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch3, ssts)
@@ -230,10 +242,10 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_default_put("test")),
-                (Bytes::from("2"), StorageValue::new_default_put("test")),
-                (Bytes::from("3"), StorageValue::new_default_put("test")),
-                (Bytes::from("4"), StorageValue::new_default_put("test")),
+                (Bytes::from("1"), StorageValue::new_put("test")),
+                (Bytes::from("2"), StorageValue::new_put("test")),
+                (Bytes::from("3"), StorageValue::new_put("test")),
+                (Bytes::from("4"), StorageValue::new_put("test")),
             ],
             WriteOptions {
                 epoch,
@@ -243,7 +255,11 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         .await
         .unwrap();
     if enable_sync {
-        let ssts = hummock_storage.sync(epoch).await.unwrap().uncommitted_ssts;
+        let ssts = hummock_storage
+            .seal_and_sync_epoch(epoch)
+            .await
+            .unwrap()
+            .uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch, ssts)
@@ -301,12 +317,12 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_default_put("test")),
-                (Bytes::from("2"), StorageValue::new_default_put("test")),
-                (Bytes::from("3"), StorageValue::new_default_put("test")),
-                (Bytes::from("4"), StorageValue::new_default_put("test")),
-                (Bytes::from("5"), StorageValue::new_default_put("test")),
-                (Bytes::from("6"), StorageValue::new_default_put("test")),
+                (Bytes::from("1"), StorageValue::new_put("test")),
+                (Bytes::from("2"), StorageValue::new_put("test")),
+                (Bytes::from("3"), StorageValue::new_put("test")),
+                (Bytes::from("4"), StorageValue::new_put("test")),
+                (Bytes::from("5"), StorageValue::new_put("test")),
+                (Bytes::from("6"), StorageValue::new_put("test")),
             ],
             WriteOptions {
                 epoch,
@@ -316,7 +332,11 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         .await
         .unwrap();
     if enable_sync {
-        let ssts = hummock_storage.sync(epoch).await.unwrap().uncommitted_ssts;
+        let ssts = hummock_storage
+            .seal_and_sync_epoch(epoch)
+            .await
+            .unwrap()
+            .uncommitted_ssts;
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch, ssts)
@@ -330,10 +350,10 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("5"), StorageValue::new_default_put("test")),
-                (Bytes::from("6"), StorageValue::new_default_put("test")),
-                (Bytes::from("7"), StorageValue::new_default_put("test")),
-                (Bytes::from("8"), StorageValue::new_default_put("test")),
+                (Bytes::from("5"), StorageValue::new_put("test")),
+                (Bytes::from("6"), StorageValue::new_put("test")),
+                (Bytes::from("7"), StorageValue::new_put("test")),
+                (Bytes::from("8"), StorageValue::new_put("test")),
             ],
             WriteOptions {
                 epoch: epoch + 1,
@@ -344,7 +364,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         .unwrap();
     if enable_sync {
         let ssts = hummock_storage
-            .sync(epoch + 1)
+            .seal_and_sync_epoch(epoch + 1)
             .await
             .unwrap()
             .uncommitted_ssts;

@@ -90,6 +90,10 @@ pub struct TableCatalog {
     /// An optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution
     pub vnode_col_idx: Option<usize>,
+
+    /// The column indices which are stored in the state store's value with row-encoding. Currently
+    /// is not supported yet and expected to be `[0..columns.len()]`
+    pub value_indices: Vec<usize>,
 }
 
 impl TableCatalog {
@@ -139,6 +143,7 @@ impl TableCatalog {
             retention_seconds: table_options
                 .retention_seconds
                 .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
+            value_indices: self.value_indices.clone(),
         }
     }
 
@@ -186,6 +191,7 @@ impl TableCatalog {
             vnode_col_idx: self
                 .vnode_col_idx
                 .map(|i| ProstColumnIndex { index: i as _ }),
+            value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -234,6 +240,7 @@ impl From<ProstTable> for TableCatalog {
             properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
             vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
+            value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -317,6 +324,7 @@ mod tests {
             )]),
             fragment_id: 0,
             vnode_col_idx: None,
+            value_indices: vec![0],
         }
         .into();
 
@@ -372,6 +380,7 @@ mod tests {
                 )])),
                 fragment_id: 0,
                 vnode_col_idx: None,
+                value_indices: vec![0],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

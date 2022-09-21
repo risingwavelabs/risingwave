@@ -24,7 +24,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::StreamExecutorResult;
+use crate::executor::{Epoch, StreamExecutorResult};
 
 /// The `RangeCache` caches a given range of `ScalarImpl` keys and corresponding rows.
 /// It will evict keys from memory if it is above capacity and shrink its range.
@@ -65,6 +65,11 @@ impl<S: StateStore> RangeCache<S> {
         }
     }
 
+    pub fn init(&mut self, epoch: Epoch) {
+        self.state_table.init_epoch(epoch.prev);
+        self.current_epoch = epoch.curr;
+    }
+
     /// Insert a row and corresponding scalar value key into cache (if within range) and
     /// `StateTable`.
     pub fn insert(&mut self, k: ScalarImpl, v: Row) -> StreamExecutorResult<()> {
@@ -72,12 +77,13 @@ impl<S: StateStore> RangeCache<S> {
             let entry = self.cache.entry(k).or_insert_with(HashSet::new);
             entry.insert(v.clone());
         }
-        self.state_table.insert(v)?;
+        self.state_table.insert(v);
         Ok(())
     }
 
     /// Delete a row and corresponding scalar value key from cache (if within range) and
     /// `StateTable`.
+    // FIXME: panic instead of returning Err
     pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if self.range.contains(k) {
             let contains_element = self
@@ -92,7 +98,7 @@ impl<S: StateStore> RangeCache<S> {
                 )));
             };
         }
-        self.state_table.delete(v)?;
+        self.state_table.delete(v);
         Ok(())
     }
 

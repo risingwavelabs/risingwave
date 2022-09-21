@@ -81,6 +81,10 @@ impl SyncFacility {
         self.notifies.lock().clear();
     }
 
+    fn remove_action(&self, sync_point: SyncPoint) {
+        self.actions.lock().remove(&sync_point);
+    }
+
     async fn on(&self, sync_point: SyncPoint) {
         let action = self.actions.lock().get(sync_point).map(|action| action());
         if let Some(action) = action {
@@ -93,6 +97,13 @@ impl SyncFacility {
 /// Enable or reset the global sync facility.
 pub fn reset() {
     SYNC_FACILITY.call_once(SyncFacility::new).reset();
+}
+
+/// Remove a sync point's action.
+pub fn remove_action(sync_point: SyncPoint) {
+    SYNC_FACILITY
+        .call_once(SyncFacility::new)
+        .remove_action(sync_point);
 }
 
 /// Mark a sync point.
@@ -120,4 +131,18 @@ where
 /// immediately.
 pub async fn wait_timeout(sync_point: SyncPoint, dur: Duration) -> Result<(), Error> {
     SyncFacility::get().wait(sync_point, dur, false).await
+}
+
+#[macro_export]
+#[cfg(feature = "sync_point")]
+macro_rules! sync_point {
+    ($name:expr) => {{
+        sync_point::on($name).await;
+    }};
+}
+
+#[macro_export]
+#[cfg(not(feature = "sync_point"))]
+macro_rules! sync_point {
+    ($name:expr) => {{}};
 }

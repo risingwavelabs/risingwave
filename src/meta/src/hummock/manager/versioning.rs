@@ -86,3 +86,29 @@ impl Versioning {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::HummockVersionDelta;
+
+    use crate::hummock::manager::versioning::Versioning;
+
+    #[tokio::test]
+    async fn test_extend_ssts_to_delete_from_deltas_trivial_move() {
+        let mut versioning = Versioning::default();
+
+        // trivial_move
+        versioning.hummock_version_deltas.insert(
+            2,
+            HummockVersionDelta {
+                id: 2,
+                prev_id: 1,
+                trivial_move: false,
+                ..Default::default()
+            },
+        );
+        assert_eq!(versioning.deltas_to_delete.len(), 0);
+        versioning.extend_ssts_to_delete_from_deltas(1..=2);
+        assert_eq!(versioning.deltas_to_delete.len(), 1);
+    }
+}

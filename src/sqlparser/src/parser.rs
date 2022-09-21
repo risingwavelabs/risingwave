@@ -404,6 +404,9 @@ impl Parser {
                 Keyword::ARRAY => Ok(Expr::Array(
                     self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
                 )),
+                k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
+                    parser_err!(format!("syntax error at or near \"{w}\""))
+                }
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token() {
@@ -1543,7 +1546,7 @@ impl Parser {
         let mut include = vec![];
         if self.parse_keyword(Keyword::INCLUDE) {
             self.expect_token(&Token::LParen)?;
-            include = self.parse_comma_separated(Parser::parse_identifier)?;
+            include = self.parse_comma_separated(Parser::parse_identifier_non_reserved)?;
             self.expect_token(&Token::RParen)?;
         }
         Ok(Statement::CreateIndex {
@@ -1615,7 +1618,7 @@ impl Parser {
     }
 
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
-        let name = self.parse_identifier()?;
+        let name = self.parse_identifier_non_reserved()?;
         let data_type = self.parse_data_type()?;
 
         let collation = if self.parse_keyword(Keyword::COLLATE) {
@@ -1626,7 +1629,7 @@ impl Parser {
         let mut options = vec![];
         loop {
             if self.parse_keyword(Keyword::CONSTRAINT) {
-                let name = Some(self.parse_identifier()?);
+                let name = Some(self.parse_identifier_non_reserved()?);
                 if let Some(option) = self.parse_optional_column_option()? {
                     options.push(ColumnOptionDef { name, option });
                 } else {
@@ -1717,7 +1720,7 @@ impl Parser {
         &mut self,
     ) -> Result<Option<TableConstraint>, ParserError> {
         let name = if self.parse_keyword(Keyword::CONSTRAINT) {
-            Some(self.parse_identifier()?)
+            Some(self.parse_identifier_non_reserved()?)
         } else {
             None
         };
@@ -1826,18 +1829,18 @@ impl Parser {
             }
         } else if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::CONSTRAINT) {
-                let old_name = self.parse_identifier()?;
+                let old_name = self.parse_identifier_non_reserved()?;
                 self.expect_keyword(Keyword::TO)?;
-                let new_name = self.parse_identifier()?;
+                let new_name = self.parse_identifier_non_reserved()?;
                 AlterTableOperation::RenameConstraint { old_name, new_name }
             } else if self.parse_keyword(Keyword::TO) {
                 let table_name = self.parse_object_name()?;
                 AlterTableOperation::RenameTable { table_name }
             } else {
                 let _ = self.parse_keyword(Keyword::COLUMN);
-                let old_column_name = self.parse_identifier()?;
+                let old_column_name = self.parse_identifier_non_reserved()?;
                 self.expect_keyword(Keyword::TO)?;
-                let new_column_name = self.parse_identifier()?;
+                let new_column_name = self.parse_identifier_non_reserved()?;
                 AlterTableOperation::RenameColumn {
                     old_column_name,
                     new_column_name,
@@ -1851,7 +1854,7 @@ impl Parser {
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
             let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
-            let column_name = self.parse_identifier()?;
+            let column_name = self.parse_identifier_non_reserved()?;
             let cascade = self.parse_keyword(Keyword::CASCADE);
             AlterTableOperation::DropColumn {
                 column_name,
@@ -1860,7 +1863,7 @@ impl Parser {
             }
         } else if self.parse_keyword(Keyword::ALTER) {
             let _ = self.parse_keyword(Keyword::COLUMN);
-            let column_name = self.parse_identifier()?;
+            let column_name = self.parse_identifier_non_reserved()?;
 
             let op = if self.parse_keywords(&[Keyword::SET, Keyword::NOT, Keyword::NULL]) {
                 AlterColumnOperation::SetNotNull {}
@@ -2036,7 +2039,7 @@ impl Parser {
 
         loop {
             if let Token::Word(_) = self.peek_token() {
-                let name = self.parse_identifier()?;
+                let name = self.parse_identifier_non_reserved()?;
                 let data_type = self.parse_data_type()?;
                 columns.push(StructField { name, data_type })
             } else {
@@ -2250,13 +2253,26 @@ impl Parser {
         }
     }
 
+    /// Parse a simple one-word identifier (possibly quoted, possibly a non-reserved keyword)
+    pub fn parse_identifier_non_reserved(&mut self) -> Result<Ident, ParserError> {
+        match self.next_token() {
+            Token::Word(w) => {
+                match keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&w.keyword) {
+                    true => parser_err!(format!("syntax error at or near \"{w}\"")),
+                    false => Ok(w.to_ident()),
+                }
+            }
+            unexpected => self.expected("identifier", unexpected),
+        }
+    }
+
     /// Parse a parenthesized comma-separated list of unqualified, possibly quoted identifiers
     pub fn parse_parenthesized_column_list(
         &mut self,
         optional: IsOptional,
     ) -> Result<Vec<Ident>, ParserError> {
         if self.consume_token(&Token::LParen) {
-            let cols = self.parse_comma_separated(Parser::parse_identifier)?;
+            let cols = self.parse_comma_separated(Parser::parse_identifier_non_reserved)?;
             self.expect_token(&Token::RParen)?;
             Ok(cols)
         } else if optional == Optional {
@@ -2267,36 +2283,29 @@ impl Parser {
     }
 
     pub fn parse_row_expr(&mut self) -> Result<Expr, ParserError> {
-        if self.consume_token(&Token::LParen) {
-            if self.consume_token(&Token::RParen) {
-                Ok(Expr::Row(vec![]))
-            } else {
-                self.prev_token();
-                Ok(Expr::Row(self.parse_token_wrapped_exprs(
-                    &Token::LParen,
-                    &Token::RParen,
-                )?))
-            }
-        } else {
-            self.expected("(", self.peek_token())
-        }
+        Ok(Expr::Row(self.parse_token_wrapped_exprs(
+            &Token::LParen,
+            &Token::RParen,
+        )?))
     }
 
-    /// Parse a comma-separated list from a wrapped expression
+    /// Parse a comma-separated list (maybe empty) from a wrapped expression
     pub fn parse_token_wrapped_exprs(
         &mut self,
         left: &Token,
         right: &Token,
     ) -> Result<Vec<Expr>, ParserError> {
         if self.consume_token(left) {
-            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-            self.expect_token(right)?;
+            let exprs = if self.consume_token(right) {
+                vec![]
+            } else {
+                let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+                self.expect_token(right)?;
+                exprs
+            };
             Ok(exprs)
         } else {
-            self.expected(
-                format!("an array of expressions in {} and {}", left, right).as_str(),
-                self.peek_token(),
-            )
+            self.expected(left.to_string().as_str(), self.peek_token())
         }
     }
 
@@ -2377,13 +2386,13 @@ impl Parser {
                         match explain_type {
                             Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                             Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                             _ => unreachable!("{}", keyword),
                         }
                     }
                     Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                     Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                     _ => unreachable!("{}", keyword),
                 }
             }
@@ -2418,67 +2427,54 @@ impl Parser {
             None
         };
 
-        if !self.parse_keyword(Keyword::INSERT) {
-            let body = self.parse_query_body(0)?;
+        let body = self.parse_query_body(0)?;
 
-            let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
-                self.parse_comma_separated(Parser::parse_order_by_expr)?
-            } else {
-                vec![]
-            };
-
-            let limit = if self.parse_keyword(Keyword::LIMIT) {
-                self.parse_limit()?
-            } else {
-                None
-            };
-
-            let offset = if self.parse_keyword(Keyword::OFFSET) {
-                Some(self.parse_offset()?)
-            } else {
-                None
-            };
-
-            let fetch = if self.parse_keyword(Keyword::FETCH) {
-                if limit.is_some() {
-                    return parser_err!("Cannot specify both LIMIT and FETCH".to_string());
-                }
-                let fetch = self.parse_fetch()?;
-                if fetch.with_ties && order_by.is_empty() {
-                    return parser_err!(
-                        "WITH TIES cannot be specified without ORDER BY clause".to_string()
-                    );
-                }
-                Some(fetch)
-            } else {
-                None
-            };
-
-            Ok(Query {
-                with,
-                body,
-                order_by,
-                limit,
-                offset,
-                fetch,
-            })
+        let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
+            self.parse_comma_separated(Parser::parse_order_by_expr)?
         } else {
-            let insert = self.parse_insert()?;
+            vec![]
+        };
 
-            Ok(Query {
-                with,
-                body: SetExpr::Insert(insert),
-                limit: None,
-                order_by: vec![],
-                offset: None,
-                fetch: None,
-            })
-        }
+        let limit = if self.parse_keyword(Keyword::LIMIT) {
+            self.parse_limit()?
+        } else {
+            None
+        };
+
+        let offset = if self.parse_keyword(Keyword::OFFSET) {
+            Some(self.parse_offset()?)
+        } else {
+            None
+        };
+
+        let fetch = if self.parse_keyword(Keyword::FETCH) {
+            if limit.is_some() {
+                return parser_err!("Cannot specify both LIMIT and FETCH".to_string());
+            }
+            let fetch = self.parse_fetch()?;
+            if fetch.with_ties && order_by.is_empty() {
+                return parser_err!(
+                    "WITH TIES cannot be specified without ORDER BY clause".to_string()
+                );
+            }
+            Some(fetch)
+        } else {
+            None
+        };
+
+        Ok(Query {
+            with,
+            body,
+            order_by,
+            limit,
+            offset,
+            fetch,
+        })
     }
 
     /// Parse a CTE (`alias [( col1, col2, ... )] AS (subquery)`)
     fn parse_cte(&mut self) -> Result<Cte, ParserError> {
-        let name = self.parse_identifier()?;
+        let name = self.parse_identifier_non_reserved()?;
 
         let mut cte = if self.parse_keyword(Keyword::AS) {
             self.expect_token(&Token::LParen)?;
@@ -2763,7 +2759,7 @@ impl Parser {
     /// `from` then use default schema name.
     pub fn parse_from_and_identifier(&mut self) -> Result<Option<Ident>, ParserError> {
         if self.parse_keyword(Keyword::FROM) {
-            Ok(Some(self.parse_identifier()?))
+            Ok(Some(self.parse_identifier_non_reserved()?))
         } else {
             Ok(None)
         }
@@ -2858,13 +2854,25 @@ impl Parser {
             //                   (1) an additional set of parens around a nested join
             //
 
-            // If the recently consumed '(' starts a derived table, the call to
-            // `parse_derived_table_factor` below will return success after parsing the
-            // subquery, followed by the closing ')', and the alias of the derived table.
-            // In the example above this is case (3).
-            return_ok_if_some!(
-                self.maybe_parse(|parser| parser.parse_derived_table_factor(NotLateral))
-            );
+            // It can only be a subquery. We don't use `maybe_parse` so that a meaningful error can
+            // be returned.
+            match self.peek_token() {
+                Token::Word(w)
+                    if [Keyword::SELECT, Keyword::WITH, Keyword::VALUES].contains(&w.keyword) =>
+                {
+                    return self.parse_derived_table_factor(NotLateral);
+                }
+                _ => {}
+            };
+            // It can still be a subquery, e.g., the case (3) in the example above:
+            // (SELECT 1) UNION (SELECT 2)
+            // TODO: how to produce a good error message here?
+            if self.peek_token() == Token::LParen {
+                return_ok_if_some!(
+                    self.maybe_parse(|parser| parser.parse_derived_table_factor(NotLateral))
+                );
+            }
+
             // A parsing error from `parse_derived_table_factor` indicates that the '(' we've
             // recently consumed does not start a derived table (cases 1, 2, or 4).
             // `maybe_parse` will ignore such an error and rewind to be after the opening '('.
@@ -2885,24 +2893,26 @@ impl Parser {
             } else {
                 // The SQL spec prohibits derived tables and bare tables from
                 // appearing alone in parentheses (e.g. `FROM (mytable)`)
-                self.expected("joined table", self.peek_token())
+                parser_err!(format!(
+                    "Expected joined table, found: {table_and_joins}, next_token: {}",
+                    self.peek_token()
+                ))
             }
         } else {
             let name = self.parse_object_name()?;
             // Postgres,table-valued functions:
-            let (args, order_by) = if self.consume_token(&Token::LParen) {
-                self.parse_optional_args()?
+            if self.consume_token(&Token::LParen) {
+                let (args, order_by) = self.parse_optional_args()?;
+                // Table-valued functions do not support ORDER BY, should return error if it appears
+                if !order_by.is_empty() {
+                    return parser_err!("Table-valued functions do not support ORDER BY clauses");
+                }
+                let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
+                Ok(TableFactor::TableFunction { name, alias, args })
             } else {
-                (vec![], vec![])
-            };
-
-            // Table-valued functions do not support ORDER BY, should return error if it appears
-            if !order_by.is_empty() {
-                return parser_err!("Table-valued functions do not support ORDER BY clauses");
+                let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
+                Ok(TableFactor::Table { name, alias })
             }
-
-            let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-            Ok(TableFactor::Table { name, alias, args })
         }
     }
 

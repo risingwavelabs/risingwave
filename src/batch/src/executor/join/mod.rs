@@ -154,15 +154,15 @@ fn convert_datum_refs_to_chunk(
         .collect();
     for _i in 0..num_tuples {
         for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
-            builder.append_datum_ref(*datum_ref)?;
+            builder.append_datum_ref(*datum_ref);
         }
     }
 
     // Finish each array builder and get Column.
     let result_columns = output_array_builders
         .into_iter()
-        .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-        .try_collect()?;
+        .map(|builder| Column::new(Arc::new(builder.finish())))
+        .collect();
 
     Ok(DataChunk::new(result_columns, num_tuples))
 }
@@ -196,9 +196,9 @@ mod tests {
         for i in 0..num_of_columns {
             let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
-                builder.append(Some(i as i32)).unwrap();
+                builder.append(Some(i as i32));
             }
-            let arr = builder.finish().unwrap();
+            let arr = builder.finish();
             columns.push(Column::new(Arc::new(arr.into())))
         }
         let chunk1: DataChunk = DataChunk::new(columns.clone(), length);

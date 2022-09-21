@@ -31,6 +31,7 @@ use super::managed_state::top_n::ManagedTopNState;
 use super::top_n::{generate_executor_pk_indices_info, TopNCache};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::error::StreamResult;
 
 pub type GroupTopNExecutor<S> = TopNExecutorWrapper<InnerGroupTopNExecutorNew<S>>;
 
@@ -45,7 +46,7 @@ impl<S: StateStore> GroupTopNExecutor<S> {
         key_indices: Vec<usize>,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
 
@@ -113,7 +114,7 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
         key_indices: Vec<usize>,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
 
@@ -144,11 +145,7 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
 
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
-    async fn apply_chunk(
-        &mut self,
-        chunk: StreamChunk,
-        epoch: u64,
-    ) -> StreamExecutorResult<StreamChunk> {
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
 
@@ -170,7 +167,7 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
                 Vacant(entry) => {
                     let mut topn_cache = TopNCache::new(self.offset, self.limit);
                     self.managed_state
-                        .init_topn_cache(Some(&pk_prefix), &mut topn_cache, epoch)
+                        .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
                         .await?;
                     entry.insert(topn_cache);
                 }
@@ -180,31 +177,33 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone())?;
+                        .insert(ordered_pk_row.clone(), row.clone());
+                    self.caches.get_mut(&pk_prefix.0).unwrap().insert(
+                        ordered_pk_row,
+                        row,
+                        &mut res_ops,
+                        &mut res_rows,
+                    );
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state.delete(&ordered_pk_row, row.clone())?;
+                    self.managed_state.delete(&ordered_pk_row, row.clone());
+                    self.caches
+                        .get_mut(&pk_prefix.0)
+                        .unwrap()
+                        .delete(
+                            Some(&pk_prefix),
+                            &mut self.managed_state,
+                            ordered_pk_row,
+                            row,
+                            &mut res_ops,
+                            &mut res_rows,
+                        )
+                        .await?;
                 }
             }
-
-            // update the corresponding rows in the group cache.
-            self.caches
-                .get_mut(&pk_prefix.0)
-                .unwrap()
-                .update(
-                    Some(&pk_prefix),
-                    &mut self.managed_state,
-                    op,
-                    ordered_pk_row,
-                    row,
-                    epoch,
-                    &mut res_ops,
-                    &mut res_rows,
-                )
-                .await?;
         }
-        // compare the those two ranges and emit the differantial result
+
         generate_output(res_rows, res_ops, &self.schema)
     }
 
@@ -230,7 +229,8 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
             .update_vnode_bitmap(vnode_bitmap);
     }
 
-    async fn init(&mut self, _epoch: u64) -> StreamExecutorResult<()> {
+    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+        self.managed_state.state_table.init_epoch(epoch);
         Ok(())
     }
 }

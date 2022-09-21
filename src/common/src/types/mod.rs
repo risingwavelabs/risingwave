@@ -48,7 +48,7 @@ pub use chrono_wrapper::{
 pub use decimal::Decimal;
 pub use interval::*;
 use itertools::Itertools;
-pub use ops::CheckedAdd;
+pub use ops::{CheckedAdd, IsNegative};
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 use postgres_types::{ToSql, Type};
@@ -300,6 +300,10 @@ impl DataType {
                 | DataType::Float64
                 | DataType::Decimal
         )
+    }
+
+    pub fn is_int(&self) -> bool {
+        matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
 
     /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.

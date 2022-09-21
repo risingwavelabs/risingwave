@@ -31,11 +31,7 @@ use crate::executor::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIn
 #[async_trait]
 pub trait TopNExecutorBase: Send + 'static {
     /// Apply the chunk to the dirty state and get the diffs.
-    async fn apply_chunk(
-        &mut self,
-        chunk: StreamChunk,
-        epoch: u64,
-    ) -> StreamExecutorResult<StreamChunk>;
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
 
     /// Flush the buffered chunk to the storage backend.
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()>;
@@ -95,9 +91,9 @@ where
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        let mut epoch = barrier.epoch.curr;
+        self.inner.init(barrier.epoch.prev).await?;
 
-        self.inner.init(epoch).await?;
+        let mut epoch = barrier.epoch.curr;
 
         yield Message::Barrier(barrier);
 
@@ -105,9 +101,7 @@ where
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Chunk(chunk) => {
-                    yield Message::Chunk(self.inner.apply_chunk(chunk, epoch).await?)
-                }
+                Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(epoch).await?;
                     epoch = barrier.epoch.curr;
@@ -124,9 +118,10 @@ pub(crate) fn generate_output(
     schema: &Schema,
 ) -> StreamExecutorResult<StreamChunk> {
     if !new_rows.is_empty() {
-        let mut data_chunk_builder = DataChunkBuilder::with_default_size(schema.data_types());
+        let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
         for row in &new_rows {
-            data_chunk_builder.append_one_row_from_datums(row.0.iter())?;
+            let res = data_chunk_builder.append_one_row_from_datums(row.0.iter())?;
+            debug_assert!(res.is_none());
         }
         // since `new_rows` is not empty, we unwrap directly
         let new_data_chunk = data_chunk_builder.consume_all()?.unwrap();
@@ -136,7 +131,7 @@ pub(crate) fn generate_output(
         let columns = schema
             .create_array_builders(0)
             .into_iter()
-            .map(|x| Column::new(Arc::new(x.finish().unwrap())))
+            .map(|x| Column::new(Arc::new(x.finish())))
             .collect_vec();
         Ok(StreamChunk::new(vec![], columns, None))
     }

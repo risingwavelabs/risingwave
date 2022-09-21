@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -32,6 +33,7 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
+use crate::stream::actor_mapping_to_parallel_unit_mapping;
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {
@@ -43,13 +45,25 @@ impl FragmentManagerCore {
     pub fn all_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
         self.table_fragments.values().flat_map(|table_fragments| {
             table_fragments.fragments.values().map(|fragment| {
-                let parallel_unit_mapping = fragment.vnode_mapping.as_ref().unwrap();
+                let parallel_unit_mapping = fragment
+                    .vnode_mapping
+                    .as_ref()
+                    .expect("no data distribution found");
                 ParallelUnitMapping {
                     fragment_id: fragment.fragment_id,
                     original_indices: parallel_unit_mapping.original_indices.clone(),
                     data: parallel_unit_mapping.data.clone(),
                 }
             })
+        })
+    }
+
+    pub fn all_internal_tables(&self) -> impl Iterator<Item = &u32> + '_ {
+        self.table_fragments.values().flat_map(|table_fragments| {
+            table_fragments
+                .fragments
+                .values()
+                .flat_map(|fragment| fragment.state_table_ids.iter())
         })
     }
 }
@@ -513,6 +527,14 @@ where
             to_remove: &HashSet<ActorId>,
             to_create: &[ActorId],
         ) {
+            let actor_id_set: HashSet<_> = actors.iter().copied().collect();
+            for actor_id in to_create {
+                assert!(!actor_id_set.contains(actor_id));
+            }
+            for actor_id in to_remove {
+                assert!(actor_id_set.contains(actor_id));
+            }
+
             actors.drain_filter(|actor_id| to_remove.contains(actor_id));
             actors.extend_from_slice(to_create);
         }
@@ -543,6 +565,11 @@ where
             }
         }
 
+        let new_created_actors: HashSet<_> = reschedules
+            .values()
+            .flat_map(|reschedule| reschedule.added_actors.clone())
+            .collect();
+
         for table_fragment in map.values_mut() {
             // Takes out the reschedules of the fragments in this table.
             let reschedules = reschedules
@@ -563,32 +590,6 @@ where
                     upstream_dispatcher_mapping,
                     downstream_fragment_id,
                 } = reschedule;
-
-                if let Some(vnode_mapping) = fragment.vnode_mapping.as_mut() {
-                    if removed_parallel_units.len() == added_parallel_units.len() {
-                        let replace_map: HashMap<_, _> = removed_parallel_units
-                            .into_iter()
-                            .zip_eq(added_parallel_units.into_iter())
-                            .collect();
-
-                        for parallel_unit_id in &mut vnode_mapping.data {
-                            if let Some(target) = replace_map.get(parallel_unit_id) {
-                                *parallel_unit_id = *target;
-                            }
-                        }
-                    } else {
-                        bail!("scale out/in not supported now")
-                    }
-
-                    if !fragment.state_table_ids.is_empty() {
-                        let mut mapping = vnode_mapping.clone();
-                        mapping.fragment_id = fragment.fragment_id;
-                        self.env
-                            .notification_manager()
-                            .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
-                            .await;
-                    }
-                }
 
                 // Add actors to this fragment: set the state to `Running`.
                 for actor_id in &added_actors {
@@ -617,6 +618,56 @@ where
                     table_fragment.actor_status.remove(actor_id);
                 }
 
+                // update fragment's vnode mapping
+                if let Some(vnode_mapping) = fragment.vnode_mapping.as_mut() {
+                    if removed_parallel_units.len() == added_parallel_units.len() {
+                        // for migration, use the added actor to replace the removed actor
+                        let replace_map: HashMap<_, _> = removed_parallel_units
+                            .into_iter()
+                            .zip_eq(added_parallel_units.into_iter())
+                            .collect();
+
+                        for parallel_unit_id in &mut vnode_mapping.data {
+                            if let Some(target) = replace_map.get(parallel_unit_id) {
+                                *parallel_unit_id = *target;
+                            }
+                        }
+                    } else {
+                        // for scaling, use actor mapping to restore vnode mapping
+                        let mut actor_to_parallel_unit =
+                            HashMap::with_capacity(fragment.actors.len());
+                        for actor in &fragment.actors {
+                            if let Some(actor_status) =
+                                table_fragment.actor_status.get(&actor.actor_id)
+                            {
+                                if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
+                                    actor_to_parallel_unit.insert(
+                                        actor.actor_id as ActorId,
+                                        parallel_unit.id as ParallelUnitId,
+                                    );
+                                }
+                            }
+                        }
+
+                        if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
+                            *vnode_mapping = actor_mapping_to_parallel_unit_mapping(
+                                fragment_id,
+                                &actor_to_parallel_unit,
+                                actor_mapping,
+                            )
+                        }
+                    }
+
+                    if !fragment.state_table_ids.is_empty() {
+                        let mut mapping = vnode_mapping.clone();
+                        mapping.fragment_id = fragment.fragment_id;
+                        self.env
+                            .notification_manager()
+                            .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
+                            .await;
+                    }
+                }
+
                 // Update the dispatcher of the upstream fragments.
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
                     // TODO: here we assume the upstream fragment is in the same materialized view
@@ -625,7 +676,12 @@ where
                         .fragments
                         .get_mut(&upstream_fragment_id)
                         .unwrap();
+
                     for upstream_actor in &mut upstream_fragment.actors {
+                        if new_created_actors.contains(&upstream_actor.actor_id) {
+                            continue;
+                        }
+
                         for dispatcher in &mut upstream_actor.dispatcher {
                             if dispatcher.dispatcher_id == dispatcher_id {
                                 dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
@@ -646,6 +702,10 @@ where
                         .get_mut(&downstream_fragment_id)
                         .unwrap();
                     for downstream_actor in &mut downstream_fragment.actors {
+                        if new_created_actors.contains(&downstream_actor.actor_id) {
+                            continue;
+                        }
+
                         update_actors(
                             downstream_actor.upstream_actor_id.as_mut(),
                             &removed_actor_ids,

@@ -41,6 +41,7 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::Keyspace;
+use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
@@ -87,7 +88,7 @@ impl SingleChunkExecutor {
 /// This test checks whether batch task and streaming task work together for `Table` creation,
 /// insertion, deletion, and materialization.
 #[tokio::test]
-async fn test_table_materialize() -> Result<()> {
+async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_pb::data::DataType;
 
     let memory_state_store = MemoryStateStore::new();
@@ -117,15 +118,12 @@ async fn test_table_materialize() -> Result<()> {
     ];
     let row_id_index = Some(0);
     let pk_column_ids = vec![0];
-    source_manager.create_table_source(
-        &source_table_id,
-        table_columns,
-        row_id_index,
-        pk_column_ids,
-    )?;
+    source_manager
+        .create_table_source(&source_table_id, table_columns, row_id_index, pk_column_ids)
+        .unwrap();
 
     // Ensure the source exists
-    let source_desc = source_manager.get_source(&source_table_id)?;
+    let source_desc = source_manager.get_source(&source_table_id).unwrap();
     let get_schema = |column_ids: &[ColumnId]| {
         let mut fields = Vec::with_capacity(column_ids.len());
         for &column_id in column_ids {
@@ -164,7 +162,7 @@ async fn test_table_materialize() -> Result<()> {
 
     // Create a `Materialize` to write the changes to storage
 
-    let mut materialize = MaterializeExecutor::new_for_test(
+    let mut materialize = MaterializeExecutor::for_test(
         Box::new(stream_source),
         memory_state_store.clone(),
         source_table_id,
@@ -212,7 +210,7 @@ async fn test_table_materialize() -> Result<()> {
         .collect_vec();
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = StorageTable::new_for_test(
+    let table = StorageTable::for_test(
         memory_state_store.clone(),
         source_table_id,
         column_descs.clone(),
@@ -400,7 +398,7 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![OrderType::Ascending],
         vec![0_usize],
     );
-    let table = StorageTable::new_for_test(
+    let table = StorageTable::for_test(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -408,22 +406,19 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![0],
     );
 
-    let epoch: u64 = 0;
-
-    state
-        .insert(Row(vec![
-            Some(1_i32.into()),
-            Some(4_i32.into()),
-            Some(7_i64.into()),
-        ]))
-        .unwrap();
-    state
-        .insert(Row(vec![
-            Some(2_i32.into()),
-            Some(5_i32.into()),
-            Some(8_i64.into()),
-        ]))
-        .unwrap();
+    let mut epoch: u64 = 0;
+    state.init_epoch(epoch);
+    epoch += 1;
+    state.insert(Row(vec![
+        Some(1_i32.into()),
+        Some(4_i32.into()),
+        Some(7_i64.into()),
+    ]));
+    state.insert(Row(vec![
+        Some(2_i32.into()),
+        Some(5_i32.into()),
+        Some(8_i64.into()),
+    ]));
     state.commit(epoch).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
