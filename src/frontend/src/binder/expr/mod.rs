@@ -375,8 +375,24 @@ impl Binder {
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
-        self.bind_expr(expr)?
-            .cast_explicit(bind_data_type(&data_type)?)
+        let lhs = if matches!(&expr, Expr::Array(elements) if elements.is_empty())
+            && matches!(&data_type, AstDataType::Array(_))
+        {
+            // The subexpr `array[]` is invalid and cannot bind by itself without a parent cast.
+            // So we handle `array[]::T[]`/`cast(array[] as T[])` as a whole here.
+            FunctionCall::new_unchecked(
+                ExprType::Array,
+                vec![],
+                // Treat `array[]` as `varchar[]` temporarily before applying cast.
+                DataType::List {
+                    datatype: Box::new(DataType::Varchar),
+                },
+            )
+            .into()
+        } else {
+            self.bind_expr(expr)?
+        };
+        lhs.cast_explicit(bind_data_type(&data_type)?)
     }
 }
 
@@ -408,6 +424,12 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
 }
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
+    let new_err = || {
+        ErrorCode::NotImplemented(
+            format!("unsupported data type: {:}", data_type),
+            None.into(),
+        )
+    };
     let data_type = match data_type {
         AstDataType::Boolean => DataType::Boolean,
         AstDataType::SmallInt(None) => DataType::Int16,
@@ -416,7 +438,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Varchar | AstDataType::String => DataType::Varchar,
+        AstDataType::Varchar | AstDataType::String | AstDataType::Text => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
@@ -439,20 +461,20 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?,
             types.iter().map(|f| f.name.real_value()).collect_vec(),
         ),
-        AstDataType::Text => {
-            return Err(ErrorCode::NotImplemented(
-                format!("unsupported data type: {:}", data_type),
-                2535.into(),
-            )
-            .into())
+        AstDataType::Custom(qualified_type_name) if qualified_type_name.0.len() == 1 => {
+            // In PostgreSQL, these are not keywords but pre-defined names that could be extended by
+            // `CREATE TYPE`.
+            match qualified_type_name.0[0].real_value().as_str() {
+                "int2" => DataType::Int16,
+                "int4" => DataType::Int32,
+                "int8" => DataType::Int64,
+                "float4" => DataType::Float32,
+                "float8" => DataType::Float64,
+                "timestamptz" => DataType::Timestampz,
+                _ => return Err(new_err().into()),
+            }
         }
-        _ => {
-            return Err(ErrorCode::NotImplemented(
-                format!("unsupported data type: {:}", data_type),
-                None.into(),
-            )
-            .into())
-        }
+        _ => return Err(new_err().into()),
     };
     Ok(data_type)
 }

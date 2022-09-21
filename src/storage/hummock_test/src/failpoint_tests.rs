@@ -115,7 +115,11 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap();
 
     // sync epoch1 test the read_error
-    let ssts = hummock_storage.sync(1).await.unwrap().uncommitted_ssts;
+    let ssts = hummock_storage
+        .seal_and_sync_epoch(1)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     meta_client.commit_epoch(1, ssts).await.unwrap();
     local_version_manager
         .try_wait_epoch(HummockReadEpoch::Committed(1))
@@ -168,11 +172,15 @@ async fn test_failpoints_state_store_read_upload() {
     // test the upload_error
     fail::cfg(mem_upload_err, "return").unwrap();
 
-    let result = hummock_storage.sync(3).await;
+    let result = hummock_storage.seal_and_sync_epoch(3).await;
     assert!(result.is_err());
     fail::remove(mem_upload_err);
 
-    let ssts = hummock_storage.sync(3).await.unwrap().uncommitted_ssts;
+    let ssts = hummock_storage
+        .seal_and_sync_epoch(3)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     meta_client.commit_epoch(3, ssts).await.unwrap();
     local_version_manager
         .try_wait_epoch(HummockReadEpoch::Committed(3))

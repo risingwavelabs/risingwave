@@ -241,6 +241,18 @@ pub struct DeveloperConfig {
     /// `SourceExecutor`.
     #[serde(default = "default::developer_connector_message_buffer_size")]
     pub connector_message_buffer_size: usize,
+
+    /// Limit number of cached entries (one per group key)
+    #[serde(default = "default::developer_unsafe_hash_agg_cache_size")]
+    pub unsafe_hash_agg_cache_size: usize,
+
+    /// Limit number of the cached entries (one per join key) on each side.
+    #[serde(default = "default::developer_unsafe_join_cache_size")]
+    pub unsafe_join_cache_size: usize,
+
+    /// Limit number of the cached entries in an extreme aggregation call
+    #[serde(default = "default::developer_unsafe_extreme_cache_size")]
+    pub unsafe_extreme_cache_size: usize,
 }
 
 impl Default for DeveloperConfig {
@@ -378,6 +390,18 @@ mod default {
 
     pub fn developer_connector_message_buffer_size() -> usize {
         16
+    }
+
+    pub fn developer_unsafe_hash_agg_cache_size() -> usize {
+        1 << 16
+    }
+
+    pub fn developer_unsafe_join_cache_size() -> usize {
+        1 << 16
+    }
+
+    pub fn developer_unsafe_extreme_cache_size() -> usize {
+        1 << 10
     }
 }
 

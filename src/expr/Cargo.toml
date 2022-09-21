@@ -27,6 +27,7 @@ risingwave_pb = { path = "../prost" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
+speedate = "0.7.0"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"

@@ -66,6 +66,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
             state_table,
             lru_manager: stream_manager.context.lru_manager.clone(),
+            cache_size: stream_manager.config.developer.unsafe_join_cache_size,
         })))
     }
 }

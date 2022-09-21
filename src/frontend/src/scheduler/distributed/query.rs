@@ -430,7 +430,7 @@ mod tests {
             Rc::new(TableDesc {
                 table_id,
                 stream_key: vec![],
-                order_key: vec![],
+                pk: vec![],
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,
@@ -450,6 +450,7 @@ mod tests {
                 distribution_key: vec![],
                 appendonly: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
+                value_indices: vec![0, 1],
             }),
             vec![],
             ctx,

@@ -19,8 +19,6 @@ use risingwave_common::hash::PrecomputedBuildHasher;
 
 use crate::task::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
-const JOIN_CACHE_CAP: usize = 1 << 16;
-
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
     data: ExecutorCache<Row, BTreeSet<Row>, PrecomputedBuildHasher>,
@@ -68,12 +66,12 @@ impl LookupCache {
         }
     }
 
-    pub fn new(lru_manager: Option<LruManagerRef>) -> Self {
+    pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
         let cache = if let Some(lru_manager) = lru_manager {
             ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher(
-                JOIN_CACHE_CAP,
+                cache_size,
                 PrecomputedBuildHasher,
             ))
         };

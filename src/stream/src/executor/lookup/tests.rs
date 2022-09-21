@@ -249,6 +249,7 @@ async fn test_lookup_this_epoch() {
             vec![1, 0],
         ),
         lru_manager: None,
+        cache_size: 1 << 16,
     }));
     let mut lookup_executor = lookup_executor.execute();
 
@@ -313,6 +314,7 @@ async fn test_lookup_last_epoch() {
             vec![1, 0],
         ),
         lru_manager: None,
+        cache_size: 1 << 16,
     }));
     let mut lookup_executor = lookup_executor.execute();
 

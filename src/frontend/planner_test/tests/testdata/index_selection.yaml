@@ -34,7 +34,7 @@
     select * from t1 where a between 1 and 8
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a >= Int32(1) AND idx1.a <= Int32(8)], distribution: UpstreamHashShard(idx1.a, idx1.b) }
+      BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1) OR idx1.a = Int32(2) OR idx1.a = Int32(3) OR idx1.a = Int32(4) OR idx1.a = Int32(5) OR idx1.a = Int32(6) OR idx1.a = Int32(7) OR idx1.a = Int32(8)], distribution: UpstreamHashShard(idx1.a, idx1.b) }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create index idx1 on t1(a, b) include(c);
@@ -416,7 +416,7 @@
               BatchExchange { order: [], dist: Single }
                 BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a > Int32(1) AND idx1.a < Int32(8)], distribution: SomeShard }
               BatchExchange { order: [], dist: Single }
-                BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c >= Int64(8) AND idx3.c <= Int64(9)], distribution: SomeShard }
+                BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c = Int64(8) OR idx3.c = Int64(9)], distribution: SomeShard }
   batch_local_plan: |
     BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND (((t1.a > 1:Int32) AND (t1.a < 8:Int32)) OR ((t1.c >= 8:Int32) AND (t1.c <= 9:Int32))), output: [t1.a, t1.b, t1.c, t1.p] }
       BatchHashAgg { group_key: [idx1.t1._row_id], aggs: [] }
@@ -424,7 +424,7 @@
           BatchExchange { order: [], dist: Single }
             BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a > Int32(1) AND idx1.a < Int32(8)], distribution: SomeShard }
           BatchExchange { order: [], dist: Single }
-            BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c >= Int64(8) AND idx3.c <= Int64(9)], distribution: SomeShard }
+            BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c = Int64(8) OR idx3.c = Int64(9)], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint, p int);
     create index idx1 on t1(a);

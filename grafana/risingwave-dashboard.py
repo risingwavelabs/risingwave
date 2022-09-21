@@ -362,14 +362,9 @@ def section_object_storage(outer_panels):
                     "sum(rate(object_store_operation_latency_count{type=~'read|readv|list|metadata'}[$__rate_interval])) by (le, media_type, job, instance)", "{{media_type}}-read - {{job}} @ {{instance}}"
                 ),
             ]),
-            panels.timeseries_bytes("Operation Size",
-                quantile(lambda quantile, legend: panels.target(
-                    f"histogram_quantile({quantile}, sum(rate(object_store_operation_bytes_bucket[$__rate_interval])) by (le, type, job, instance))", "{{type}}" + f" p{legend}" + " - {{job}} @ {{instance}}"
-                ), [50, 90, 99, "max"])
-            ),
-            panels.timeseries_count("Operation Failure Count", [
+            panels.timeseries_ops("Operation Failure Rate", [
                 panels.target(
-                    "sum(object_store_failure_count) by (instance, job, type)", "{{type}} - {{job}} @ {{instance}}"
+                    "sum(rate(object_store_failure_count[$__rate_interval])) by (instance, job, type)", "{{type}} - {{job}} @ {{instance}}"
                 )
             ]),
             panels.timeseries_dollar("Estimated S3 Cost (Realtime)", [
@@ -479,16 +474,6 @@ def section_streaming_actors(outer_panels):
             panels.timeseries_actor_rowsps("Executor Throughput", [
                 panels.target(
                     "rate(stream_executor_row_count[$__rate_interval]) > 0", "{{actor_id}}->{{executor_id}}"
-                ),
-            ]),
-            panels.timeseries_ns("Actor Sampled Deserialization Time", [
-                panels.target(
-                    "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
-                ),
-            ]),
-            panels.timeseries_ns("Actor Sampled Serialization Time", [
-                panels.target(
-                    "actor_sampled_serialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_percentage("Actor Backpressure", [

@@ -102,6 +102,8 @@ pub struct LookupExecutorParams<S: StateStore> {
     pub state_table: StateTable<S>,
 
     pub lru_manager: Option<LruManagerRef>,
+    
+    pub cache_size: usize,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -119,6 +121,7 @@ impl<S: StateStore> LookupExecutor<S> {
             column_mapping,
             state_table,
             lru_manager,
+            cache_size,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -214,7 +217,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(lru_manager),
+            lookup_cache: LookupCache::new(lru_manager, cache_size),
         }
     }
 

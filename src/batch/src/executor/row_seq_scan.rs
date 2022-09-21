@@ -160,24 +160,20 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .collect();
 
         let pk_types = table_desc
-            .order_key
+            .pk
             .iter()
             .map(|order| column_descs[order.index as usize].clone().data_type)
             .collect_vec();
-        let pk_len = table_desc.order_key.len();
+        let pk_len = table_desc.pk.len();
         let order_types: Vec<OrderType> = table_desc
-            .order_key
+            .pk
             .iter()
             .map(|order| {
                 OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
             })
             .collect();
 
-        let pk_indices = table_desc
-            .order_key
-            .iter()
-            .map(|k| k.index as usize)
-            .collect_vec();
+        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices
@@ -201,7 +197,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 None
             },
         };
-
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let metrics = source.context().get_task_metrics();
             let table = StorageTable::new_partial(
@@ -213,6 +213,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 pk_indices,
                 distribution,
                 table_option,
+                value_indices,
             );
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 

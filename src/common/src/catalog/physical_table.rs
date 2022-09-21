@@ -27,7 +27,7 @@ pub struct TableDesc {
     /// Id of the table, to find in storage.
     pub table_id: TableId,
     /// The key used to sort in storage.
-    pub order_key: Vec<OrderPair>,
+    pub pk: Vec<OrderPair>,
     /// All columns in the table, noticed it is NOT sorted by columnId in the vec.
     pub columns: Vec<ColumnDesc>,
     /// Distribution keys of this table, which corresponds to the corresponding column of the
@@ -41,20 +41,22 @@ pub struct TableDesc {
     pub appendonly: bool,
 
     pub retention_seconds: u32,
+
+    pub value_indices: Vec<usize>,
 }
 
 impl TableDesc {
     pub fn arrange_key_orders_prost(&self) -> Vec<ColumnOrder> {
         // Set materialize key as arrange key + pk
-        self.order_key.iter().map(|x| x.to_protobuf()).collect()
+        self.pk.iter().map(|x| x.to_protobuf()).collect()
     }
 
     pub fn order_column_indices(&self) -> Vec<usize> {
-        self.order_key.iter().map(|col| (col.column_idx)).collect()
+        self.pk.iter().map(|col| (col.column_idx)).collect()
     }
 
     pub fn order_column_ids(&self) -> Vec<ColumnId> {
-        self.order_key
+        self.pk
             .iter()
             .map(|col| self.columns[col.column_idx].column_id)
             .collect()
@@ -64,9 +66,10 @@ impl TableDesc {
         StorageTableDesc {
             table_id: self.table_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
-            order_key: self.order_key.iter().map(|v| v.to_protobuf()).collect(),
+            pk: self.pk.iter().map(|v| v.to_protobuf()).collect(),
             dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
             retention_seconds: self.retention_seconds,
+            value_indices: self.value_indices.iter().map(|&v| v as u32).collect(),
         }
     }
 

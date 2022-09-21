@@ -45,9 +45,6 @@ use crate::task::{ActorId, EvictableHashMap, ExecutorCache, LruManagerRef, Manag
 
 type DegreeType = u64;
 
-/// Limit number of the cached entries (one per join key) on each side.
-const JOIN_CACHE_CAP: usize = 1 << 16;
-
 pub fn build_degree_row(mut order_key: Row, degree: DegreeType) -> Row {
     let degree_datum = Some(ScalarImpl::Int64(degree as i64));
     order_key.0.push(degree_datum);
@@ -265,6 +262,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         lru_manager: Option<LruManagerRef>,
+        cache_size: usize,
         join_key_data_types: Vec<DataType>,
         state_all_data_types: Vec<DataType>,
         state_table: StateTable<S>,
@@ -303,7 +301,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             )
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher_in(
-                JOIN_CACHE_CAP,
+                cache_size,
                 PrecomputedBuildHasher,
                 alloc.clone(),
             ))
