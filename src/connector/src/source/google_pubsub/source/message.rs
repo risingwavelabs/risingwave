@@ -1,6 +1,5 @@
 use bytes::Bytes;
 use google_cloud_googleapis::pubsub::v1::ReceivedMessage;
-use anyhow::Result;
 
 use crate::source::SourceMessage;
 
@@ -17,6 +16,8 @@ impl From<ReceivedMessage> for SourceMessage {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
+
     use super::*;
 
     fn test_conv() -> Result<()> {

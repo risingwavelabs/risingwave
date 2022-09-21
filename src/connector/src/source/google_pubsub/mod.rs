@@ -28,7 +28,6 @@ pub struct PubsubProperties {
     // use against the pubsub emulator
     #[serde(rename = "emulator_host", alias = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
-
     // @todo: more relevant properties: region, access key, secret, session token? (maybe)
     // roles: not sure
 }

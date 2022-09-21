@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::source::SplitMetaData;
+use crate::source::{SplitMetaData, SplitId};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct PubsubSplit {
@@ -13,9 +13,9 @@ pub struct PubsubSplit {
 impl PubsubSplit {}
 
 impl SplitMetaData for PubsubSplit {
-    fn id(&self) -> String {
+    fn id(&self) -> SplitId {
         // for now, until we figure out how we take care of IDs here
-        format!("{}", 0)
+        format!("{}", 0).into()
     }
 
     fn encode_to_bytes(&self) -> bytes::Bytes {
