@@ -27,7 +27,7 @@ use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse};
-use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
+use risingwave_storage::hummock::local_version_manager::LocalVersionManagerRef;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct TestNotificationClient<S: MetaStore> {
@@ -99,7 +99,7 @@ pub async fn get_observer_manager(
     env: MetaSrvEnv<MemStore>,
     hummock_manager_ref: Arc<HummockManager<MemStore>>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
-    local_version_manager: Arc<LocalVersionManager>,
+    local_version_manager: LocalVersionManagerRef,
     worker_node: WorkerNode,
 ) -> ObserverManager<TestNotificationClient<MemStore>> {
     let client = TestNotificationClient::new(env.notification_manager_ref(), hummock_manager_ref);
