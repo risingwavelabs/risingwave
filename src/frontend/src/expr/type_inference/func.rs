@@ -21,7 +21,9 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeName};
 
 use super::{align_types, cast_ok_base, least_restrictive, CastContext};
-use crate::expr::type_inference::cast::{add_nesting, get_inner_type, get_most_nested};
+use crate::expr::type_inference::cast::{
+    add_nesting, calc_nesting_level, get_inner_type, get_most_nested,
+};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
@@ -194,7 +196,10 @@ fn infer_type_for_special(
                             get_inner_type(left_type.clone()),
                             get_inner_type(right_type.clone()),
                         );
-                        if common_ele_type.is_err() {
+                        let nesting_level_diff = (calc_nesting_level(left_type.clone())
+                            - calc_nesting_level(right_type.clone()))
+                        .abs();
+                        if common_ele_type.is_err() || nesting_level_diff > 1 {
                             return Err(ErrorCode::BindError(format!(
                                 "A Cannot concatenate {} and {}",
                                 left_type, right_type
@@ -245,7 +250,10 @@ fn infer_type_for_special(
 
             // cast to least restrictive type or return error
             let common_ele_type = least_restrictive(*left_ele_type.clone(), right_type.clone());
-            if common_ele_type.is_err() {
+            let nesting_level_diff = (calc_nesting_level(left_type.clone())
+                            - calc_nesting_level(right_type.clone()))
+                        .abs();
+            if common_ele_type.is_err() || nesting_level_diff > 1 {
                 return Err(ErrorCode::BindError(format!(
                     "unable to find least restrictive type between {} and {}",
                     left_type, right_type
@@ -296,7 +304,10 @@ fn infer_type_for_special(
 
             // cast to least restrictive type or return error
             let common_ele_type = least_restrictive(*right_ele_type.clone(), left_type.clone());
-            if common_ele_type.is_err() {
+            let nesting_level_diff = (calc_nesting_level(left_type.clone())
+                            - calc_nesting_level(right_type.clone()))
+                        .abs();
+            if common_ele_type.is_err() || nesting_level_diff > 1 {
                 return Err(ErrorCode::BindError(format!(
                     "unable to find least restrictive type between {} and {}",
                     left_type, right_type

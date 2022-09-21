@@ -91,9 +91,6 @@
     select array_append(123, 234);
   binder_error: 'Bind error: Cannot append integer to integer'
 - sql: |
-    select array_append(array[array[66]], array[233]);
-  binder_error: 'Bind error: Cannot append integer[] to integer[][]'
-- sql: |
     select array_prepend(123, array[66]);
   logical_plan: |
     LogicalProject { exprs: [ArrayPrepend(123:Int32, Array(66:Int32))] }
@@ -104,9 +101,6 @@
 - sql: |
     select array_prepend(123, 234);
   binder_error: 'Bind error: Cannot prepend integer to integer'
-- sql: |
-    select array_prepend(array[233], array[array[66]]);
-  binder_error: 'Bind error: Cannot prepend integer[] to integer[][]'
 - sql: |
     /* string from/to varchar[] in implicit context */
     values (array['a', 'b']), ('{c,' || 'd}');
