@@ -406,6 +406,26 @@ where
             CommandChanges::None => {}
         }
     }
+
+    /// We need to make sure there are no changes when doing recovery
+    pub fn clear_changes(&mut self) {
+        if !self.creating_tables.is_empty() {
+            tracing::warn!("there are some changes in creating_tables");
+            self.creating_tables.clear();
+        }
+        if !self.removing_actors.is_empty() {
+            tracing::warn!("there are some changes in removing_actors");
+            self.removing_actors.clear();
+        }
+        if !self.adding_actors.is_empty() {
+            tracing::warn!("there are some changes in adding_actors");
+            self.adding_actors.clear();
+        }
+        if !self.dropping_tables.is_empty() {
+            tracing::warn!("there are some changes in dropping_tables");
+            self.dropping_tables.clear();
+        }
+    }
 }
 
 /// The state and message of this barrier, a node for concurrent checkpoint.
@@ -728,8 +748,14 @@ where
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
             tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
-            self.do_recovery(err, fail_node.into_iter(), state, tracker)
-                .await;
+            self.do_recovery(
+                err,
+                fail_node.into_iter(),
+                state,
+                tracker,
+                checkpoint_control,
+            )
+            .await;
             return;
         }
         // change the state is Complete
@@ -752,7 +778,8 @@ where
             let fail_nodes = complete_nodes
                 .drain(index..)
                 .chain(checkpoint_control.barrier_failed().into_iter());
-            self.do_recovery(err, fail_nodes, state, tracker).await;
+            self.do_recovery(err, fail_nodes, state, tracker, checkpoint_control)
+                .await;
         }
     }
 
@@ -762,7 +789,9 @@ where
         fail_nodes: impl IntoIterator<Item = EpochNode<S>>,
         state: &mut BarrierManagerState,
         tracker: &mut CreateMviewProgressTracker,
+        checkpoint_control: &mut CheckpointControl<S>,
     ) {
+        checkpoint_control.clear_changes();
         for node in fail_nodes {
             if let Some(timer) = node.timer {
                 timer.observe_duration();
