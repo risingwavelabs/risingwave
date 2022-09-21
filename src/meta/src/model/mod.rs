@@ -658,6 +658,13 @@ mod tests {
             },
         );
         map.insert(
+            "to-remove-after-modify".to_string(),
+            TestTransactional {
+                key: "to-remove-after-modify",
+                value: "to-remove-after-modify-value",
+            },
+        );
+        map.insert(
             "first".to_string(),
             TestTransactional {
                 key: "first",
@@ -668,6 +675,14 @@ mod tests {
         let mut map_copy = map.clone();
         let mut map_txn = BTreeMapTransaction::new(&mut map);
         map_txn.remove("to-remove".to_string());
+        map_txn.insert(
+            "to-remove-after-modify".to_string(),
+            TestTransactional {
+                key: "to-remove-after-modify",
+                value: "to-remove-after-modify-value-modifying",
+            },
+        );
+        map_txn.remove("to-remove-after-modify".to_string());
         map_txn.insert(
             "first".to_string(),
             TestTransactional {
@@ -717,7 +732,7 @@ mod tests {
         let mut txn = Transaction::default();
         map_txn.apply_to_txn(&mut txn).unwrap();
         let txn_ops = txn.get_operations();
-        assert_eq!(4, txn_ops.len());
+        assert_eq!(5, txn_ops.len());
         for op in txn_ops {
             match op {
                 Operation::Put { cf, key, value }
@@ -734,6 +749,8 @@ mod tests {
                         && value == "third-value-updated".as_bytes() => {}
                 Operation::Delete { cf, key } if cf == TEST_CF && key == "to-remove".as_bytes() => {
                 }
+                Operation::Delete { cf, key }
+                    if cf == TEST_CF && key == "to-remove-after-modify".as_bytes() => {}
                 _ => unreachable!("invalid operation"),
             }
         }
@@ -741,6 +758,14 @@ mod tests {
 
         // replay the change to local copy and compare
         map_copy.remove("to-remove").unwrap();
+        map_copy.insert(
+            "to-remove-after-modify".to_string(),
+            TestTransactional {
+                key: "to-remove-after-modify",
+                value: "to-remove-after-modify-value-modifying",
+            },
+        );
+        map_copy.remove("to-remove-after-modify").unwrap();
         map_copy.insert(
             "first".to_string(),
             TestTransactional {
