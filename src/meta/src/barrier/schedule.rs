@@ -79,13 +79,27 @@ impl<S: MetaStore> BarrierScheduler<S> {
 
     /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
     /// default checkpoint barrier will be created.
-    async fn attach_notifiers(&self, new_notifiers: impl IntoIterator<Item = Notifier>) {
+    async fn attach_notifiers(&self, new_notifiers: Vec<Notifier>) {
         let mut queue = self.inner.queue.write().await;
+        let new_checkpoint = new_notifiers
+            .iter()
+            .any(|notifier| notifier.bound_to_checkpoint_barrier());
         match queue.front_mut() {
-            Some((_, notifiers)) => notifiers.extend(new_notifiers),
+            Some(Scheduled {
+                notifiers,
+                checkpoint,
+                ..
+            }) => {
+                notifiers.extend(new_notifiers);
+                *checkpoint = *checkpoint || new_checkpoint;
+            }
             None => {
                 // If no command scheduled, create periodic checkpoint barrier by default.
-                queue.push_back((Command::checkpoint(), new_notifiers.into_iter().collect()));
+                queue.push_back(Scheduled {
+                    notifiers: new_notifiers.into_iter().collect(),
+                    command: Command::checkpoint(),
+                    checkpoint: new_checkpoint,
+                });
                 if queue.len() == 1 {
                     self.inner.changed_tx.send(()).ok();
                 }
@@ -102,7 +116,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
             checkpoint,
             ..Default::default()
         };
-        self.attach_notifiers(once(notifier)).await;
+        self.attach_notifiers(vec![notifier]).await;
         rx.await.unwrap()
     }
 
@@ -128,16 +142,17 @@ impl<S: MetaStore> BarrierScheduler<S> {
                 finish_rx,
                 is_create_mv,
             });
-            scheduleds.push((
+            scheduleds.push(Scheduled {
                 command,
-                once(Notifier {
+                notifiers: once(Notifier {
                     collected: Some(collect_tx),
                     finished: Some(finish_tx),
                     checkpoint: true,
                     ..Default::default()
                 })
                 .collect(),
-            ));
+                checkpoint: true,
+            });
         }
 
         self.push(scheduleds).await;
@@ -197,9 +212,11 @@ impl ScheduledBarriers {
         let mut queue = self.inner.queue.write().await;
 
         // If no command scheduled, create periodic checkpoint barrier by default.
-        queue
-            .pop_front()
-            .unwrap_or_else(|| (Command::checkpoint(), Default::default()))
+        queue.pop_front().unwrap_or_else(|| Scheduled {
+            command: Command::checkpoint(),
+            notifiers: Default::default(),
+            checkpoint: false,
+        })
     }
 
     /// Wait for at least one scheduled barrier in the queue.
@@ -217,7 +234,7 @@ impl ScheduledBarriers {
     /// Clear all queueed scheduled barriers, and notify their subscribers with failed as aborted.
     pub(super) async fn abort(&self) {
         let mut queue = self.inner.queue.write().await;
-        while let Some((_, notifiers)) = queue.pop_front() {
+        while let Some(Scheduled { notifiers, .. }) = queue.pop_front() {
             notifiers.into_iter().for_each(|notify| {
                 notify.notify_collection_failed(anyhow!("Scheduled barrier abort.").into())
             })

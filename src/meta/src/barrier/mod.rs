@@ -66,8 +66,12 @@ pub use self::command::{Command, Reschedule};
 pub use self::schedule::BarrierScheduler;
 
 /// Scheduled command with its notifiers.
-type Scheduled = (Command, Vec<Notifier>);
-
+struct Scheduled {
+    command: Command,
+    notifiers: Vec<Notifier>,
+    /// Choose a different barrier(checkpoint == true) according to it
+    checkpoint: bool,
+}
 /// Changes to the actors to be sent or collected after this command is committed.
 ///
 /// Since the checkpoints might be concurrent, the meta store of table fragments is only updated
@@ -156,6 +160,9 @@ struct CheckpointControl<S: MetaStore> {
     /// The numbers of barrier (checkpoint = false) since the last barrier (checkpoint = true)
     num_uncheckpointed_barrier: usize,
 
+    /// Force checkpoint in next barrier.
+    force_checkpoint: bool,
+
     checkpoint_frequency: usize,
 }
 
@@ -174,23 +181,25 @@ where
             finished_notifiers: Default::default(),
             num_uncheckpointed_barrier: 0,
             checkpoint_frequency,
+            force_checkpoint: false,
         }
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.
     fn try_get_checkpoint(&mut self) -> bool {
-        self.num_uncheckpointed_barrier >= self.checkpoint_frequency
+        self.num_uncheckpointed_barrier >= self.checkpoint_frequency || self.force_checkpoint
     }
 
     /// Make the `checkpoint` of the next barrier must be true
     fn force_checkpoint_in_next_barrier(&mut self) {
-        self.num_uncheckpointed_barrier = self.checkpoint_frequency;
+        self.force_checkpoint = true;
     }
 
     /// Update the `num_uncheckpointed_barrier`
     fn update_num_uncheckpointed_barrier(&mut self, checkpoint: bool) {
         if checkpoint {
-            self.num_uncheckpointed_barrier = 0
+            self.num_uncheckpointed_barrier = 0;
+            self.force_checkpoint = false;
         } else {
             self.num_uncheckpointed_barrier += 1
         }
@@ -538,7 +547,11 @@ where
                 barrier_timer.observe_duration();
             }
             barrier_timer = Some(self.metrics.barrier_send_latency.start_timer());
-            let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
+            let Scheduled {
+                command,
+                notifiers,
+                mut checkpoint,
+            } = self.scheduled_barriers.pop_or_default().await;
             let info = self
                 .resolve_actor_info(&mut checkpoint_control, &command)
                 .await;
@@ -564,11 +577,7 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
-            let need_collected_checkpoint =
-                notifiers.iter().any(Notifier::bound_to_checkpoint_barrier);
-            let checkpoint = checkpoint_control.try_get_checkpoint()
-                || !matches!(command, Command::Plain(_))
-                || need_collected_checkpoint;
+            checkpoint = checkpoint || checkpoint_control.try_get_checkpoint();
 
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),

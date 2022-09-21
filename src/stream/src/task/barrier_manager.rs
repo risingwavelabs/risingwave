@@ -68,17 +68,17 @@ pub struct LocalBarrierManager {
     /// Current barrier collection state.
     state: BarrierState,
 
-    /// Save collect `CompleteReceiver`
+    /// Save collect `CompleteReceiver`.
     collect_complete_receiver: HashMap<u64, CompleteReceiver>,
 }
 
-/// Information used after collection
+/// Information used after collection.
 pub struct CompleteReceiver {
-    /// Notify all actors of completion of collection
+    /// Notify all actors of completion of collection.
     pub complete_receiver: Option<Receiver<CollectResult>>,
-    /// `barrier_inflight_timer`'s metrics
+    /// `barrier_inflight_timer`'s metrics.
     pub barrier_inflight_timer: Option<HistogramTimer>,
-    /// Mark this barrier do checkpoint.
+    /// Mark whether this is a checkpoint barrier.
     pub checkpoint: bool,
 }
 
