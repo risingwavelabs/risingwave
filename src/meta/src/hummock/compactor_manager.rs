@@ -346,12 +346,16 @@ mod tests {
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
             let _receiver = compactor_manager.add_compactor(context_id, 1);
+            let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
             let task = hummock_manager
                 .get_compact_task(StaticCompactionGroupId::StateDefault.into())
                 .await
                 .unwrap()
                 .unwrap();
-            let _compactor = hummock_manager.assign_compaction_task(&task).await.unwrap();
+            hummock_manager
+                .assign_compaction_task(&task, context_id)
+                .await
+                .unwrap();
             (env, context_id)
         };
 

@@ -79,14 +79,15 @@ where
             .add_compactor(context_id, u64::MAX);
         temp_compactor = true;
     }
+    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()
         .unwrap();
     compact_task.target_level = 6;
-    let compactor = hummock_manager
-        .assign_compaction_task(&compact_task)
+    hummock_manager
+        .assign_compaction_task(&compact_task, compactor.context_id())
         .await
         .unwrap();
     if temp_compactor {

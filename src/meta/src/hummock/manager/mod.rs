@@ -170,7 +170,6 @@ use super::Compactor;
 static CACEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [
         TaskStatus::ManualCanceled,
-        TaskStatus::NoAvailCanceled,
         TaskStatus::SendFailCanceled,
         TaskStatus::AssignFailCanceled,
         TaskStatus::HeartbeatCanceled,
@@ -797,24 +796,12 @@ where
             .await
     }
 
-    /// Pick an idle compactor and assigns a compaction task to it. Return the chosen compactor.
     #[named]
-    pub async fn assign_compaction_task(
-        &self,
-        compact_task: &CompactTask,
-    ) -> Result<Arc<Compactor>> {
-        fail_point!("assign_compaction_task_fail", |_| Err(anyhow::anyhow!(
-            "assign_compaction_task_fail"
-        )
-        .into()));
-        let mut compaction_guard = write_lock!(self, compaction).await;
-        let _timer = start_measure_real_process_timer!(self);
-
-        let compaction = compaction_guard.deref_mut();
-
+    pub async fn get_idle_compactor(&self) -> Option<Arc<Compactor>> {
+        let compaction_guard = read_lock!(self, compaction).await;
         // Calculate the number of tasks assigned to each compactor.
         let mut compactor_assigned_task_num = HashMap::new();
-        compaction
+        compaction_guard
             .compact_task_assignment
             .values()
             .for_each(|assignment| {
@@ -823,20 +810,28 @@ where
                     .and_modify(|n| *n += 1)
                     .or_insert(1);
             });
+        self.compactor_manager
+            .next_idle_compactor(&compactor_assigned_task_num)
+    }
 
-        // Pick a compactor.
-        let compactor = self
-            .compactor_manager
-            .next_idle_compactor(&compactor_assigned_task_num);
-        if compactor.is_none() {
-            return Err(Error::NoIdleCompactor);
-        }
+    /// Pick an idle compactor and assigns a compaction task to it. Return the chosen compactor.
+    #[named]
+    pub async fn assign_compaction_task(
+        &self,
+        compact_task: &CompactTask,
+        assignee_context_id: HummockContextId,
+    ) -> Result<()> {
+        fail_point!("assign_compaction_task_fail", |_| Err(anyhow::anyhow!(
+            "assign_compaction_task_fail"
+        )
+        .into()));
+        let mut compaction_guard = write_lock!(self, compaction).await;
+        let _timer = start_measure_real_process_timer!(self);
 
         // Assign the task.
+        let compaction = compaction_guard.deref_mut();
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-        let compactor = compactor.unwrap();
-        let assignee_context_id = compactor.context_id();
         if let Some(assignment) = compact_task_assignment.get(&compact_task.task_id) {
             return Err(Error::CompactionTaskAlreadyAssigned(
                 compact_task.task_id,
@@ -866,7 +861,7 @@ where
             self.check_state_consistency().await;
         }
 
-        Ok(compactor)
+        Ok(())
     }
 
     pub async fn report_compact_task(
@@ -1453,7 +1448,20 @@ where
     ) -> Result<()> {
         let start_time = Instant::now();
 
-        // 1. Get manual compaction task.
+        // 1. Get idle compactor.
+        let compactor = match self.get_idle_compactor().await {
+            Some(compactor) => compactor,
+            None => {
+                tracing::warn!("trigger_manual_compaction No compactor is available.");
+                return Err(anyhow::anyhow!(
+                    "trigger_manual_compaction No compactor is available. compaction_group {}",
+                    compaction_group
+                )
+                .into());
+            }
+        };
+
+        // 2. Get manual compaction task.
         let compact_task = self
             .manual_get_compact_task(compaction_group, manual_compaction_option)
             .await;
@@ -1477,7 +1485,7 @@ where
             }
         };
 
-        // Locally cancel task if any step encounters an error.
+        // Locally cancel task if fails to assign or send task.
         let locally_cancel_task = |compact_task| async {
             self.env
                 .notification_manager()
@@ -1487,23 +1495,14 @@ where
                 "Failed to trigger_manual_compaction"
             )))
         };
+
         // 2. Select a compactor and assign the task.
-        let compactor = match self.assign_compaction_task(&compact_task).await {
-            Ok(compactor) => compactor,
-            Err(err) => match err {
-                Error::NoIdleCompactor => {
-                    tracing::warn!("trigger_manual_compaction No compactor is available.");
-                    return Err(anyhow::anyhow!(
-                        "trigger_manual_compaction No compactor is available. compaction_group {}",
-                        compaction_group
-                    )
-                    .into());
-                }
-                _ => {
-                    tracing::warn!("Failed to assign compaction task to compactor: {:#?}", err);
-                    return locally_cancel_task(compact_task).await;
-                }
-            },
+        if let Err(err) = self
+            .assign_compaction_task(&compact_task, compactor.context_id())
+            .await
+        {
+            tracing::warn!("Failed to assign compaction task to compactor: {:#?}", err);
+            return locally_cancel_task(compact_task).await;
         };
 
         // 3. Send the task.

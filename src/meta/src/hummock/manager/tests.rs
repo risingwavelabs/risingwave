@@ -137,10 +137,12 @@ async fn test_hummock_compaction_task() {
         .await
         .unwrap()
         .unwrap();
+    // Get the compactor and assign task.
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     compactor_manager.add_compactor(worker_node.id, u64::MAX);
-    let compactor = hummock_manager
-        .assign_compaction_task(&compact_task)
+    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, compactor.context_id())
         .await
         .unwrap();
     assert_eq!(compactor.context_id(), worker_node.id);
@@ -165,14 +167,16 @@ async fn test_hummock_compaction_task() {
         .await
         .unwrap());
 
+    // Get compactor.
+    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()
         .unwrap();
-    let compactor = hummock_manager
-        .assign_compaction_task(&compact_task)
+    hummock_manager
+        .assign_compaction_task(&compact_task, compactor.context_id())
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
@@ -805,7 +809,7 @@ async fn test_trigger_manual_compaction() {
             .await;
 
         assert_eq!(
-            "trigger_manual_compaction No compaction_task is available. compaction_group 2",
+            "trigger_manual_compaction No compactor is available. compaction_group 2",
             result.err().unwrap().to_string()
         );
     }
@@ -813,8 +817,20 @@ async fn test_trigger_manual_compaction() {
     // No compaction task available.
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
     let receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
+    {
+        let option = ManualCompactionOption::default();
+        // to check no compaction task
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
+            .await;
 
-    // Assign
+        assert_eq!(
+            "trigger_manual_compaction No compaction_task is available. compaction_group 2",
+            result.err().unwrap().to_string()
+        );
+    }
+
+    // Generate data for compaction task
     let _ = add_test_tables(&hummock_manager, context_id).await;
     {
         // to check compactor send task fail

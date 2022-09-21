@@ -47,7 +47,7 @@ pub enum ScheduleStatus {
     Ok,
     NoTask,
     PickFailure,
-    NoAvailableCompactor(CompactTask),
+    NoAvailableCompactor,
     AssignFailure(CompactTask),
     SendFailure(CompactTask),
 }
@@ -146,7 +146,11 @@ where
             let status = self
                 .pick_and_assign(compaction_group, request_channel.clone())
                 .await;
-            if let ScheduleStatus::NoAvailableCompactor(_) = status {
+            if let ScheduleStatus::NoAvailableCompactor = status {
+                // If the group cannot be schduled due to no available compactor, try to
+                // schedule it again immediately for fairness.
+                let _ = request_channel.try_send(compaction_group);
+                // TODO: change schedule status
                 tokio::time::sleep(Duration::from_secs(
                     self.env.opts.no_available_compactor_stall_sec,
                 ))
@@ -170,10 +174,9 @@ where
 
         let cancel_state = match &schedule_status {
             ScheduleStatus::Ok => None,
-            ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
-            ScheduleStatus::NoAvailableCompactor(task) => {
-                Some((task.clone(), TaskStatus::NoAvailCanceled))
-            }
+            ScheduleStatus::NoTask
+            | ScheduleStatus::PickFailure
+            | ScheduleStatus::NoAvailableCompactor => None,
             ScheduleStatus::AssignFailure(task) => {
                 Some((task.clone(), TaskStatus::AssignFailCanceled))
             }
@@ -210,12 +213,27 @@ where
         compaction_group: CompactionGroupId,
         request_channel: Arc<CompactionRequestChannel>,
     ) -> ScheduleStatus {
-        // 1. Pick a compaction task.
+        // 1. Get an idle compactor.
+        let compactor = self.hummock_manager.get_idle_compactor().await;
+        request_channel.unschedule(compaction_group);
+        let compactor = match compactor {
+            Some(compactor) => compactor,
+            None => {
+                let current_compactor_tasks =
+                    self.hummock_manager.list_assigned_tasks_number().await;
+                tracing::warn!(
+                    "No available compactor. The assigned task number for every compactor is (context_id, count):\n {:?}",
+                    current_compactor_tasks
+                );
+                return ScheduleStatus::NoAvailableCompactor;
+            }
+        };
+
+        // 2. Pick a compaction task.
         let compact_task = self
             .hummock_manager
             .get_compact_task(compaction_group)
             .await;
-        request_channel.unschedule(compaction_group);
         let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
@@ -231,28 +249,21 @@ where
             compact_task_to_string(&compact_task)
         );
 
-        // 2. Assign the compaction task to a compactor.
-        let compactor = match self
+        // 3. Assign the compaction task to a compactor.
+        match self
             .hummock_manager
-            .assign_compaction_task(&compact_task)
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
         {
-            Ok(compactor) => {
+            Ok(_) => {
                 tracing::trace!(
                     "Assigned compaction task. {}",
                     compact_task_to_string(&compact_task)
                 );
-                compactor
             }
             Err(err) => {
                 tracing::warn!("Failed to assign compaction task to compactor: {:#?}", err);
                 match err {
-                    Error::NoIdleCompactor => {
-                        let current_compactor_tasks =
-                            self.hummock_manager.list_assigned_tasks_number().await;
-                        tracing::warn!("The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
-                        return ScheduleStatus::NoAvailableCompactor(compact_task);
-                    }
                     Error::CompactionTaskAlreadyAssigned(_, _) => {
                         panic!("Compaction scheduler is the only tokio task that can assign task.");
                     }
@@ -319,6 +330,22 @@ mod tests {
         let (request_tx, _request_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
+        // No compactor
+        assert_eq!(compactor_manager.compactor_num(), 0);
+        assert_eq!(
+            ScheduleStatus::NoAvailableCompactor,
+            compaction_scheduler
+                .pick_and_assign(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    request_channel.clone()
+                )
+                .await
+        );
+
+        // Add a compactor with invalid context_id.
+        let _receiver = compactor_manager.add_compactor(1234, 1);
+        assert_eq!(compactor_manager.compactor_num(), 1);
+
         // No task
         assert_eq!(
             ScheduleStatus::NoTask,
@@ -329,23 +356,8 @@ mod tests {
                 )
                 .await
         );
+
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-
-        // No compactor
-        assert_eq!(compactor_manager.compactor_num(), 0);
-        assert_matches!(
-            compaction_scheduler
-                .pick_and_assign(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    request_channel.clone()
-                )
-                .await,
-            ScheduleStatus::NoAvailableCompactor(_)
-        );
-
-        // Add a compactor with invalid context_id.
-        let _receiver = compactor_manager.add_compactor(1234, 1);
-        assert_eq!(compactor_manager.compactor_num(), 1);
         // Cannot assign because of invalid compactor
         assert_matches!(
             compaction_scheduler
@@ -387,7 +399,7 @@ mod tests {
                     request_channel.clone()
                 )
                 .await,
-            ScheduleStatus::NoAvailableCompactor(_)
+            ScheduleStatus::NoAvailableCompactor
         );
 
         // Increase compactor concurrency and succeed
@@ -485,7 +497,7 @@ mod tests {
                     request_channel.clone()
                 )
                 .await,
-            ScheduleStatus::NoAvailableCompactor(_)
+            ScheduleStatus::NoAvailableCompactor
         );
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
         let _receiver = compactor_manager.add_compactor(context_id, 1);
