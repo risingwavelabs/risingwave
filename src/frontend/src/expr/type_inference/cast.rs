@@ -70,9 +70,8 @@ fn lhs_is_more_nested(lhs: DataType, rhs: DataType) -> bool {
 ///
 /// Examples:
 /// `get_most_nested(DataType::Boolean, DataType::Boolean) -> DataType::Boolean`
-/// `get_most_nested(DataType::Date, List{List{DataType::Boolean}}) ->
-/// List{List{DataType::Boolean}}` `get_most_nested(List{DataType::Int16},
-/// List{List{DataType::Boolean}}) -> List{List{DataType::Boolean}}`
+/// `get_most_nested(DataType::Date, List{List{DataType::Boolean}}) -> List{List{DataType::Boolean}}`
+/// `get_most_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> List{List{DataType::Boolean}}`
 pub fn get_most_nested(lhs: DataType, rhs: DataType) -> DataType {
     if lhs_is_more_nested(lhs.clone(), rhs.clone()) {
         return lhs;
