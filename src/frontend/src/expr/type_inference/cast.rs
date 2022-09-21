@@ -36,47 +36,57 @@ pub fn get_inner_type(dt: DataType) -> DataType {
 }
 
 // helper for determine_nesting_level
-fn determine_nesting_level_inner(dt: DataType, level: i32) -> i32 {
-    let return_val: i32 = match dt.clone() {
+fn calc_nesting_level_inner(dt: DataType, level: i32) -> i32 {
+    let return_val: i32 = match dt {
         DataType::List { datatype: inner } => {
-            determine_nesting_level_inner(*(inner.clone()), level + 1)
+            calc_nesting_level_inner(*(inner.clone()), level + 1)
         }
-        _ => 0
+        _ => level,
     };
     return_val
 }
 
 /// True if lhs is more nested, else false
-/// 
+///
 /// Examples:
 /// get_most_nested(DataType::Boolean) -> 0
 /// get_most_nested(List{DataType::Int16}) -> 1
 /// get_most_nested(List{List{DataType::Boolean}}) -> 2
-fn determine_nesting_level(dt: DataType) -> i32 {
-    determine_nesting_level_inner(dt, 0)
+fn calc_nesting_level(dt: DataType) -> i32 {
+    calc_nesting_level_inner(dt, 0)
 }
 
 /// True if lhs is more nested, else false
-/// 
+///
 /// Examples:
 /// lhs_is_more_nested(DataType::Boolean, DataType::Boolean) -> false
 /// lhs_is_more_nested(List{List{DataType::Boolean}}, DataType::Date) -> true
 /// lhs_is_more_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> false
 fn lhs_is_more_nested(lhs: DataType, rhs: DataType) -> bool {
-    let lhs_level = determine_nesting_level(lhs.clone()); 
-    let rhs_level = determine_nesting_level(rhs.clone()); 
-    if lhs_level > rhs_level {
-        return true
-    }
-    false
+    let lhs_level = calc_nesting_level(lhs.clone());
+    let rhs_level = calc_nesting_level(rhs.clone());
+    lhs_level > rhs_level
+}
+
+/// True if lhs is more nested, else false
+///
+/// Examples:
+/// lhs_is_more_nested(DataType::Boolean, DataType::Boolean) -> true
+/// lhs_is_more_nested(List{List{DataType::Boolean}}, DataType::Date) -> true
+/// lhs_is_more_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> false
+fn lhs_is_more_or_eq_nested(lhs: DataType, rhs: DataType) -> bool {
+    let lhs_level = calc_nesting_level(lhs.clone());
+    let rhs_level = calc_nesting_level(rhs.clone());
+    lhs_level >= rhs_level
 }
 
 /// Get the more nested element. Returns lhs if both are equally nested
-/// 
+///
 /// Examples:
 /// get_most_nested(DataType::Boolean, DataType::Boolean) -> DataType::Boolean
 /// get_most_nested(DataType::Date, List{List{DataType::Boolean}}) -> List{List{DataType::Boolean}}
-/// get_most_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> List{List{DataType::Boolean}}
+/// get_most_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) ->
+/// List{List{DataType::Boolean}}
 pub fn get_most_nested(lhs: DataType, rhs: DataType) -> DataType {
     if lhs_is_more_nested(lhs.clone(), rhs.clone()) {
         return lhs;
@@ -85,16 +95,23 @@ pub fn get_most_nested(lhs: DataType, rhs: DataType) -> DataType {
 }
 
 /// Add levels to target dt until it is as nested as target_nesting
-/// 
+///
 /// Examples:
 /// add_nesting(DataType::Boolean, DataType::Boolean) -> DataType::Boolean
 /// add_nesting(DataType::Date, List{List{DataType::Boolean}}) -> List{List{DataType::Date}}
-/// add_nesting(List{List{DataType::Int16}}, DataType::Interval) -> List{List{DataType::Int16}} // already more nested
-pub fn add_nesting(lhs: DataType, rhs: DataType) -> DataType {
-    if !lhs_is_more_nested(lhs.clone(), rhs.clone()) { // TODO: inefficient. Will be determined over and over
-        return lhs
+/// add_nesting(List{List{DataType::Int16}}, DataType::Interval) -> List{List{DataType::Int16}} //
+/// already more nested
+pub fn add_nesting(target_dt: DataType, target_nesting: DataType) -> DataType {
+    // TODO: inefficient. Will be determined over and over
+    if lhs_is_more_or_eq_nested(target_dt.clone(), target_nesting.clone()) {
+        return target_dt;
     }
-    return add_nesting(DataType::List { datatype: Box::new(lhs) }, rhs)
+    return add_nesting(
+        DataType::List {
+            datatype: Box::new(target_dt),
+        },
+        target_nesting,
+    );
 }
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -384,6 +401,51 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn test_nesting_level_ok() {
+        let dt = DataType::Boolean;
+        let nested_1 = DataType::List {
+            datatype: Box::new(dt.clone()),
+        };
+        let nested_2 = DataType::List {
+            datatype: Box::new(nested_1.clone()),
+        };
+        let nested_3 = DataType::List {
+            datatype: Box::new(nested_2.clone()),
+        };
+        assert_eq!(calc_nesting_level(dt), 0);
+        assert_eq!(calc_nesting_level(nested_1), 1);
+        assert_eq!(calc_nesting_level(nested_2), 2);
+        assert_eq!(calc_nesting_level(nested_3), 3);
+    }
+
+    #[test]
+    fn test_is_more_nested_ok() {
+        let dt = DataType::Boolean;
+        let nested_1 = DataType::List {
+            datatype: Box::new(dt.clone()),
+        };
+        let nested_2 = DataType::List {
+            datatype: Box::new(nested_1.clone()),
+        };
+        let nested_3 = DataType::List {
+            datatype: Box::new(nested_2.clone()),
+        };
+        assert!(lhs_is_more_nested(nested_3.clone(), dt.clone()));
+        assert!(lhs_is_more_nested(nested_1.clone(), dt.clone()));
+        assert!(lhs_is_more_nested(nested_2.clone(), dt.clone()));
+        assert!(lhs_is_more_nested(nested_3.clone(), nested_2.clone()));
+        assert!(lhs_is_more_nested(nested_3.clone(), nested_1.clone()));
+
+        // negated
+        assert!(!lhs_is_more_nested(dt.clone(), nested_3.clone()));
+        assert!(!lhs_is_more_nested(dt.clone(), nested_1.clone()));
+        assert!(!lhs_is_more_nested(dt.clone(), nested_2.clone()));
+        assert!(!lhs_is_more_nested(nested_2.clone(), nested_3.clone()));
+        assert!(!lhs_is_more_nested(nested_1.clone(), nested_3.clone()));
+    }
+
     #[test]
     fn test_get_inner_type_ok() {
         for dt in vec![
@@ -416,6 +478,10 @@ mod tests {
                     assert_eq!(dt.clone(), get_inner_type(ele_i.clone())); // compare simple with nested
                     assert_eq!(get_inner_type(ele_i.clone()), get_inner_type(ele_j.clone())); // compare nested
                 }
+            }
+            for ele in combinations {
+                let nested = add_nesting(dt.clone(), ele.clone());
+                assert_eq!(nested, ele);
             }
         }
     }
