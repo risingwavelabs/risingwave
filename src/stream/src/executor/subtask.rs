@@ -14,6 +14,7 @@
 
 use futures::{Future, StreamExt};
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::{BoxedExecutor, Executor, ExecutorInfo, MessageStreamItem};
@@ -66,8 +67,18 @@ pub fn wrap(input: BoxedExecutor) -> (SubtaskHandle, SubtaskRxExecutor) {
     let handle = async move {
         let mut input = input.execute();
         while let Some(item) = input.next().await {
-            // The downstream must not be dropped, so we `unwrap` here.
-            tx.send(item).await.unwrap();
+            // It's possible that the downstream itself yields an error (e.g. from remote input) and
+            // finishes, so we may fail to send the message. In this case, we can simply ignore the
+            // send error and exit as well. If the message itself is another error, log it.
+            if let Err(SendError(item)) = tx.send(item).await {
+                match item {
+                    Ok(_) => tracing::error!("actor downstream subtask failed"),
+                    Err(e) => tracing::error!(
+                        "after actor downstream subtask failed, another error occurs: {e}"
+                    ),
+                }
+                break;
+            }
         }
     };
 
