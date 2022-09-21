@@ -17,8 +17,10 @@ use std::collections::HashSet;
 use itertools::Itertools;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::LevelDeltas;
+use risingwave_pb::hummock::level_delta::DeltaType;
 use risingwave_pb::hummock::{
-    HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
+    CompactionConfig, HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel,
+    SstableInfo,
 };
 
 use crate::prost_key_range::KeyRangeExt;
@@ -39,14 +41,16 @@ pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary 
     let mut insert_sub_level_id = u64::MAX;
     let mut insert_table_infos = vec![];
     for level_delta in &level_deltas.level_deltas {
-        if !level_delta.removed_table_ids.is_empty() {
-            delete_sst_levels.push(level_delta.level_idx);
-            delete_sst_ids_set.extend(level_delta.removed_table_ids.iter().clone());
-        }
-        if !level_delta.inserted_table_infos.is_empty() {
-            insert_sst_level_id = level_delta.level_idx;
-            insert_sub_level_id = level_delta.l0_sub_level_id;
-            insert_table_infos.extend(level_delta.inserted_table_infos.iter().cloned());
+        if let DeltaType::IntraLevel(intra_level) = level_delta.get_delta_type().unwrap() {
+            if !intra_level.removed_table_ids.is_empty() {
+                delete_sst_levels.push(intra_level.level_idx);
+                delete_sst_ids_set.extend(intra_level.removed_table_ids.iter().clone());
+            }
+            if !intra_level.inserted_table_infos.is_empty() {
+                insert_sst_level_id = intra_level.level_idx;
+                insert_sub_level_id = intra_level.l0_sub_level_id;
+                insert_table_infos.extend(intra_level.inserted_table_infos.iter().cloned());
+            }
         }
     }
 
@@ -59,188 +63,12 @@ pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary 
     }
 }
 
-pub trait HummockVersionExt {
-    /// Gets `compaction_group_id`'s levels
-    fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels;
-    /// Gets `compaction_group_id`'s levels
-    fn get_compaction_group_levels_mut(
-        &mut self,
-        compaction_group_id: CompactionGroupId,
-    ) -> &mut Levels;
-    /// Gets all levels.
-    ///
-    /// Levels belonging to the same compaction group retain their relative order.
-    fn get_combined_levels(&self) -> Vec<&Level>;
-    fn iter_tables<F: FnMut(&SstableInfo)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idex: usize,
-        f: F,
-    );
-    fn map_level<F: FnMut(&Level)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idex: usize,
-        f: F,
-    );
-    fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize;
-    fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
-
-    fn get_sst_ids(&self) -> Vec<u64>;
-    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
-}
-
-impl HummockVersionExt for HummockVersion {
-    fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
-        self.levels
-            .get(&compaction_group_id)
-            .unwrap_or_else(|| panic!("compaction group {} not exists", compaction_group_id))
-    }
-
-    fn get_compaction_group_levels_mut(
-        &mut self,
-        compaction_group_id: CompactionGroupId,
-    ) -> &mut Levels {
-        self.levels
-            .get_mut(&compaction_group_id)
-            .unwrap_or_else(|| panic!("compaction group {} not exists", compaction_group_id))
-    }
-
-    fn get_combined_levels(&self) -> Vec<&Level> {
-        let mut combined_levels = vec![];
-        for level in self.levels.values() {
-            combined_levels.extend(level.l0.as_ref().unwrap().sub_levels.iter().rev());
-            combined_levels.extend(level.levels.iter());
-        }
-        combined_levels
-    }
-
-    fn get_sst_ids(&self) -> Vec<u64> {
-        self.get_combined_levels()
-            .iter()
-            .flat_map(|level| level.table_infos.iter().map(|table_info| table_info.id))
-            .collect_vec()
-    }
-
-    fn iter_tables<F: FnMut(&SstableInfo)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idx: usize,
-        mut f: F,
-    ) {
-        if let Some(levels) = self.levels.get(&compaction_group_id) {
-            if level_idx == 0 {
-                for level in &levels.l0.as_ref().unwrap().sub_levels {
-                    for table in &level.table_infos {
-                        f(table);
-                    }
-                }
-            } else {
-                for table in &levels.levels[level_idx - 1].table_infos {
-                    f(table);
-                }
-            }
-        }
-    }
-
-    fn level_iter<F: FnMut(&Level) -> bool>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        mut f: F,
-    ) {
-        if let Some(levels) = self.levels.get(&compaction_group_id) {
-            for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
-                if !f(sub_level) {
-                    return;
-                }
-            }
-            for level in &levels.levels {
-                if !f(level) {
-                    return;
-                }
-            }
-        }
-    }
-
-    fn map_level<F: FnMut(&Level)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idx: usize,
-        mut f: F,
-    ) {
-        if let Some(levels) = self.levels.get(&compaction_group_id) {
-            if level_idx == 0 {
-                for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
-                    f(sub_level);
-                }
-            } else {
-                f(&levels.levels[level_idx - 1]);
-            }
-        }
-    }
-
-    fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize {
-        // l0 is currently separated from all levels
-        self.levels
-            .get(&compaction_group_id)
-            .map(|group| group.levels.len() + 1)
-            .unwrap_or(0)
-    }
-
-    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
-        for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
-            let levels = self
-                .levels
-                .get_mut(compaction_group_id)
-                .expect("compaction group should exist");
-
-            let summary = summarize_level_deltas(level_deltas);
-
-            assert!(
-                self.max_committed_epoch <= version_delta.max_committed_epoch,
-                "new max commit epoch {} is older than the current max commit epoch {}",
-                version_delta.max_committed_epoch,
-                self.max_committed_epoch
-            );
-            if self.max_committed_epoch < version_delta.max_committed_epoch {
-                // `max_committed_epoch` increases. It must be a `commit_epoch`
-                let LevelDeltasSummary {
-                    delete_sst_levels,
-                    delete_sst_ids_set,
-                    insert_sst_level_id,
-                    insert_sub_level_id,
-                    insert_table_infos,
-                } = summary;
-                assert_eq!(
-                    0, insert_sst_level_id,
-                    "we should only add to L0 when we commit an epoch. Inserting into {} {:?}",
-                    insert_sst_level_id, insert_table_infos
-                );
-                assert!(
-                    delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty(),
-                    "no sst should be deleted when committing an epoch"
-                );
-                add_new_sub_level(
-                    levels.l0.as_mut().unwrap(),
-                    insert_sub_level_id,
-                    insert_table_infos,
-                );
-            } else {
-                // `max_committed_epoch` is not changed. The delta is caused by compaction.
-                levels.apply_compact_ssts(summary, false);
-            }
-        }
-        self.id = version_delta.id;
-        self.max_committed_epoch = version_delta.max_committed_epoch;
-        self.safe_epoch = version_delta.safe_epoch;
-    }
-}
-
 pub trait HummockLevelsExt {
     fn get_level0(&self) -> &OverlappingLevel;
     fn get_level(&self, idx: usize) -> &Level;
     fn get_level_mut(&mut self, idx: usize) -> &mut Level;
     fn apply_compact_ssts(&mut self, summary: LevelDeltasSummary, local_related_only: bool);
+    fn build_initial_levels(compaction_config: &CompactionConfig) -> Levels;
 }
 
 impl HummockLevelsExt for Levels {
@@ -275,7 +103,7 @@ impl HummockLevelsExt for Levels {
                 deleted = level_delete_ssts(&mut self.levels[idx], &delete_sst_ids_set) || deleted;
             }
         }
-        if local_related_only && !deleted {
+        if local_related_only && !delete_sst_ids_set.is_empty() && !deleted {
             // If no sst is deleted, the current delta will not be related to the local version.
             // Therefore, if we only care local related data, we can return without inserting the
             // ssts.
@@ -331,6 +159,26 @@ impl HummockLevelsExt for Levels {
                 .iter()
                 .map(|level| level.total_file_size)
                 .sum::<u64>();
+        }
+    }
+
+    fn build_initial_levels(compaction_config: &CompactionConfig) -> Levels {
+        let mut levels = vec![];
+        for l in 0..compaction_config.get_max_level() {
+            levels.push(Level {
+                level_idx: (l + 1) as u32,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![],
+                total_file_size: 0,
+                sub_level_id: 0,
+            });
+        }
+        Levels {
+            levels,
+            l0: Some(OverlappingLevel {
+                sub_levels: vec![],
+                total_file_size: 0,
+            }),
         }
     }
 }
@@ -426,8 +274,10 @@ impl HummockVersionDeltaExt for HummockVersionDelta {
         let mut ret = vec![];
         for level_deltas in self.level_deltas.values() {
             for level_delta in &level_deltas.level_deltas {
-                for sst_id in &level_delta.removed_table_ids {
-                    ret.push(*sst_id);
+                if let DeltaType::IntraLevel(intra_level) = level_delta.get_delta_type().unwrap() {
+                    for sst_id in &intra_level.removed_table_ids {
+                        ret.push(*sst_id);
+                    }
                 }
             }
         }
@@ -438,8 +288,10 @@ impl HummockVersionDeltaExt for HummockVersionDelta {
         let mut ret = vec![];
         for level_deltas in self.level_deltas.values() {
             for level_delta in &level_deltas.level_deltas {
-                for sst in &level_delta.inserted_table_infos {
-                    ret.push(sst.id);
+                if let DeltaType::IntraLevel(intra_level) = level_delta.get_delta_type().unwrap() {
+                    for sst in &intra_level.inserted_table_infos {
+                        ret.push(sst.id);
+                    }
                 }
             }
         }
@@ -450,8 +302,203 @@ impl HummockVersionDeltaExt for HummockVersionDelta {
         self.level_deltas
             .values()
             .flat_map(|item| item.level_deltas.iter())
-            .map(|level_delta| level_delta.inserted_table_infos.len())
+            .map(|level_delta| match level_delta.get_delta_type().unwrap() {
+                DeltaType::IntraLevel(intra_level) => intra_level.inserted_table_infos.len(),
+                _ => 0,
+            })
             .sum()
+    }
+}
+
+pub trait HummockVersionExt {
+    /// Gets `compaction_group_id`'s levels
+    fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels;
+    /// Gets `compaction_group_id`'s levels
+    fn get_compaction_group_levels_mut(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+    ) -> &mut Levels;
+    /// Gets all levels.
+    ///
+    /// Levels belonging to the same compaction group retain their relative order.
+    fn get_combined_levels(&self) -> Vec<&Level>;
+    fn iter_tables<F: FnMut(&SstableInfo)>(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        level_idex: usize,
+        f: F,
+    );
+    fn map_level<F: FnMut(&Level)>(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        level_idex: usize,
+        f: F,
+    );
+    fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize;
+    fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
+
+    fn get_sst_ids(&self) -> Vec<u64>;
+    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
+}
+
+impl HummockVersionExt for HummockVersion {
+    fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
+        self.levels
+            .get(&compaction_group_id)
+            .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id))
+    }
+
+    fn get_compaction_group_levels_mut(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+    ) -> &mut Levels {
+        self.levels
+            .get_mut(&compaction_group_id)
+            .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id))
+    }
+
+    fn get_combined_levels(&self) -> Vec<&Level> {
+        let mut combined_levels = vec![];
+        for level in self.levels.values() {
+            combined_levels.extend(level.l0.as_ref().unwrap().sub_levels.iter().rev());
+            combined_levels.extend(level.levels.iter());
+        }
+        combined_levels
+    }
+
+    fn get_sst_ids(&self) -> Vec<u64> {
+        self.get_combined_levels()
+            .iter()
+            .flat_map(|level| level.table_infos.iter().map(|table_info| table_info.id))
+            .collect_vec()
+    }
+
+    fn iter_tables<F: FnMut(&SstableInfo)>(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        level_idx: usize,
+        mut f: F,
+    ) {
+        if let Some(levels) = self.levels.get(&compaction_group_id) {
+            if level_idx == 0 {
+                for level in &levels.l0.as_ref().unwrap().sub_levels {
+                    for table in &level.table_infos {
+                        f(table);
+                    }
+                }
+            } else {
+                for table in &levels.levels[level_idx - 1].table_infos {
+                    f(table);
+                }
+            }
+        }
+    }
+
+    fn level_iter<F: FnMut(&Level) -> bool>(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        mut f: F,
+    ) {
+        if let Some(levels) = self.levels.get(&compaction_group_id) {
+            for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
+                if !f(sub_level) {
+                    return;
+                }
+            }
+            for level in &levels.levels {
+                if !f(level) {
+                    return;
+                }
+            }
+        }
+    }
+
+    fn map_level<F: FnMut(&Level)>(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        level_idx: usize,
+        mut f: F,
+    ) {
+        if let Some(levels) = self.levels.get(&compaction_group_id) {
+            if level_idx == 0 {
+                for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
+                    f(sub_level);
+                }
+            } else {
+                f(&levels.levels[level_idx - 1]);
+            }
+        }
+    }
+
+    fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize {
+        // l0 is currently separated from all levels
+        self.levels
+            .get(&compaction_group_id)
+            .map(|group| group.levels.len() + 1)
+            .unwrap_or(0)
+    }
+
+    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
+        for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
+            for delta in level_deltas.get_level_deltas() {
+                if let Some(DeltaType::GroupConstruct(ref group_construct)) = delta.delta_type {
+                    self.levels.insert(
+                        *compaction_group_id,
+                        <Levels as HummockLevelsExt>::build_initial_levels(
+                            group_construct.get_group_config().unwrap(),
+                        ),
+                    );
+                }
+            }
+            let levels = self
+                .levels
+                .get_mut(compaction_group_id)
+                .expect("compaction group should exist");
+
+            let summary = summarize_level_deltas(level_deltas);
+
+            assert!(
+                self.max_committed_epoch <= version_delta.max_committed_epoch,
+                "new max commit epoch {} is older than the current max commit epoch {}",
+                version_delta.max_committed_epoch,
+                self.max_committed_epoch
+            );
+            if self.max_committed_epoch < version_delta.max_committed_epoch {
+                // `max_committed_epoch` increases. It must be a `commit_epoch`
+                let LevelDeltasSummary {
+                    delete_sst_levels,
+                    delete_sst_ids_set,
+                    insert_sst_level_id,
+                    insert_sub_level_id,
+                    insert_table_infos,
+                } = summary;
+                assert_eq!(
+                    0, insert_sst_level_id,
+                    "we should only add to L0 when we commit an epoch. Inserting into {} {:?}",
+                    insert_sst_level_id, insert_table_infos
+                );
+                assert!(
+                    delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty(),
+                    "no sst should be deleted when committing an epoch"
+                );
+                add_new_sub_level(
+                    levels.l0.as_mut().unwrap(),
+                    insert_sub_level_id,
+                    insert_table_infos,
+                );
+            } else {
+                // `max_committed_epoch` is not changed. The delta is caused by compaction.
+                levels.apply_compact_ssts(summary, false);
+            }
+            for delta in level_deltas.get_level_deltas() {
+                if matches!(delta.delta_type, Some(DeltaType::GroupDestroy(_))) {
+                    self.levels.remove(compaction_group_id);
+                }
+            }
+        }
+        self.id = version_delta.id;
+        self.max_committed_epoch = version_delta.max_committed_epoch;
+        self.safe_epoch = version_delta.safe_epoch;
     }
 }
 
