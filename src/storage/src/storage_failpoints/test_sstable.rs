@@ -94,7 +94,7 @@ async fn test_failpoints_vacuum_and_metadata() {
     let table_id = 0;
     let kv_iter =
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-    let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
+    let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter).await;
     let result = put_sst(
         table_id,
         data.clone(),

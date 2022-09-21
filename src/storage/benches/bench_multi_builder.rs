@@ -72,7 +72,6 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
         let writer = self
             .writer_factory
             .create_sst_writer(id, writer_options)
-            .await
             .unwrap();
         let builder = SstableBuilder::for_test(id, writer, self.options.clone());
 
@@ -99,7 +98,7 @@ async fn build_tables<F: SstableWriterFactory>(
             .await
             .unwrap();
     }
-    let split_table_outputs = builder.finish().unwrap();
+    let split_table_outputs = builder.finish().await.unwrap();
     let join_handles = split_table_outputs
         .into_iter()
         .map(|o| o.upload_join_handle)
