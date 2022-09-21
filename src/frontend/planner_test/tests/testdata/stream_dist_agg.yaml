@@ -161,7 +161,7 @@
 
      Table 0 { columns: [sum(count)], primary key: [], value indices: [0], distribution key: [] }
      Table 1 { columns: [max(t.v), Vnode(t._row_id)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
-     Table 2 { columns: [Vnode(t._row_id), count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
+     Table 2 { columns: [Vnode(t._row_id), count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [], vnode column idx: 0 }
      Table 3 { columns: [Vnode(t._row_id), t.v, t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [2], vnode column idx: 0 }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: extreme_on_AO
@@ -427,9 +427,9 @@
      Table 0 { columns: [sum(count)], primary key: [], value indices: [0], distribution key: [] }
      Table 1 { columns: [max(t.v), Vnode(t._row_id)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
      Table 2 { columns: [sum(count(t.v))], primary key: [], value indices: [0], distribution key: [] }
-     Table 3 { columns: [Vnode(t._row_id), count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
+     Table 3 { columns: [Vnode(t._row_id), count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [], vnode column idx: 0 }
      Table 4 { columns: [Vnode(t._row_id), t.v, t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [2], vnode column idx: 0 }
-     Table 5 { columns: [Vnode(t._row_id), count(t.v)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
+     Table 5 { columns: [Vnode(t._row_id), count(t.v)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [], vnode column idx: 0 }
      Table 4294967294 { columns: [a1, a2], primary key: [], value indices: [0, 1], distribution key: [] }
 - id: extreme_count_on_AO
   before:

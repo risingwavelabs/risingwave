@@ -634,7 +634,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], primary key: [$0 ASC, $11 DESC, $14 ASC, $16 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], distribution key: [] }
+     Table 0 { columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], primary key: [$0 ASC, $11 DESC, $14 ASC, $16 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], distribution key: [0] }
      Table 1 { columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0] }
      Table 2 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 3 { columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], primary key: [$0 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [0] }
@@ -1037,7 +1037,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], primary key: [$1 ASC, $0 ASC, $5 DESC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [] }
+     Table 0 { columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], primary key: [$1 ASC, $0 ASC, $5 DESC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [1, 0] }
      Table 4294967294 { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }
   batch_error: |-
     Feature is not yet implemented: Group TopN in batch mode

@@ -25,10 +25,13 @@ use crate::PlanRef;
 pub struct StreamGroupTopN {
     pub base: PlanBase,
     logical: LogicalTopN,
+    /// an optional column index which is the vnode of each row computed by the input's consistent
+    /// hash distribution
+    vnode_col_idx: Option<usize>,
 }
 
 impl StreamGroupTopN {
-    pub fn new(logical: LogicalTopN) -> Self {
+    pub fn new(logical: LogicalTopN, vnode_col_idx: Option<usize>) -> Self {
         assert!(!logical.group_key().is_empty());
         let input = logical.input();
         let dist = match input.distribution() {
@@ -46,7 +49,11 @@ impl StreamGroupTopN {
             dist,
             false,
         );
-        StreamGroupTopN { base, logical }
+        StreamGroupTopN {
+            base,
+            logical,
+            vnode_col_idx,
+        }
     }
 }
 
@@ -59,7 +66,7 @@ impl StreamNode for StreamGroupTopN {
         }
         let table = self
             .logical
-            .infer_internal_table_catalog(Some(group_key))
+            .infer_internal_table_catalog(Some(group_key), self.vnode_col_idx)
             .with_id(state.gen_table_id_wrapped());
         let group_topn_node = GroupTopNNode {
             limit: self.logical.limit() as u64,
@@ -103,6 +110,6 @@ impl PlanTreeNodeUnary for StreamGroupTopN {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
     }
 }
