@@ -2748,7 +2748,7 @@
      Table 9 { columns: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1] }
      Table 10 { columns: [sum(count)], primary key: [], value indices: [0] }
      Table 11 { columns: [max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), Vnode(lineitem.l_suppkey)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1] }
-     Table 12 { columns: [Vnode(lineitem.l_suppkey), count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 12 { columns: [Vnode(lineitem.l_suppkey), count], primary key: [$0 ASC], value indices: [0, 1], vnode column idx: 0 }
      Table 13 { columns: [Vnode(lineitem.l_suppkey), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], vnode column idx: 0 }
      Table 14 { columns: [lineitem.l_suppkey, count], primary key: [$0 ASC], value indices: [0, 1] }
      Table 15 { columns: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1] }
