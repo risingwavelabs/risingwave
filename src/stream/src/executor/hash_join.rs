@@ -25,6 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -35,8 +36,7 @@ use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, EpochPair, Executor, Message, PkIndices,
-    PkIndicesRef,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::JoinType::LeftAnti;

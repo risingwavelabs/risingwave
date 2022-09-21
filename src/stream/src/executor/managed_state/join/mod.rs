@@ -32,6 +32,7 @@ use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -41,7 +42,6 @@ use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use self::iter_utils::zip_by_order_key;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::EpochPair;
 use crate::task::ActorId;
 
 type DegreeType = u64;

@@ -27,6 +27,7 @@ use risingwave_common::array::{ArrayImpl, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::{ConnectorState, SplitImpl};
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -207,32 +208,6 @@ pub enum Mutation {
     SourceChangeSplit(HashMap<ActorId, ConnectorState>),
     Pause,
     Resume,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct EpochPair {
-    pub curr: u64,
-    pub prev: u64,
-}
-
-impl EpochPair {
-    pub fn new(curr: u64, prev: u64) -> Self {
-        assert!(curr > prev);
-        Self { curr, prev }
-    }
-
-    #[cfg(test)]
-    pub fn inc(&self) -> Self {
-        Self {
-            curr: self.curr + 1,
-            prev: self.prev + 1,
-        }
-    }
-
-    pub fn new_test_epoch(curr: u64) -> Self {
-        assert!(curr > 0);
-        Self::new(curr, curr - 1)
-    }
 }
 
 #[derive(Debug, Clone)]

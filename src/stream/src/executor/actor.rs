@@ -19,13 +19,13 @@ use async_stack_trace::{SpanValue, StackTrace};
 use futures::pin_mut;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
 use super::StreamConsumer;
 use crate::error::StreamResult;
-use crate::executor::EpochPair;
 use crate::task::{ActorId, SharedContext};
 
 /// Shared by all operators of an actor.

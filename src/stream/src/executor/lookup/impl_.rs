@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -27,7 +28,7 @@ use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::{Barrier, EpochPair, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::executor::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a

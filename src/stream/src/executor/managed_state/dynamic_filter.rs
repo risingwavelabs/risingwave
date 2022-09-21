@@ -20,11 +20,12 @@ use std::ops::RangeBounds;
 use anyhow::anyhow;
 use risingwave_common::array::Row;
 use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{EpochPair, StreamExecutorResult};
+use crate::executor::StreamExecutorResult;
 
 /// The `RangeCache` caches a given range of `ScalarImpl` keys and corresponding rows.
 /// It will evict keys from memory if it is above capacity and shrink its range.
