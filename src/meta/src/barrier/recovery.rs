@@ -184,35 +184,38 @@ where
     async fn get_migrate_map_plan(
         &self,
         info: &BarrierActorInfo,
-        expired_workers: &Vec<WorkerId>,
+        expired_workers: &[WorkerId],
     ) -> (HashMap<ActorId, WorkerId>, HashMap<WorkerId, WorkerNode>) {
-        let workers_size = expired_workers.len();
         let mut cur = 0;
         let mut migrate_map = HashMap::new();
         let mut node_map = HashMap::new();
-        while cur < workers_size {
+        while cur < expired_workers.len() {
             let current_nodes = self
                 .cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
                 .await;
             let new_nodes = current_nodes
-                .iter()
-                .filter(|&node| {
+                .into_iter()
+                .filter(|node| {
                     !info.node_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
                 })
                 .collect_vec();
             for new_node in new_nodes {
                 let actors = info.actor_map.get(&expired_workers[cur]).unwrap();
-                let actors_len = actors.len();
-                for actor in actors.iter().take(actors_len) {
+                for actor in actors {
                     migrate_map.insert(*actor, new_node.id);
                 }
-                node_map.insert(new_node.id, new_node.clone());
                 cur += 1;
                 debug!(
-                    "got new worker {} , migrate process ({}/{})",
-                    new_node.id, cur, workers_size
+                    "new worker joined: {}, migrate process ({}/{})",
+                    new_node.id,
+                    cur,
+                    expired_workers.len()
                 );
+                node_map.insert(new_node.id, new_node);
+                if cur == expired_workers.len() {
+                    return (migrate_map, node_map);
+                }
             }
             // wait to get newly joined CN
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

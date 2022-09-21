@@ -478,7 +478,7 @@ where
             last_line_is_empty = true;
             last_is_select = false;
         } else if skip == 0 {
-            if line.to_lowercase().starts_with("select ") {
+            if line.to_lowercase().starts_with("select") {
                 last_is_select = true;
             }
             if last_line_is_empty {
