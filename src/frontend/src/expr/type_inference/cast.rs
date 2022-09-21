@@ -38,9 +38,7 @@ pub fn get_inner_type(dt: DataType) -> DataType {
 // helper for determine_nesting_level
 fn calc_nesting_level_inner(dt: DataType, level: i32) -> i32 {
     let return_val: i32 = match dt {
-        DataType::List { datatype: inner } => {
-            calc_nesting_level_inner(*(inner.clone()), level + 1)
-        }
+        DataType::List { datatype: inner } => calc_nesting_level_inner(*(inner.clone()), level + 1),
         _ => level,
     };
     return_val
@@ -68,18 +66,6 @@ fn lhs_is_more_nested(lhs: DataType, rhs: DataType) -> bool {
     lhs_level > rhs_level
 }
 
-/// True if lhs is more nested, else false
-///
-/// Examples:
-/// lhs_is_more_nested(DataType::Boolean, DataType::Boolean) -> true
-/// lhs_is_more_nested(List{List{DataType::Boolean}}, DataType::Date) -> true
-/// lhs_is_more_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> false
-fn lhs_is_more_or_eq_nested(lhs: DataType, rhs: DataType) -> bool {
-    let lhs_level = calc_nesting_level(lhs.clone());
-    let rhs_level = calc_nesting_level(rhs.clone());
-    lhs_level >= rhs_level
-}
-
 /// Get the more nested element. Returns lhs if both are equally nested
 ///
 /// Examples:
@@ -94,6 +80,20 @@ pub fn get_most_nested(lhs: DataType, rhs: DataType) -> DataType {
     rhs
 }
 
+// helper for add_nesting
+pub fn add_nesting_inner(target_dt: DataType, target_nesting: DataType, level: i32) -> DataType {
+    if level <= 0 {
+        return target_dt;
+    }
+    add_nesting_inner(
+        DataType::List {
+            datatype: Box::new(target_dt),
+        },
+        target_nesting,
+        level - 1,
+    )
+}
+
 /// Add levels to target dt until it is as nested as target_nesting
 ///
 /// Examples:
@@ -102,16 +102,13 @@ pub fn get_most_nested(lhs: DataType, rhs: DataType) -> DataType {
 /// add_nesting(List{List{DataType::Int16}}, DataType::Interval) -> List{List{DataType::Int16}} //
 /// already more nested
 pub fn add_nesting(target_dt: DataType, target_nesting: DataType) -> DataType {
-    // TODO: inefficient. Will be determined over and over
-    if lhs_is_more_or_eq_nested(target_dt.clone(), target_nesting.clone()) {
-        return target_dt;
-    }
-    return add_nesting(
-        DataType::List {
-            datatype: Box::new(target_dt),
-        },
+    let target_dt_level = calc_nesting_level(target_dt.clone());
+    let target_nesting_level = calc_nesting_level(target_nesting.clone());
+    add_nesting_inner(
+        target_dt,
         target_nesting,
-    );
+        target_nesting_level - target_dt_level,
+    )
 }
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -400,7 +397,6 @@ mod tests {
             ]
         );
     }
-
 
     #[test]
     fn test_nesting_level_ok() {
