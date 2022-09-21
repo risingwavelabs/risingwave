@@ -235,16 +235,7 @@ impl EpochPair {
     }
 }
 
-impl Default for EpochPair {
-    fn default() -> Self {
-        Self {
-            curr: 1,
-            prev: INVALID_EPOCH,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Barrier {
     pub epoch: EpochPair,
     pub mutation: Option<Arc<Mutation>>,
@@ -260,7 +251,8 @@ impl Barrier {
         Self {
             epoch: EpochPair::new_test_epoch(epoch),
             checkpoint: true,
-            ..Default::default()
+            mutation: Default::default(),
+            passed_actors: Default::default(),
         }
     }
 
