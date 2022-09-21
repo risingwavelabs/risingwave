@@ -16,7 +16,7 @@ To build the images without SIMD vector extensions, run
 docker build . -f docker/Dockerfile --build-arg simd_disabled=true
 ```
 
-from the project root and run any subqsequent docker commands on the resultant image.
+from the project root and run any subsequent docker commands on the resultant image.
 
 To ensure you are using the latest version of RisingWave image,
 
