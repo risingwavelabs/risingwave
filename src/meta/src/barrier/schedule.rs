@@ -147,7 +147,10 @@ impl<S: MetaStore> BarrierScheduler<S> {
             is_create_mv,
         } in contexts
         {
-            collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
+            // Throw the error if it occurs when collecting this barrier.
+            collect_rx
+                .await
+                .map_err(|e| anyhow!("failed to collect barrier: {}", e))??;
 
             // TODO: refactor this
             if is_create_mv {

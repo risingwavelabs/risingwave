@@ -155,11 +155,7 @@ where
         Ok(())
     }
 
-    pub async fn notify_fragment_mapping(
-        &self,
-        table_fragment: &TableFragments,
-        operation: Operation,
-    ) {
+    async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         for fragment in table_fragment.fragments.values() {
             if !fragment.state_table_ids.is_empty() {
                 let mut mapping = fragment
@@ -257,6 +253,8 @@ where
             }
 
             self.env.meta_store().txn(transaction).await?;
+            self.notify_fragment_mapping(&table_fragments, Operation::Add)
+                .await;
             map.insert(*table_id, table_fragments);
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);

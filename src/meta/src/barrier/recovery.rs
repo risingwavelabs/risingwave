@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::iter::{Map, Take};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -57,7 +56,7 @@ where
 
     #[inline(always)]
     /// Initialize a retry strategy for operation in recovery.
-    fn get_retry_strategy() -> Map<Take<ExponentialBackoff>, fn(Duration) -> Duration> {
+    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(Self::RECOVERY_RETRY_BASE_INTERVAL)
             .max_delay(Self::RECOVERY_RETRY_MAX_INTERVAL)
             .take(Self::RECOVERY_RETRY_MAX_ATTEMPTS)
