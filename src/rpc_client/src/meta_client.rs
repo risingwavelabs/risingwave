@@ -388,11 +388,20 @@ impl MetaClient {
                     }
                 }
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
-                if let Err(err) = meta_client
-                    .send_heartbeat(meta_client.worker_id(), extra_info)
-                    .await
+                match tokio::time::timeout(
+                    // TODO: decide better min_interval for timeout
+                    min_interval * 3,
+                    meta_client.send_heartbeat(meta_client.worker_id(), extra_info),
+                )
+                .await
                 {
-                    tracing::warn!("Failed to send_heartbeat: {}", err);
+                    Ok(Ok(_)) => {}
+                    Ok(Err(err)) => {
+                        tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to send_heartbeat: timeout {}", err);
+                    }
                 }
             }
         });
