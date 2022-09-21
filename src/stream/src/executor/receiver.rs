@@ -208,7 +208,6 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
-    // use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
     use super::*;
     use crate::executor::{ActorContext, Barrier, Executor, Mutation};
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
