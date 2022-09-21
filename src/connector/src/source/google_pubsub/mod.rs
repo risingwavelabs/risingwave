@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-// pub mod enumerator;
+pub mod enumerator;
 pub mod source;
+pub mod split;
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
