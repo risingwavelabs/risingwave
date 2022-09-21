@@ -40,10 +40,12 @@
           StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
         StreamExchange { dist: HashShard(b.k1) }
           StreamTableScan { table: b, columns: [b.k1, b.v, b._row_id], pk: [b._row_id], distribution: UpstreamHashShard(b._row_id) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), b._row_id(hidden), b.k1(hidden)], pk_columns: [ak1.a._row_id, b._row_id, ak1.k1, b.k1] }
+          materialized table: 4294967294
         StreamHashJoin { type: Inner, predicate: ak1.k1 = b.k1, output: [ak1.v, b.v, ak1.a._row_id, ak1.k1, b._row_id, b.k1] }
+            left table: 0, right table 2, left degree table: 1, right degree table: 3,
           StreamExchange Hash([0]) from 1
           StreamExchange Hash([0]) from 2
 
@@ -57,6 +59,11 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [ak1.k1, ak1.v, ak1.a._row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2] }
+     Table 1 { columns: [ak1.k1, ak1.a._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 2 { columns: [b.k1, b.v, b._row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2] }
+     Table 3 { columns: [b.k1, b._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 4294967294 { columns: [v, bv, ak1.a._row_id, ak1.k1, b._row_id, b.k1], primary key: [$2 ASC, $4 ASC, $3 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
 - id: A_join_Bk1_onk1
   before:
   - create_tables
@@ -75,10 +82,12 @@
           StreamTableScan { table: a, columns: [a.k1, a.v, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
         StreamExchange { dist: HashShard(bk1.k1) }
           StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], distribution: UpstreamHashShard(bk1.k1) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [v, bv, a._row_id(hidden), a.k1(hidden), bk1.b._row_id(hidden), bk1.k1(hidden)], pk_columns: [a._row_id, bk1.b._row_id, a.k1, bk1.k1] }
+          materialized table: 4294967294
         StreamHashJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v, a._row_id, a.k1, bk1.b._row_id, bk1.k1] }
+            left table: 0, right table 2, left degree table: 1, right degree table: 3,
           StreamExchange Hash([0]) from 1
           StreamExchange Hash([0]) from 2
 
@@ -92,6 +101,11 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [a.k1, a.v, a._row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2] }
+     Table 1 { columns: [a.k1, a._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 2 { columns: [bk1.k1, bk1.v, bk1.b._row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2] }
+     Table 3 { columns: [bk1.k1, bk1.b._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 4294967294 { columns: [v, bv, a._row_id, a.k1, bk1.b._row_id, bk1.k1], primary key: [$2 ASC, $4 ASC, $3 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
 - id: Ak1_join_Bk1_onk1
   before:
   - create_tables
@@ -110,10 +124,12 @@
           StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
         StreamExchange { dist: HashShard(bk1.k1) }
           StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], distribution: UpstreamHashShard(bk1.k1) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden), bk1.k1(hidden)], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1, bk1.k1] }
+          materialized table: 4294967294
         StreamHashJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id, bk1.k1] }
+            left table: 0, right table 2, left degree table: 1, right degree table: 3,
           StreamExchange Hash([0]) from 1
           StreamExchange Hash([0]) from 2
 
@@ -127,6 +143,11 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [ak1.k1, ak1.v, ak1.a._row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2] }
+     Table 1 { columns: [ak1.k1, ak1.a._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 2 { columns: [bk1.k1, bk1.v, bk1.b._row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2] }
+     Table 3 { columns: [bk1.k1, bk1.b._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 4294967294 { columns: [v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id, bk1.k1], primary key: [$2 ASC, $4 ASC, $3 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5] }
 - id: aggk1_from_A
   before:
   - create_tables
@@ -146,11 +167,13 @@
         StreamHashAgg { group_key: [a.k1], aggs: [count, max(a.v)] }
           StreamExchange { dist: HashShard(a.k1) }
             StreamTableScan { table: a, columns: [a.k1, a.v, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [max_v, a.k1(hidden)], pk_columns: [a.k1] }
+          materialized table: 4294967294
         StreamProject { exprs: [max(a.v), a.k1] }
           StreamHashAgg { group_key: [a.k1], aggs: [count, max(a.v)] }
+              state tables: [0, 1]
             StreamExchange Hash([0]) from 1
 
     Fragment 1
@@ -158,6 +181,9 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 1 { columns: [a.k1, a.v, a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2] }
+     Table 4294967294 { columns: [max_v, a.k1], primary key: [$1 ASC], value indices: [0, 1] }
 - id: aggk1_from_Ak1
   before:
   - create_tables
@@ -175,15 +201,20 @@
       StreamProject { exprs: [max(ak1.v), ak1.k1] }
         StreamHashAgg { group_key: [ak1.k1], aggs: [count, max(ak1.v)] }
           StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [max_v, ak1.k1(hidden)], pk_columns: [ak1.k1] }
+          materialized table: 4294967294
         StreamProject { exprs: [max(ak1.v), ak1.k1] }
           StreamHashAgg { group_key: [ak1.k1], aggs: [count, max(ak1.v)] }
+              state tables: [0, 1]
             Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
               Upstream
               BatchPlanNode
 
+     Table 0 { columns: [ak1.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 1 { columns: [ak1.k1, ak1.v, ak1.a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2] }
+     Table 4294967294 { columns: [max_v, ak1.k1], primary key: [$1 ASC], value indices: [0, 1] }
 - id: aggk1_from_Ak1k2
   before:
   - create_tables
@@ -203,11 +234,13 @@
         StreamHashAgg { group_key: [ak1k2.k1], aggs: [count, max(ak1k2.v)] }
           StreamExchange { dist: HashShard(ak1k2.k1) }
             StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], pk: [ak1k2.a._row_id], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [max_v, ak1k2.k1(hidden)], pk_columns: [ak1k2.k1] }
+          materialized table: 4294967294
         StreamProject { exprs: [max(ak1k2.v), ak1k2.k1] }
           StreamHashAgg { group_key: [ak1k2.k1], aggs: [count, max(ak1k2.v)] }
+              state tables: [0, 1]
             StreamExchange Hash([0]) from 1
 
     Fragment 1
@@ -215,6 +248,9 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [ak1k2.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 1 { columns: [ak1k2.k1, ak1k2.v, ak1k2.a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2] }
+     Table 4294967294 { columns: [max_v, ak1k2.k1], primary key: [$1 ASC], value indices: [0, 1] }
 - id: aggk2_from_Ak1k2
   before:
   - create_tables
@@ -234,11 +270,13 @@
         StreamHashAgg { group_key: [ak1k2.k2], aggs: [count, max(ak1k2.v)] }
           StreamExchange { dist: HashShard(ak1k2.k2) }
             StreamTableScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], pk: [ak1k2.a._row_id], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [max_v, ak1k2.k2(hidden)], pk_columns: [ak1k2.k2] }
+          materialized table: 4294967294
         StreamProject { exprs: [max(ak1k2.v), ak1k2.k2] }
           StreamHashAgg { group_key: [ak1k2.k2], aggs: [count, max(ak1k2.v)] }
+              state tables: [0, 1]
             StreamExchange Hash([0]) from 1
 
     Fragment 1
@@ -246,6 +284,9 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [ak1k2.k2, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 1 { columns: [ak1k2.k2, ak1k2.v, ak1k2.a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2] }
+     Table 4294967294 { columns: [max_v, ak1k2.k2], primary key: [$1 ASC], value indices: [0, 1] }
 - id: aggk1k2_from_Ak1k2
   before:
   - create_tables
@@ -263,15 +304,20 @@
       StreamProject { exprs: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2] }
         StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [count, sum(ak1k2.v)] }
           StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], pk_columns: [ak1k2.k1, ak1k2.k2] }
+          materialized table: 4294967294
         StreamProject { exprs: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2] }
           StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [count, sum(ak1k2.v)] }
+              state tables: [0, 1]
             Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
               Upstream
               BatchPlanNode
 
+     Table 0 { columns: [ak1k2.k1, ak1k2.k2, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 1 { columns: [ak1k2.k1, ak1k2.k2, sum(ak1k2.v)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 4294967294 { columns: [sum_v, ak1k2.k1, ak1k2.k2], primary key: [$1 ASC, $2 ASC], value indices: [0, 1, 2] }
 - id: aggk1k2_from_Ak1
   before:
   - create_tables
@@ -289,15 +335,20 @@
       StreamProject { exprs: [sum(ak1.v), ak1.k1, ak1.k2] }
         StreamHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [count, sum(ak1.v)] }
           StreamTableScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [sum_v, ak1.k1(hidden), ak1.k2(hidden)], pk_columns: [ak1.k1, ak1.k2] }
+          materialized table: 4294967294
         StreamProject { exprs: [sum(ak1.v), ak1.k1, ak1.k2] }
           StreamHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [count, sum(ak1.v)] }
+              state tables: [0, 1]
             Chain { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
               Upstream
               BatchPlanNode
 
+     Table 0 { columns: [ak1.k1, ak1.k2, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 1 { columns: [ak1.k1, ak1.k2, sum(ak1.v)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 4294967294 { columns: [sum_v, ak1.k1, ak1.k2], primary key: [$1 ASC, $2 ASC], value indices: [0, 1, 2] }
 - id: aggk1_from_aggk1
   before:
   - create_tables
@@ -326,13 +377,16 @@
             StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
               StreamExchange { dist: HashShard(a.k1) }
                 StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [max_num, a.k1(hidden)], pk_columns: [a.k1] }
+          materialized table: 4294967294
         StreamProject { exprs: [max(count), a.k1] }
           StreamHashAgg { group_key: [a.k1], aggs: [count, max(count)] }
+              state tables: [0, 1]
             StreamProject { exprs: [a.k1, count] }
               StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+                  state tables: [2, 3]
                 StreamExchange Hash([0]) from 1
 
     Fragment 1
@@ -340,6 +394,11 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 1 { columns: [a.k1, count, a.k1_0], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2] }
+     Table 2 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 3 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 4294967294 { columns: [max_num, a.k1], primary key: [$1 ASC], value indices: [0, 1] }
 - id: aggk1_from_aggk1k2
   before:
   - create_tables
@@ -371,16 +430,19 @@
               StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, count] }
                 StreamExchange { dist: HashShard(a.k1, a.k2) }
                   StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [max_num, a.k1(hidden)], pk_columns: [a.k1] }
+          materialized table: 4294967294
         StreamProject { exprs: [max(count), a.k1] }
           StreamHashAgg { group_key: [a.k1], aggs: [count, max(count)] }
+              state tables: [0, 1]
             StreamExchange Hash([0]) from 1
 
     Fragment 1
       StreamProject { exprs: [a.k1, count, a.k2] }
         StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, count] }
+            state tables: [2, 3]
           StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
@@ -388,6 +450,11 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 1 { columns: [a.k1, count, a.k1_0, a.k2], primary key: [$0 ASC, $1 DESC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3] }
+     Table 2 { columns: [a.k1, a.k2, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 3 { columns: [a.k1, a.k2, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 4294967294 { columns: [max_num, a.k1], primary key: [$1 ASC], value indices: [0, 1] }
 - id: aggk2_from_aggk1k2
   before:
   - create_tables
@@ -419,16 +486,19 @@
               StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, count] }
                 StreamExchange { dist: HashShard(a.k1, a.k2) }
                   StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [max_num, a.k2(hidden)], pk_columns: [a.k2] }
+          materialized table: 4294967294
         StreamProject { exprs: [max(count), a.k2] }
           StreamHashAgg { group_key: [a.k2], aggs: [count, max(count)] }
+              state tables: [0, 1]
             StreamExchange Hash([0]) from 1
 
     Fragment 1
       StreamProject { exprs: [a.k2, count, a.k1] }
         StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, count] }
+            state tables: [2, 3]
           StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
@@ -436,6 +506,11 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [a.k2, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 1 { columns: [a.k2, count, a.k1, a.k2_0], primary key: [$0 ASC, $1 DESC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3] }
+     Table 2 { columns: [a.k1, a.k2, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 3 { columns: [a.k1, a.k2, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 4294967294 { columns: [max_num, a.k2], primary key: [$1 ASC], value indices: [0, 1] }
 - id: aggk1k2_from_aggk1k2
   before:
   - create_tables
@@ -464,13 +539,16 @@
             StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, count] }
               StreamExchange { dist: HashShard(a.k1, a.k2) }
                 StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [max_num, a.k1(hidden), a.k2(hidden)], pk_columns: [a.k1, a.k2] }
+          materialized table: 4294967294
         StreamProject { exprs: [max(count), a.k1, a.k2] }
           StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, max(count)] }
+              state tables: [0, 1]
             StreamProject { exprs: [a.k1, a.k2, count] }
               StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count, count] }
+                  state tables: [2, 3]
                 StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
@@ -478,6 +556,11 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [a.k1, a.k2, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 1 { columns: [a.k1, a.k2, count, a.k1_0, a.k2_0], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4] }
+     Table 2 { columns: [a.k1, a.k2, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 3 { columns: [a.k1, a.k2, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2] }
+     Table 4294967294 { columns: [max_num, a.k1, a.k2], primary key: [$1 ASC, $2 ASC], value indices: [0, 1, 2] }
 - id: Ak1_join_aggk1_onk1
   before:
   - create_tables
@@ -507,13 +590,16 @@
           StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
             StreamExchange { dist: HashShard(a.k1) }
               StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), a.k1(hidden)], pk_columns: [ak1.a._row_id, a.k1, ak1.k1] }
+          materialized table: 4294967294
         StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] }
+            left table: 0, right table 2, left degree table: 1, right degree table: 3,
           StreamExchange Hash([0]) from 1
           StreamProject { exprs: [count, a.k1] }
             StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+                state tables: [4, 5]
               StreamExchange Hash([0]) from 2
 
     Fragment 1
@@ -526,6 +612,13 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [ak1.k1, ak1.v, ak1.a._row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2] }
+     Table 1 { columns: [ak1.k1, ak1.a._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 2 { columns: [count, a.k1], primary key: [$1 ASC, $1 ASC], value indices: [0, 1] }
+     Table 3 { columns: [a.k1, a.k1_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 4 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 5 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 4294967294 { columns: [v, bv, ak1.a._row_id, ak1.k1, a.k1], primary key: [$2 ASC, $4 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4] }
 - id: aggk1_join_Ak1_onk1
   before:
   - create_tables
@@ -555,12 +648,15 @@
               StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
         StreamExchange { dist: HashShard(ak1.k1) }
           StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], distribution: UpstreamHashShard(ak1.k1) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [v, bv, a.k1(hidden), ak1.a._row_id(hidden), ak1.k1(hidden)], pk_columns: [a.k1, ak1.a._row_id, ak1.k1] }
+          materialized table: 4294967294
         StreamHashJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count, a.k1, ak1.a._row_id, ak1.k1] }
+            left table: 0, right table 2, left degree table: 1, right degree table: 3,
           StreamProject { exprs: [count, a.k1] }
             StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+                state tables: [4, 5]
               StreamExchange Hash([0]) from 1
           StreamExchange Hash([0]) from 2
 
@@ -574,6 +670,13 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [count, a.k1], primary key: [$1 ASC, $1 ASC], value indices: [0, 1] }
+     Table 1 { columns: [a.k1, a.k1_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 2 { columns: [ak1.k1, ak1.v, ak1.a._row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2] }
+     Table 3 { columns: [ak1.k1, ak1.a._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 4 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 5 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 4294967294 { columns: [v, bv, a.k1, ak1.a._row_id, ak1.k1], primary key: [$2 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4] }
 - id: aggk1_join_aggk1_onk1
   before:
   - create_tables
@@ -612,15 +715,19 @@
           StreamHashAgg { group_key: [b.k1], aggs: [count, count] }
             StreamExchange { dist: HashShard(b.k1) }
               StreamTableScan { table: b, columns: [b.k1, b._row_id], pk: [b._row_id], distribution: UpstreamHashShard(b._row_id) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [num, bv, a.k1(hidden), b.k1(hidden)], pk_columns: [a.k1, b.k1] }
+          materialized table: 4294967294
         StreamHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count, a.k1, b.k1] }
+            left table: 0, right table 2, left degree table: 1, right degree table: 3,
           StreamProject { exprs: [count, a.k1] }
             StreamHashAgg { group_key: [a.k1], aggs: [count, count] }
+                state tables: [4, 5]
               StreamExchange Hash([0]) from 1
           StreamProject { exprs: [count, b.k1] }
             StreamHashAgg { group_key: [b.k1], aggs: [count, count] }
+                state tables: [6, 7]
               StreamExchange Hash([0]) from 2
 
     Fragment 1
@@ -633,6 +740,15 @@
         Upstream
         BatchPlanNode
 
+     Table 0 { columns: [count, a.k1], primary key: [$1 ASC, $1 ASC], value indices: [0, 1] }
+     Table 1 { columns: [a.k1, a.k1_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 2 { columns: [count, b.k1], primary key: [$1 ASC, $1 ASC], value indices: [0, 1] }
+     Table 3 { columns: [b.k1, b.k1_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2] }
+     Table 4 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 5 { columns: [a.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 6 { columns: [b.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 7 { columns: [b.k1, count], primary key: [$0 ASC], value indices: [0, 1] }
+     Table 4294967294 { columns: [num, bv, a.k1, b.k1], primary key: [$2 ASC, $3 ASC], value indices: [0, 1, 2, 3] }
 - sql: |
     create table t1 (row_id int, uid int, v int, created_at timestamp);
     select * from hop(t1, created_at, interval '15' minute, interval '30' minute);
@@ -651,11 +767,13 @@
     StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_start, window_end] }
       StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end, t1._row_id] }
         StreamTableScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
-  stream_dist_plan: |+
+  stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_start, window_end] }
+          materialized table: 4294967294
         StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end, t1._row_id] }
           Chain { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
             Upstream
             BatchPlanNode
 
+     Table 4294967294 { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id], primary key: [$6 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5, 6] }
