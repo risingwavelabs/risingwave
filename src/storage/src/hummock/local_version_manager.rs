@@ -147,7 +147,8 @@ impl BufferTracker {
 /// worker tasks related to `LocalVersionManager` and holding a reference to it.
 ///
 /// Upon dropping such holder, it means there is no any external usage of the `LocalVersionManager`,
-/// and we can send the shutdown message to the `LocalVersionRelatedWorker` to gracefully shutdown the worker.
+/// and we can send the shutdown message to the `LocalVersionRelatedWorker` to gracefully shutdown
+/// the worker.
 pub struct LocalVersionManagerExternalHolder {
     local_version_manager: Arc<LocalVersionManager>,
     shutdown_sender: mpsc::UnboundedSender<SharedBufferEvent>,
@@ -772,7 +773,8 @@ impl LocalVersionManager {
 
         let mut pending_write_requests: VecDeque<_> = VecDeque::new();
 
-        // We temporarily allow this clippy rule to reduce the code diff. The clippy rule will not be triggered in the upcoming PR
+        // We temporarily allow this clippy rule to reduce the code diff. The clippy rule will not
+        // be triggered in the upcoming PR
         #[allow(clippy::while_let_loop)]
         loop {
             if let Some(event) = shared_buffer_event_receiver.recv().await {
