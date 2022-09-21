@@ -90,7 +90,7 @@ impl StreamGraphFormatter {
                     }
                 })
                 .join(", "),
-            tb.order_key,
+            tb.pk,
             tb.value_indices,
             if let Some(vnode_col_idx) = tb.vnode_col_idx {
                 format!(", vnode column idx: {}", vnode_col_idx)
