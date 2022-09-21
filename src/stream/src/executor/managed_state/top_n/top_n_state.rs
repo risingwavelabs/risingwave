@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::Row;
 use risingwave_common::util::ordered::*;
@@ -105,13 +103,14 @@ impl<S: StateStore> ManagedTopNState<S> {
         Ok(rows)
     }
 
-    pub async fn fill_cache(
+    pub async fn fill_high_cache<const WITH_TIES: bool>(
         &self,
         pk_prefix: Option<&Row>,
-        cache: &mut BTreeMap<OrderedRow, Row>,
+        topn_cache: &mut TopNCache<WITH_TIES>,
         start_key: &OrderedRow,
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
+        let cache = &mut topn_cache.high;
         let state_table_iter = iter_state_table(&self.state_table, pk_prefix).await?;
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
@@ -125,6 +124,23 @@ impl<S: StateStore> ManagedTopNState<S> {
                 break;
             }
         }
+        if WITH_TIES && topn_cache.is_high_cache_full() {
+            let high_last_sort_key = topn_cache
+                .high
+                .last_key_value()
+                .unwrap()
+                .0
+                .prefix(topn_cache.sort_key_len);
+            while let Some(item) = state_table_iter.next().await {
+                let topn_row = self.get_topn_row(item?.into_owned());
+                if topn_row.ordered_key.prefix(topn_cache.sort_key_len) == high_last_sort_key {
+                    topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+                } else {
+                    break;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -167,6 +183,22 @@ impl<S: StateStore> ManagedTopNState<S> {
             topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
             if topn_cache.high.len() == topn_cache.high_capacity {
                 break;
+            }
+        }
+        if WITH_TIES && topn_cache.is_high_cache_full() {
+            let high_last_sort_key = topn_cache
+                .high
+                .last_key_value()
+                .unwrap()
+                .0
+                .prefix(topn_cache.sort_key_len);
+            while let Some(item) = state_table_iter.next().await {
+                let topn_row = self.get_topn_row(item?.into_owned());
+                if topn_row.ordered_key.prefix(topn_cache.sort_key_len) == high_last_sort_key {
+                    topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+                } else {
+                    break;
+                }
             }
         }
 
@@ -283,7 +315,7 @@ mod tests {
         let row5 = row_nonnull!["abcd".to_string(), 5i64];
         let rows = vec![row1, row2, row3, row4, row5];
 
-        let mut cache = BTreeMap::<OrderedRow, Row>::new();
+        let mut cache = TopNCache::<false>::new(1, 1, 1);
         let ordered_rows = rows
             .clone()
             .into_iter()
@@ -296,11 +328,11 @@ mod tests {
         managed_state.insert(ordered_rows[4].clone(), rows[4].clone());
 
         managed_state
-            .fill_cache(None, &mut cache, &ordered_rows[3], 2)
+            .fill_high_cache(None, &mut cache, &ordered_rows[3], 2)
             .await
             .unwrap();
-        assert_eq!(cache.len(), 2);
-        assert_eq!(cache.first_key_value().unwrap().0, &ordered_rows[1]);
-        assert_eq!(cache.last_key_value().unwrap().0, &ordered_rows[4]);
+        assert_eq!(cache.high.len(), 2);
+        assert_eq!(cache.high.first_key_value().unwrap().0, &ordered_rows[1]);
+        assert_eq!(cache.high.last_key_value().unwrap().0, &ordered_rows[4]);
     }
 }

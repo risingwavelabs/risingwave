@@ -93,6 +93,37 @@ impl<S: StateStore> TopNExecutor<S, true> {
             )?,
         })
     }
+
+    /// It only has 1 capacity for high cache. Used to test recovery is correct.
+    #[allow(clippy::too_many_arguments)]
+    #[cfg(test)]
+    pub fn new_with_ties_for_test(
+        input: Box<dyn Executor>,
+        order_pairs: Vec<OrderPair>,
+        offset_and_limit: (usize, usize),
+        pk_indices: PkIndices,
+        executor_id: u64,
+        key_indices: Vec<usize>,
+        state_table: StateTable<S>,
+    ) -> StreamResult<Self> {
+        let info = input.info();
+        let schema = input.schema().clone();
+
+        let mut inner = InnerTopNExecutorNew::new(
+            info,
+            schema,
+            order_pairs,
+            offset_and_limit,
+            pk_indices,
+            executor_id,
+            key_indices,
+            state_table,
+        )?;
+
+        inner.cache.high_capacity = 1;
+
+        Ok(TopNExecutorWrapper { input, inner })
+    }
 }
 
 pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
@@ -203,7 +234,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     ) {
         // Note: rust doesn't auto-implement T::<FLAG>::f() even when
         // T::<true>::f() and T::<false>::f() are both present.
-        // So we workaroud it here by using 2 functions.
+        // So we workaround it here by using 2 functions.
         if WITH_TIES {
             self.insert_with_ties(ordered_pk_row, row, res_ops, res_rows);
         } else {
@@ -231,7 +262,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     ) -> StreamExecutorResult<()> {
         // Note: rust doesn't auto-implement T::<FLAG>::f() even when
         // T::<true>::f() and T::<false>::f() are both present.
-        // So we workaroud it here by using 2 functions.
+        // So we workaround it here by using 2 functions.
         if WITH_TIES {
             self.delete_with_ties(
                 pk_prefix,
@@ -345,10 +376,10 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             // Try to fill the high cache if it is empty
             if self.high.is_empty() {
                 managed_state
-                    .fill_cache(
+                    .fill_high_cache(
                         pk_prefix,
-                        &mut self.high,
-                        self.middle.last_key_value().unwrap().0,
+                        self,
+                        &self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
                     )
                     .await?;
@@ -379,10 +410,10 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 // Try to fill the high cache if it is empty
                 if self.high.is_empty() {
                     managed_state
-                        .fill_cache(
+                        .fill_high_cache(
                             pk_prefix,
-                            &mut self.high,
-                            self.middle.last_key_value().unwrap().0,
+                            self,
+                            &self.middle.last_key_value().unwrap().0.clone(),
                             self.high_capacity,
                         )
                         .await?;
@@ -509,10 +540,10 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             // Try to fill the high cache if it is empty
             if self.high.is_empty() {
                 managed_state
-                    .fill_cache(
+                    .fill_high_cache(
                         pk_prefix,
-                        &mut self.high,
-                        self.middle.last_key_value().unwrap().0,
+                        self,
+                        &self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
                     )
                     .await?;
@@ -1670,7 +1701,7 @@ mod tests {
                 &[0, 1],
             );
             let top_n_executor = Box::new(
-                TopNExecutor::new_with_ties(
+                TopNExecutor::new_with_ties_for_test(
                     create_source_before_recovery() as Box<dyn Executor>,
                     order_types.clone(),
                     (0, 3),
@@ -1717,7 +1748,7 @@ mod tests {
 
             // recovery
             let top_n_executor_after_recovery = Box::new(
-                TopNExecutor::new_with_ties(
+                TopNExecutor::new_with_ties_for_test(
                     create_source_after_recovery() as Box<dyn Executor>,
                     order_types.clone(),
                     (0, 3),
@@ -1745,6 +1776,7 @@ mod tests {
                 )
             );
 
+            // High cache has only one capacity, but we need to trigger 2 inserts here!
             let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
                 *res.as_chunk().unwrap(),
