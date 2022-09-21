@@ -781,6 +781,6 @@ select array_cat(array[1.2], array[array[1]]);
 query T
 select array_cat(array[2], array[array[1]]);
 ----
-{{1},{1}}
+{{2},{1}}
 
 
