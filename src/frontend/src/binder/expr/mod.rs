@@ -438,7 +438,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Varchar | AstDataType::String => DataType::Varchar,
+        AstDataType::Varchar | AstDataType::String | AstDataType::Text => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
@@ -461,13 +461,6 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?,
             types.iter().map(|f| f.name.real_value()).collect_vec(),
         ),
-        AstDataType::Text => {
-            return Err(ErrorCode::NotImplemented(
-                format!("unsupported data type: {:}", data_type),
-                2535.into(),
-            )
-            .into())
-        }
         AstDataType::Custom(qualified_type_name) if qualified_type_name.0.len() == 1 => {
             // In PostgreSQL, these are not keywords but pre-defined names that could be extended by
             // `CREATE TYPE`.
