@@ -201,7 +201,7 @@ fn infer_type_for_special(
                         .abs();
                         if common_ele_type.is_err() || nesting_level_diff > 1 {
                             return Err(ErrorCode::BindError(format!(
-                                "A Cannot concatenate {} and {}",
+                                "Cannot concatenate {} and {}",
                                 left_type, right_type
                             ))
                             .into());
@@ -228,7 +228,7 @@ fn infer_type_for_special(
             };
             Ok(Some(return_type.ok_or_else(|| {
                 ErrorCode::BindError(format!(
-                    "B Cannot concatenate {} and {}",
+                    "Cannot concatenate {} and {}",
                     left_type, right_type
                 ))
             })?))
