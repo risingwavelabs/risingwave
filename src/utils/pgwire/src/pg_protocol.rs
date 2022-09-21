@@ -24,7 +24,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::log::trace;
 
 use crate::error::{PsqlError, PsqlResult};
-use crate::pg_extended::{default_params, replace_params, PgPortal, PgStatement};
+use crate::pg_extended::{PgPortal, PgStatement, PreparedStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
@@ -311,7 +311,7 @@ where
     async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         tracing::trace!("(extended query)parse query: {}", sql);
-        // 1. Create the types description.
+        // Create the types description.
         let types = msg
             .type_ids
             .iter()
@@ -328,25 +328,17 @@ where
                 || lower_sql.starts_with("describe")
         };
 
+        let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), types)?;
+
         // 2. Create the row description.
         let fields: Vec<PgFieldDescriptor> = if is_query_sql {
-            if types.is_empty() {
-                let session = self.session.clone().unwrap();
-                session
-                    .infer_return_type(sql)
-                    .await
-                    .map_err(PsqlError::ParseError)?
-            } else {
-                // replace the param use default value of that type
-                let default_params = default_params(&types)?;
-                let real_sql = replace_params(sql.to_string(), &default_params);
-                let session = self.session.clone().unwrap();
-                session
-                    .infer_return_type(&real_sql)
-                    .await
-                    .map_err(PsqlError::ParseError)?
-                // send sql to the infer_return_type
-            }
+            let sql = prepared_statement.instance_default()?;
+
+            let session = self.session.clone().unwrap();
+            session
+                .infer_return_type(&sql)
+                .await
+                .map_err(PsqlError::ParseError)?
         } else {
             vec![]
         };
@@ -354,8 +346,7 @@ where
         // 3. Create the statement.
         let statement = PgStatement::new(
             cstr_to_str(&msg.statement_name).unwrap().to_string(),
-            msg.sql_bytes,
-            types,
+            prepared_statement,
             fields,
             is_query_sql,
         );
@@ -424,10 +415,7 @@ where
                 .ok_or_else(PsqlError::no_portal_in_execute)?
         };
 
-        tracing::trace!(
-            "(extended query)execute query: {}",
-            cstr_to_str(&portal.query_string()).unwrap()
-        );
+        tracing::trace!("(extended query)execute query: {}", portal.query_string());
 
         // 2. Execute instance statement using portal.
         let session = self.session.clone().unwrap();
