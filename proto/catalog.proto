@@ -73,7 +73,7 @@ message Table {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated plan_common.ColumnOrder order_key = 6;
+  repeated plan_common.ColumnOrder pk = 6;
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
