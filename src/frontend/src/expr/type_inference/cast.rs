@@ -49,9 +49,9 @@ fn calc_nesting_level_inner(dt: DataType, level: i32) -> i32 {
 /// True if lhs is more nested, else false
 ///
 /// Examples:
-/// get_most_nested(DataType::Boolean) -> 0
-/// get_most_nested(List{DataType::Int16}) -> 1
-/// get_most_nested(List{List{DataType::Boolean}}) -> 2
+/// calc_nesting_level(DataType::Boolean) -> 0
+/// calc_nesting_level(List{DataType::Int16}) -> 1
+/// calc_nesting_level(List{List{DataType::Boolean}}) -> 2
 fn calc_nesting_level(dt: DataType) -> i32 {
     calc_nesting_level_inner(dt, 0)
 }

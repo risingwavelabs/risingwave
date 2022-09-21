@@ -21,7 +21,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeName};
 
 use super::{align_types, cast_ok_base, least_restrictive, CastContext};
-use crate::expr::type_inference::cast::{get_inner_type, get_most_nested, add_nesting};
+use crate::expr::type_inference::cast::{add_nesting, get_inner_type, get_most_nested};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
@@ -255,19 +255,27 @@ fn infer_type_for_special(
 
             // found common type
             let common_ele_type = common_ele_type.unwrap();
-            let array_type = DataType::List {
-                datatype: Box::new(common_ele_type.clone()),
-            };
+            let most_nested = get_most_nested(left_type.clone(), right_type.clone());
+            let array_type = add_nesting(common_ele_type.clone(), most_nested);
+
+            // TODO: remove this comments
+            // let array_type = DataType::List {
+            //     datatype: Box::new(common_ele_type.clone()),
+            // };
 
             // try to cast inputs to inputs to common type
             let inputs_owned = std::mem::take(inputs);
             let try_cast = inputs_owned
                 .into_iter()
                 .map(|input| {
-                    if input.return_type().is_scalar() {
-                        return input.cast_implicit(common_ele_type.clone());
-                    }
-                    input.cast_implicit(array_type.clone())
+                    let x = input.return_type();
+                    input.cast_explicit(add_nesting(common_ele_type.clone(), x))
+
+                    // TODO: remove these comments
+                    // if input.return_type().is_scalar() {
+                    //     return input.cast_implicit(common_ele_type.clone());
+                    // }
+                    // input.cast_implicit(array_type.clone())
                 })
                 .try_collect();
 
