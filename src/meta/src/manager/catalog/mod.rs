@@ -642,7 +642,7 @@ where
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
         } else {
-            bail!("source or table already exist");
+            bail!("source or table already exists");
         }
     }
 
