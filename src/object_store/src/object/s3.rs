@@ -163,7 +163,7 @@ impl S3StreamingUploader {
 
             try_update_failure_metric(&metrics, &upload_output_res, operation_type);
             if let Err(err) = upload_output_res.as_ref() {
-                upload_part_err.lock().get_or_insert(format!("{:?}", err));
+                upload_part_err.lock().get_or_insert(format!("{}", err));
             }
             Ok((part_id, upload_output_res?))
         }));
@@ -241,7 +241,7 @@ impl S3StreamingUploader {
             .as_ref()
             .map(|err| {
                 Err(ObjectError::internal(format!(
-                    "some part already failed to be uploaded: {:?}",
+                    "some part already failed to be uploaded: {}",
                     err,
                 )))
             })
