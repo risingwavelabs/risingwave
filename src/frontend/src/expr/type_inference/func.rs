@@ -258,11 +258,6 @@ fn infer_type_for_special(
             let most_nested = get_most_nested(left_type.clone(), right_type.clone());
             let array_type = add_nesting(common_ele_type.clone(), most_nested);
 
-            // TODO: remove this comments
-            // let array_type = DataType::List {
-            //     datatype: Box::new(common_ele_type.clone()),
-            // };
-
             // try to cast inputs to inputs to common type
             let inputs_owned = std::mem::take(inputs);
             let try_cast = inputs_owned
@@ -270,12 +265,6 @@ fn infer_type_for_special(
                 .map(|input| {
                     let x = input.return_type();
                     input.cast_explicit(add_nesting(common_ele_type.clone(), x))
-
-                    // TODO: remove these comments
-                    // if input.return_type().is_scalar() {
-                    //     return input.cast_implicit(common_ele_type.clone());
-                    // }
-                    // input.cast_implicit(array_type.clone())
                 })
                 .try_collect();
 
