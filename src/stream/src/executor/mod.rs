@@ -617,7 +617,9 @@ pub async fn expect_first_barrier_from_aligned_stream(
         .next()
         .stack_trace("expect_first_barrier")
         .await
-        .expect("failed to extract the first message: stream closed unexpectedly")?;
+        .ok_or_else(|| {
+            anyhow!("failed to extract the first message: stream closed unexpectedly")
+        })??;
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");

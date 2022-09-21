@@ -707,6 +707,9 @@ impl LocalStreamManagerCore {
         }
         self.actors.clear();
         self.context.clear_channels();
+        if let Some(stack_trace_manager) = self.stack_trace_manager.as_mut() {
+            std::mem::take(stack_trace_manager);
+        }
         self.actor_monitor_tasks.clear();
         self.context.actor_infos.write().clear();
     }
