@@ -55,14 +55,6 @@ pub async fn handle_drop_mv(
                 "Use `DROP TABLE` to drop a table.".to_owned(),
             )));
         }
-
-        // If is index on is `Some`, then it is a actually an index.
-        if table.is_index_on.is_some() {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP INDEX` to drop an index.".to_owned(),
-            )));
-        }
-
         // If the name is not valid, then it is a actually an internal table.
         if !valid_table_name(&table_name) {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
