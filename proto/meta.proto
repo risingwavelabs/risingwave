@@ -60,6 +60,10 @@ message TableFragments {
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
     common.ParallelUnitMapping vnode_mapping = 5;
     repeated uint32 state_table_ids = 6;
+    // Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
+    // but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,
+    // so we pre-generate and store it here, this member will only be initialized when creating the Fragment
+    // and modified when and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
   }
   uint32 table_id = 1;
