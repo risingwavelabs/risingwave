@@ -163,33 +163,60 @@ pub async fn compaction_test_serve(
             );
             // When this function returns, the compaction is finished.
             // The returned version deltas is order by id in ascending order
-            let new_versions = meta_client
+            let (new_version_id, new_committed_epoch) = meta_client
                 .trigger_compaction_deterministic(
                     version_id,
                     Vec::from_iter(modified_compaction_groups.into_iter()),
                 )
                 .await?;
-            if let Some(latest_version) = new_versions.version_deltas.last() {
-                // compare KVs after compaction finished
-                let actual_result = hummock
-                    .scan::<_, Vec<u8>>(
-                        None,
-                        ..,
-                        None,
-                        ReadOptions {
-                            epoch: latest_version.max_committed_epoch,
-                            table_id: None,
-                            retention_seconds: None,
-                        },
-                    )
-                    .await?;
-                tracing::info!(
-                    "Check result for version: id: {}, max_committed_epoch: {}",
-                    latest_version.id,
-                    latest_version.max_committed_epoch,
-                );
-                check_result(&expect_result, &actual_result);
-            }
+
+            assert!(
+                new_version_id >= version_id,
+                "new_version_id: {}, epoch: {}",
+                new_version_id,
+                new_committed_epoch
+            );
+            assert_eq!(max_committed_epoch, new_committed_epoch);
+            let actual_result = hummock
+                .scan::<_, Vec<u8>>(
+                    None,
+                    ..,
+                    None,
+                    ReadOptions {
+                        epoch: new_committed_epoch,
+                        table_id: None,
+                        retention_seconds: None,
+                    },
+                )
+                .await?;
+            tracing::info!(
+                "Check result for version: id: {}, max_committed_epoch: {}",
+                new_version_id,
+                new_committed_epoch,
+            );
+            check_result(&expect_result, &actual_result);
+
+            // if let Some(latest_version) = new_versions.version_deltas.last() {
+            //     // compare KVs after compaction finished
+            //     let actual_result = hummock
+            //         .scan::<_, Vec<u8>>(
+            //             None,
+            //             ..,
+            //             None,
+            //             ReadOptions {
+            //                 epoch: latest_version.max_committed_epoch,
+            //                 table_id: None,
+            //                 retention_seconds: None,
+            //             },
+            //         )
+            //         .await?;
+            //     tracing::info!(
+            //         "Check result for version: id: {}, max_committed_epoch: {}",
+            //         latest_version.id,
+            //         latest_version.max_committed_epoch,
+            //     );
+            //     check_result(&expect_result, &actual_result);
+            // }
             modified_compaction_groups = HashSet::new();
         }
     }

@@ -83,7 +83,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         &self,
         version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<HummockVersionDeltas> {
+    ) -> Result<(HummockVersionId, HummockEpoch)> {
         self.meta_client
             .trigger_compaction_deterministic(version_id, compaction_groups)
             .await

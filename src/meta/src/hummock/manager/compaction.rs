@@ -32,6 +32,8 @@ pub struct Compaction {
     pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
+
+    pub deterministic_mode: bool,
 }
 
 impl Compaction {

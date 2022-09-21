@@ -522,13 +522,13 @@ impl HummockMetaClient for MetaClient {
         &self,
         version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<HummockVersionDeltas> {
+    ) -> Result<(HummockVersionId, HummockEpoch)> {
         let req = TriggerCompactionDeterministicRequest {
             version_id,
             compaction_groups,
         };
         let resp = self.inner.trigger_compaction_deterministic(req).await?;
-        Ok(resp.versions.unwrap())
+        Ok((resp.version_id, resp.max_committed_epoch))
     }
 
     async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
