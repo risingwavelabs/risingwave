@@ -104,7 +104,6 @@ pub(crate) fn gen_create_index_plan(
     // Manually assemble the materialization plan for the index MV.
     let materialize = assemble_materialize(
         table_name,
-        table.id,
         table_desc.clone(),
         context,
         index_table_name.clone(),
@@ -206,7 +205,6 @@ fn build_index_item(
 
 fn assemble_materialize(
     table_name: String,
-    table_id: TableId,
     table_desc: Rc<TableDesc>,
     context: OptimizerContextRef,
     index_name: String,
@@ -258,7 +256,7 @@ fn assemble_materialize(
         project_required_cols,
         out_names,
     )
-    .gen_create_index_plan(index_name, table_id)
+    .gen_create_index_plan(index_name)
 }
 
 fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
