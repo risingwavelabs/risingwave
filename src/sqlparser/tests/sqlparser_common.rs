@@ -10,7 +10,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![warn(clippy::all)]
 //! Test SQL syntax, which all sqlparser dialects must parse in the same way.
 //!
 //! Note that it does not mean all SQL here is valid in all the dialects, only
