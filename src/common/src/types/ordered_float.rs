@@ -69,7 +69,7 @@ const CANONICAL_ZERO_BITS: u64 = 0x0u64;
 
 /// A wrapper around floats providing implementations of `Eq`, `Ord`, and `Hash`.
 ///
-/// NaN is sorted as *greater* than all other values and *equal*
+/// `NaN` is sorted as *greater* than all other values and *equal*
 /// to itself, in contradiction with the IEEE standard.
 ///
 /// ```ignore

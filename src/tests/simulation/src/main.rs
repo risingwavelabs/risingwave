@@ -14,6 +14,7 @@
 
 #![cfg_attr(not(madsim), allow(dead_code))]
 #![feature(once_cell)]
+#![feature(lint_reasons)]
 
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -302,6 +303,7 @@ async fn kill_node() {
 }
 
 #[cfg(not(madsim))]
+#[expect(clippy::unused_async)]
 async fn kill_node() {}
 
 async fn run_slt_task(glob: &str, host: &str) {
