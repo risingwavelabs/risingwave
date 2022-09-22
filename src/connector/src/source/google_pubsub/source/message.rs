@@ -23,16 +23,3 @@ impl From<ReceivedMessage> for SourceMessage {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use anyhow::Result;
-
-    use super::*;
-
-    fn test_conv() -> Result<()> {
-        let message = ReceivedMessage::default();
-        let _source_message: SourceMessage = message.into();
-        Ok(())
-    }
-}
