@@ -25,6 +25,7 @@ rustflags = [
     "tokio_unstable",
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
+    "-Dunused_must_use",
     "-Wclippy::dbg_macro",
     "-Wclippy::disallowed_methods",
     "-Wclippy::disallowed_types",
@@ -36,6 +37,8 @@ rustflags = [
     "-Wclippy::map_flatten",
     "-Wclippy::no_effect_underscore_binding",
     "-Wclippy::await_holding_lock",
-    "-Dunused_must_use",
-    "-Wrustdoc::broken_intra_doc_links"
+    "-Wrustdoc::broken_intra_doc_links",
+    "-Wfuture_incompatible",
+    "-Wnonstandard_style",
+    "-Wrust_2018_idioms",
 ]

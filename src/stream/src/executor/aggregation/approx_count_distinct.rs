@@ -223,7 +223,7 @@ impl<const DENSE_BITS: usize> StreamingApproxCountDistinct<DENSE_BITS> {
     /// count at the register.
     fn update_registers(
         &mut self,
-        datum_ref: DatumRef,
+        datum_ref: DatumRef<'_>,
         is_insert: bool,
     ) -> StreamExecutorResult<()> {
         if datum_ref.is_none() {

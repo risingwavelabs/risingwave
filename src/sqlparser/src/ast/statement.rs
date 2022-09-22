@@ -636,7 +636,7 @@ impl ParseTo for DropMode {
 }
 
 impl fmt::Display for DropMode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             DropMode::Cascade => "CASCADE",
             DropMode::Restrict => "RESTRICT",

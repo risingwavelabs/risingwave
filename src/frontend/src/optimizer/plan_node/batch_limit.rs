@@ -54,7 +54,7 @@ impl BatchLimit {
 }
 
 impl fmt::Display for BatchLimit {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "BatchLimit {{ limit: {limit}, offset: {offset} }}",

@@ -39,7 +39,7 @@ impl Executor for SubtaskRxExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> super::PkIndicesRef {
+    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 

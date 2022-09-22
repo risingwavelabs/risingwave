@@ -22,7 +22,7 @@ pub const PG_USER_TABLE_NAME: &str = "pg_user";
 pub const PG_USER_ID_INDEX: usize = 0;
 pub const PG_USER_NAME_INDEX: usize = 1;
 
-pub const PG_USER_COLUMNS: &[PgCatalogColumnsDef] = &[
+pub const PG_USER_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "usesysid"),
     (DataType::Varchar, "name"),
     (DataType::Boolean, "usecreatedb"),

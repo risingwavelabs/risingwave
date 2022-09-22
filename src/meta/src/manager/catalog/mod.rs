@@ -98,7 +98,7 @@ where
         Ok(())
     }
 
-    pub async fn get_catalog_core_guard(&self) -> MutexGuard<CatalogManagerCore<S>> {
+    pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore<S>> {
         self.core.lock().await
     }
 }

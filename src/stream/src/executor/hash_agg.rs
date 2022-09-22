@@ -114,7 +114,7 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
         &self.extra.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.extra.pk_indices
     }
 

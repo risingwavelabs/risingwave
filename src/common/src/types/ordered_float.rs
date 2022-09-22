@@ -195,7 +195,7 @@ impl<T: Float> Hash for OrderedFloat<T> {
 
 impl<T: Float + fmt::Display> fmt::Display for OrderedFloat<T> {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let v = self.0;
         if v.is_nan() {
             return write!(f, "NaN");

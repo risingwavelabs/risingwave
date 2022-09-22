@@ -129,7 +129,7 @@ struct RowIdIter<'a> {
 }
 
 impl ChunkedData<Option<RowId>> {
-    fn row_id_iter(&self, begin: Option<RowId>) -> RowIdIter {
+    fn row_id_iter(&self, begin: Option<RowId>) -> RowIdIter<'_> {
         RowIdIter {
             current_row_id: begin,
             next_row_id: self,
@@ -1334,7 +1334,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
     fn append_one_row_with_null_build_side(
         chunk_builder: &mut DataChunkBuilder,
-        probe_row_ref: RowRef,
+        probe_row_ref: RowRef<'_>,
         build_column_count: usize,
     ) -> Result<Option<DataChunk>> {
         Ok(chunk_builder.append_one_row_from_datum_refs(
@@ -1346,7 +1346,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
     fn append_one_row_with_null_probe_side(
         chunk_builder: &mut DataChunkBuilder,
-        build_row_ref: RowRef,
+        build_row_ref: RowRef<'_>,
         probe_column_count: usize,
     ) -> Result<Option<DataChunk>> {
         Ok(chunk_builder.append_one_row_from_datum_refs(
@@ -1575,7 +1575,7 @@ impl DataChunkMutator {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for HashJoinExecutor<()> {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        context: &ExecutorBuilder<C>,
+        context: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [left_child, right_child]: [_; 2] = inputs.try_into().unwrap();
