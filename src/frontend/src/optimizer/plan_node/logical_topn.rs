@@ -122,7 +122,11 @@ impl LogicalTopN {
     }
 
     /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
-    pub fn infer_internal_table_catalog(&self, group_key: Option<&[usize]>) -> TableCatalog {
+    pub fn infer_internal_table_catalog(
+        &self,
+        group_key: Option<&[usize]>,
+        vnode_col_idx: Option<usize>,
+    ) -> TableCatalog {
         let schema = &self.base.schema;
         let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
@@ -163,7 +167,11 @@ impl LogicalTopN {
                 order_cols.insert(*idx);
             }
         });
-        internal_table_catalog_builder.build(vec![], self.base.append_only, None)
+        internal_table_catalog_builder.build(
+            self.input().distribution().dist_column_indices().to_vec(),
+            self.base.append_only,
+            vnode_col_idx,
+        )
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
@@ -218,13 +226,16 @@ impl LogicalTopN {
         );
         let vnode_col_idx = exprs.len() - 1;
         let project = StreamProject::new(LogicalProject::new(stream_input, exprs.clone()));
-        let local_top_n = StreamGroupTopN::new(LogicalTopN::with_group(
-            project.into(),
-            self.limit + self.offset,
-            0,
-            self.order.clone(),
-            vec![vnode_col_idx],
-        ));
+        let local_top_n = StreamGroupTopN::new(
+            LogicalTopN::with_group(
+                project.into(),
+                self.limit + self.offset,
+                0,
+                self.order.clone(),
+                vec![vnode_col_idx],
+            ),
+            Some(vnode_col_idx),
+        );
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;
         let global_top_n = StreamTopN::new(LogicalTopN::new(
@@ -380,7 +391,7 @@ impl ToStream for LogicalTopN {
             let input = RequiredDist::hash_shard(self.group_key())
                 .enforce_if_not_satisfies(input, &Order::any())?;
             let logical = self.clone_with_input(input);
-            StreamGroupTopN::new(logical).into()
+            StreamGroupTopN::new(logical, None).into()
         } else {
             self.gen_dist_stream_top_n_plan(self.input.to_stream()?)?
         })

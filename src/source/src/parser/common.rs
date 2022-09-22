@@ -19,6 +19,13 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{str_to_date, str_to_time, str_to_timestamp};
 use serde_json::Value;
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
+use simd_json::{value::StaticNode, BorrowedValue, ValueAccess};
 
 macro_rules! ensure_float {
     ($v:ident, $t:ty) => {
@@ -79,10 +86,74 @@ fn do_parse_json_value(column: &ColumnDesc, v: &Value) -> Result<ScalarImpl> {
     Ok(v)
 }
 
+#[inline]
 pub(crate) fn json_parse_value(column: &ColumnDesc, value: Option<&Value>) -> Result<Datum> {
     match value {
         None | Some(Value::Null) => Ok(None),
         Some(v) => Ok(Some(do_parse_json_value(column, v).map_err(|e| {
+            anyhow!("failed to parse column '{}' from json: {}", column.name, e)
+        })?)),
+    }
+}
+
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
+fn do_parse_simd_json_value(column: &ColumnDesc, v: &BorrowedValue) -> Result<ScalarImpl> {
+    let v = match column.data_type {
+        DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
+        DataType::Int16 => ScalarImpl::Int16(
+            ensure_int!(v, i16)
+                .try_into()
+                .map_err(|e| anyhow!("expect i16: {}", e))?,
+        ),
+        DataType::Int32 => ScalarImpl::Int32(
+            ensure_int!(v, i32)
+                .try_into()
+                .map_err(|e| anyhow!("expect i32: {}", e))?,
+        ),
+        DataType::Int64 => ensure_int!(v, i64).into(),
+        DataType::Float32 => ScalarImpl::Float32((ensure_float!(v, f32) as f32).into()),
+        DataType::Float64 => ScalarImpl::Float64((ensure_float!(v, f64) as f64).into()),
+        DataType::Decimal => Decimal::from_f64(ensure_float!(v, Decimal))
+            .ok_or_else(|| anyhow!("expect decimal"))?
+            .into(),
+        DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
+        DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
+        DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
+        DataType::Timestamp => str_to_timestamp(ensure_str!(v, "timestamp"))?.into(),
+        DataType::Timestampz => unimplemented!(),
+        DataType::Interval => unimplemented!(),
+        DataType::List { .. } => unimplemented!(),
+        DataType::Struct { .. } => {
+            let fields = column
+                .field_descs
+                .iter()
+                .map(|field| simd_json_parse_value(field, v.get(field.name.as_str())))
+                .collect::<Result<Vec<Datum>>>()?;
+            ScalarImpl::Struct(StructValue::new(fields))
+        }
+    };
+    Ok(v)
+}
+
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
+#[inline]
+pub(crate) fn simd_json_parse_value(
+    column: &ColumnDesc,
+    value: Option<&BorrowedValue>,
+) -> Result<Datum> {
+    match value {
+        None | Some(BorrowedValue::Static(StaticNode::Null)) => Ok(None),
+        Some(v) => Ok(Some(do_parse_simd_json_value(column, v).map_err(|e| {
             anyhow!("failed to parse column '{}' from json: {}", column.name, e)
         })?)),
     }
