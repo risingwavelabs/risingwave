@@ -429,14 +429,24 @@ impl PreparedStatement {
                     format!("{}::DECIMAL", tmp)
                 }
                 TypeOid::Timestampz => {
-                    return Err(PsqlError::BindError(
-                        "Can't support Timestampz type in extended query mode".into(),
-                    ))
+                    if param_format {
+                        return Err(PsqlError::BindError(
+                            "Can't support Timestampz type in binary format".into(),
+                        ));
+                    } else {
+                        let tmp = cstr_to_str(raw_param).unwrap().to_string();
+                        format!("'{}'::TIMESTAMPZ", tmp)
+                    }
                 }
                 TypeOid::Interval => {
-                    return Err(PsqlError::BindError(
-                        "Can't support Interval type in extended query mode".into(),
-                    ))
+                    if param_format {
+                        return Err(PsqlError::BindError(
+                            "Can't support Interval type in binary format".into(),
+                        ));
+                    } else {
+                        let tmp = cstr_to_str(raw_param).unwrap().to_string();
+                        format!("'{}'::INTERVAL", tmp)
+                    }
                 }
             };
             params.push(str)
