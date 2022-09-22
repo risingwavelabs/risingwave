@@ -1,5 +1,5 @@
 steps:
-  - label: "flink nexmarkbenchmark"
+  - label: "flink nexmark benchmark"
     command: "ci/scripts/flink-bench.sh"
     plugins:
       - ./ci/plugins/benchmark
@@ -8,5 +8,5 @@ steps:
             GITHUB_TOKEN: github-token
             BENCH_TOKEN: bench-token
     agents:
-      queue: "flink-bench"
+      queue: "benchmark"
     timeout_in_minutes: 30
