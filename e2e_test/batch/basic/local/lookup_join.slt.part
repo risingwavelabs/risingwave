@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 set rw_batch_enable_lookup_join to true;
 
 statement ok
@@ -40,8 +43,12 @@ query IIII
 select * from t1 join t3 on t1.v1 = t3.v1 where t1.v1 > 1 order by t1.v1, t1.v2;
 ----
 
-statement error
-select * from t1 right join t3 on t1.v1 = t3.v1;
+query IIII
+select * from t1 right join t3 on t1.v1 = t3.v1 order by t1.v1, t1.v2;
+----
+1 1 1 2
+1 4 1 2
+NULL NULL 4 1
 
 statement ok
 drop materialized view t3;
@@ -90,8 +97,13 @@ select t3.v1 from t1 join t3 on t1.v2 = t3.v2;
 ----
 1
 
-statement error
-select * from t1 right join t3 on t1.v1 = t3.v2;
+query IIII
+select * from t1 right join t3 on t1.v1 = t3.v2 order by t3.v1, t3.v2;
+----
+NULL NULL 1 flow
+NULL NULL 1 gww
+NULL NULL 1 hello
+
 
 statement ok
 drop materialized view t3;
@@ -149,9 +161,6 @@ query IIII
 select * from t3 join t6 on t3.v1 = t6.v1;
 ----
 2 2 1
-
-statement error
-select * from t4 join t6 on t4.v1 = t6.v1;
 
 statement ok
 drop materialized view t6;

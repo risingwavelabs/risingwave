@@ -40,6 +40,7 @@ pub enum FeMessage {
     Sync,
     CancelQuery(FeCancelMessage),
     Terminate,
+    Flush,
 }
 
 pub struct FeStartupMessage {
@@ -298,6 +299,7 @@ impl FeMessage {
             b'X' => Ok(FeMessage::Terminate),
             b'C' => FeCloseMessage::parse(sql_bytes),
             b'p' => FePasswordMessage::parse(sql_bytes),
+            b'H' => Ok(FeMessage::Flush),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!("Unsupported tag of regular message: {}", val),
