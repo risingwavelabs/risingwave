@@ -11,7 +11,7 @@ aws ec2 start-instances --instance-ids i-029fdf626052dcdaf
 echo "==========================================="
 echo "do ssh to the flink benchmark machine"
 echo "==========================================="
-ssh -o "StrictHostKeyChecking no" ubuntu@ec2-13-250-182-33.ap-southeast-1.compute.amazonaws.com
+ssh -o "StrictHostKeyChecking no" ubuntu@52.220.89.140
 printf "logged in to the flink benchmark setup\n"
 
 echo "==========================================="
