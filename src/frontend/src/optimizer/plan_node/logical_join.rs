@@ -100,10 +100,10 @@ impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let out_column_num =
             Self::out_column_num(left.schema().len(), right.schema().len(), join_type);
-        Self::new_with_output_indices(left, right, join_type, on, (0..out_column_num).collect())
+        Self::with_output_indices(left, right, join_type, on, (0..out_column_num).collect())
     }
 
-    pub(crate) fn new_with_output_indices(
+    pub(crate) fn with_output_indices(
         left: PlanRef,
         right: PlanRef,
         join_type: JoinType,
@@ -120,6 +120,35 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
+        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
+        // key.
+        let pk_indices = pk_indices.and_then(|mut pk_indices| {
+            let left_len = left.schema().len();
+            let right_len = right.schema().len();
+            let eq_predicate = EqJoinPredicate::create(left_len, right_len, on.clone());
+
+            let l2i = Self::l2i_col_mapping_inner(left_len, right_len, join_type);
+            let r2i = Self::r2i_col_mapping_inner(left_len, right_len, join_type);
+            let out_col_num = Self::out_column_num(left_len, right_len, join_type);
+            let i2o = ColIndexMapping::with_remaining_columns(&output_indices, out_col_num);
+
+            for (lk, rk) in eq_predicate.eq_indexes() {
+                if let Some(lk) = l2i.try_map(lk) {
+                    let out_k = i2o.try_map(lk)?;
+                    if !pk_indices.contains(&out_k) {
+                        pk_indices.push(out_k);
+                    }
+                }
+                if let Some(rk) = r2i.try_map(rk) {
+                    let out_k = i2o.try_map(rk)?;
+                    if !pk_indices.contains(&out_k) {
+                        pk_indices.push(out_k);
+                    }
+                }
+            }
+            Some(pk_indices)
+        });
+        // NOTE(st1page) over
         let functional_dependency = Self::derive_fd(
             left.schema().len(),
             right.schema().len(),
@@ -129,13 +158,20 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
-        let pk_indices = match pk_indices {
-            Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
-                functional_dependency.minimize_key(&pk_indices)
-            }
-            _ => pk_indices.unwrap_or_default(),
-        };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
+        // key.
+        // let pk_indices = match pk_indices {
+        //     Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
+        //         functional_dependency.minimize_key(&pk_indices)
+        //     }
+        //     _ => pk_indices.unwrap_or_default(),
+        // };
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
         LogicalJoin {
             base,
             left,
@@ -388,7 +424,7 @@ impl LogicalJoin {
 
     /// Clone with new output indices
     pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
-        Self::new_with_output_indices(
+        Self::with_output_indices(
             self.left.clone(),
             self.right.clone(),
             self.join_type,
@@ -399,7 +435,7 @@ impl LogicalJoin {
 
     /// Clone with new `on` condition
     pub fn clone_with_cond(&self, cond: Condition) -> Self {
-        Self::new_with_output_indices(
+        Self::with_output_indices(
             self.left.clone(),
             self.right.clone(),
             self.join_type,
@@ -556,6 +592,14 @@ impl LogicalJoin {
             return None;
         }
 
+        match logical_join.join_type() {
+            JoinType::RightOuter
+            | JoinType::RightSemi
+            | JoinType::RightAnti
+            | JoinType::FullOuter => return None,
+            _ => {}
+        };
+
         let logical_scan = self.right.as_logical_scan().unwrap();
         let table_desc = logical_scan.table_desc().clone();
         let output_column_ids = logical_scan.output_column_ids();
@@ -624,7 +668,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new_with_output_indices(
+        Self::with_output_indices(
             left,
             right,
             self.join_type,
@@ -659,7 +703,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
             (new_on, new_output_indices)
         };
 
-        let join = Self::new_with_output_indices(
+        let join = Self::with_output_indices(
             left,
             right,
             self.join_type,
@@ -747,7 +791,7 @@ impl ColPrunable for LogicalJoin {
             required_cols.iter().map(|&i| mapping.map(i)).collect_vec()
         };
 
-        LogicalJoin::new_with_output_indices(
+        LogicalJoin::with_output_indices(
             self.left.prune_col(&left_required_cols),
             self.right.prune_col(&right_required_cols),
             self.join_type,
@@ -820,7 +864,16 @@ impl PredicatePushdown for LogicalJoin {
 
         let new_left = self.left.predicate_pushdown(left_predicate);
         let new_right = self.right.predicate_pushdown(right_predicate);
-        let new_join = LogicalJoin::new(new_left, new_right, join_type, new_on);
+        let new_join = LogicalJoin::with_output_indices(
+            new_left,
+            new_right,
+            join_type,
+            new_on,
+            self.output_indices.clone(),
+        );
+
+        let mut mapping = self.i2o_col_mapping();
+        predicate = predicate.rewrite_expr(&mut mapping);
         LogicalFilter::create(new_join.into(), predicate)
     }
 }
@@ -1104,11 +1157,35 @@ impl ToStream for LogicalJoin {
             .filter(|i| r2i.try_map(*i) == None)
             .map(|i| i + left_len);
 
+        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
+        // key.
+        let right_len = right.schema().len();
+        let eq_predicate = EqJoinPredicate::create(left_len, right_len, join.on.clone());
+
+        let left_to_add = left_to_add
+            .chain(
+                eq_predicate
+                    .left_eq_indexes()
+                    .into_iter()
+                    .filter(|i| l2i.try_map(*i) == None),
+            )
+            .unique();
+        let right_to_add = right_to_add
+            .chain(
+                eq_predicate
+                    .right_eq_indexes()
+                    .into_iter()
+                    .filter(|i| r2i.try_map(*i) == None)
+                    .map(|i| i + left_len),
+            )
+            .unique();
+        // NOTE(st1page) over
+
         let mut new_output_indices = join.output_indices.clone();
-        if !self.is_right_join() {
+        if !join.is_right_join() {
             new_output_indices.extend(left_to_add);
         }
-        if !self.is_left_join() {
+        if !join.is_left_join() {
             new_output_indices.extend(right_to_add);
         }
 

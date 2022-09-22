@@ -90,6 +90,19 @@ create materialized source s7 (v1 int, v2 varchar) with (
 statement ok
 select * from s7
 
+# we cannot create debezium source without pk
+statement error
+create materialized source s8 (
+  id integer,
+  first_name varchar,
+  last_name varchar,
+  email varchar
+) with (
+  connector = 'kafka',
+  topic = 'debezium_log',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format debezium_json
+
 statement ok
 create materialized source s8 (
   id integer,
@@ -105,6 +118,16 @@ create materialized source s8 (
 
 statement ok
 select * from s8
+
+statement ok
+create materialized source s9 with (
+  connector = 'kafka', topic = 'avro_bin',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format avro message 'test_student' row schema location 'file:///risingwave/avro-simple-schema.avsc'
+
+statement ok
+select * from s9
 
 statement ok
 flush;
@@ -242,3 +265,6 @@ drop source s6
 
 statement ok
 drop source s8
+
+statement ok
+drop source s9

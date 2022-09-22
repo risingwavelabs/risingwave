@@ -27,8 +27,12 @@ use super::create_sink::gen_sink_plan;
 use super::create_table::gen_create_table_plan;
 use crate::binder::Binder;
 use crate::handler::util::force_local_mode;
+use crate::optimizer::plan_node::Convention;
 use crate::planner::Planner;
+use crate::scheduler::BatchPlanFragmenter;
 use crate::session::OptimizerContext;
+use crate::stream_fragmenter::build_graph;
+use crate::utils::explain_stream_graph;
 
 pub(super) fn handle_explain(
     context: OptimizerContext,
@@ -39,19 +43,9 @@ pub(super) fn handle_explain(
     if analyze {
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
     }
-    match options.explain_type {
-        ExplainType::Logical => {
-            return Err(
-                ErrorCode::NotImplemented("explain logical".to_string(), 4856.into()).into(),
-            )
-        }
-        ExplainType::Physical => {}
-        ExplainType::DistSQL => {
-            return Err(
-                ErrorCode::NotImplemented("explain distsql".to_string(), 4856.into()).into(),
-            )
-        }
-    };
+    if options.explain_type == ExplainType::Logical {
+        return Err(ErrorCode::NotImplemented("explain logical".to_string(), 4856.into()).into());
+    }
 
     let session = context.session_ctx.clone();
     context
@@ -62,6 +56,7 @@ pub(super) fn handle_explain(
         .store(options.trace, Ordering::Release);
     // bind, plan, optimize, and serialize here
     let mut planner = Planner::new(context.into());
+    // we need to know if the plan is streaming or batch plan,
     let plan = match stmt {
         Statement::CreateView {
             or_replace: false,
@@ -69,7 +64,7 @@ pub(super) fn handle_explain(
             query,
             name,
             ..
-        } => gen_create_mv_plan(&session, planner.ctx(), query, name)?.0,
+        } => gen_create_mv_plan(&session, planner.ctx(), *query, name, false)?.0,
 
         Statement::CreateSink { stmt } => gen_sink_plan(&session, planner.ctx(), stmt)?.0,
 
@@ -109,8 +104,9 @@ pub(super) fn handle_explain(
 
     let ctx = plan.plan_base().ctx.clone();
     let explain_trace = ctx.is_explain_trace();
+    let explain_verbose = ctx.is_explain_verbose();
 
-    let rows = if explain_trace {
+    let mut rows = if explain_trace {
         let trace = ctx.take_trace();
         trace
             .iter()
@@ -118,12 +114,46 @@ pub(super) fn handle_explain(
             .map(|s| Row::new(vec![Some(s.to_string().into())]))
             .collect::<Vec<_>>()
     } else {
-        let output = plan.explain_to_string()?;
-        output
-            .lines()
-            .map(|s| Row::new(vec![Some(s.to_string().into())]))
-            .collect::<Vec<_>>()
+        vec![]
     };
+
+    if options.explain_type == ExplainType::DistSql {
+        match plan.convention() {
+            Convention::Logical => unreachable!(),
+            Convention::Batch => {
+                let plan_fragmenter = BatchPlanFragmenter::new(
+                    session.env().worker_node_manager_ref(),
+                    session.env().catalog_reader().clone(),
+                );
+                let query = plan_fragmenter.split(plan)?;
+                let stage_graph_json = serde_json::to_string_pretty(&query.stage_graph).unwrap();
+                rows.extend(
+                    vec![stage_graph_json]
+                        .iter()
+                        .flat_map(|s| s.lines())
+                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                );
+            }
+            Convention::Stream => {
+                let graph = build_graph(plan);
+                rows.extend(
+                    explain_stream_graph(&graph, explain_verbose)?
+                        .lines()
+                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                );
+            }
+        }
+    } else {
+        // if explain trace is open, the plan has been in the rows
+        if !explain_trace {
+            let output = plan.explain_to_string()?;
+            rows.extend(
+                output
+                    .lines()
+                    .map(|s| Row::new(vec![Some(s.to_string().into())])),
+            );
+        }
+    }
 
     Ok(PgResponse::new(
         StatementType::EXPLAIN,

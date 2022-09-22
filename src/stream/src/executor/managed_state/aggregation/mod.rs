@@ -22,7 +22,6 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
-use risingwave_common::util::ordered::OrderedRow;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -34,10 +33,6 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::array_agg::ManagedArrayAggState;
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
 use crate::executor::PkIndices;
-
-/// Limit number of the cached entries in an extreme aggregation call
-// TODO: estimate a good cache size instead of hard-coding
-const EXTREME_CACHE_SIZE: usize = 1024;
 
 mod array_agg;
 mod extreme;
@@ -60,14 +55,14 @@ pub fn verify_batch(
 }
 
 /// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
-pub struct Cache<T> {
+pub struct Cache<K: Ord, V> {
     /// The capacity of the cache.
     capacity: usize,
     /// Ordered cache entries.
-    entries: BTreeMap<OrderedRow, T>,
+    entries: BTreeMap<K, V>,
 }
 
-impl<T> Cache<T> {
+impl<K: Ord, V> Cache<K, V> {
     /// Create a new cache with specified capacity and order requirements.
     /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
     pub fn new(capacity: usize) -> Self {
@@ -100,7 +95,7 @@ impl<T> Cache<T> {
     /// Insert an entry into the cache.
     /// Key: `OrderedRow` composed of order by fields.
     /// Value: The value fields that are to be aggregated.
-    pub fn insert(&mut self, key: OrderedRow, value: T) {
+    pub fn insert(&mut self, key: K, value: V) {
         self.entries.insert(key, value);
         // evict if capacity is reached
         while self.entries.len() > self.capacity {
@@ -109,22 +104,22 @@ impl<T> Cache<T> {
     }
 
     /// Remove an entry from the cache.
-    pub fn remove(&mut self, key: OrderedRow) {
+    pub fn remove(&mut self, key: K) {
         self.entries.remove(&key);
     }
 
     /// Get the last (largest) key in the cache
-    pub fn last_key(&self) -> Option<&OrderedRow> {
+    pub fn last_key(&self) -> Option<&K> {
         self.entries.last_key_value().map(|(k, _)| k)
     }
 
     /// Get the first (smallest) value in the cache.
-    pub fn first_value(&self) -> Option<&T> {
+    pub fn first_value(&self) -> Option<&V> {
         self.entries.first_key_value().map(|(_, v)| v)
     }
 
     /// Iterate over the values in the cache.
-    pub fn iter_values(&self) -> impl Iterator<Item = &T> {
+    pub fn iter_values(&self) -> impl Iterator<Item = &V> {
         self.entries.values()
     }
 }
@@ -146,28 +141,23 @@ impl<S: StateStore> ManagedStateImpl<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        epoch: u64,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_chunk(ops, visibility, columns),
             Self::Table(state) => {
                 state
-                    .apply_chunk(ops, visibility, columns, epoch, state_table)
+                    .apply_chunk(ops, visibility, columns, state_table)
                     .await
             }
         }
     }
 
     /// Get the output of the state. Must flush before getting output.
-    pub async fn get_output(
-        &mut self,
-        epoch: u64,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output(),
-            Self::Table(state) => state.get_output(epoch, state_table).await,
+            Self::Table(state) => state.get_output(state_table).await,
         }
     }
 
@@ -188,12 +178,14 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Create a managed state from `agg_call`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_managed_state(
         agg_call: AggCall,
         row_count: Option<usize>,
         pk_indices: PkIndices,
         is_row_count: bool,
         group_key: Option<&Row>,
+        extreme_cache_size: usize,
         state_table: &StateTable<S>,
         state_table_col_mapping: Arc<StateTableColumnMapping>,
     ) -> StreamExecutorResult<Self> {
@@ -219,7 +211,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 pk_indices,
                 state_table_col_mapping,
                 row_count.unwrap(),
-                EXTREME_CACHE_SIZE,
+                extreme_cache_size,
             )))),
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
                 agg_call,

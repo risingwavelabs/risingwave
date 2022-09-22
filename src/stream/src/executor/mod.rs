@@ -23,11 +23,11 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use minitrace::prelude::*;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
+use risingwave_common::array::{ArrayImpl, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::{ConnectorState, SplitImpl};
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -41,7 +41,8 @@ use risingwave_pb::stream_plan::{
 };
 use smallvec::SmallVec;
 
-use crate::task::ActorId;
+use crate::error::StreamResult;
+use crate::task::{ActorId, FragmentId};
 
 mod actor;
 mod barrier_align;
@@ -90,7 +91,7 @@ pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
-pub use error::StreamExecutorResult;
+pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::GlobalSimpleAggExecutor;
@@ -115,6 +116,8 @@ pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use union::UnionExecutor;
 pub use wrapper::WrapperExecutor;
+
+use self::barrier_align::AlignedMessageStream;
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
@@ -185,15 +188,15 @@ impl std::fmt::Debug for BoxedExecutor {
 
 pub const INVALID_EPOCH: u64 = 0;
 
-pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
+type UpstreamFragmentId = FragmentId;
 
 /// See [`risingwave_pb::stream_plan::barrier::Mutation`] for the semantics of each mutation.
 #[derive(Debug, Clone, PartialEq, EnumAsInner)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
     Update {
-        dispatchers: HashMap<ActorId, DispatcherUpdate>,
-        merges: HashMap<ActorId, MergeUpdate>,
+        dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
+        merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
         vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
     },
@@ -207,47 +210,13 @@ pub enum Mutation {
     Resume,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Epoch {
-    pub curr: u64,
-    pub prev: u64,
-}
-
-impl Epoch {
-    pub fn new(curr: u64, prev: u64) -> Self {
-        assert!(curr > prev);
-        Self { curr, prev }
-    }
-
-    #[cfg(test)]
-    pub fn inc(&self) -> Self {
-        Self {
-            curr: self.curr + 1,
-            prev: self.prev + 1,
-        }
-    }
-
-    pub fn new_test_epoch(curr: u64) -> Self {
-        assert!(curr > 0);
-        Self::new(curr, curr - 1)
-    }
-}
-
-impl Default for Epoch {
-    fn default() -> Self {
-        Self {
-            curr: 1,
-            prev: INVALID_EPOCH,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Barrier {
-    pub epoch: Epoch,
+    pub epoch: EpochPair,
     pub mutation: Option<Arc<Mutation>>,
     pub checkpoint: bool,
 
+    /// The actors that this barrier has passed locally. Used for debugging only.
     pub passed_actors: Vec<ActorId>,
 }
 
@@ -255,9 +224,10 @@ impl Barrier {
     /// Create a plain barrier.
     pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
-            epoch: Epoch::new_test_epoch(epoch),
+            epoch: EpochPair::new_test_epoch(epoch),
             checkpoint: true,
-            ..Default::default()
+            mutation: Default::default(),
+            passed_actors: Default::default(),
         }
     }
 
@@ -281,10 +251,16 @@ impl Barrier {
 
     /// Whether this barrier is to stop the actor with `actor_id`.
     pub fn is_stop_or_update_drop_actor(&self, actor_id: ActorId) -> bool {
+        self.all_stop_actors()
+            .map_or(false, |actors| actors.contains(&actor_id))
+    }
+
+    /// Get all actors that to be stopped (dropped) by this barrier.
+    pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
         match self.mutation.as_deref() {
-            Some(Mutation::Stop(actors)) => actors.contains(&actor_id),
-            Some(Mutation::Update { dropped_actors, .. }) => dropped_actors.contains(&actor_id),
-            _ => false,
+            Some(Mutation::Stop(actors)) => Some(actors),
+            Some(Mutation::Update { dropped_actors, .. }) => Some(dropped_actors),
+            _ => None,
         }
     }
 
@@ -299,13 +275,22 @@ impl Barrier {
         )
     }
 
+    /// Whether this barrier is for configuration change. Used for source executor initialization.
+    pub fn is_update(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Update { .. }))
+    }
+
     /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor
     /// with `actor_id`.
-    pub fn as_update_merge(&self, actor_id: ActorId) -> Option<&MergeUpdate> {
+    pub fn as_update_merge(
+        &self,
+        actor_id: ActorId,
+        upstream_fragment_id: UpstreamFragmentId,
+    ) -> Option<&MergeUpdate> {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
-                Mutation::Update { merges, .. } => merges.get(&actor_id),
+                Mutation::Update { merges, .. } => merges.get(&(actor_id, upstream_fragment_id)),
                 _ => None,
             })
     }
@@ -351,8 +336,8 @@ impl Mutation {
                 vnode_bitmaps,
                 dropped_actors,
             } => ProstMutation::Update(UpdateMutation {
-                actor_dispatcher_update: dispatchers.clone(),
-                actor_merge_update: merges.clone(),
+                dispatcher_update: dispatchers.values().flatten().cloned().collect(),
+                merge_update: merges.values().cloned().collect(),
                 actor_vnode_bitmap_update: vnode_bitmaps
                     .iter()
                     .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
@@ -398,15 +383,23 @@ impl Mutation {
         }
     }
 
-    fn from_protobuf(prost: &ProstMutation) -> Result<Self> {
+    fn from_protobuf(prost: &ProstMutation) -> StreamResult<Self> {
         let mutation = match prost {
             ProstMutation::Stop(stop) => {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
             }
 
             ProstMutation::Update(update) => Mutation::Update {
-                dispatchers: update.actor_dispatcher_update.clone(),
-                merges: update.actor_merge_update.clone(),
+                dispatchers: update
+                    .dispatcher_update
+                    .iter()
+                    .map(|u| (u.actor_id, u.clone()))
+                    .into_group_map(),
+                merges: update
+                    .merge_update
+                    .iter()
+                    .map(|u| ((u.actor_id, u.upstream_fragment_id), u.clone()))
+                    .collect(),
                 vnode_bitmaps: update
                     .actor_vnode_bitmap_update
                     .iter()
@@ -453,8 +446,7 @@ impl Mutation {
                                     .splits
                                     .iter()
                                     .map(SplitImpl::try_from)
-                                    .collect::<anyhow::Result<Vec<SplitImpl>>>()
-                                    .to_rw_result()?,
+                                    .try_collect()?,
                             ),
                         ));
                     }
@@ -493,7 +485,7 @@ impl Barrier {
         }
     }
 
-    pub fn from_protobuf(prost: &ProstBarrier) -> Result<Self> {
+    pub fn from_protobuf(prost: &ProstBarrier) -> StreamResult<Self> {
         let mutation = prost
             .mutation
             .as_ref()
@@ -503,7 +495,7 @@ impl Barrier {
         let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {
             checkpoint: prost.checkpoint,
-            epoch: Epoch::new(epoch.curr, epoch.prev),
+            epoch: EpochPair::new(epoch.curr, epoch.prev),
             mutation,
             passed_actors: prost.get_passed_actors().clone(),
         })
@@ -543,7 +535,7 @@ impl Message {
         )
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstStreamMessage> {
+    pub fn to_protobuf(&self) -> StreamResult<ProstStreamMessage> {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf();
@@ -557,7 +549,7 @@ impl Message {
         Ok(prost_stream_msg)
     }
 
-    pub fn from_protobuf(prost: &ProstStreamMessage) -> Result<Self> {
+    pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamResult<Self> {
         let res = match prost.get_stream_message()? {
             StreamMessage::StreamChunk(ref stream_chunk) => {
                 Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
@@ -579,6 +571,7 @@ pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
+#[track_caller]
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
@@ -593,9 +586,25 @@ pub async fn expect_first_barrier(
     Ok(barrier)
 }
 
+/// Expect the first message of the given `stream` as a barrier.
+#[track_caller]
+pub async fn expect_first_barrier_from_aligned_stream(
+    stream: &mut (impl AlignedMessageStream + Unpin),
+) -> StreamExecutorResult<Barrier> {
+    let message = stream
+        .next()
+        .stack_trace("expect_first_barrier")
+        .await
+        .expect("failed to extract the first message: stream closed unexpectedly")?;
+    let barrier = message
+        .into_barrier()
+        .expect("the first message must be a barrier");
+    Ok(barrier)
+}
+
 /// `StreamConsumer` is the last step in an actor.
 pub trait StreamConsumer: Send + 'static {
-    type BarrierStream: Stream<Item = Result<Barrier>> + Send;
+    type BarrierStream: Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream;
 }

@@ -32,8 +32,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+        stream: &mut LocalStreamManagerCore,
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
@@ -41,28 +41,32 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
         let table_l = node.get_left_table()?;
+        let degree_table_l = node.get_left_degree_table()?;
+
         let table_r = node.get_right_table()?;
+        let degree_table_r = node.get_right_degree_table()?;
+
         let params_l = JoinParams::new(
             node.get_left_key()
                 .iter()
                 .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
+                .collect_vec(),
             table_l
                 .distribution_key
                 .iter()
                 .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
+                .collect_vec(),
         );
         let params_r = JoinParams::new(
             node.get_right_key()
                 .iter()
                 .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
+                .collect_vec(),
             table_r
                 .distribution_key
                 .iter()
                 .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
+                .collect_vec(),
         );
         let null_safe = node.get_null_safe().to_vec();
         let output_indices = node
@@ -82,7 +86,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 fn create_hash_join_executor<S: StateStore>(
                     typ: JoinTypeProto, kind: HashKeyKind,
                     args: HashJoinExecutorDispatcherArgs<S>,
-                ) -> Result<BoxedExecutor> {
+                ) -> StreamResult<BoxedExecutor> {
                     match typ {
                         $( JoinTypeProto::$join_type_proto => HashJoinExecutorDispatcher::<_, {JoinType::$join_type}>::dispatch_by_kind(kind, args), )*
                         JoinTypeProto::Unspecified => unreachable!(),
@@ -108,16 +112,22 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             };
         }
 
-        let keys = params_l
-            .key_indices
+        let join_key_data_types = params_l
+            .join_key_indices
             .iter()
             .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
-        let kind = calc_hash_key_kind(&keys);
+        let kind = calc_hash_key_kind(&join_key_data_types);
 
         let state_table_l =
             StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
-        let state_table_r = StateTable::from_table_catalog(table_r, store, Some(vnodes));
+        let degree_state_table_l =
+            StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()));
+
+        let state_table_r =
+            StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone()));
+        let degree_state_table_r =
+            StateTable::from_table_catalog(degree_table_r, store, Some(vnodes));
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -131,8 +141,11 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
+            cache_size: stream.config.developer.unsafe_join_cache_size,
             state_table_l,
+            degree_state_table_l,
             state_table_r,
+            degree_state_table_r,
             is_append_only,
             metrics: params.executor_stats,
         };
@@ -157,8 +170,11 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     cond: Option<BoxedExpression>,
     op_info: String,
+    cache_size: usize,
     state_table_l: StateTable<S>,
+    degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
+    degree_state_table_r: StateTable<S>,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
 }
@@ -167,7 +183,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
     for HashJoinExecutorDispatcher<S, T>
 {
     type Input = HashJoinExecutorDispatcherArgs<S>;
-    type Output = Result<BoxedExecutor>;
+    type Output = StreamResult<BoxedExecutor>;
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Ok(Box::new(HashJoinExecutor::<K, S, T>::new(
@@ -182,8 +198,11 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.executor_id,
             args.cond,
             args.op_info,
+            args.cache_size,
             args.state_table_l,
+            args.degree_state_table_l,
             args.state_table_r,
+            args.degree_state_table_r,
             args.is_append_only,
             args.metrics,
         )))

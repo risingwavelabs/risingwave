@@ -21,14 +21,13 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
+use crate::hummock::compactor::context::TaskProgressTracker;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
-use crate::hummock::{
-    CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions, DEFAULT_ENTRY_SIZE,
-};
+use crate::hummock::{CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions};
 
 #[derive(Clone)]
 pub struct CompactorRunner {
@@ -54,15 +53,9 @@ impl CompactorRunner {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
+        let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
         if options.compression_algorithm == CompressionAlgorithm::None {
-            options.capacity = std::cmp::min(options.capacity, total_file_size as usize);
-        }
-        options.estimate_bloom_filter_capacity = context
-            .context
-            .filter_key_extractor_manager
-            .estimate_bloom_filter_size(options.capacity);
-        if options.estimate_bloom_filter_capacity == 0 {
-            options.estimate_bloom_filter_capacity = options.capacity / DEFAULT_ENTRY_SIZE;
+            options.capacity = std::cmp::min(options.capacity, total_file_size);
         }
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
@@ -92,10 +85,20 @@ impl CompactorRunner {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
+        let task_progress = TaskProgressTracker::new(
+            self.compact_task.task_id,
+            self.compactor.context.task_progress.clone(),
+        );
         let ssts = self
             .compactor
-            .compact_key_range(iter, compaction_filter, filter_key_extractor)
+            .compact_key_range(
+                iter,
+                compaction_filter,
+                filter_key_extractor,
+                Some(task_progress.clone()),
+            )
             .await?;
+        task_progress.on_task_complete();
         Ok((self.split_index, ssts))
     }
 

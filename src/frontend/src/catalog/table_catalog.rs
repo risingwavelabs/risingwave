@@ -16,13 +16,14 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
-use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
+use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, FragmentId, SchemaId};
 use crate::optimizer::property::FieldOrder;
+use crate::WithOptions;
 
 /// Includes full information about a table.
 ///
@@ -62,16 +63,15 @@ pub struct TableCatalog {
     pub columns: Vec<ColumnCatalog>,
 
     /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
-    pub order_key: Vec<FieldOrder>,
+    pub pk: Vec<FieldOrder>,
 
     /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
 
+    pub is_index: bool,
+
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
-
-    /// If set to Some(TableId), then this table is an index on another table.
-    pub is_index_on: Option<TableId>,
 
     /// The appendonly attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
     /// on this to derive an append-only stream plan
@@ -80,13 +80,19 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: u32,
 
-    pub properties: HashMap<String, String>,
+    /// Properties of the table. For example, `appendonly` or `retention_seconds`.
+    pub properties: WithOptions,
 
+    /// The fragment id of the `Materialize` operator for this table.
     pub fragment_id: FragmentId,
 
-    /// an optional column index which is the vnode of each row computed by the table's consistent
+    /// An optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution
     pub vnode_col_idx: Option<usize>,
+
+    /// The column indices which are stored in the state store's value with row-encoding. Currently
+    /// is not supported yet and expected to be `[0..columns.len()]`
+    pub value_indices: Vec<usize>,
 }
 
 impl TableCatalog {
@@ -112,8 +118,8 @@ impl TableCatalog {
     }
 
     /// Get a reference to the table catalog's pk desc.
-    pub fn order_key(&self) -> &[FieldOrder] {
-        self.order_key.as_ref()
+    pub fn pk(&self) -> &[FieldOrder] {
+        self.pk.as_ref()
     }
 
     /// Get a [`TableDesc`] of the table.
@@ -124,18 +130,15 @@ impl TableCatalog {
 
         TableDesc {
             table_id: self.id,
-            order_key: self
-                .order_key
-                .iter()
-                .map(FieldOrder::to_order_pair)
-                .collect(),
+            pk: self.pk.iter().map(FieldOrder::to_order_pair).collect(),
             stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
             retention_seconds: table_options
                 .retention_seconds
-                .unwrap_or(TABLE_OPTION_DUMMY_RETAINTION_SECOND),
+                .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
+            value_indices: self.value_indices.clone(),
         }
     }
 
@@ -148,7 +151,7 @@ impl TableCatalog {
         self.distribution_key.as_ref()
     }
 
-    pub fn to_state_table_prost(&self) -> ProstTable {
+    pub fn to_internal_table_prost(&self) -> ProstTable {
         use risingwave_common::catalog::{DatabaseId, SchemaId};
         self.to_prost(
             SchemaId::placeholder() as u32,
@@ -163,14 +166,13 @@ impl TableCatalog {
             database_id,
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
-            order_key: self.order_key.iter().map(|o| o.to_protobuf()).collect(),
+            pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
-            is_index: self.is_index_on.is_some(),
-            index_on_id: self.is_index_on.unwrap_or_default().table_id(),
+            is_index: self.is_index,
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -178,11 +180,12 @@ impl TableCatalog {
                 .collect_vec(),
             appendonly: self.appendonly,
             owner: self.owner,
-            properties: self.properties.clone(),
+            properties: self.properties.inner().clone(),
             fragment_id: self.fragment_id,
             vnode_col_idx: self
                 .vnode_col_idx
                 .map(|i| ProstColumnIndex { index: i as _ }),
+            value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -207,19 +210,15 @@ impl From<ProstTable> for TableCatalog {
             col_index.insert(col_id, idx);
         }
 
-        let order_key = tb.order_key.iter().map(FieldOrder::from_protobuf).collect();
+        let pk = tb.pk.iter().map(FieldOrder::from_protobuf).collect();
 
         Self {
             id: id.into(),
             associated_source_id: associated_source_id.map(Into::into),
             name,
-            order_key,
+            pk,
             columns,
-            is_index_on: if tb.is_index {
-                Some(tb.index_on_id.into())
-            } else {
-                None
-            },
+            is_index: tb.is_index,
             distribution_key: tb
                 .distribution_key
                 .iter()
@@ -228,9 +227,10 @@ impl From<ProstTable> for TableCatalog {
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
-            properties: tb.properties,
+            properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
             vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
+            value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -246,7 +246,7 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -259,12 +259,12 @@ mod tests {
     use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::TableCatalog;
     use crate::optimizer::property::{Direction, FieldOrder};
+    use crate::WithOptions;
 
     #[test]
     fn test_into_table_catalog() {
         let table: TableCatalog = ProstTable {
             is_index: false,
-            index_on_id: 0,
             id: 0,
             schema_id: 0,
             database_id: 0,
@@ -295,7 +295,7 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            order_key: vec![FieldOrder {
+            pk: vec![FieldOrder {
                 index: 0,
                 direct: Direction::Asc,
             }
@@ -308,18 +308,19 @@ mod tests {
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
-                String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                String::from(PROPERTIES_RETENTION_SECOND_KEY),
                 String::from("300"),
             )]),
             fragment_id: 0,
             vnode_col_idx: None,
+            value_indices: vec![0],
         }
         .into();
 
         assert_eq!(
             table,
             TableCatalog {
-                is_index_on: None,
+                is_index: false,
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
@@ -355,19 +356,20 @@ mod tests {
                     }
                 ],
                 stream_key: vec![0],
-                order_key: vec![FieldOrder {
+                pk: vec![FieldOrder {
                     index: 0,
                     direct: Direction::Asc,
                 }],
                 distribution_key: vec![],
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-                properties: HashMap::from([(
-                    String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                properties: WithOptions::new(HashMap::from([(
+                    String::from(PROPERTIES_RETENTION_SECOND_KEY),
                     String::from("300")
-                )]),
+                )])),
                 fragment_id: 0,
                 vnode_col_idx: None,
+                value_indices: vec![0],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

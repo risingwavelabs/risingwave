@@ -83,7 +83,7 @@ impl Operations {
         &mut self,
         store: &impl StateStore,
         opts: &Opts,
-        context: Option<(Arc<CompactorContext>, Arc<LocalVersionManager>)>,
+        context: Option<(Arc<CompactorContext>, LocalVersionManagerRef)>,
     ) {
         let (prefixes, keys) = Workload::new_random_keys(opts, opts.writes as u64, &mut self.rng);
         let values = Workload::new_values(opts, opts.writes as u64, &mut self.rng);
@@ -99,11 +99,7 @@ impl Operations {
         if opts.compact_level_after_write > 0 {
             if let Some((compact_context, local_version_manager)) = context {
                 if let Some(task) = self.meta_client.get_compact_task().await {
-                    Compactor::compact(compact_context.clone(), task).await;
-                    // Ensure the version after compaction is available locally.
-                    let last_pinned_id = local_version_manager.get_pinned_version().id();
-                    let version = self.meta_client.pin_version(last_pinned_id).await.unwrap();
-                    local_version_manager.try_update_pinned_version(Some(last_pinned_id), version);
+                    Compactor::compact(compact_context, task).await;
                 }
             }
         }

@@ -56,9 +56,9 @@ impl Expression for CoalesceExpression {
                     }
                 }
             }
-            builder.append_datum(&data)?;
+            builder.append_datum(&data);
         }
-        Ok(Arc::new(builder.finish()?))
+        Ok(Arc::new(builder.finish()))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

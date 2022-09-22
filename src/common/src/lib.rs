@@ -38,6 +38,7 @@
 #![feature(lint_reasons)]
 #![feature(generators)]
 #![feature(map_try_insert)]
+#![feature(once_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]

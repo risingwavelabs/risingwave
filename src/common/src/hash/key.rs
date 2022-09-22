@@ -32,7 +32,7 @@ use crate::types::{
     NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode,
     VIRTUAL_NODE_COUNT,
 };
-use crate::util::hash_util::CRC32FastBuilder;
+use crate::util::hash_util::Crc32FastBuilder;
 
 /// This file contains implementation for hash key serialization for
 /// hash-agg, hash-join, and perhaps other hash-based operators.
@@ -101,7 +101,7 @@ pub trait HashKey:
     type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
-        let hash_codes = data_chunk.get_hash_values(column_idxes, CRC32FastBuilder)?;
+        let hash_codes = data_chunk.get_hash_values(column_idxes, Crc32FastBuilder);
         Ok(Self::build_from_hash_code(
             column_idxes,
             data_chunk,
@@ -139,7 +139,7 @@ pub trait HashKey:
         self.deserialize_to_builders(&mut builders)?;
         builders
             .into_iter()
-            .map(|builder| Ok::<_, ArrayError>(builder.finish()?.value_at(0).to_owned_datum()))
+            .map(|builder| Ok::<_, ArrayError>(builder.finish().value_at(0).to_owned_datum()))
             .try_collect()
             .map(Row)
     }
@@ -608,7 +608,7 @@ where
     <<A as ArrayBuilder>::ArrayType as Array>::RefItem<'a>: HashKeySerDe<'a>,
     S: HashKeyDeserializer,
 {
-    builder.append(deserializer.deserialize()?)?;
+    builder.append(deserializer.deserialize()?);
     Ok(())
 }
 
@@ -660,12 +660,10 @@ impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
-        array_builders
-            .iter_mut()
-            .zip_eq(self.key.0)
-            .try_for_each(|(array_builder, key)| {
-                array_builder.append_datum(&key).map_err(Into::into)
-            })
+        for (array_builder, key) in array_builders.iter_mut().zip_eq(self.key.0) {
+            array_builder.append_datum(&key);
+        }
+        Ok(())
     }
 
     fn null_bitmap(&self) -> &FixedBitSet {
@@ -793,7 +791,7 @@ mod tests {
 
         let result_arrays = array_builders
             .into_iter()
-            .map(|array_builder| array_builder.finish().unwrap())
+            .map(|array_builder| array_builder.finish())
             .collect::<Vec<ArrayImpl>>();
 
         for (ret_idx, col_idx) in column_indexes.iter().enumerate() {
@@ -894,7 +892,7 @@ mod tests {
         keys.into_iter()
             .for_each(|k| k.deserialize_to_builders(&mut array_builders[..]).unwrap());
 
-        let array = array_builders.pop().unwrap().finish().unwrap();
+        let array = array_builders.pop().unwrap().finish();
         let i32_vec = array
             .iter()
             .map(|opt| opt.map(|s| s.into_int32()))

@@ -27,10 +27,12 @@ import {
   Tr,
   useToast,
 } from "@chakra-ui/react"
+import Head from "next/head"
 
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import Title from "../components/Title"
+import extractColumnInfo from "../lib/extractInfo"
 import { Table as RwTable } from "../proto/gen/catalog"
 import { getMaterializedViews } from "./api/streaming"
 
@@ -55,9 +57,9 @@ export default function MaterializeViews() {
     }
     doFetch()
     return () => {}
-  }, [])
+  }, [toast])
 
-  return (
+  const retVal = (
     <Box p={3}>
       <Title>Materialized Views</Title>
       <TableContainer>
@@ -67,9 +69,9 @@ export default function MaterializeViews() {
               <Th width={3}>Id</Th>
               <Th width={5}>Name</Th>
               <Th width={3}>Owner</Th>
-              <Th width={3}>Metrics</Th>
-              <Th width={3}>Depends</Th>
-              <Th width={3}>Fragments</Th>
+              <Th width={1}>Metrics</Th>
+              <Th width={1}>Depends</Th>
+              <Th width={1}>Fragments</Th>
               <Th>Visible Columns</Th>
             </Tr>
           </Thead>
@@ -92,14 +94,16 @@ export default function MaterializeViews() {
                     </Button>
                   </Td>
                   <Td>
-                    <Button
-                      size="sm"
-                      aria-label="view metrics"
-                      colorScheme="teal"
-                      variant="link"
-                    >
-                      D
-                    </Button>
+                    <Link href={`/streaming_graph/?id=${mv.id}`}>
+                      <Button
+                        size="sm"
+                        aria-label="view metrics"
+                        colorScheme="teal"
+                        variant="link"
+                      >
+                        D
+                      </Button>
+                    </Link>
                   </Td>
                   <Td>
                     <Link href={`/streaming_plan/?id=${mv.id}`}>
@@ -116,10 +120,7 @@ export default function MaterializeViews() {
                   <Td overflowWrap="normal">
                     {mv.columns
                       .filter((col) => !col.isHidden)
-                      .map(
-                        (col) =>
-                          `${col.columnDesc?.name} (${col.columnDesc?.columnType?.typeName})`
-                      )
+                      .map((col) => extractColumnInfo(col))
                       .join(", ")}
                   </Td>
                 </Tr>
@@ -128,5 +129,14 @@ export default function MaterializeViews() {
         </Table>
       </TableContainer>
     </Box>
+  )
+
+  return (
+    <Fragment>
+      <Head>
+        <title>Materialized Views</title>
+      </Head>
+      {retVal}
+    </Fragment>
   )
 }

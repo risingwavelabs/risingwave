@@ -144,9 +144,9 @@ mod tests {
     async fn test_pause_and_resume() {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
-        let table_source = TableSourceV2::new(vec![]);
+        let table_source = TableSource::new(vec![]);
         let source_reader =
-            SourceStreamReaderImpl::TableV2(table_source.stream_reader(vec![]).await.unwrap());
+            SourceStreamReaderImpl::Table(table_source.stream_reader(vec![]).await.unwrap());
 
         let stream = SourceReaderStream::new(barrier_rx, Box::new(source_reader));
         pin_mut!(stream);
@@ -161,14 +161,14 @@ mod tests {
         table_source.write_chunk(StreamChunk::default()).unwrap();
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
-        barrier_tx.send(Barrier::default()).unwrap();
+        barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
         assert_matches!(next!().unwrap(), Either::Left(_));
 
         // Pause the stream.
         stream.pause_source();
 
         // Write a barrier.
-        barrier_tx.send(Barrier::default()).unwrap();
+        barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
         // Then write a chunk.
         table_source.write_chunk(StreamChunk::default()).unwrap();
 

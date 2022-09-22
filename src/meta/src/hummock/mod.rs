@@ -14,8 +14,9 @@
 
 pub mod compaction;
 pub mod compaction_group;
+mod compaction_schedule_policy;
 mod compaction_scheduler;
-mod compactor_manager;
+pub mod compactor_manager;
 pub mod error;
 mod manager;
 pub use manager::*;
@@ -37,7 +38,7 @@ pub use compaction_scheduler::CompactionScheduler;
 pub use compactor_manager::*;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
-use risingwave_common::util::sync_point::on_sync_point;
+use sync_point::sync_point;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -53,7 +54,7 @@ use crate::MetaOpts;
 pub async fn start_hummock_workers<S>(
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    vacuum_manager: Arc<VacuumManager<S>>,
+    vacuum_manager: VacuumManagerRef<S>,
     notification_manager: NotificationManagerRef,
     compaction_scheduler: CompactionSchedulerRef<S>,
     meta_opts: &MetaOpts,
@@ -67,19 +68,15 @@ where
             vacuum_manager.clone(),
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
-        subscribe_cluster_membership_change(
-            hummock_manager,
-            compactor_manager,
-            notification_manager,
-        )
-        .await,
+        start_local_notification_receiver(hummock_manager, compactor_manager, notification_manager)
+            .await,
     ]
 }
 
-/// Starts a task to handle cluster membership change.
-pub async fn subscribe_cluster_membership_change<S>(
+/// Starts a task to handle meta local notification.
+pub async fn start_local_notification_receiver<S>(
     hummock_manager: Arc<HummockManager<S>>,
-    compactor_manager: Arc<CompactorManager>,
+    compactor_manager: CompactorManagerRef,
     notification_manager: NotificationManagerRef,
 ) -> (JoinHandle<()>, Sender<()>)
 where
@@ -89,40 +86,54 @@ where
     notification_manager.insert_local_sender(tx).await;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
+        let retry_strategy = ExponentialBackoff::from_millis(10)
+            .max_delay(Duration::from_secs(60))
+            .map(jitter);
         loop {
-            let worker_node = tokio::select! {
+            tokio::select! {
                 notification = rx.recv() => {
                     match notification {
                         None => {
                             return;
+                        },
+                        Some(LocalNotification::WorkerNodeIsDeleted(worker_node)) => {
+                            compactor_manager.remove_compactor(worker_node.id);
+                            tokio_retry::RetryIf::spawn(
+                                retry_strategy.clone(),
+                                || async {
+                                    if let Err(err) = hummock_manager.release_contexts(vec![worker_node.id]).await {
+                                        tracing::warn!("Failed to release hummock context {}. {}. Will retry.", worker_node.id, err);
+                                        return Err(err);
+                                    }
+                                    Ok(())
+                                }, RetryableError::default())
+                                .await
+                                .expect("retry until success");
+                            tracing::info!("Released hummock context {}", worker_node.id);
+                            sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
+                        },
+                        Some(LocalNotification::CompactionTaskNeedCancel(compact_task)) => {
+                            tokio_retry::RetryIf::spawn(
+                                retry_strategy.clone(),
+                                || async {
+                                    if let Err(err) = hummock_manager.cancel_compact_task_impl(&compact_task).await {
+                                        tracing::warn!("Failed to cancel compaction task {}. {}. Will retry.", compact_task.task_id, err);
+                                        return Err(err);
+                                    }
+                                    Ok(())
+                                }, RetryableError::default())
+                                .await
+                                .expect("retry until success");
+                            tracing::info!("Cancelled compaction task {}", compact_task.task_id);
+                            sync_point!("AFTER_CANCEL_COMPACTION_TASK_ASYNC");
                         }
-                        Some(LocalNotification::WorkerDeletion(worker_node)) => worker_node
                     }
                 }
                 _ = &mut shutdown_rx => {
-                    tracing::info!("Membership Change Subscriber is stopped");
+                    tracing::info!("Hummock local notification receiver is stopped");
                     return;
                 }
             };
-            compactor_manager.remove_compactor(worker_node.id);
-
-            // Retry only happens when meta store is undergoing failure.
-            let retry_strategy = ExponentialBackoff::from_millis(10)
-                .max_delay(Duration::from_secs(60))
-                .map(jitter);
-            tokio_retry::RetryIf::spawn(
-                retry_strategy,
-                || async {
-                    if let Err(err) = hummock_manager.release_contexts(vec![worker_node.id]).await {
-                        tracing::warn!("Failed to release_contexts {:?}. Will retry.", err);
-                        return Err(err);
-                    }
-                    Ok(())
-                },
-                RetryableError::default(),
-            )
-            .await
-            .expect("release_contexts should always be retryable and eventually succeed.")
         }
     });
     (join_handle, shutdown_tx)
@@ -146,7 +157,7 @@ where
 
 /// Starts a task to periodically vacuum hummock.
 pub fn start_vacuum_scheduler<S>(
-    vacuum: Arc<VacuumManager<S>>,
+    vacuum: VacuumManagerRef<S>,
     interval: Duration,
 ) -> (JoinHandle<()>, Sender<()>)
 where
@@ -173,39 +184,7 @@ where
             if let Err(err) = vacuum.vacuum_sst_data().await {
                 tracing::warn!("Vacuum SST error {:#?}", err);
             }
-            on_sync_point("AFTER_SCHEDULE_VACUUM").await.unwrap();
-        }
-    });
-    (join_handle, shutdown_tx)
-}
-
-// As we have supported manual full GC in risectl,
-// this auto full GC scheduler is not used for now.
-#[allow(unused)]
-pub fn start_full_gc_scheduler<S>(
-    vacuum: Arc<VacuumManager<S>>,
-    interval: Duration,
-    sst_retention_time: Duration,
-) -> (JoinHandle<()>, Sender<()>)
-where
-    S: MetaStore,
-{
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
-        let mut min_trigger_interval = tokio::time::interval(interval);
-        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        min_trigger_interval.tick().await;
-        loop {
-            tokio::select! {
-                _ = min_trigger_interval.tick() => {},
-                _ = &mut shutdown_rx => {
-                    tracing::info!("Full GC scheduler is stopped");
-                    return;
-                }
-            }
-            if let Err(err) = vacuum.start_full_gc(sst_retention_time).await {
-                tracing::warn!("Full GC error {:#?}", err);
-            }
+            sync_point!("AFTER_SCHEDULE_VACUUM");
         }
     });
     (join_handle, shutdown_tx)

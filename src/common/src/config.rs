@@ -43,8 +43,12 @@ where
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerConfig {
+    /// The interval for periodic heartbeat from worker to the meta service.
     #[serde(default = "default::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
+
+    #[serde(default = "default::connection_pool_size")]
+    pub connection_pool_size: u16,
 }
 
 impl Default for ServerConfig {
@@ -56,8 +60,15 @@ impl Default for ServerConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BatchConfig {
-    // #[serde(default = "default::chunk_size")]
-    // pub chunk_size: u32,
+    /// Not used.
+    #[cfg(any())]
+    #[serde(default = "default::chunk_size")]
+    pub chunk_size: u32,
+
+    /// The thread number of the batch task runtime in the compute node. The default value is
+    /// decided by `tokio`.
+    #[serde(default)]
+    pub worker_threads_num: Option<usize>,
 }
 
 impl Default for BatchConfig {
@@ -69,19 +80,35 @@ impl Default for BatchConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StreamingConfig {
-    // #[serde(default = "default::chunk_size")]
-    // pub chunk_size: u32,
+    /// Not used.
+    #[cfg(any())]
+    #[serde(default = "default::chunk_size")]
+    pub chunk_size: u32,
+
+    /// The interval of periodic checkpointing.
     #[serde(default = "default::checkpoint_interval_ms")]
     pub checkpoint_interval_ms: u32,
 
+    /// The maximum number of barriers in-flight in the compute nodes.
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
+    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
+    /// fragment on one parallel unit per compute node.
+    #[serde(default)]
+    pub minimal_scheduling: bool,
+
+    /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[serde(default = "default::worker_node_parallelism")]
     pub worker_node_parallelism: usize,
 
+    /// The thread number of the streaming actor runtime in the compute node. The default value is
+    /// decided by `tokio`.
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
+
+    #[serde(default)]
+    pub developer: DeveloperConfig,
 }
 
 impl Default for StreamingConfig {
@@ -164,6 +191,10 @@ pub struct StorageConfig {
     /// Whether to enable streaming upload for sstable.
     #[serde(default = "default::min_sst_size_for_streaming_upload")]
     pub min_sst_size_for_streaming_upload: u64,
+
+    /// Max sub compaction task numbers
+    #[serde(default = "default::max_sub_compaction")]
+    pub max_sub_compaction: u32,
 }
 
 impl Default for StorageConfig {
@@ -175,17 +206,53 @@ impl Default for StorageConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileCacheConfig {
-    #[serde(default = "default::file_cache_capacity")]
-    pub capacity: usize,
+    #[serde(default = "default::file_cache_capacity_mb")]
+    pub capacity_mb: usize,
 
-    #[serde(default = "default::file_cache_total_buffer_capacity")]
-    pub total_buffer_capacity: usize,
+    #[serde(default = "default::file_cache_total_buffer_capacity_mb")]
+    pub total_buffer_capacity_mb: usize,
 
-    #[serde(default = "default::file_cache_cache_file_fallocate_unit")]
-    pub cache_file_fallocate_unit: usize,
+    #[serde(default = "default::file_cache_cache_file_fallocate_unit_mb")]
+    pub cache_file_fallocate_unit_mb: usize,
+
+    #[serde(default = "default::file_cache_cache_meta_fallocate_unit_mb")]
+    pub cache_meta_fallocate_unit_mb: usize,
 }
 
 impl Default for FileCacheConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeveloperConfig {
+    /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
+    /// and might affect the prometheus performance. If you only need actor input and output
+    /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
+    #[serde(default = "default::developer_enable_executor_row_count")]
+    pub enable_executor_row_count: bool,
+
+    /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
+    /// `SourceExecutor`.
+    #[serde(default = "default::developer_connector_message_buffer_size")]
+    pub connector_message_buffer_size: usize,
+
+    /// Limit number of cached entries (one per group key)
+    #[serde(default = "default::developer_unsafe_hash_agg_cache_size")]
+    pub unsafe_hash_agg_cache_size: usize,
+
+    /// Limit number of the cached entries (one per join key) on each side.
+    #[serde(default = "default::developer_unsafe_join_cache_size")]
+    pub unsafe_join_cache_size: usize,
+
+    /// Limit number of the cached entries in an extreme aggregation call
+    #[serde(default = "default::developer_unsafe_extreme_cache_size")]
+    pub unsafe_extreme_cache_size: usize,
+}
+
+impl Default for DeveloperConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -195,6 +262,10 @@ mod default {
 
     pub fn heartbeat_interval_ms() -> u32 {
         1000
+    }
+
+    pub fn connection_pool_size() -> u16 {
+        16
     }
 
     #[expect(dead_code)]
@@ -278,24 +349,49 @@ mod default {
         10
     }
 
-    pub fn file_cache_capacity() -> usize {
-        // 1 GiB
-        1024 * 1024 * 1024
+    pub fn file_cache_capacity_mb() -> usize {
+        1024
     }
 
-    pub fn file_cache_total_buffer_capacity() -> usize {
-        // 128 MiB
-        128 * 1024 * 1024
+    pub fn file_cache_total_buffer_capacity_mb() -> usize {
+        128
     }
 
-    pub fn file_cache_cache_file_fallocate_unit() -> usize {
-        // 96 MiB
-        96 * 1024 * 1024
+    pub fn file_cache_cache_file_fallocate_unit_mb() -> usize {
+        512
+    }
+
+    pub fn file_cache_cache_meta_fallocate_unit_mb() -> usize {
+        16
     }
 
     pub fn min_sst_size_for_streaming_upload() -> u64 {
         // 32MB
         32 * 1024 * 1024
+    }
+
+    pub fn max_sub_compaction() -> u32 {
+        4
+    }
+
+    pub fn developer_enable_executor_row_count() -> bool {
+        false
+    }
+
+    pub fn developer_connector_message_buffer_size() -> usize {
+        16
+    }
+
+    pub fn developer_unsafe_hash_agg_cache_size() -> usize {
+        1 << 16
+    }
+
+    pub fn developer_unsafe_join_cache_size() -> usize {
+        1 << 16
+    }
+
+    pub fn developer_unsafe_extreme_cache_size() -> usize {
+        1 << 10
     }
 }
 
@@ -318,7 +414,7 @@ pub mod constant {
             }
         }
 
-        pub const TABLE_OPTION_DUMMY_RETAINTION_SECOND: u32 = 0;
-        pub const PROPERTIES_RETAINTION_SECOND_KEY: &str = "retention_seconds";
+        pub const TABLE_OPTION_DUMMY_RETENTION_SECOND: u32 = 0;
+        pub const PROPERTIES_RETENTION_SECOND_KEY: &str = "retention_seconds";
     }
 }

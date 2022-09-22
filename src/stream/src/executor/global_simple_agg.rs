@@ -18,13 +18,13 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
 use super::*;
 use crate::common::StateTableColumnMapping;
+use crate::error::StreamResult;
 use crate::executor::aggregation::{
     generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
@@ -68,6 +68,8 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
 
     /// State table column mappings for each aggregation calls,
     state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
+
+    extreme_cache_size: usize,
 }
 
 impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
@@ -89,19 +91,21 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
 }
 
 impl<S: StateStore> GlobalSimpleAggExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
+        extreme_cache_size: usize,
         mut state_tables: Vec<StateTable<S>>,
         state_table_col_mappings: Vec<Vec<usize>>,
-    ) -> Result<Self> {
+    ) -> StreamResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
 
-        // // TODO: enable sanity check for globle simple agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
+        // TODO: enable sanity check for globle simple agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
         for state_table in &mut state_tables {
             state_table.disable_sanity_check();
         }
@@ -124,6 +128,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 .map(StateTableColumnMapping::new)
                 .map(Arc::new)
                 .collect(),
+            extreme_cache_size,
         })
     }
 
@@ -136,7 +141,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         _input_schema: &Schema,
         states: &mut Option<AggState<S>>,
         chunk: StreamChunk,
-        epoch: u64,
+        extreme_cache_size: usize,
         state_tables: &mut [StateTable<S>],
         state_table_col_mappings: &[Arc<StateTableColumnMapping>],
     ) -> StreamExecutorResult<()> {
@@ -151,7 +156,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 None,
                 agg_calls,
                 input_pk_indices.to_vec(),
-                epoch,
+                extreme_cache_size,
                 state_tables,
                 state_table_col_mappings,
             )
@@ -161,7 +166,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         let states = states.as_mut().unwrap();
 
         // 2. Mark the state as dirty by filling prev states
-        states.may_mark_as_dirty(epoch, state_tables).await?;
+        states.may_mark_as_dirty(state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
         for ((agg_state, agg_call), state_table) in states
@@ -179,7 +184,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 capacity,
             )?;
             agg_state
-                .apply_chunk(&ops, vis_map.as_ref(), &column_refs, epoch, state_table)
+                .apply_chunk(&ops, vis_map.as_ref(), &column_refs, state_table)
                 .await?;
         }
 
@@ -222,13 +227,13 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         // --- Retrieve modified states and put the changes into the builders ---
         states
-            .build_changes(&mut builders, &mut new_ops, epoch, state_tables)
+            .build_changes(&mut builders, &mut new_ops, state_tables)
             .await?;
 
         let columns: Vec<Column> = builders
             .into_iter()
-            .map(|builder| builder.finish().map(Into::into))
-            .try_collect()?;
+            .map(|builder| builder.finish().into())
+            .collect();
 
         let chunk = StreamChunk::new(new_ops, columns, None);
 
@@ -245,13 +250,18 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             input_schema,
             mut states,
             agg_calls,
+            extreme_cache_size,
             mut state_tables,
             state_table_col_mappings,
         } = self;
         let mut input = input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
+        for table in &mut state_tables {
+            table.init_epoch(barrier.epoch.prev);
+        }
         let mut epoch = barrier.epoch.curr;
+
         yield Message::Barrier(barrier);
 
         #[for_await]
@@ -267,7 +277,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         &input_schema,
                         &mut states,
                         chunk,
-                        epoch,
+                        extreme_cache_size,
                         &mut state_tables,
                         &state_table_col_mappings,
                     )

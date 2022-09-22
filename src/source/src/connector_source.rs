@@ -14,11 +14,10 @@
 
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_connector::source::{
@@ -31,7 +30,7 @@ use tokio::task::JoinHandle;
 
 use crate::common::SourceChunkBuilder;
 use crate::monitor::SourceMetrics;
-use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState};
+use crate::{SourceColumnDesc, SourceParserImpl, SourceStreamChunkBuilder, StreamChunkWithState};
 
 #[derive(Clone, Debug)]
 pub struct SourceContext {
@@ -48,9 +47,7 @@ impl SourceContext {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref DEFAULT_SPLIT_ID: SplitId = SplitId::new("None".into());
-}
+static DEFAULT_SPLIT_ID: LazyLock<SplitId> = LazyLock::new(|| "None".into());
 
 struct InnerConnectorSourceReader {
     reader: SplitReaderImpl,
@@ -65,8 +62,6 @@ struct InnerConnectorSourceReaderHandle {
     stop_tx: oneshot::Sender<()>,
     join_handle: JoinHandle<()>,
 }
-
-const CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 512;
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or
 /// batch processing. [`ConnectorSource`] introduces schema at this level while
@@ -175,7 +170,7 @@ impl InnerConnectorSourceReader {
 
                     self.metrics
                         .partition_input_count
-                        .with_label_values(&[actor_id.as_str(), source_id.as_str(), id.as_str()])
+                        .with_label_values(&[actor_id.as_str(), source_id.as_str(), &*id])
                         .inc_by(msg.len() as u64);
 
                     output.send(Ok(msg)).await.ok();
@@ -191,27 +186,29 @@ impl ConnectorSourceReader {
     pub async fn next(&mut self) -> Result<StreamChunkWithState> {
         let batch = self.message_rx.recv().await.unwrap()?;
 
-        let mut events = Vec::with_capacity(batch.len());
         let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
+
+        let mut builder =
+            SourceStreamChunkBuilder::with_capacity(self.columns.clone(), batch.len());
 
         for msg in batch {
             if let Some(content) = msg.payload {
                 split_offset_mapping.insert(msg.split_id, msg.offset);
-                match self.parser.parse(content.as_ref(), &self.columns) {
+                let writer = builder.row_writer();
+                match self.parser.parse(content.as_ref(), writer) {
                     Err(e) => {
                         tracing::warn!("message parsing failed {}, skipping", e.to_string());
                         continue;
                     }
-                    Ok(result) => events.push(result),
+                    Ok(_guard) => {}
                 }
             }
         }
 
-        let columns = Self::build_columns(&self.columns, events.iter().flat_map(|e| &e.rows))?;
-        let ops = events.into_iter().flat_map(|e| e.ops).collect();
+        let chunk = builder.finish();
 
         Ok(StreamChunkWithState {
-            chunk: StreamChunk::new(ops, columns, None),
+            chunk,
             split_offset_mapping: Some(split_offset_mapping),
         })
     }
@@ -280,6 +277,7 @@ pub struct ConnectorSource {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub parser: Arc<SourceParserImpl>,
+    pub connector_message_buffer_size: usize,
 }
 
 impl ConnectorSource {
@@ -308,7 +306,7 @@ impl ConnectorSource {
         metrics: Arc<SourceMetrics>,
         context: SourceContext,
     ) -> Result<ConnectorSourceReader> {
-        let (tx, rx) = mpsc::channel(CONNECTOR_MESSAGE_BUFFER_SIZE);
+        let (tx, rx) = mpsc::channel(self.connector_message_buffer_size);
         let mut handles = HashMap::with_capacity(if let Some(split) = &splits {
             split.len()
         } else {

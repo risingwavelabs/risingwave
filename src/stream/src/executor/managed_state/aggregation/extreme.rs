@@ -22,7 +22,7 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::*;
-use risingwave_common::util::ordered::OrderedRow;
+use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -34,6 +34,9 @@ use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
+
+/// Memcomparable row.
+type CacheKey = Vec<u8>;
 
 /// Generic managed agg state for min/max.
 /// It maintains a top N cache internally, using `HashSet`, and the sort key
@@ -57,21 +60,21 @@ pub struct GenericExtremeState<S: StateStore> {
     /// The columns to order by in state table.
     state_table_order_col_indices: Vec<usize>,
 
-    /// The order types of `state_table_order_col_indices`.
-    state_table_order_types: Vec<OrderType>,
-
     /// Number of all items in the state store.
     total_count: usize,
 
     /// Cache for the top N elements in the state. Note that the cache
     /// won't store group_key so the column indices should be offsetted
     /// by group_key.len(), which is handled by `state_row_to_cache_row`.
-    cache: Cache<Datum>,
+    cache: Cache<CacheKey, Datum>,
 
     /// Whether the cache is synced to state table. The cache is synced iff:
     /// - the cache is empty and `total_count` is 0, or
     /// - the cache is not empty and elements in it are the top ones in the state table.
     cache_synced: bool,
+
+    /// Serializer for cache key.
+    cache_key_serializer: OrderedRowSerializer,
 }
 
 /// A trait over all table-structured states.
@@ -87,16 +90,11 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        epoch: u64,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()>;
 
     /// Get the output of the state. Must flush before getting output.
-    async fn get_output(
-        &mut self,
-        epoch: u64,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Datum>;
+    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
 
     /// Check if this state needs a flush.
     fn is_dirty(&self) -> bool;
@@ -139,6 +137,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             )
         }))
         .unzip();
+        let cache_key_serializer = OrderedRowSerializer::new(state_table_order_types);
 
         Self {
             _phantom_data: PhantomData,
@@ -147,20 +146,23 @@ impl<S: StateStore> GenericExtremeState<S> {
             upstream_agg_col_idx,
             state_table_agg_col_idx,
             state_table_order_col_indices,
-            state_table_order_types,
             total_count: row_count,
             cache: Cache::new(cache_capacity),
             cache_synced: row_count == 0, // if there is no row, the cache is synced initially
+            cache_key_serializer,
         }
     }
 
-    fn state_row_to_cache_entry(&self, state_row: &Row) -> (OrderedRow, Datum) {
-        let cache_key = OrderedRow::new(
-            state_row.by_indices(&self.state_table_order_col_indices),
-            &self.state_table_order_types,
+    fn state_row_to_cache_entry(&self, state_row: &Row) -> StreamExecutorResult<(Vec<u8>, Datum)> {
+        let mut cache_key = Vec::new();
+        self.cache_key_serializer.serialize_datums(
+            self.state_table_order_col_indices
+                .iter()
+                .map(|col_idx| &(state_row.0)[*col_idx]),
+            &mut cache_key,
         );
         let cache_data = state_row[self.state_table_agg_col_idx].clone();
-        (cache_key, cache_data)
+        Ok((cache_key, cache_data))
     }
 
     /// Apply a chunk of data to the state.
@@ -177,7 +179,12 @@ impl<S: StateStore> GenericExtremeState<S> {
             .iter()
             .enumerate()
             .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
-            .filter(|(i, _)| columns[self.upstream_agg_col_idx].datum_at(*i).is_some())
+            .filter(|(i, _)| {
+                columns[self.upstream_agg_col_idx]
+                    .null_bitmap()
+                    .is_set(*i)
+                    .unwrap()
+            })
         {
             let state_row = Row::new(
                 self.state_table_col_mapping
@@ -186,8 +193,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                     .map(|col_idx| columns[*col_idx].datum_at(i))
                     .collect(),
             );
-            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
-
+            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row)?;
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     if self.cache_synced
@@ -196,7 +202,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                     {
                         self.cache.insert(cache_key, cache_data);
                     }
-                    state_table.insert(state_row)?;
+                    state_table.insert(state_row);
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -207,7 +213,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                             self.cache_synced = false;
                         }
                     }
-                    state_table.delete(state_row)?;
+                    state_table.delete(state_row);
                     self.total_count -= 1;
                 }
             }
@@ -226,7 +232,6 @@ impl<S: StateStore> GenericExtremeState<S> {
 
     async fn get_output_inner(
         &mut self,
-        epoch: u64,
         state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         // try to get the result from cache
@@ -234,15 +239,14 @@ impl<S: StateStore> GenericExtremeState<S> {
             Ok(datum)
         } else {
             // read from state table and fill in the cache
-            let all_data_iter =
-                iter_state_table(state_table, epoch, self.group_key.as_ref()).await?;
+            let all_data_iter = iter_state_table(state_table, self.group_key.as_ref()).await?;
             pin_mut!(all_data_iter);
 
             self.cache.clear();
             #[for_await]
             for state_row in all_data_iter.take(self.cache.capacity()) {
                 let state_row = state_row?;
-                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref());
+                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref())?;
                 self.cache.insert(cache_key, cache_data);
             }
             self.cache_synced = true;
@@ -260,18 +264,13 @@ impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        _epoch: u64,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         self.apply_chunk_inner(ops, visibility, columns, state_table)
     }
 
-    async fn get_output(
-        &mut self,
-        epoch: u64,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Datum> {
-        self.get_output_inner(epoch, state_table).await
+    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
+        self.get_output_inner(state_table).await
     }
 
     /// Check if this state needs a flush.
@@ -349,6 +348,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -361,20 +362,14 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 3);
@@ -392,20 +387,13 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
-            epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 2);
@@ -425,7 +413,7 @@ mod tests {
                 row_count,
                 usize::MAX,
             );
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 2);
@@ -473,6 +461,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -485,20 +475,14 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 8);
@@ -516,20 +500,13 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
-            epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 9);
@@ -549,7 +526,7 @@ mod tests {
                 row_count,
                 usize::MAX,
             );
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 9);
@@ -604,6 +581,11 @@ mod tests {
             vec![0, 1], // [b, _row_id]
         );
 
+        let mut epoch = 0;
+        state_table_1.init_epoch(epoch);
+        state_table_2.init_epoch(epoch);
+        epoch += 1;
+
         let mut managed_state_1 = GenericExtremeState::new(
             agg_call_1.clone(),
             None,
@@ -621,8 +603,6 @@ mod tests {
             usize::MAX,
         );
 
-        let mut epoch = 0;
-
         {
             let chunk = StreamChunk::from_pretty(
                 " T i i I
@@ -637,37 +617,24 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state_1
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table_1,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table_1)
                 .await?;
             managed_state_2
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table_2,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table_2)
                 .await?;
 
             managed_state_1.flush(&mut state_table_1)?;
             managed_state_2.flush(&mut state_table_2)?;
             state_table_1.commit(epoch).await.unwrap();
             state_table_2.commit(epoch).await.unwrap();
-            epoch += 1;
 
-            match managed_state_1.get_output(epoch, &state_table_1).await? {
+            match managed_state_1.get_output(&state_table_1).await? {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(&s, "a");
                 }
                 _ => panic!("unexpected output"),
             }
-            match managed_state_2.get_output(epoch, &state_table_2).await? {
+            match managed_state_2.get_output(&state_table_2).await? {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 9);
                 }
@@ -704,7 +671,6 @@ mod tests {
             ],
             vec![0, 1, 2], // [c, b, _row_id]
         );
-
         let group_key = Row::new(vec![Some(8.into())]);
 
         let mut managed_state = GenericExtremeState::new(
@@ -717,6 +683,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -728,20 +696,14 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 5);
@@ -759,20 +721,13 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
-            epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 8);
@@ -792,7 +747,7 @@ mod tests {
                 row_count,
                 usize::MAX,
             );
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 8);
@@ -829,7 +784,9 @@ mod tests {
             ],
             vec![0, 1], // [a, _row_id]
         );
-
+        let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
         let mut managed_state = GenericExtremeState::new(
             agg_call.clone(),
             None,
@@ -847,8 +804,6 @@ mod tests {
             .into_iter()
             .collect();
         let mut min_value = i32::MAX;
-
-        let mut epoch = 0;
 
         {
             let mut pretty_lines = vec!["i I".to_string()];
@@ -871,20 +826,14 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, min_value);
@@ -914,20 +863,13 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
-            epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, min_value);
@@ -975,6 +917,8 @@ mod tests {
         );
 
         let mut epoch = 0;
+        state_table.init_epoch(epoch);
+        epoch += 1;
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -986,20 +930,14 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 4);
@@ -1020,20 +958,14 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 12);
@@ -1056,20 +988,13 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             managed_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
-            epoch += 1;
 
-            let res = managed_state.get_output(epoch, &state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 12);

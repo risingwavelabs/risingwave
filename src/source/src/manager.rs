@@ -28,7 +28,7 @@ use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
 use crate::monitor::SourceMetrics;
-use crate::table_v2::TableSourceV2;
+use crate::table::TableSource;
 use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
@@ -62,6 +62,24 @@ pub struct SourceColumnDesc {
     pub fields: Vec<ColumnDesc>,
     /// Now `skip_parse` is used to indicate whether the column is a row id column.
     pub skip_parse: bool,
+}
+
+impl SourceColumnDesc {
+    /// Create a [`SourceColumnDesc`] without composite types.
+    #[track_caller]
+    pub fn simple(name: impl Into<String>, data_type: DataType, column_id: ColumnId) -> Self {
+        assert!(
+            !matches!(data_type, DataType::List { .. } | DataType::Struct(..)),
+            "called `SourceColumnDesc::simple` with a composite type."
+        );
+        Self {
+            name: name.into(),
+            data_type,
+            column_id,
+            fields: vec![],
+            skip_parse: false,
+        }
+    }
 }
 
 impl From<&ColumnDesc> for SourceColumnDesc {
@@ -103,11 +121,14 @@ pub struct SourceDesc {
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
     /// local source metrics
     metrics: Arc<SourceMetrics>,
+    /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
+    /// `SourceExecutor`.
+    connector_message_buffer_size: usize,
 }
 
 #[async_trait]
@@ -157,6 +178,7 @@ impl SourceManager for MemSourceManager {
             config,
             columns: columns.clone(),
             parser,
+            connector_message_buffer_size: self.connector_message_buffer_size,
         });
 
         let desc = SourceDesc {
@@ -200,7 +222,7 @@ impl SourceManager for MemSourceManager {
         );
 
         let source_columns = columns.iter().map(SourceColumnDesc::from).collect();
-        let source = SourceImpl::TableV2(TableSourceV2::new(columns));
+        let source = SourceImpl::Table(TableSource::new(columns));
 
         // Table sources do not need columns and format
         let desc = SourceDesc {
@@ -241,11 +263,22 @@ impl SourceManager for MemSourceManager {
     }
 }
 
+impl Default for MemSourceManager {
+    fn default() -> Self {
+        MemSourceManager {
+            sources: Default::default(),
+            metrics: Default::default(),
+            connector_message_buffer_size: 16,
+        }
+    }
+}
+
 impl MemSourceManager {
-    pub fn new(metrics: Arc<SourceMetrics>) -> Self {
+    pub fn new(metrics: Arc<SourceMetrics>, connector_message_buffer_size: usize) -> Self {
         MemSourceManager {
             sources: Mutex::new(HashMap::new()),
             metrics,
+            connector_message_buffer_size,
         }
     }
 
@@ -300,7 +333,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_table_source_v2() -> Result<()> {
+    async fn test_table_source() -> Result<()> {
         let table_id = TableId::default();
 
         let schema = Schema {

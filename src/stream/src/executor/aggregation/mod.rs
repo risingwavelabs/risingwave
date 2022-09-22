@@ -136,14 +136,14 @@ pub fn create_streaming_agg_state(
             ) {
                 $(
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
-                        Box::new(<$state_impl>::new_with_datum(datum)?)
+                        Box::new(<$state_impl>::with_datum(datum)?)
                     }
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
                         Box::new(<$state_impl>::new())
                     }
                 )*
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new_with_datum(datum))
+                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_datum(datum))
                 }
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, None) => {
                     Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new())
@@ -331,7 +331,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
     pk_indices: PkIndices,
-    epoch: u64,
+    extreme_cache_size: usize,
     state_tables: &[StateTable<S>],
     state_table_col_mappings: &[Arc<StateTableColumnMapping>],
 ) -> StreamExecutorResult<AggState<S>> {
@@ -348,6 +348,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
             pk_indices.clone(),
             idx == ROW_COUNT_COLUMN,
             key,
+            extreme_cache_size,
             &state_tables[idx],
             state_table_col_mappings[idx].clone(),
         )
@@ -355,7 +356,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
 
         if idx == ROW_COUNT_COLUMN {
             // For the rowcount state, we should record the rowcount.
-            let output = managed_state.get_output(epoch, &state_tables[idx]).await?;
+            let output = managed_state.get_output(&state_tables[idx]).await?;
             row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
         }
 

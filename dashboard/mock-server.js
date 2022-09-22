@@ -30,6 +30,10 @@ app.get("/fragments", (req, res, next) => {
   res.json(require("./mock/fragments.json"))
 })
 
+app.get("/fragments2", (req, res, next) => {
+  res.json(require("./mock/fragments2.json"))
+})
+
 app.get("/materialized_views", (req, res, next) => {
   res.json(require("./mock/materialized_views.json"))
 })

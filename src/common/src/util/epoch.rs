@@ -14,12 +14,13 @@
 
 use core::fmt;
 use std::cmp::Ordering;
+use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
-lazy_static::lazy_static! {
-    /// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch: 2021-04-01T00:00:00Z.
-    pub static ref UNIX_SINGULARITY_DATE_EPOCH: SystemTime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200);
-}
+/// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch:
+/// 2021-04-01T00:00:00Z.
+pub static UNIX_SINGULARITY_DATE_EPOCH: LazyLock<SystemTime> =
+    LazyLock::new(|| SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200));
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Epoch(pub u64);
@@ -96,6 +97,31 @@ impl fmt::Display for Epoch {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EpochPair {
+    pub curr: u64,
+    pub prev: u64,
+}
+
+impl EpochPair {
+    pub fn new(curr: u64, prev: u64) -> Self {
+        assert!(curr > prev);
+        Self { curr, prev }
+    }
+
+    #[cfg(test)]
+    pub fn inc(&self) -> Self {
+        Self {
+            curr: self.curr + 1,
+            prev: self.prev + 1,
+        }
+    }
+
+    pub fn new_test_epoch(curr: u64) -> Self {
+        assert!(curr > 0);
+        Self::new(curr, curr - 1)
+    }
+}
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone, Utc};

@@ -15,14 +15,13 @@ clap = { version = "3", features = ["derive", "env"] }
 crc32fast = "1"
 derivative = "2"
 either = "1"
-etcd-client = "0.10"
+etcd-client = { version = "0.2", package = "madsim-etcd-client" }
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
-lazy_static = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -37,11 +36,12 @@ risingwave_connector = { path = "../connector" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
-scopeguard = "1"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
+serial_test = "0.9"
 smallvec = "1"
+sync-point = { path = "../utils/sync-point" }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -65,6 +65,7 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+maplit = "1.0.2"
 rand = "0.8"
 risingwave_test_runner = { path = "../test_runner" }
 static_assertions = "1"

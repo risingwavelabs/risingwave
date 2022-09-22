@@ -12,20 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 
 use super::BlockMeta;
-use crate::hummock::{HummockResult, SstableBuilderOptions};
+use crate::hummock::{HummockResult, SstableBuilderOptions, SstableMeta};
 
 /// A consumer of SST data.
+#[async_trait::async_trait]
 pub trait SstableWriter: Send {
     type Output;
 
     /// Write an SST block to the writer.
-    fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()>;
+    async fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()>;
 
     /// Finish writing the SST.
-    fn finish(self, size_footer: u32) -> HummockResult<Self::Output>;
+    async fn finish(self, meta: SstableMeta) -> HummockResult<Self::Output>;
 
     /// Get the length of data that has already been written.
     fn data_len(&self) -> usize;
@@ -33,13 +34,13 @@ pub trait SstableWriter: Send {
 
 /// Append SST data to a buffer. Used for tests and benchmarks.
 pub struct InMemWriter {
-    buf: BytesMut,
+    buf: Vec<u8>,
 }
 
 impl InMemWriter {
     pub fn new(capacity: usize) -> Self {
         Self {
-            buf: BytesMut::with_capacity(capacity),
+            buf: Vec::with_capacity(capacity),
         }
     }
 }
@@ -50,18 +51,18 @@ impl From<&SstableBuilderOptions> for InMemWriter {
     }
 }
 
+#[async_trait::async_trait]
 impl SstableWriter for InMemWriter {
-    type Output = Bytes;
+    type Output = (Bytes, SstableMeta);
 
-    fn write_block(&mut self, block: &[u8], _meta: &BlockMeta) -> HummockResult<()> {
-        self.buf.put_slice(block);
+    async fn write_block(&mut self, block: &[u8], _meta: &BlockMeta) -> HummockResult<()> {
+        self.buf.extend_from_slice(block);
         Ok(())
     }
 
-    fn finish(mut self, size_footer: u32) -> HummockResult<Self::Output> {
-        self.buf.put_slice(&size_footer.to_le_bytes());
-        let data = self.buf.freeze();
-        Ok(data)
+    async fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
+        meta.encode_to(&mut self.buf);
+        Ok((Bytes::from(self.buf), meta))
     }
 
     fn data_len(&self) -> usize {
@@ -104,23 +105,23 @@ mod tests {
             key_count: 0,
             smallest_key: Vec::new(),
             largest_key: Vec::new(),
+            meta_offset: data.len() as u64,
             version: VERSION,
         };
 
         (data, blocks, meta)
     }
 
-    #[test]
-    fn test_in_mem_writer() {
+    #[tokio::test]
+    async fn test_in_mem_writer() {
         let (data, blocks, meta) = get_sst();
         let mut writer = Box::new(InMemWriter::new(0));
-        blocks
-            .iter()
-            .zip_eq(meta.block_metas.iter())
-            .for_each(|(block, meta)| {
-                writer.write_block(&block[..], meta).unwrap();
-            });
-        let output_data = writer.finish(blocks.len() as u32).unwrap();
-        assert_eq!(output_data, data);
+        for (block, meta) in blocks.iter().zip_eq(meta.block_metas.iter()) {
+            writer.write_block(&block[..], meta).await.unwrap();
+        }
+
+        let meta_offset = meta.meta_offset as usize;
+        let (output_data, _) = writer.finish(meta).await.unwrap();
+        assert_eq!(output_data.slice(0..meta_offset), data);
     }
 }

@@ -207,9 +207,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 });
 
                 // TODO: currently not a vectorized implementation
-                states
-                    .iter_mut()
-                    .for_each(|state| state.update_single(&chunk, row_id).unwrap());
+                for state in states {
+                    state.update_single(&chunk, row_id)?
+                }
             }
         }
 
@@ -251,7 +251,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let columns = group_builders
                 .into_iter()
                 .chain(agg_builders)
-                .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
+                .map(|b| Ok(Column::new(Arc::new(b.finish()))))
                 .collect::<Result<Vec<_>>>()?;
 
             let output = DataChunk::new(columns, array_len);

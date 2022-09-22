@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::expr::DataTypeName;
+use risingwave_common::types::DataTypeName;
 use risingwave_sqlparser::ast::{
     DataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
@@ -90,7 +90,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
 /// Create a table view function.
 fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWithJoins {
-    let factor = TableFactor::Table {
+    let factor = TableFactor::TableFunction {
         name: ObjectName(vec![name.into()]),
         alias: Some(alias),
         args,

@@ -23,6 +23,8 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
 use risingwave_pb::data::Epoch as ProstEpoch;
+use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
@@ -38,6 +40,7 @@ use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
+use crate::stream::build_actor_splits;
 use crate::{MetaError, MetaResult};
 
 pub type RecoveryResult = (Epoch, HashSet<ActorId>, Vec<CreateMviewProgress>);
@@ -109,6 +112,13 @@ where
                 return Err(err);
             }
 
+            // get split assignments for all actors
+            let source_split_assignments = self.source_manager.list_assignments().await;
+            let command = Command::Plain(Some(Mutation::Add(AddMutation {
+                actor_dispatchers: Default::default(),
+                actor_splits: build_actor_splits(&source_split_assignments),
+            })));
+
             let prev_epoch = new_epoch;
             new_epoch = prev_epoch.next();
             // checkpoint, used as init barrier to initialize all executors.
@@ -118,7 +128,7 @@ where
                 info,
                 prev_epoch,
                 new_epoch,
-                Command::checkpoint(),
+                command,
             ));
 
             let (barrier_complete_tx, mut barrier_complete_rx) =
@@ -160,35 +170,38 @@ where
     async fn get_migrate_map_plan(
         &self,
         info: &BarrierActorInfo,
-        expired_workers: &Vec<WorkerId>,
+        expired_workers: &[WorkerId],
     ) -> (HashMap<ActorId, WorkerId>, HashMap<WorkerId, WorkerNode>) {
-        let workers_size = expired_workers.len();
         let mut cur = 0;
         let mut migrate_map = HashMap::new();
         let mut node_map = HashMap::new();
-        while cur < workers_size {
+        while cur < expired_workers.len() {
             let current_nodes = self
                 .cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
                 .await;
             let new_nodes = current_nodes
-                .iter()
-                .filter(|&node| {
+                .into_iter()
+                .filter(|node| {
                     !info.node_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
                 })
                 .collect_vec();
             for new_node in new_nodes {
                 let actors = info.actor_map.get(&expired_workers[cur]).unwrap();
-                let actors_len = actors.len();
-                for actor in actors.iter().take(actors_len) {
+                for actor in actors {
                     migrate_map.insert(*actor, new_node.id);
                 }
-                node_map.insert(new_node.id, new_node.clone());
                 cur += 1;
                 debug!(
-                    "got new worker {} , migrate process ({}/{})",
-                    new_node.id, cur, workers_size
+                    "new worker joined: {}, migrate process ({}/{})",
+                    new_node.id,
+                    cur,
+                    expired_workers.len()
                 );
+                node_map.insert(new_node.id, new_node);
+                if cur == expired_workers.len() {
+                    return (migrate_map, node_map);
+                }
             }
             // wait to get newly joined CN
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -311,6 +324,17 @@ where
         prev_epoch: &Epoch,
         new_epoch: &Epoch,
     ) -> MetaResult<()> {
+        // Here in order to stop all actors in CNs, we need resolve all actors include those in
+        // starting status.
+        let all_actors = &self
+            .fragment_manager
+            .load_all_actors(|_, _, _| true)
+            .await
+            .actor_maps
+            .values()
+            .flat_map(|actor_ids| actor_ids.clone().into_iter())
+            .collect_vec();
+
         let futures = info.node_map.iter().map(|(_, worker_node)| async move {
             let client = self.env.stream_client_pool().get(worker_node).await?;
             debug!("force stop actors: {}", worker_node.id);
@@ -321,6 +345,7 @@ where
                         curr: new_epoch.0,
                         prev: prev_epoch.0,
                     }),
+                    actor_ids: all_actors.clone(),
                 })
                 .await
         });

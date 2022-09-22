@@ -23,7 +23,6 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_common::error::Result;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::source::{ConnectorState, SplitId, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
@@ -33,6 +32,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::reader::SourceReaderStream;
+use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::source::state::SourceStateHandler;
@@ -93,7 +93,7 @@ impl<S: StateStore> SourceExecutor<S> {
         _op_info: String,
         streaming_metrics: Arc<StreamingMetrics>,
         expected_barrier_latency_ms: u64,
-    ) -> Result<Self> {
+    ) -> StreamResult<Self> {
         // Using vnode range start for row id generator.
         let vnode_id = vnodes.next_set_bit(0).unwrap_or(0);
         Ok(Self {
@@ -124,10 +124,10 @@ impl<S: StateStore> SourceExecutor<S> {
         let row_ids = self.row_id_generator.next_batch(len).await;
 
         for row_id in row_ids {
-            builder.append(Some(row_id)).unwrap();
+            builder.append(Some(row_id));
         }
 
-        builder.finish().unwrap().into()
+        builder.finish().into()
     }
 
     /// Generate a row ID column according to ops.
@@ -138,19 +138,15 @@ impl<S: StateStore> SourceExecutor<S> {
         for i in 0..len {
             // Only refill row_id for insert operation.
             if ops.get(i) == Some(&Op::Insert) {
-                builder
-                    .append(Some(self.row_id_generator.next().await))
-                    .unwrap();
+                builder.append(Some(self.row_id_generator.next().await));
             } else {
-                builder
-                    .append(Some(
-                        i64::try_from(column.array_ref().datum_at(i).unwrap()).unwrap(),
-                    ))
-                    .unwrap();
+                builder.append(Some(
+                    i64::try_from(column.array_ref().datum_at(i).unwrap()).unwrap(),
+                ));
             }
         }
 
-        Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
+        Column::new(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
     async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
@@ -178,7 +174,7 @@ impl<S: StateStore> SourceExecutor<S> {
 }
 
 impl<S: StateStore> SourceExecutor<S> {
-    fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
+    fn get_diff(&mut self, rhs: ConnectorState) -> ConnectorState {
         // rhs can not be None because we do not support split number reduction
 
         let split_change = rhs.unwrap();
@@ -191,6 +187,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 Some(s) => target_state.push(s.clone()),
                 None => {
                     no_change_flag = false;
+                    // write new assigned split to state cache. snapshot is base on cache.
+                    self.state_cache
+                        .entry(sc.id())
+                        .or_insert_with(|| sc.clone());
                     target_state.push(sc.clone())
                 }
             }
@@ -218,10 +218,10 @@ impl<S: StateStore> SourceExecutor<S> {
         state: ConnectorState,
     ) -> StreamExecutorResult<Box<SourceStreamReaderImpl>> {
         let reader = match self.source_desc.source.as_ref() {
-            SourceImpl::TableV2(t) => t
+            SourceImpl::Table(t) => t
                 .stream_reader(self.column_ids.clone())
                 .await
-                .map(SourceStreamReaderImpl::TableV2),
+                .map(SourceStreamReaderImpl::Table),
             SourceImpl::Connector(c) => c
                 .stream_reader(
                     state,
@@ -246,6 +246,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .await
             .unwrap();
 
+        // If the first barrier is configuration change, then the source executor must be newly
+        // created, and we should start with the paused state.
+        let start_with_paused = barrier.is_update();
+
         if let Some(mutation) = barrier.mutation.as_ref() {
             if let Mutation::Add { splits, .. } = mutation.as_ref() {
                 if let Some(splits) = splits.get(&self.ctx.id) {
@@ -268,6 +272,12 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
+        tracing::debug!(
+            "source {:?} actor {:?} starts with state {:?}",
+            self.source_id,
+            self.ctx.id,
+            recover_state
+        );
 
         // todo: use epoch from msg to restore state from state store
         let source_chunk_reader = self
@@ -277,6 +287,9 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
+        if start_with_paused {
+            stream.pause_source();
+        }
 
         yield Message::Barrier(barrier);
 
@@ -286,7 +299,6 @@ impl<S: StateStore> SourceExecutor<S> {
                 Either::Left(barrier) => {
                     let barrier = barrier?;
                     let epoch = barrier.epoch.prev;
-                    self.take_snapshot(epoch).await?;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
@@ -330,6 +342,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             _ => {}
                         }
                     }
+                    self.take_snapshot(epoch).await?;
                     self.state_cache.clear();
                     yield Message::Barrier(barrier);
                 }
@@ -370,7 +383,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     // Refill row id column for source.
                     chunk = match self.source_desc.source.as_ref() {
                         SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true).await,
-                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false).await,
+                        SourceImpl::Table(_) => self.refill_row_id_column(chunk, false).await,
                     };
 
                     self.metrics
@@ -423,6 +436,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, StreamSourceInfo};
@@ -439,7 +453,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_table_source() -> Result<()> {
+    async fn test_table_source() {
         let table_id = TableId::default();
 
         let rowid_type = DataType::Int64;
@@ -472,13 +486,10 @@ mod tests {
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
         let source_manager = MemSourceManager::default();
-        source_manager.create_table_source(
-            &table_id,
-            table_columns,
-            row_id_index,
-            pk_column_ids,
-        )?;
-        let source_desc = source_manager.get_source(&table_id)?;
+        source_manager
+            .create_table_source(&table_id, table_columns, row_id_index, pk_column_ids)
+            .unwrap();
+        let source_desc = source_manager.get_source(&table_id).unwrap();
         let source = source_desc.clone().source;
 
         let chunk1 = StreamChunk::from_pretty(
@@ -529,14 +540,17 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table_v2().unwrap();
+            let table_source = source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
         barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
 
         let msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(msg.into_barrier().unwrap().epoch, Epoch::new_test_epoch(1));
+        assert_eq!(
+            msg.into_barrier().unwrap().epoch,
+            EpochPair::new_test_epoch(1)
+        );
 
         // Write 1st chunk
         write_chunk(chunk1);
@@ -565,12 +579,10 @@ mod tests {
                 U+ 6 6 world",
             )
         );
-
-        Ok(())
     }
 
     #[tokio::test]
-    async fn test_table_dropped() -> Result<()> {
+    async fn test_table_dropped() {
         let table_id = TableId::default();
 
         let rowid_type = DataType::Int64;
@@ -603,13 +615,10 @@ mod tests {
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
         let source_manager = MemSourceManager::default();
-        source_manager.create_table_source(
-            &table_id,
-            table_columns,
-            row_id_index,
-            pk_column_ids,
-        )?;
-        let source_desc = source_manager.get_source(&table_id)?;
+        source_manager
+            .create_table_source(&table_id, table_columns, row_id_index, pk_column_ids)
+            .unwrap();
+        let source_desc = source_manager.get_source(&table_id).unwrap();
         let source = source_desc.clone().source;
 
         // Prepare test data chunks
@@ -654,7 +663,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table_v2().unwrap();
+            let table_source = source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
@@ -666,8 +675,6 @@ mod tests {
         write_chunk(chunk.clone());
         executor.next().await.unwrap().unwrap();
         write_chunk(chunk);
-
-        Ok(())
     }
 
     fn mock_stream_source_info() -> StreamSourceInfo {
@@ -726,14 +733,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_split_change_mutation() -> Result<()> {
+    async fn test_split_change_mutation() {
         let stream_source_info = mock_stream_source_info();
         let source_table_id = TableId::default();
         let source_manager = Arc::new(MemSourceManager::default());
 
         source_manager
             .create_source(&source_table_id, stream_source_info)
-            .await?;
+            .await
+            .unwrap();
 
         let get_schema = |column_ids: &[ColumnId], source_desc: &SourceDesc| {
             let mut fields = Vec::with_capacity(column_ids.len());
@@ -748,7 +756,7 @@ mod tests {
             Schema::new(fields)
         };
 
-        let source_desc = source_manager.get_source(&source_table_id)?;
+        let source_desc = source_manager.get_source(&source_table_id).unwrap();
         let mem_state_store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(mem_state_store.clone(), &TableId::from(0x2333));
         let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
@@ -756,6 +764,7 @@ mod tests {
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+        let source_state_handler = SourceStateHandler::new(keyspace.clone());
 
         let source_exec = SourceExecutor::new(
             ActorContext::create(0),
@@ -772,9 +781,10 @@ mod tests {
             "SourceExecutor".to_string(),
             Arc::new(StreamingMetrics::unused()),
             u64::MAX,
-        )?;
+        )
+        .unwrap();
 
-        let mut materialize = MaterializeExecutor::new_for_test(
+        let mut materialize = MaterializeExecutor::for_test(
             Box::new(source_exec),
             mem_state_store.clone(),
             TableId::from(0x2333),
@@ -842,6 +852,13 @@ mod tests {
 
         let _ = materialize.next().await.unwrap(); // barrier
 
+        // there must exist state for new add partition
+        source_state_handler
+            .restore_states("3-1".to_string().into(), curr_epoch + 1)
+            .await
+            .unwrap()
+            .unwrap();
+
         let chunk_2 = (materialize.next().await.unwrap().unwrap())
             .into_chunk()
             .unwrap()
@@ -878,6 +895,5 @@ mod tests {
         let pause_barrier =
             Barrier::new_test_barrier(curr_epoch + 3).with_mutation(Mutation::Resume);
         barrier_tx.send(pause_barrier).unwrap();
-        Ok(())
     }
 }

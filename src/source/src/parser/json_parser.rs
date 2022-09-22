@@ -12,43 +12,66 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::Datum;
-use serde_json::Value;
 
-use crate::parser::common::json_parse_value;
-use crate::{Event, SourceColumnDesc, SourceParser};
+use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
 #[derive(Debug)]
-pub struct JSONParser;
+pub struct JsonParser;
 
-impl SourceParser for JSONParser {
-    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
+impl SourceParser for JsonParser {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+        use serde_json::Value;
+
+        use crate::parser::common::json_parse_value;
         let value: Value = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        Ok(Event {
-            ops: vec![Op::Insert],
-            rows: vec![columns
-                .iter()
-                .map(|column| {
-                    if column.skip_parse {
-                        Ok(None)
-                    } else {
-                        json_parse_value(&column.into(), value.get(&column.name)).map_err(|e| {
-                            tracing::error!(
-                                "failed to process value ({}): {}",
-                                String::from_utf8_lossy(payload),
-                                e
-                            );
-                            e.into()
-                        })
-                    }
-                })
-                .collect::<Result<Vec<Datum>>>()?],
+        writer.insert(|desc| {
+            json_parse_value(&desc.into(), value.get(&desc.name)).map_err(|e| {
+                tracing::error!(
+                    "failed to process value ({}): {}",
+                    String::from_utf8_lossy(payload),
+                    e
+                );
+                e.into()
+            })
+        })
+    }
+}
+
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
+impl SourceParser for JsonParser {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+        use simd_json::{BorrowedValue, ValueAccess};
+
+        use crate::parser::common::simd_json_parse_value;
+        let mut payload_mut = payload.to_vec();
+        let value: BorrowedValue = simd_json::to_borrowed_value(&mut payload_mut)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+        writer.insert(|desc| {
+            simd_json_parse_value(&desc.into(), value.get(desc.name.as_str())).map_err(|e| {
+                tracing::error!(
+                    "failed to process value ({}): {}",
+                    String::from_utf8_lossy(payload),
+                    e
+                );
+                e.into()
+            })
         })
     }
 }
@@ -56,117 +79,143 @@ impl SourceParser for JSONParser {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::StructValue;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::array::{Op, StructValue};
+    use risingwave_common::catalog::ColumnDesc;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
-    use crate::{JSONParser, SourceColumnDesc, SourceParser};
+    use crate::{JsonParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
     #[test]
     fn test_json_parser() {
-        let parser = JSONParser {};
-        let payload = r#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269"}"#.as_bytes();
+        let parser = JsonParser;
         let descs = vec![
-            SourceColumnDesc {
-                name: "i32".to_string(),
-                data_type: DataType::Int32,
-                column_id: ColumnId::from(0),
-                skip_parse: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "bool".to_string(),
-                data_type: DataType::Boolean,
-                column_id: ColumnId::from(2),
-                skip_parse: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "i16".to_string(),
-                data_type: DataType::Int16,
-                column_id: ColumnId::from(3),
-                skip_parse: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "i64".to_string(),
-                data_type: DataType::Int64,
-                column_id: ColumnId::from(4),
-                skip_parse: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "f32".to_string(),
-                data_type: DataType::Float32,
-                column_id: ColumnId::from(5),
-                skip_parse: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "f64".to_string(),
-                data_type: DataType::Float64,
-                column_id: ColumnId::from(6),
-                skip_parse: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "varchar".to_string(),
-                data_type: DataType::Varchar,
-                column_id: ColumnId::from(7),
-                skip_parse: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "date".to_string(),
-                data_type: DataType::Date,
-                column_id: ColumnId::from(8),
-                skip_parse: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "timestamp".to_string(),
-                data_type: DataType::Timestamp,
-                column_id: ColumnId::from(9),
-                skip_parse: false,
-                fields: vec![],
-            },
+            SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
+            SourceColumnDesc::simple("bool", DataType::Boolean, 2.into()),
+            SourceColumnDesc::simple("i16", DataType::Int16, 3.into()),
+            SourceColumnDesc::simple("i64", DataType::Int64, 4.into()),
+            SourceColumnDesc::simple("f32", DataType::Float32, 5.into()),
+            SourceColumnDesc::simple("f64", DataType::Float64, 6.into()),
+            SourceColumnDesc::simple("varchar", DataType::Varchar, 7.into()),
+            SourceColumnDesc::simple("date", DataType::Date, 8.into()),
+            SourceColumnDesc::simple("timestamp", DataType::Timestamp, 9.into()),
         ];
 
-        let event = parser.parse(payload, &descs).unwrap();
-        let row = event.rows.first().unwrap();
-        assert_eq!(row.len(), descs.len());
-        assert!(row[0].eq(&Some(ScalarImpl::Int32(1))));
-        assert!(row[1].eq(&Some(ScalarImpl::Bool(true))));
-        assert!(row[2].eq(&Some(ScalarImpl::Int16(1))));
-        assert!(row[3].eq(&Some(ScalarImpl::Int64(12345678))));
-        assert!(row[4].eq(&Some(ScalarImpl::Float32(1.23.into()))));
-        assert!(row[5].eq(&Some(ScalarImpl::Float64(1.2345.into()))));
-        assert!(row[6].eq(&Some(ScalarImpl::Utf8("varchar".to_string()))));
-        assert!(row[7].eq(&Some(ScalarImpl::NaiveDate(
-            str_to_date("2021-01-01").unwrap()
-        ))));
-        assert!(row[8].eq(&Some(ScalarImpl::NaiveDateTime(
-            str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
-        ))));
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
-        let payload = r#"{"i32":1}"#.as_bytes();
-        let result = parser.parse(payload, &descs);
-        assert!(result.is_ok());
-        let event = result.unwrap();
-        let row = event.rows.first().unwrap();
-        assert_eq!(row.len(), descs.len());
-        assert!(row[0].eq(&Some(ScalarImpl::Int32(1))));
-        assert!(row[1].eq(&None));
+        for payload in [
+            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269"}"#.as_slice(),
+            br#"{"i32":1}"#.as_slice(),
+        ] {
+            let writer = builder.row_writer();
+            parser.parse(payload, writer).unwrap();
+        }
 
-        let payload = r#"{"i32:1}"#.as_bytes();
-        let result = parser.parse(payload, &descs);
-        assert!(result.is_err());
+        let chunk = builder.finish();
+
+        let mut rows = chunk.rows();
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
+            assert_eq!(
+                row.value_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Bool(true)))
+            );
+            assert_eq!(
+                row.value_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int16(1)))
+            );
+            assert_eq!(
+                row.value_at(3).to_owned_datum(),
+                (Some(ScalarImpl::Int64(12345678)))
+            );
+            assert_eq!(
+                row.value_at(4).to_owned_datum(),
+                (Some(ScalarImpl::Float32(1.23.into())))
+            );
+            // Usage of avx2 results in a floating point error. Since it is
+            // very small (close to precision of f64) we ignore it.
+            #[cfg(target_feature = "avx2")]
+            assert_eq!(
+                row.value_at(5).to_owned_datum(),
+                (Some(ScalarImpl::Float64(1.2345000000000002.into())))
+            );
+            #[cfg(not(target_feature = "avx2"))]
+            assert_eq!(
+                row.value_at(5).to_owned_datum(),
+                (Some(ScalarImpl::Float64(1.2345.into())))
+            );
+            assert_eq!(
+                row.value_at(6).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("varchar".to_string())))
+            );
+            assert_eq!(
+                row.value_at(7).to_owned_datum(),
+                (Some(ScalarImpl::NaiveDate(str_to_date("2021-01-01").unwrap())))
+            );
+            assert_eq!(
+                row.value_at(8).to_owned_datum(),
+                (Some(ScalarImpl::NaiveDateTime(
+                    str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
+                )))
+            );
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.value_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int32(1)))
+            );
+            assert_eq!(row.value_at(1).to_owned_datum(), None);
+        }
+    }
+
+    #[test]
+    fn test_json_parser_failed() {
+        let parser = JsonParser;
+        let descs = vec![
+            SourceColumnDesc::simple("v1", DataType::Int32, 0.into()),
+            SourceColumnDesc::simple("v2", DataType::Int16, 1.into()),
+            SourceColumnDesc::simple("v3", DataType::Varchar, 2.into()),
+        ];
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
+
+        // Parse a correct record.
+        {
+            let writer = builder.row_writer();
+            let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
+            parser.parse(payload, writer).unwrap();
+        }
+
+        // Parse an incorrect record.
+        {
+            let writer = builder.row_writer();
+            // `v2` overflowed.
+            let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#;
+            parser.parse(payload, writer).unwrap_err();
+        }
+
+        // Parse a correct record.
+        {
+            let writer = builder.row_writer();
+            let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
+            parser.parse(payload, writer).unwrap();
+        }
+
+        let chunk = builder.finish();
+        assert!(chunk.valid());
+
+        assert_eq!(chunk.cardinality(), 2);
     }
 
     #[test]
     fn test_json_parse_struct() {
-        let parser = JSONParser {};
+        let parser = JsonParser;
 
         let descs = vec![
             ColumnDesc::new_struct(
@@ -195,25 +244,31 @@ mod tests {
         .iter()
         .map(SourceColumnDesc::from)
         .collect_vec();
-        let payload = r#"
+        let payload = br#"
         {
             "data": {
-              "created_at": "2022-07-13 20:48:37.07",
-              "id": "1732524418112319151",
-              "text": "Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.",           
-              "lang": "English"
+                "created_at": "2022-07-13 20:48:37.07",
+                "id": "1732524418112319151",
+                "text": "Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.",
+                "lang": "English"
             },
             "author": {
-              "created_at": "2018-01-29 12:19:11.07",
-              "id": "7772634297",
-              "name": "Lily Frami yet",
-              "username": "Dooley5659"
+                "created_at": "2018-01-29 12:19:11.07",
+                "id": "7772634297",
+                "name": "Lily Frami yet",
+                "username": "Dooley5659"
             }
-          }
-        "#
-        .as_bytes();
-        let event = parser.parse(payload, &descs).unwrap();
-        let row = event.rows[0].clone();
+        }
+        "#;
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+        {
+            let writer = builder.row_writer();
+            parser.parse(payload, writer).unwrap();
+        }
+        let chunk = builder.finish();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.to_owned_row().0;
 
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![

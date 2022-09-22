@@ -18,13 +18,16 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
+use tracing::log::warn;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
@@ -37,6 +40,7 @@ use crate::hummock::iterator::{
     HummockIteratorUnion,
 };
 use crate::hummock::local_version::ReadVersion;
+use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
@@ -94,6 +98,7 @@ impl HummockStorage {
             Some(table_id) => Some(
                 self.get_compaction_group_id(*table_id)
                     .in_span(Span::enter_with_local_parent("get_compaction_group_id"))
+                    .stack_trace("store_get_compaction_group_id")
                     .await?,
             ),
         };
@@ -102,19 +107,12 @@ impl HummockStorage {
         let mut overlapped_iters = vec![];
 
         let ReadVersion {
-            replicated_batches,
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
         } = self.read_filter(&read_options, &key_range)?;
 
         let mut local_stats = StoreLocalStatistic::default();
-
-        for epoch_replicated_batches in replicated_batches {
-            for batch in epoch_replicated_batches {
-                overlapped_iters.push(HummockIteratorUnion::First(batch.into_directed_iter()));
-            }
-        }
         for uncommitted_data in shared_buffer_data {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
@@ -191,7 +189,7 @@ impl HummockStorage {
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
                         let sstable = self
                             .sstable_store
-                            .sstable(sstable_info.id, &mut local_stats)
+                            .sstable(sstable_info, &mut local_stats)
                             .in_span(Span::enter_with_local_parent("get_sstable"))
                             .await?;
 
@@ -218,7 +216,7 @@ impl HummockStorage {
                 for table_info in table_infos.into_iter().rev() {
                     let sstable = self
                         .sstable_store
-                        .sstable(table_info.id, &mut local_stats)
+                        .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
@@ -293,7 +291,6 @@ impl HummockStorage {
         };
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
-            replicated_batches,
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
@@ -301,16 +298,6 @@ impl HummockStorage {
 
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
-
-        // Query replicated batches. Return the value without iterating SSTs if found
-        for epoch_replicated_batches in replicated_batches {
-            for batch in epoch_replicated_batches {
-                if let Some(v) = self.get_from_batch(&batch, key) {
-                    local_stats.report(self.stats.as_ref());
-                    return Ok(v.into_user_value());
-                }
-            }
-        }
 
         // Query shared buffer. Return the value without iterating SSTs if found
         for uncommitted_data in shared_buffer_data {
@@ -359,7 +346,7 @@ impl HummockStorage {
                     for table_info in table_infos {
                         let table = self
                             .sstable_store
-                            .sstable(table_info.id, &mut local_stats)
+                            .sstable(table_info, &mut local_stats)
                             .await?;
                         table_counts += 1;
                         if let Some(v) = self
@@ -401,7 +388,7 @@ impl HummockStorage {
 
                     let table = self
                         .sstable_store
-                        .sstable(level.table_infos[table_info_idx].id, &mut local_stats)
+                        .sstable(&level.table_infos[table_info_idx], &mut local_stats)
                         .await?;
                     table_counts += 1;
                     if let Some(v) = self
@@ -518,36 +505,10 @@ impl StateStore for HummockStorage {
                     epoch,
                     compaction_group_id,
                     kv_pairs,
-                    false,
                     write_options.table_id.into(),
                 )
                 .await?;
             Ok(size)
-        }
-    }
-
-    /// Replicates a batch to shared buffer, without uploading to the storage backend.
-    fn replicate_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_> {
-        async move {
-            let epoch = write_options.epoch;
-            let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
-            // See comments in HummockStorage::iter_inner for details about using
-            // compaction_group_id in read/write path.
-            self.local_version_manager
-                .write_shared_buffer(
-                    epoch,
-                    compaction_group_id,
-                    kv_pairs,
-                    true,
-                    write_options.table_id.into(),
-                )
-                .await?;
-
-            Ok(())
         }
     }
 
@@ -637,18 +598,33 @@ impl StateStore for HummockStorage {
         self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
-    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
-        async move { Ok(self.local_version_manager.wait_epoch(epoch).await?) }
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+        async move { Ok(self.local_version_manager.try_wait_epoch(epoch).await?) }
     }
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
+            if epoch == INVALID_EPOCH {
+                warn!("syncing invalid epoch");
+                return Ok(SyncResult {
+                    sync_size: 0,
+                    uncommitted_ssts: vec![],
+                });
+            }
             let sync_result = self
                 .local_version_manager()
-                .sync_shared_buffer(epoch)
+                .await_sync_shared_buffer(epoch)
                 .await?;
             Ok(sync_result)
         }
+    }
+
+    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+        if epoch == INVALID_EPOCH {
+            warn!("sealing invalid epoch");
+            return;
+        }
+        self.local_version_manager.seal_epoch(epoch, is_checkpoint);
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
@@ -656,6 +632,14 @@ impl StateStore for HummockStorage {
             self.local_version_manager.clear_shared_buffer().await;
             Ok(())
         }
+    }
+}
+
+impl HummockStorage {
+    #[cfg(any(test, feature = "test"))]
+    pub async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
+        self.seal_epoch(epoch, true);
+        self.sync(epoch).await
     }
 }
 

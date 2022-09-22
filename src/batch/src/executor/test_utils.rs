@@ -49,11 +49,9 @@ pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) ->
                     .unwrap();
             let mut array_builder = data_type.create_array_builder(batch_size);
             for j in 0..batch_size {
-                array_builder
-                    .append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64))
-                    .unwrap();
+                array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
             }
-            let array = array_builder.finish().unwrap();
+            let array = array_builder.finish();
             columns.push(Column::new(Arc::new(array)));
         }
         ret.push(DataChunk::new(columns, batch_size));
@@ -83,12 +81,10 @@ pub fn gen_sorted_data(
         let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for _ in 0..batch_size {
-            array_builder
-                .append_datum(&data_gen.generate_datum(0))
-                .unwrap();
+            array_builder.append_datum(&data_gen.generate_datum(0));
         }
 
-        let array = array_builder.finish().unwrap();
+        let array = array_builder.finish();
         ret.push(DataChunk::new(
             vec![Column::new(Arc::new(array))],
             batch_size,
@@ -115,12 +111,10 @@ pub fn gen_projected_data(
         let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for j in 0..batch_size {
-            array_builder
-                .append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64))
-                .unwrap();
+            array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
         }
 
-        let array = array_builder.finish().unwrap();
+        let array = array_builder.finish();
         let chunk = DataChunk::new(vec![Column::new(Arc::new(array))], batch_size);
 
         let array = expr.eval(&chunk).unwrap();

@@ -18,11 +18,12 @@ use async_stack_trace::StackTrace;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::{Barrier, Epoch};
+use risingwave_stream::executor::{Barrier, Mutation};
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
@@ -117,12 +118,20 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
         let epoch = req.epoch.unwrap();
-        self.mgr
-            .stop_all_actors(Epoch {
+
+        let barrier = &Barrier {
+            epoch: EpochPair {
                 curr: epoch.curr,
                 prev: epoch.prev,
-            })
-            .await?;
+            },
+            mutation: Some(Arc::new(Mutation::Stop(
+                req.actor_ids.into_iter().collect(),
+            ))),
+            checkpoint: true,
+            passed_actors: vec![],
+        };
+
+        self.mgr.stop_all_actors(barrier).await?;
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -135,8 +144,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<InjectBarrierRequest>,
     ) -> Result<Response<InjectBarrierResponse>, Status> {
         let req = request.into_inner();
-        let barrier =
-            Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
+        let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
 
         self.mgr
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
@@ -160,11 +168,11 @@ impl StreamService for StreamServiceImpl {
             .await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
-        let (synced_sstables, sync_succeed) = self
+        let synced_sstables = self
             .mgr
             .sync_epoch(req.prev_epoch)
             .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
-            .await;
+            .await?;
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
@@ -177,7 +185,9 @@ impl StreamService for StreamServiceImpl {
                     sst: Some(sst),
                 })
                 .collect_vec(),
-            checkpoint: sync_succeed,
+            // TODO: in the future may set it according to whether the barrier is a checkpoint
+            // barrier
+            checkpoint: true,
             worker_id: self.env.worker_id(),
         }))
     }

@@ -80,6 +80,7 @@ where
         }
     }
 
+    #[allow(clippy::uninit_vec)]
     pub fn append(&mut self, key: K, value: &V) {
         let offset = self.buffer.len();
         let len = value.encoded_len();
@@ -89,10 +90,12 @@ where
         };
         self.blocs.push(bloc);
 
-        self.buffer.resize(offset + len, 0);
+        let buffer_len = utils::align_up(self.block_size, offset + len);
+        self.buffer.reserve(buffer_len);
+        unsafe {
+            self.buffer.set_len(buffer_len);
+        }
         value.encode(&mut self.buffer[offset..offset + len]);
-        self.buffer
-            .resize(utils::align_up(self.block_size, self.buffer.len()), 0);
 
         self.keys.push(key);
     }
@@ -132,15 +135,14 @@ where
         // Write new cache entries.
 
         let mut slots = Vec::with_capacity(self.blocs.len());
+        let len = self.buffer.len();
 
-        self.store
-            .metrics
-            .disk_write_throughput
-            .inc_by(self.buffer.len() as f64);
         let timer = self.store.metrics.disk_write_latency.start_timer();
         let boff = self.store.cache_file.append(self.buffer).await? / self.block_size as u64;
         let boff: u32 = boff.try_into().unwrap();
         timer.observe_duration();
+        self.store.metrics.disk_write_bytes.inc_by(len as f64);
+        self.store.metrics.disk_write_io_size.observe(len as f64);
 
         for bloc in &mut self.blocs {
             bloc.bidx += boff;
@@ -162,6 +164,7 @@ pub struct StoreOptions {
     pub capacity: usize,
     pub buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
+    pub cache_meta_fallocate_unit: usize,
 
     pub metrics: FileCacheMetricsRef,
 }
@@ -215,7 +218,10 @@ where
             fallocate_unit: options.cache_file_fallocate_unit,
         };
 
-        let mf = MetaFile::open(PathBuf::from(&options.dir).join(META_FILE_FILENAME))?;
+        let mf = MetaFile::open(
+            PathBuf::from(&options.dir).join(META_FILE_FILENAME),
+            options.cache_meta_fallocate_unit,
+        )?;
 
         let cf = CacheFile::open(
             PathBuf::from(&options.dir).join(CACHE_FILE_FILENAME),
@@ -310,7 +316,8 @@ where
         let timer = self.metrics.disk_read_latency.start_timer();
         let buf = self.cache_file.read(offset, blen).await?;
         timer.observe_duration();
-        self.metrics.disk_read_throughput.inc_by(buf.len() as f64);
+        self.metrics.disk_read_bytes.inc_by(buf.len() as f64);
+        self.metrics.disk_read_io_size.observe(buf.len() as f64);
 
         drop(guard);
 

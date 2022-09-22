@@ -13,18 +13,16 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
-use risingwave_common::util::sync_point::on_sync_point;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumManager};
+use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -36,7 +34,7 @@ where
 {
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    vacuum_manager: Arc<VacuumManager<S>>,
+    vacuum_manager: VacuumManagerRef<S>,
     compaction_group_manager: CompactionGroupManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -48,7 +46,7 @@ where
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
         compactor_manager: CompactorManagerRef,
-        vacuum_trigger: Arc<VacuumManager<S>>,
+        vacuum_trigger: VacuumManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
@@ -69,30 +67,6 @@ where
 {
     type SubscribeCompactTasksStream = RwReceiverStream<SubscribeCompactTasksResponse>;
 
-    async fn pin_version(
-        &self,
-        request: Request<PinVersionRequest>,
-    ) -> Result<Response<PinVersionResponse>, Status> {
-        let req = request.into_inner();
-        let payload = self
-            .hummock_manager
-            .pin_version(req.context_id, req.last_pinned)
-            .await?;
-        Ok(Response::new(PinVersionResponse {
-            status: None,
-            payload: Some(payload),
-        }))
-    }
-
-    async fn unpin_version(
-        &self,
-        request: Request<UnpinVersionRequest>,
-    ) -> Result<Response<UnpinVersionResponse>, Status> {
-        let req = request.into_inner();
-        self.hummock_manager.unpin_version(req.context_id).await?;
-        Ok(Response::new(UnpinVersionResponse { status: None }))
-    }
-
     async fn unpin_version_before(
         &self,
         request: Request<UnpinVersionBeforeRequest>,
@@ -102,6 +76,32 @@ where
             .unpin_version_before(req.context_id, req.unpin_version_before)
             .await?;
         Ok(Response::new(UnpinVersionBeforeResponse { status: None }))
+    }
+
+    async fn get_current_version(
+        &self,
+        _request: Request<GetCurrentVersionRequest>,
+    ) -> Result<Response<GetCurrentVersionResponse>, Status> {
+        let current_version = self.hummock_manager.get_current_version().await;
+        Ok(Response::new(GetCurrentVersionResponse {
+            status: None,
+            current_version: Some(current_version),
+        }))
+    }
+
+    async fn get_version_deltas(
+        &self,
+        request: Request<GetVersionDeltasRequest>,
+    ) -> Result<Response<GetVersionDeltasResponse>, Status> {
+        let req = request.into_inner();
+        let version_deltas = self
+            .hummock_manager
+            .get_version_deltas(req.start_id, req.num_epochs)
+            .await?;
+        let resp = GetVersionDeltasResponse {
+            version_deltas: Some(version_deltas),
+        };
+        Ok(Response::new(resp))
     }
 
     async fn report_compaction_tasks(
@@ -185,13 +185,23 @@ where
                 format!("invalid hummock context {}", context_id),
             ));
         }
-        self.hummock_manager
-            .cancel_assigned_tasks_for_context_ids(context_id)
-            .await?;
         let rx = self
             .compactor_manager
             .add_compactor(context_id, req.max_concurrent_task_number);
         Ok(Response::new(RwReceiverStream::new(rx)))
+    }
+
+    // TODO: convert this into a stream.
+    async fn report_compaction_task_progress(
+        &self,
+        request: Request<ReportCompactionTaskProgressRequest>,
+    ) -> Result<Response<ReportCompactionTaskProgressResponse>, Status> {
+        let req = request.into_inner();
+        self.compactor_manager
+            .update_task_heartbeats(req.context_id, &req.progress);
+        Ok(Response::new(ReportCompactionTaskProgressResponse {
+            status: None,
+        }))
     }
 
     async fn report_vacuum_task(
@@ -201,7 +211,7 @@ where
         if let Some(vacuum_task) = request.into_inner().vacuum_task {
             self.vacuum_manager.report_vacuum_task(vacuum_task).await?;
         }
-        on_sync_point("AFTER_REPORT_VACUUM").await.unwrap();
+        sync_point::sync_point!("AFTER_REPORT_VACUUM");
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
     }
 

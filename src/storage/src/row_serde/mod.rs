@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
@@ -60,7 +60,11 @@ impl ColumnDescMapping {
     }
 
     /// Create a mapping with given `table_columns` projected on the `column_ids`.
-    pub fn new_partial(table_columns: &[ColumnDesc], output_column_ids: &[ColumnId]) -> Arc<Self> {
+    pub fn new_partial(
+        table_columns: &[ColumnDesc],
+        output_column_ids: &[ColumnId],
+        value_indices: &[usize],
+    ) -> Arc<Self> {
         let all_data_types = table_columns.iter().map(|d| d.data_type.clone()).collect();
         let mut table_columns = table_columns
             .iter()
@@ -74,6 +78,9 @@ impl ColumnDescMapping {
             .iter()
             .map(|id| table_columns.remove(id).unwrap())
             .unzip();
+        let output_index_set: HashSet<usize> = output_index.iter().copied().collect();
+        let value_set = value_indices.iter().copied().collect();
+        assert!(output_index_set.is_subset(&value_set));
         Self::new_inner(output_columns, all_data_types, output_index)
     }
 

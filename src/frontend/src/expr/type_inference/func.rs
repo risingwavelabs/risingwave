@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use itertools::{iproduct, Itertools as _};
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DataTypeName};
 
-use super::{align_types, cast_ok_base, CastContext, DataTypeName};
+use super::{align_types, cast_ok_base, CastContext};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
@@ -75,7 +76,7 @@ macro_rules! ensure_arity {
             .into());
         }
     };
-    ($func:literal, $num:literal == | $inputs:ident |) => {
+    ($func:literal, | $inputs:ident | == $num:literal) => {
         if !($inputs.len() == $num) {
             return Err(ErrorCode::BindError(format!(
                 "Function `{}` takes {} arguments ({} given)",
@@ -141,6 +142,20 @@ fn infer_type_for_special(
                 .try_collect()?;
             Ok(Some(DataType::Varchar))
         }
+        ExprType::IsNotNull => {
+            ensure_arity!("is_not_null", | inputs | == 1);
+            match inputs[0].return_type() {
+                DataType::Struct(_) | DataType::List { .. } => Ok(Some(DataType::Boolean)),
+                _ => Ok(None),
+            }
+        }
+        ExprType::IsNull => {
+            ensure_arity!("is_null", | inputs | == 1);
+            match inputs[0].return_type() {
+                DataType::Struct(_) | DataType::List { .. } => Ok(Some(DataType::Boolean)),
+                _ => Ok(None),
+            }
+        }
         ExprType::RegexpMatch => {
             ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
             if inputs.len() == 3 {
@@ -155,7 +170,7 @@ fn infer_type_for_special(
             }))
         }
         ExprType::ArrayCat => {
-            ensure_arity!("array_cat", 2 == | inputs |);
+            ensure_arity!("array_cat", | inputs | == 2);
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let return_type = match (&left_type, &right_type) {
@@ -185,7 +200,7 @@ fn infer_type_for_special(
             })?))
         }
         ExprType::ArrayAppend => {
-            ensure_arity!("array_append", 2 == | inputs |);
+            ensure_arity!("array_append", | inputs | == 2);
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let return_type = match (&left_type, &right_type) {
@@ -203,7 +218,7 @@ fn infer_type_for_special(
             })?))
         }
         ExprType::ArrayPrepend => {
-            ensure_arity!("array_prepend", 2 == | inputs |);
+            ensure_arity!("array_prepend", | inputs | == 2);
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let return_type = match (&left_type, &right_type) {
@@ -781,11 +796,7 @@ fn build_type_derive_map() -> FuncSigMap {
     map
 }
 
-lazy_static::lazy_static! {
-    static ref FUNC_SIG_MAP: FuncSigMap = {
-        build_type_derive_map()
-    };
-}
+static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(build_type_derive_map);
 
 /// The table of function signatures.
 pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {

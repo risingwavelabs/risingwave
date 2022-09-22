@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::array::{Array, ListRef, StructRef};
-use risingwave_common::bail;
 
-use crate::Result;
+use crate::{ExprError, Result};
 
 /// Essentially `RTFn` is an alias of the specific Fn. It was aliased not to
 /// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
@@ -125,11 +124,33 @@ pub fn max_list<'a>(r: Option<ListRef<'a>>, i: Option<ListRef<'a>>) -> Result<Op
     max(r, i)
 }
 
+/// Note the following corner cases:
+///
+/// ```slt
+/// statement ok
 /// create table t(v1 int);
+///
+/// statement ok
 /// insert into t values (null);
-/// select count(*) from t; gives 1.
-/// select count(v1) from t; gives 0.
-/// select sum(v1) from t; gives null
+///
+/// query I
+/// select count(*) from t;
+/// ----
+/// 1
+///
+/// query I
+/// select count(v1) from t;
+/// ----
+/// 0
+///
+/// query I
+/// select sum(v1) from t;
+/// ----
+/// NULL
+///
+/// statement ok
+/// drop table t;
+/// ```
 pub fn count<T>(result: Option<i64>, input: Option<T>) -> Result<Option<i64>> {
     let res = match (result, input) {
         (None, None) => Some(0),
@@ -174,9 +195,7 @@ where
     ) -> Result<Option<<T as Array>::RefItem<'a>>> {
         self.count += 1;
         if self.count > 1 {
-            bail!(
-                "SingleValue aggregation can only accept exactly one value. But there is more than one.",
-            )
+            Err(ExprError::MaxOneRow("single_value input"))
         } else {
             Ok(input)
         }

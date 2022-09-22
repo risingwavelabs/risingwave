@@ -99,7 +99,7 @@ impl MockSource {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
-        let mut epoch = 0;
+        let mut epoch = 1;
 
         while let Some(msg) = self.rx.recv().await {
             epoch += 1;
@@ -270,6 +270,7 @@ pub mod agg_executor {
                 agg_calls,
                 pk_indices,
                 executor_id,
+                1 << 10,
                 state_tables,
                 state_table_col_mappings,
             )

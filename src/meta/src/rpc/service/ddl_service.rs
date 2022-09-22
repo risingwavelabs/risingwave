@@ -19,6 +19,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
+use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::meta::subscribe_response::Operation;
@@ -29,7 +31,8 @@ use tonic::{Request, Response, Status};
 
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
-    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
+    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, StreamingJobBackgroundDeleterRef,
+    StreamingJobId, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -47,6 +50,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+    table_background_deleter: StreamingJobBackgroundDeleterRef,
     ddl_lock: Arc<RwLock<()>>,
 }
 
@@ -62,6 +66,7 @@ where
         source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        table_background_deleter: StreamingJobBackgroundDeleterRef,
         ddl_lock: Arc<RwLock<()>>,
     ) -> Self {
         Self {
@@ -71,6 +76,7 @@ where
             source_manager,
             cluster_manager,
             fragment_manager,
+            table_background_deleter,
             ddl_lock,
         }
     }
@@ -104,7 +110,10 @@ where
     ) -> Result<Response<DropDatabaseResponse>, Status> {
         let req = request.into_inner();
         let database_id = req.get_database_id();
-        let version = self.catalog_manager.drop_database(database_id).await?;
+        let (version, catalog_ids) = self.catalog_manager.drop_database(database_id).await?;
+
+        self.table_background_deleter.delete(catalog_ids);
+
         Ok(Response::new(DropDatabaseResponse {
             status: None,
             version,
@@ -184,8 +193,9 @@ where
         // 1. Drop source in catalog. Ref count will be checked.
         let version = self.catalog_manager.drop_source(source_id).await?;
 
-        // 2. Drop source on compute nodes.
-        self.source_manager.drop_source(source_id).await?;
+        // 2. Drop source in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![StreamingJobId::SourceId(source_id)]);
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -220,16 +230,14 @@ where
         &self,
         request: Request<DropSinkRequest>,
     ) -> Result<Response<DropSinkResponse>, Status> {
-        use risingwave_common::catalog::TableId;
         let sink_id = request.into_inner().sink_id;
 
         // 1. Drop sink in catalog.
         let version = self.catalog_manager.drop_sink(sink_id).await?;
 
-        // 2. drop sink in stream manager
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(sink_id))
-            .await?;
+        // 2. drop sink in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![StreamingJobId::SinkId(sink_id.into())]);
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -265,7 +273,6 @@ where
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
         let _ddl_lock = self.ddl_lock.read().await;
-        use risingwave_common::catalog::TableId;
 
         self.env.idle_manager().record_activity();
 
@@ -281,10 +288,9 @@ where
             .drop_table(table_id, internal_tables)
             .await?;
 
-        // 2. drop mv in stream manager
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(table_id))
-            .await?;
+        // 2. drop mv in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![StreamingJobId::TableId(table_id.into())]);
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -321,7 +327,6 @@ where
         request: Request<DropIndexRequest>,
     ) -> Result<Response<DropIndexResponse>, Status> {
         let _ddl_lock = self.ddl_lock.read().await;
-        use risingwave_common::catalog::TableId;
 
         self.env.idle_manager().record_activity();
 
@@ -339,10 +344,9 @@ where
             .drop_index(index_id, index_table_id, internal_tables)
             .await?;
 
-        // 2. drop mv(index) in stream manager
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(index_table_id))
-            .await?;
+        // 2. drop mv(index) in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![StreamingJobId::TableId(index_table_id.into())]);
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -475,11 +479,18 @@ where
         };
 
         let table_ids_cnt = fragment_graph.table_ids_cnt;
-        let parallel_degree = self.cluster_manager.get_parallel_unit_count().await;
+        let default_parallelism = if self.env.opts.minimal_scheduling {
+            self.cluster_manager
+                .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+                .await
+                .len()
+        } else {
+            self.cluster_manager.get_active_parallel_unit_count().await
+        };
         let mut actor_graph_builder = ActorGraphBuilder::new(
             self.env.id_gen_manager_ref(),
             fragment_graph,
-            parallel_degree as u32,
+            default_parallelism as u32,
             &mut ctx,
         )
         .await?;
@@ -689,8 +700,6 @@ where
         source_id: SourceId,
         table_id: TableId,
     ) -> MetaResult<CatalogVersion> {
-        use risingwave_common::catalog::TableId;
-
         // 1. Drop materialized source in catalog, source_id will be checked if it is
         // associated_source_id in mview.
         let version = self
@@ -698,14 +707,13 @@ where
             .drop_materialized_source(source_id, table_id)
             .await?;
 
-        // 2. Drop source and mv separately.
-        // Note: we need to drop the materialized view to unmap the source_id to fragment_ids in
-        // `SourceManager` before we can drop the source
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(table_id))
-            .await?;
-
-        self.source_manager.drop_source(source_id).await?;
+        // 2. Drop source and mv in table background deleter asynchronously.
+        // Note: we need to drop the materialized view to unmap the source_id to fragment_ids before
+        // we can drop the source.
+        self.table_background_deleter.delete(vec![
+            StreamingJobId::TableId(table_id.into()),
+            StreamingJobId::SourceId(source_id),
+        ]);
 
         Ok(version)
     }

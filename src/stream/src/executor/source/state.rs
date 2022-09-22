@@ -69,7 +69,7 @@ impl<S: StateStore> SourceStateHandler<S> {
             });
             states.iter().for_each(|state| {
                 let value = state.encode_to_bytes();
-                local_batch.put(state.id().as_str(), StorageValue::new_default_put(value));
+                local_batch.put(&*state.id(), StorageValue::new_put(value));
             });
             // If an error is returned, the underlying state should be rollback
             local_batch.ingest().await.inspect_err(|e| {
@@ -94,7 +94,7 @@ impl<S: StateStore> SourceStateHandler<S> {
     ) -> StreamExecutorResult<Option<Bytes>> {
         self.keyspace
             .get(
-                state_identifier.as_str(),
+                &*state_identifier,
                 true,
                 ReadOptions {
                     epoch,
@@ -225,7 +225,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_state_restore() {
-        let partition = SplitId::new("p01".into());
+        let partition = "p01".into();
         let state_store_handler = SourceStateHandler::new(new_test_keyspace());
         let list_states = state_store_handler
             .restore_states(partition, u64::MAX)

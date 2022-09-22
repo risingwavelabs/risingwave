@@ -17,10 +17,11 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
+use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
-use super::SstableMeta;
+use crate::hummock::compactor::TaskProgressTracker;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -38,11 +39,8 @@ pub trait TableBuilderFactory {
 }
 
 pub struct SplitTableOutput {
-    pub sst_id: HummockSstableId,
-    pub meta: SstableMeta,
+    pub sst_info: SstableInfo,
     pub upload_join_handle: UploadJoinHandle,
-    pub bloom_filter_size: usize,
-    pub table_ids: Vec<u32>,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -62,6 +60,8 @@ where
 
     /// Statistics.
     pub stats: Arc<StateStoreMetrics>,
+
+    task_progress_tracker: Option<TaskProgressTracker>,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -69,21 +69,27 @@ where
     F: TableBuilderFactory,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(builder_factory: F, stats: Arc<StateStoreMetrics>) -> Self {
+    pub fn new(
+        builder_factory: F,
+        stats: Arc<StateStoreMetrics>,
+        task_progress_tracker: Option<TaskProgressTracker>,
+    ) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
             stats,
+            task_progress_tracker,
         }
     }
 
-    pub fn new_for_test(builder_factory: F) -> Self {
+    pub fn for_test(builder_factory: F) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
             stats: Arc::new(StateStoreMetrics::unused()),
+            task_progress_tracker: None,
         }
     }
 
@@ -128,7 +134,7 @@ where
     ) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.as_ref() {
             if allow_split && builder.reach_capacity() {
-                self.seal_current()?;
+                self.seal_current().await?;
             }
         }
 
@@ -138,7 +144,7 @@ where
         }
 
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key.into_inner(), value)?;
+        builder.add(full_key.into_inner(), value).await?;
         Ok(())
     }
 
@@ -146,37 +152,53 @@ where
     ///
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
-    pub fn seal_current(&mut self) -> HummockResult<()> {
+    pub async fn seal_current(&mut self) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.take() {
-            let builder_output = builder.finish()?;
-            let meta = builder_output.meta;
+            let builder_output = builder.finish().await?;
 
-            let bloom_filter_size = meta.bloom_filter.len();
+            {
+                // report
 
-            if bloom_filter_size != 0 {
-                self.stats
-                    .sstable_bloom_filter_size
-                    .observe(bloom_filter_size as _);
+                if let Some(tracker) = &self.task_progress_tracker {
+                    tracker.inc_ssts_sealed();
+                }
+
+                if builder_output.bloom_filter_size != 0 {
+                    self.stats
+                        .sstable_bloom_filter_size
+                        .observe(builder_output.bloom_filter_size as _);
+                }
+
+                if builder_output.sst_info.file_size != 0 {
+                    self.stats
+                        .sstable_file_size
+                        .observe(builder_output.sst_info.file_size as _);
+                }
+
+                if builder_output.avg_key_size != 0 {
+                    self.stats
+                        .sstable_avg_key_size
+                        .observe(builder_output.avg_key_size as _);
+                }
+
+                if builder_output.avg_value_size != 0 {
+                    self.stats
+                        .sstable_avg_value_size
+                        .observe(builder_output.avg_value_size as _);
+                }
             }
 
-            self.stats
-                .sstable_meta_size
-                .observe(meta.encoded_size() as _);
-
             self.sst_outputs.push(SplitTableOutput {
-                sst_id: builder_output.sstable_id,
-                meta,
                 upload_join_handle: builder_output.writer_output,
-                bloom_filter_size,
-                table_ids: builder_output.table_ids,
+                sst_info: builder_output.sst_info,
             });
         }
         Ok(())
     }
 
     /// Finalizes all the tables to be ids, blocks and metadata.
-    pub fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
-        self.seal_current()?;
+    pub async fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
+        self.seal_current().await?;
         Ok(self.sst_outputs)
     }
 }
@@ -222,7 +244,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
             .sstable_store
             .clone()
             .create_sst_writer(id, writer_options);
-        let builder = SstableBuilder::new_for_test(id, writer, self.options.clone());
+        let builder = SstableBuilder::for_test(id, writer, self.options.clone());
 
         Ok(builder)
     }
@@ -236,8 +258,8 @@ mod tests {
     use crate::hummock::test_utils::default_builder_opt_for_test;
     use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
-    #[test]
-    fn test_empty() {
+    #[tokio::test]
+    async fn test_empty() {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let opts = SstableBuilderOptions {
@@ -246,11 +268,10 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: 0,
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
-        let builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
-        let results = builder.finish().unwrap();
+        let builder = CapacitySplitTableBuilder::for_test(builder_factory);
+        let results = builder.finish().await.unwrap();
         assert!(results.is_empty());
     }
 
@@ -264,10 +285,9 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
-            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
-        let mut builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
+        let mut builder = CapacitySplitTableBuilder::for_test(builder_factory);
 
         for i in 0..table_capacity {
             builder
@@ -280,14 +300,14 @@ mod tests {
                 .unwrap();
         }
 
-        let results = builder.finish().unwrap();
+        let results = builder.finish().await.unwrap();
         assert!(results.len() > 1);
     }
 
     #[tokio::test]
     async fn test_table_seal() {
         let opts = default_builder_opt_for_test();
-        let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
+        let mut builder = CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(
             1001,
             mock_sstable_store(),
             opts,
@@ -305,29 +325,29 @@ mod tests {
         }
 
         assert_eq!(builder.len(), 0);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 0);
         add!();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 1);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 2);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
 
-        let results = builder.finish().unwrap();
+        let results = builder.finish().await.unwrap();
         assert_eq!(results.len(), 2);
     }
 
     #[tokio::test]
     async fn test_initial_not_allowed_split() {
         let opts = default_builder_opt_for_test();
-        let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
+        let mut builder = CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(
             1001,
             mock_sstable_store(),
             opts,

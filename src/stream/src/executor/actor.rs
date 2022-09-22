@@ -19,13 +19,13 @@ use async_stack_trace::{SpanValue, StackTrace};
 use futures::pin_mut;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
-use risingwave_common::error::Result;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
 use super::StreamConsumer;
-use crate::executor::Epoch;
+use crate::error::StreamResult;
 use crate::task::{ActorId, SharedContext};
 
 /// Shared by all operators of an actor.
@@ -33,7 +33,7 @@ use crate::task::{ActorId, SharedContext};
 pub struct ActorContext {
     pub id: ActorId,
 
-    /// TODO: report errors and prompt the user.
+    // TODO: report errors and prompt the user.
     pub errors: Mutex<HashMap<String, Vec<ExprError>>>,
 }
 
@@ -86,7 +86,7 @@ where
         }
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(self) -> StreamResult<()> {
         let span_name = format!("actor_poll_{:03}", self.id);
         let mut span = {
             let mut span = Span::enter_with_local_parent("actor_poll");
@@ -97,7 +97,7 @@ where
             span
         };
 
-        let mut last_epoch: Option<Epoch> = None;
+        let mut last_epoch: Option<EpochPair> = None;
 
         let stream = Box::new(self.consumer).execute();
         pin_mut!(stream);

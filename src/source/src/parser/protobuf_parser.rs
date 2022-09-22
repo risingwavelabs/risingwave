@@ -17,10 +17,9 @@ use std::path::Path;
 use itertools::Itertools;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
-use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_common::types::{DataType, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 use risingwave_pb::plan_common::ColumnDesc;
 use serde::de::Deserialize;
@@ -29,7 +28,7 @@ use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
-use crate::{Event, SourceColumnDesc, SourceParser};
+use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for Protobuf-encoded bytes.
 #[derive(Debug)]
@@ -223,22 +222,18 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
 }
 
 impl SourceParser for ProtobufParser {
-    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         let mut map = match self.decode(payload)? {
             Value::Map(m) => m,
             _ => return Err(RwError::from(ProtocolError("".to_string()))),
         };
 
-        let row = columns.iter().map(|column| {
-            if column.skip_parse {
-                return None;
-            }
-
+        writer.insert(|column| {
             let key = Value::String(column.name.clone());
 
             // Use `remove` instead of `get` to take the ownership of the value
             let value = map.remove(&key);
-            match column.data_type {
+            Ok(match column.data_type {
                 DataType::Boolean => {
                     protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
                 }
@@ -284,12 +279,7 @@ impl SourceParser for ProtobufParser {
                     }).map(ScalarImpl::NaiveDateTime)
                 }
                 _ => unimplemented!(),
-            }
-        }).collect::<Vec<Datum>>();
-
-        Ok(Event {
-            ops: vec![Op::Insert],
-            rows: vec![row],
+            })
         })
     }
 }
@@ -300,6 +290,7 @@ mod tests {
 
     use itertools::Itertools;
     use maplit::hashmap;
+    use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error::Result;
     use risingwave_common::test_prelude::*;
@@ -309,7 +300,7 @@ mod tests {
     use serde_value::Value;
     use tempfile::Builder;
 
-    use crate::{ProtobufParser, SourceColumnDesc, SourceParser};
+    use crate::{ProtobufParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
     static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";
@@ -458,17 +449,21 @@ mod tests {
             },
         ];
 
-        let result = parser.parse(PRE_GEN_PROTO_DATA, &descs);
-        assert!(result.is_ok());
-        let event = result.unwrap();
-        let data = event.rows.first().unwrap();
-        assert_eq!(data.len(), descs.len());
-        assert!(data[0].eq(&Some(ScalarImpl::Int32(123))));
-        assert!(data[1].eq(&Some(ScalarImpl::Utf8("test address".to_string()))));
-        assert!(data[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
-        assert!(data[3].eq(&Some(ScalarImpl::Int64(456))));
-        assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
-        assert!(data[5].eq(&Some(ScalarImpl::NaiveDate(
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+        {
+            let writer = builder.row_writer();
+            parser.parse(PRE_GEN_PROTO_DATA, writer).unwrap();
+        }
+        let chunk = builder.finish();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.to_owned_row();
+        assert!(row[0].eq(&Some(ScalarImpl::Int32(123))));
+        assert!(row[1].eq(&Some(ScalarImpl::Utf8("test address".to_string()))));
+        assert!(row[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
+        assert!(row[3].eq(&Some(ScalarImpl::Int64(456))));
+        assert!(row[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
+        assert!(row[5].eq(&Some(ScalarImpl::NaiveDate(
             str_to_date("2021-01-01").unwrap()
         ))))
     }

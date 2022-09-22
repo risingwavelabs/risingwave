@@ -15,7 +15,7 @@
 use std::mem;
 
 use rand::Rng;
-use risingwave_frontend::expr::DataTypeName;
+use risingwave_common::types::DataTypeName;
 use risingwave_sqlparser::ast::{
     DataType, FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins,
 };
@@ -60,7 +60,6 @@ pub(crate) fn create_table_factor_from_table(table: &Table) -> TableFactor {
     TableFactor::Table {
         name: ObjectName(vec![Ident::new(&table.name)]),
         alias: None,
-        args: vec![],
     }
 }
 

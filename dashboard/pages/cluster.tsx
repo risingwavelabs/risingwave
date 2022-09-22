@@ -24,6 +24,7 @@ import {
   useToast,
   VStack,
 } from "@chakra-ui/react"
+import Head from "next/head"
 import { Fragment, useEffect, useState } from "react"
 import Title from "../components/Title"
 import { WorkerNode } from "../proto/gen/common"
@@ -81,11 +82,11 @@ export default function Cluster() {
     }
     doFetch()
     return () => {}
-  }, [])
+  }, [toast])
 
-  return (
+  const retVal = (
     <Box p={3}>
-      <Title>Cluster Information</Title>
+      <Title>Cluster Overview</Title>
       <Grid templateColumns="repeat(3, 1fr)" gap={6} width="full">
         {frontendList.map((frontend) => (
           <GridItem
@@ -119,5 +120,13 @@ export default function Cluster() {
         ))}
       </Grid>
     </Box>
+  )
+  return (
+    <Fragment>
+      <Head>
+        <title>Cluster Overview</title>
+      </Head>
+      {retVal}
+    </Fragment>
   )
 }

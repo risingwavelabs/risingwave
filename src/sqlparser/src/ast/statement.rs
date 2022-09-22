@@ -85,8 +85,9 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json,         // Keyword::JSON
-    DebeziumJson, // Keyword::DEBEZIUM_JSON
+    Json,             // Keyword::JSON
+    DebeziumJson,     // Keyword::DEBEZIUM_JSON
+    Avro(AvroSchema), // Keyword::AVRO
 }
 
 impl ParseTo for SourceSchema {
@@ -98,9 +99,12 @@ impl ParseTo for SourceSchema {
             SourceSchema::Protobuf(protobuf_schema)
         } else if p.parse_keywords(&[Keyword::DEBEZIUM_JSON]) {
             SourceSchema::DebeziumJson
+        } else if p.parse_keywords(&[Keyword::AVRO]) {
+            impl_parse_to!(avro_schema: AvroSchema, p);
+            SourceSchema::Avro(avro_schema)
         } else {
             return Err(ParserError::ParserError(
-                "expected JSON | PROTOBUF after ROW FORMAT".to_string(),
+                "expected JSON | PROTOBUF | DEBEZIUM JSON | AVRO after ROW FORMAT".to_string(),
             ));
         };
         Ok(schema)
@@ -113,6 +117,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
+            SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
         }
     }
 }
@@ -144,6 +149,43 @@ impl ParseTo for ProtobufSchema {
 }
 
 impl fmt::Display for ProtobufSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!([Keyword::MESSAGE], v);
+        impl_fmt_display!(message_name, v, self);
+        impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
+        impl_fmt_display!(row_schema_location, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+// sql_grammar!(AvroSchema {
+//     [Keyword::MESSAGE],
+//     message_name: AstString,
+//     [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION],
+//     row_schema_location: AstString,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct AvroSchema {
+    pub message_name: AstString,
+    pub row_schema_location: AstString,
+}
+
+impl ParseTo for AvroSchema {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!([Keyword::MESSAGE], p);
+        impl_parse_to!(message_name: AstString, p);
+        impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
+        impl_parse_to!(row_schema_location: AstString, p);
+        Ok(Self {
+            message_name,
+            row_schema_location,
+        })
+    }
+}
+
+impl fmt::Display for AvroSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!([Keyword::MESSAGE], v);

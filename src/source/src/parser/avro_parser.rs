@@ -20,17 +20,18 @@ use std::path::Path;
 use apache_avro::types::Value;
 use apache_avro::{Reader, Schema};
 use chrono::{Datelike, NaiveDate};
+use itertools::Itertools;
 use num_traits::FromPrimitive;
-use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
+    DataType, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
 };
 use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
+use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
-use crate::{Event, SourceColumnDesc, SourceParser};
+use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
@@ -76,6 +77,86 @@ impl AvroParser {
         } else {
             Err(arvo_schema.err().unwrap())
         }
+    }
+
+    pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
+        if let Schema::Record { fields, .. } = &self.schema {
+            let mut index = 0;
+            Ok(fields
+                .iter()
+                .map(|field| {
+                    Self::avro_field_to_column_desc(&field.name, &field.schema, &mut index)
+                })
+                .collect::<Result<Vec<_>>>()?)
+        } else {
+            Err(RwError::from(InternalError(
+                "schema invalid, record required".into(),
+            )))
+        }
+    }
+
+    fn avro_field_to_column_desc(
+        name: &str,
+        schema: &Schema,
+        index: &mut i32,
+    ) -> Result<ColumnDesc> {
+        let data_type = Self::avro_type_mapping(schema)?;
+        if let Schema::Record {
+            name: schema_name,
+            fields,
+            ..
+        } = schema
+        {
+            let vec_column = fields
+                .iter()
+                .map(|f| Self::avro_field_to_column_desc(&f.name, &f.schema, index))
+                .collect::<Result<Vec<_>>>()?;
+            *index += 1;
+            Ok(ColumnDesc {
+                column_type: Some(data_type.to_protobuf()),
+                column_id: *index,
+                name: name.to_owned(),
+                field_descs: vec_column,
+                type_name: schema_name.to_string(),
+            })
+        } else {
+            *index += 1;
+            Ok(ColumnDesc {
+                column_type: Some(data_type.to_protobuf()),
+                column_id: *index,
+                name: name.to_owned(),
+                ..Default::default()
+            })
+        }
+    }
+
+    fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
+        let data_type = match schema {
+            Schema::String => DataType::Varchar,
+            Schema::Int => DataType::Int32,
+            Schema::Long => DataType::Int64,
+            Schema::Boolean => DataType::Boolean,
+            Schema::Float => DataType::Float32,
+            Schema::Double => DataType::Float64,
+            Schema::Date => DataType::Date,
+            Schema::TimestampMillis => DataType::Timestamp,
+            Schema::Record { fields, .. } => {
+                let struct_fields = fields
+                    .iter()
+                    .map(|f| Self::avro_type_mapping(&f.schema))
+                    .collect::<Result<Vec<_>>>()?;
+                let struct_names = fields.iter().map(|f| f.name.clone()).collect_vec();
+                DataType::new_struct(struct_fields, struct_names)
+            }
+            _ => {
+                return Err(RwError::from(InternalError(format!(
+                    "unsupported type in Avro: {:?}",
+                    schema
+                ))));
+            }
+        };
+
+        Ok(data_type)
     }
 }
 
@@ -179,38 +260,22 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
 }
 
 impl SourceParser for AvroParser {
-    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
-        let reader_rs = Reader::with_schema(&self.schema, payload);
-        if let Ok(reader) = reader_rs {
-            let mut rows = Vec::new();
-            for record in reader {
-                if let Ok(Value::Record(fields)) = record {
-                    let vals = columns
-                        .iter()
-                        .map(|column| {
-                            if column.skip_parse {
-                                None
-                            } else {
-                                let tuple =
-                                    fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
-                                from_avro_value(column, tuple.clone().1).ok()
-                            }
-                        })
-                        .collect::<Vec<Datum>>();
-                    rows.push(vals);
-                } else {
-                    return Err(RwError::from(ProtocolError(
-                        record.err().unwrap().to_string(),
-                    )));
-                }
-            }
-            Ok(Event {
-                ops: vec![Op::Insert],
-                rows,
-            })
-        } else {
-            let init_reader_err = reader_rs.err().unwrap();
-            Err(RwError::from(ProtocolError(init_reader_err.to_string())))
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter) -> Result<WriteGuard> {
+        match Reader::with_schema(&self.schema, payload) {
+            Ok(mut reader) => match reader.next() {
+                Some(Ok(Value::Record(fields))) => writer.insert(|column| {
+                    let tuple = fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
+                    Ok(from_avro_value(column, tuple.clone().1).ok())
+                }),
+                Some(Ok(_)) => Err(RwError::from(ProtocolError(
+                    "avro parse unexpected value".to_string(),
+                ))),
+                Some(Err(e)) => Err(RwError::from(ProtocolError(e.to_string()))),
+                None => Err(RwError::from(ProtocolError(
+                    "avro parse unexpected eof".to_string(),
+                ))),
+            },
+            Err(e) => Err(RwError::from(ProtocolError(e.to_string()))),
         }
     }
 }
@@ -347,6 +412,7 @@ mod test {
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Schema, Writer};
     use chrono::NaiveDate;
+    use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
     use risingwave_common::error::ErrorCode::InternalError;
@@ -356,7 +422,7 @@ mod test {
     use crate::parser::avro_parser::{
         load_schema_async, read_schema_from_local, read_schema_from_s3, unix_epoch_days, AvroParser,
     };
-    use crate::{SourceColumnDesc, SourceParser};
+    use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -419,11 +485,15 @@ mod test {
         assert!(flush > 0);
         let input_data = writer.into_inner().unwrap();
         let columns = build_rw_columns();
-        let parse_rs = avro_parser.parse(&input_data[..], &columns[..]);
-        assert!(parse_rs.is_ok());
-        let event = parse_rs.unwrap();
-        let row = event.rows.first().unwrap();
-        assert_eq!(row.len(), columns.len());
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
+        {
+            let writer = builder.row_writer();
+            avro_parser.parse(&input_data[..], writer).unwrap();
+        }
+        let chunk = builder.finish();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.to_owned_row();
         for (i, field) in record.fields.iter().enumerate() {
             let value = field.clone().1;
             match value {
@@ -577,6 +647,14 @@ mod test {
             }
         }
         record
+    }
+
+    #[tokio::test]
+    async fn test_map_to_columns() {
+        let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc")
+            .await
+            .unwrap();
+        println!("{:?}", avro_parser_rs.map_to_columns().unwrap());
     }
 
     #[tokio::test]

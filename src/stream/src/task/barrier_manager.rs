@@ -15,13 +15,13 @@
 use std::collections::{HashMap, HashSet};
 
 use prometheus::HistogramTimer;
-use risingwave_common::error::Result;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 
 use self::managed_state::ManagedBarrierState;
+use crate::error::StreamResult;
 use crate::executor::*;
 use crate::task::ActorId;
 
@@ -31,6 +31,7 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
+use risingwave_storage::StateStoreImpl;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
 /// Note that this option will significantly increase the overhead of tracing.
@@ -72,12 +73,6 @@ pub struct LocalBarrierManager {
         HashMap<u64, (Option<Receiver<CollectResult>>, Option<HistogramTimer>)>,
 }
 
-impl Default for LocalBarrierManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl LocalBarrierManager {
     fn with_state(state: BarrierState) -> Self {
         Self {
@@ -89,8 +84,8 @@ impl LocalBarrierManager {
     }
 
     /// Create a [`LocalBarrierManager`] with managed mode.
-    pub fn new() -> Self {
-        Self::with_state(BarrierState::Managed(ManagedBarrierState::new()))
+    pub fn new(state_store: StateStoreImpl) -> Self {
+        Self::with_state(BarrierState::Managed(ManagedBarrierState::new(state_store)))
     }
 
     /// Register sender for source actors, used to send barriers.
@@ -112,7 +107,7 @@ impl LocalBarrierManager {
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
         timer: Option<HistogramTimer>,
-    ) -> Result<()> {
+    ) -> StreamResult<()> {
         let to_send = {
             let to_send: HashSet<ActorId> = actor_ids_to_send.into_iter().collect();
             match &self.state {
@@ -148,11 +143,13 @@ impl LocalBarrierManager {
                 .senders
                 .get(&actor_id)
                 .unwrap_or_else(|| panic!("sender for actor {} does not exist", actor_id));
-            sender.send(barrier.clone()).unwrap();
+            sender.send(barrier.clone()).unwrap_or_else(|e| {
+                panic!("failed to send barrier to actor {}: {:?}", actor_id, e.0)
+            });
         }
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
-        if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
+        if let Some(actors) = barrier.all_stop_actors() {
             trace!("remove actors {:?} from senders", actors);
             for actor in actors {
                 self.senders.remove(actor);
@@ -195,7 +192,7 @@ impl LocalBarrierManager {
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) -> Result<()> {
+    pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) -> StreamResult<()> {
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}

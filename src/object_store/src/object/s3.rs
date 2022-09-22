@@ -15,14 +15,17 @@
 use std::cmp;
 use std::sync::Arc;
 
+use aws_sdk_s3::client::fluent_builders::GetObject;
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
+use aws_smithy_types::retry::RetryConfig;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream;
 use hyper::Body;
 use itertools::Itertools;
+use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 
 use super::object_metrics::ObjectStoreMetrics;
@@ -30,20 +33,25 @@ use super::{
     BlockLocation, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult,
     ObjectStore, StreamingUploader,
 };
+use crate::object::try_update_failure_metric;
 
 type PartId = i32;
 
 /// MinIO and S3 share the same minimum part ID and part size.
 const MIN_PART_ID: PartId = 1;
-const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
-
+/// The minimum number of bytes that is buffered before they are uploaded as a part.
+/// Its value must be greater than the minimum part size of 5MiB.
+///
+/// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html>
 const S3_PART_SIZE: usize = 16 * 1024 * 1024;
 // TODO: we should do some benchmark to determine the proper part size for MinIO
 const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
 /// The number of S3 bucket prefixes
 const S3_NUM_PREFIXES: u32 = 256;
 
-/// S3 multipart upload handle.
+/// S3 multipart upload handle. The multipart upload is not initiated until the first part is
+/// available for upload.
+///
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
 pub struct S3StreamingUploader {
     client: Client,
@@ -52,26 +60,16 @@ pub struct S3StreamingUploader {
     /// The key of the object.
     key: String,
     /// The identifier of multipart upload task for S3.
-    upload_id: String,
+    upload_id: Option<String>,
     /// Next part ID.
     next_part_id: PartId,
     /// Join handles for part uploads.
     join_handles: Vec<JoinHandle<ObjectResult<(PartId, UploadPartOutput)>>>,
-    /// Buffer for bytes.
-    ///
-    /// We prefer `Vec` over other data structures for better memory usage
-    /// and spatial locality, which is important because we tend to remove multiple
-    /// consecutive elements from `buf` at a time.
-    ///
-    /// Moreover, we preserve at least `MIN_PART_SIZE` of data in the buffer when uploading a part
-    /// due to the minimum part size limitation of S3.
+    /// Buffer for data. It will store at least `part_size` bytes of data before wrapping itself
+    /// into a stream and upload to object store as a part.
     buf: Vec<Bytes>,
     /// Length of the data that have not been uploaded to S3.
     not_uploaded_len: usize,
-    /// Length of the data that exceeds the current part to be uploaded in the buffer.
-    next_part_len: usize,
-    /// The data included in the next part are `buf[..part_end]`.
-    part_end: usize,
     /// To record metrics for uploading part.
     metrics: Arc<ObjectStoreMetrics>,
 }
@@ -82,7 +80,6 @@ impl S3StreamingUploader {
         bucket: String,
         part_size: usize,
         key: String,
-        upload_id: String,
         metrics: Arc<ObjectStoreMetrics>,
     ) -> S3StreamingUploader {
         Self {
@@ -90,38 +87,60 @@ impl S3StreamingUploader {
             bucket,
             part_size,
             key,
-            upload_id,
+            upload_id: None,
             next_part_id: MIN_PART_ID,
             join_handles: Default::default(),
             buf: Default::default(),
             not_uploaded_len: 0,
-            next_part_len: 0,
-            part_end: 0,
             metrics,
         }
     }
 
-    fn upload_next_part(&mut self, data: Vec<Bytes>, len: usize) {
-        debug_assert_eq!(data.iter().map(Bytes::len).sum::<usize>(), len);
+    async fn upload_next_part(&mut self) -> ObjectResult<()> {
+        let operation_type = "s3_upload_part";
 
+        // Lazily create multipart upload.
+        if self.upload_id.is_none() {
+            let resp = self
+                .client
+                .create_multipart_upload()
+                .bucket(&self.bucket)
+                .key(&self.key)
+                .send()
+                .await?;
+            self.upload_id = Some(resp.upload_id.unwrap());
+        }
+
+        // Get the data to upload for the next part.
+        let data = self.buf.drain(..).collect_vec();
+        let len = self.not_uploaded_len;
+        debug_assert_eq!(
+            data.iter().map(|b| b.len()).sum::<usize>(),
+            self.not_uploaded_len
+        );
+
+        // Update part id.
         let part_id = self.next_part_id;
         self.next_part_id += 1;
+
+        // Clone the variables to be passed into the upload join handle.
         let client_cloned = self.client.clone();
         let bucket = self.bucket.clone();
         let key = self.key.clone();
-        let upload_id = self.upload_id.clone();
+        let upload_id = self.upload_id.clone().unwrap();
+
         let metrics = self.metrics.clone();
         metrics
             .operation_size
-            .with_label_values(&["s3_upload_part"])
+            .with_label_values(&[operation_type])
             .observe(len as f64);
 
         self.join_handles.push(tokio::spawn(async move {
-            let timer = metrics
+            let _timer = metrics
                 .operation_latency
-                .with_label_values(&["s3", "s3_upload_part"])
+                .with_label_values(&["s3", operation_type])
                 .start_timer();
-            let upload_output = client_cloned
+            let upload_output_res = client_cloned
                 .upload_part()
                 .bucket(bucket)
                 .key(key)
@@ -130,17 +149,19 @@ impl S3StreamingUploader {
                 .body(get_upload_body(data))
                 .content_length(len as i64)
                 .send()
-                .await?;
-            timer.observe_duration();
-            Ok((part_id, upload_output))
+                .await
+                .map_err(ObjectError::s3);
+            try_update_failure_metric(&metrics, &upload_output_res, operation_type);
+            Ok((part_id, upload_output_res?))
         }));
+
+        Ok(())
     }
 
-    async fn flush_and_complete(&mut self) -> ObjectResult<()> {
-        self.upload_next_part(
-            Vec::from_iter(self.buf.iter().cloned()),
-            self.not_uploaded_len,
-        );
+    async fn flush_multipart_and_complete(&mut self) -> ObjectResult<()> {
+        if !self.buf.is_empty() {
+            self.upload_next_part().await?;
+        }
 
         // If any part fails to upload, abort the upload.
         let join_handles = self.join_handles.drain(..).collect_vec();
@@ -169,7 +190,7 @@ impl S3StreamingUploader {
             .complete_multipart_upload()
             .bucket(&self.bucket)
             .key(&self.key)
-            .upload_id(&self.upload_id)
+            .upload_id(self.upload_id.as_ref().unwrap())
             .multipart_upload(
                 CompletedMultipartUpload::builder()
                     .set_parts(completed_parts)
@@ -195,7 +216,7 @@ impl S3StreamingUploader {
             .abort_multipart_upload()
             .bucket(&self.bucket)
             .key(&self.key)
-            .upload_id(&self.upload_id)
+            .upload_id(self.upload_id.as_ref().unwrap())
             .send()
             .await?;
         Ok(())
@@ -204,7 +225,7 @@ impl S3StreamingUploader {
 
 #[async_trait::async_trait]
 impl StreamingUploader for S3StreamingUploader {
-    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         fail_point!("s3_write_bytes_err", |_| Err(ObjectError::internal(
             "s3 write bytes error"
         )));
@@ -212,22 +233,9 @@ impl StreamingUploader for S3StreamingUploader {
         self.not_uploaded_len += data_len;
         self.buf.push(data);
 
-        if self.not_uploaded_len > self.part_size {
-            if self.part_end == 0 {
-                // Mark current slice of buffer to be the next part to be uploaded.
-                self.part_end = self.buf.len();
-            } else {
-                // `data` should be uploaded in the next part.
-                self.next_part_len += data_len;
-            }
-        }
-        if self.next_part_len >= MIN_PART_SIZE {
-            // Take a 16MiB part and upload it. `Bytes` performs shallow clone.
-            let part = self.buf.drain(..self.part_end).collect();
-            self.upload_next_part(part, self.not_uploaded_len - self.next_part_len);
-            self.not_uploaded_len = self.next_part_len;
-            self.part_end = 0;
-            self.next_part_len = 0;
+        if self.not_uploaded_len >= self.part_size {
+            self.upload_next_part().await?;
+            self.not_uploaded_len = 0;
         }
         Ok(())
     }
@@ -239,32 +247,35 @@ impl StreamingUploader for S3StreamingUploader {
         fail_point!("s3_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("s3 finish streaming upload error")
         ));
-        // Fallback to `PUT`.
-        if self.join_handles.is_empty() {
-            self.abort().await?;
-            return if self.buf.is_empty() {
+        // If the multipart upload has not been initiated, we can use `Put` instead to save the
+        // `CreateMultipartUpload` and `CompleteMultipartUpload` requests.
+        if self.upload_id.is_none() {
+            debug_assert!(self.join_handles.is_empty());
+            if self.buf.is_empty() {
+                debug_assert_eq!(self.not_uploaded_len, 0);
                 Err(ObjectError::internal("upload empty object"))
             } else {
                 self.client
                     .put_object()
                     .bucket(&self.bucket)
-                    .key(&self.key)
                     .body(get_upload_body(self.buf))
                     .content_length(self.not_uploaded_len as i64)
+                    .key(&self.key)
                     .send()
                     .await?;
                 Ok(())
-            };
-        }
-        if let Err(e) = self.flush_and_complete().await {
+            }
+        } else if let Err(e) = self.flush_multipart_and_complete().await {
+            tracing::warn!("Failed to upload object {}: {:?}", self.key, e);
             self.abort().await?;
-            return Err(e);
+            Err(e)
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     fn get_memory_usage(&self) -> u64 {
-        (self.part_size + MIN_PART_SIZE) as u64
+        self.part_size as u64
     }
 }
 
@@ -309,23 +320,15 @@ impl ObjectStore for S3ObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         fail_point!("s3_streaming_upload_err", |_| Err(ObjectError::internal(
             "s3 streaming upload error"
         )));
-        let resp = self
-            .client
-            .create_multipart_upload()
-            .bucket(&self.bucket)
-            .key(path)
-            .send()
-            .await?;
         Ok(Box::new(S3StreamingUploader::new(
             self.client.clone(),
             self.bucket.clone(),
             self.part_size,
             path.to_string(),
-            resp.upload_id.unwrap(),
             self.metrics.clone(),
         )))
     }
@@ -335,19 +338,17 @@ impl ObjectStore for S3ObjectStore {
         fail_point!("s3_read_err", |_| Err(ObjectError::internal(
             "s3 read error"
         )));
-        let req = self.client.get_object().bucket(&self.bucket).key(path);
 
-        let range = match block_loc.as_ref() {
-            None => None,
-            Some(block_location) => block_location.byte_range_specifier(),
-        };
+        let (start_pos, end_pos) = block_loc.as_ref().map_or((None, None), |block_loc| {
+            (
+                Some(block_loc.offset),
+                Some(
+                    block_loc.offset + block_loc.size - 1, // End is inclusive.
+                ),
+            )
+        });
 
-        let req = if let Some(range) = range {
-            req.range(range)
-        } else {
-            req
-        };
-
+        let req = self.obj_store_request(path, start_pos, end_pos);
         let resp = req.send().await?;
         let val = resp.body.collect().await?.into_bytes();
 
@@ -390,6 +391,24 @@ impl ObjectStore for S3ObjectStore {
                 .as_secs_f64(),
             total_size: resp.content_length as usize,
         })
+    }
+
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    async fn streaming_read(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        fail_point!("s3_streaming_read_err", |_| Err(ObjectError::internal(
+            "s3 streaming read error"
+        )));
+
+        let req = self.obj_store_request(path, start_pos, None);
+        let resp = req.send().await?;
+
+        Ok(Box::new(resp.body.into_async_read()))
     }
 
     /// Permanently deletes the whole object.
@@ -495,8 +514,12 @@ impl S3ObjectStore {
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        let shared_config = aws_config::load_from_env().await;
-        let client = Client::new(&shared_config);
+        // Retry 3 times if we get server-side errors or throttling errors
+        let sdk_config = aws_config::from_env()
+            .retry_config(RetryConfig::standard().with_max_attempts(4))
+            .load()
+            .await;
+        let client = Client::new(&sdk_config);
 
         Self {
             client,
@@ -531,6 +554,34 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
+        }
+    }
+
+    /// Generates an HTTP GET request to download the object specified in `path`. If given,
+    /// `start_pos` and `end_pos` specify the first and last byte to download, respectively. Both
+    /// are inclusive and 0-based. For example, set `start_pos = 0` and `end_pos = 7` to download
+    /// the first 8 bytes. If neither is given, the request will download the whole object.
+    fn obj_store_request(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+        end_pos: Option<usize>,
+    ) -> GetObject {
+        let req = self.client.get_object().bucket(&self.bucket).key(path);
+
+        match (start_pos, end_pos) {
+            (None, None) => {
+                // No range is given. Return request as is.
+                req
+            }
+            _ => {
+                // At least one boundary is given. Return request with range limitation.
+                req.range(format!(
+                    "bytes={}-{}",
+                    start_pos.map_or(String::new(), |pos| pos.to_string()),
+                    end_pos.map_or(String::new(), |pos| pos.to_string())
+                ))
+            }
         }
     }
 }

@@ -17,8 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::{self, InternalError};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::utils::TableCatalogBuilder;
@@ -41,6 +40,7 @@ pub struct LogicalTopN {
     limit: usize,
     offset: usize,
     order: Order,
+    group_key: Vec<usize>,
 }
 
 impl LogicalTopN {
@@ -56,10 +56,22 @@ impl LogicalTopN {
             limit,
             offset,
             order,
+            group_key: vec![],
         }
     }
 
-    /// the function will check if the cond is bool expression
+    pub fn with_group(
+        input: PlanRef,
+        limit: usize,
+        offset: usize,
+        order: Order,
+        group_key: Vec<usize>,
+    ) -> Self {
+        let mut topn = Self::new(input, limit, offset, order);
+        topn.group_key = group_key;
+        topn
+    }
+
     pub fn create(input: PlanRef, limit: usize, offset: usize, order: Order) -> PlanRef {
         Self::new(input, limit, offset, order).into()
     }
@@ -82,6 +94,10 @@ impl LogicalTopN {
         &self.order
     }
 
+    pub fn group_key(&self) -> &[usize] {
+        &self.group_key
+    }
+
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         let input = self.input();
@@ -98,34 +114,38 @@ impl LogicalTopN {
         );
         builder
             .field("limit", &format_args!("{}", self.limit()))
-            .field("offset", &format_args!("{}", self.offset()))
-            .finish()
+            .field("offset", &format_args!("{}", self.offset()));
+        if !self.group_key.is_empty() {
+            builder.field("group_key", &self.group_key);
+        }
+        builder.finish()
     }
 
-    // `group_key` only be set when inferring group topN's state table catalog.
-    pub fn infer_internal_table_catalog(&self, group_key: Option<&[usize]>) -> TableCatalog {
+    /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
+    pub fn infer_internal_table_catalog(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
         let schema = &self.base.schema;
         let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
         let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
+        internal_table_catalog_builder
+            .set_properties(self.ctx().inner().with_options.internal_table_subset());
+
         columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
         let mut order_cols = HashSet::new();
 
-        if let Some(group_key) = group_key {
-            // Here we want the state table to store the states in the order we want, fisrtly in
-            // ascending order by the columns specified by the group key, then by the columns
-            // specified by `order`. If we do that, when the later group topN operator
-            // does a prefix scannimg with the group key, we can fetch the data in the
-            // desired order.
-            group_key.iter().for_each(|idx| {
-                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
-                order_cols.insert(*idx);
-            });
-        }
+        // Here we want the state table to store the states in the order we want, fisrtly in
+        // ascending order by the columns specified by the group key, then by the columns
+        // specified by `order`. If we do that, when the later group topN operator
+        // does a prefix scannimg with the group key, we can fetch the data in the
+        // desired order.
+        self.group_key().iter().for_each(|idx| {
+            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
+            order_cols.insert(*idx);
+        });
 
         field_order.iter().for_each(|field_order| {
             if !order_cols.contains(&field_order.index) {
@@ -141,7 +161,11 @@ impl LogicalTopN {
                 order_cols.insert(*idx);
             }
         });
-        internal_table_catalog_builder.build(vec![], self.base.append_only, None)
+        internal_table_catalog_builder.build(
+            self.input().distribution().dist_column_indices().to_vec(),
+            self.base.append_only,
+            vnode_col_idx,
+        )
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
@@ -197,13 +221,14 @@ impl LogicalTopN {
         let vnode_col_idx = exprs.len() - 1;
         let project = StreamProject::new(LogicalProject::new(stream_input, exprs.clone()));
         let local_top_n = StreamGroupTopN::new(
-            LogicalTopN::new(
+            LogicalTopN::with_group(
                 project.into(),
                 self.limit + self.offset,
                 0,
                 self.order.clone(),
+                vec![vnode_col_idx],
             ),
-            vec![vnode_col_idx],
+            Some(vnode_col_idx),
         );
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;
@@ -227,7 +252,13 @@ impl PlanTreeNodeUnary for LogicalTopN {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.limit, self.offset, self.order.clone())
+        Self::with_group(
+            input,
+            self.limit,
+            self.offset,
+            self.order.clone(),
+            self.group_key.clone(),
+        )
     }
 
     #[must_use]
@@ -237,13 +268,17 @@ impl PlanTreeNodeUnary for LogicalTopN {
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         (
-            Self::new(
+            Self::with_group(
                 input,
                 self.limit,
                 self.offset,
                 input_col_change
                     .rewrite_required_order(&self.order)
                     .unwrap(),
+                self.group_key
+                    .iter()
+                    .map(|idx| input_col_change.map(*idx))
+                    .collect(),
             ),
             input_col_change,
         )
@@ -267,10 +302,18 @@ impl ColPrunable for LogicalTopN {
                 .for_each(|fo| order_required_cols.insert(fo.index));
             order_required_cols
         };
+        let group_required_cols = {
+            let mut group_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
+            self.group_key
+                .iter()
+                .for_each(|idx| group_required_cols.insert(*idx));
+            group_required_cols
+        };
 
         let input_required_cols = {
             let mut tmp = order_required_cols;
             tmp.union_with(&input_required_bitset);
+            tmp.union_with(&group_required_cols);
             tmp.ones().collect_vec()
         };
         let mapping = ColIndexMapping::with_remaining_columns(
@@ -316,6 +359,14 @@ impl PredicatePushdown for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
+        if !self.group_key.is_empty() {
+            return Err(ErrorCode::NotImplemented(
+                "Group TopN in batch mode".to_string(),
+                4847.into(),
+            )
+            .into());
+        }
+
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         Ok(BatchTopN::new(new_logical).into())
@@ -325,12 +376,19 @@ impl ToBatch for LogicalTopN {
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> Result<PlanRef> {
         if self.offset() != 0 && self.limit == LIMIT_ALL_COUNT {
-            return Err(RwError::from(InternalError(
-                "Doesn't support OFFSET without LIMIT".to_string(),
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                "OFFSET without LIMIT in streaming mode".to_string(),
             )));
         }
-        let stream_top_n = self.gen_dist_stream_top_n_plan(self.input.to_stream()?)?;
-        Ok(stream_top_n)
+        Ok(if !self.group_key.is_empty() {
+            let input = self.input().to_stream()?;
+            let input = RequiredDist::hash_shard(self.group_key())
+                .enforce_if_not_satisfies(input, &Order::any())?;
+            let logical = self.clone_with_input(input);
+            StreamGroupTopN::new(logical, None).into()
+        } else {
+            self.gen_dist_stream_top_n_plan(self.input.to_stream()?)?
+        })
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {

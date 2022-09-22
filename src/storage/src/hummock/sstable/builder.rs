@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
+use risingwave_pb::hummock::SstableInfo;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
@@ -45,8 +46,6 @@ pub struct SstableBuilderOptions {
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
-    /// Approximate bloom filter capacity.
-    pub estimate_bloom_filter_capacity: usize,
 }
 
 impl From<&StorageConfig> for SstableBuilderOptions {
@@ -58,7 +57,6 @@ impl From<&StorageConfig> for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: capacity / DEFAULT_ENTRY_SIZE,
         }
     }
 }
@@ -71,16 +69,16 @@ impl Default for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: DEFAULT_SSTABLE_SIZE / DEFAULT_ENTRY_SIZE,
         }
     }
 }
 
 pub struct SstableBuilderOutput<WO> {
-    pub sstable_id: u64,
-    pub meta: SstableMeta,
+    pub sst_info: SstableInfo,
+    pub bloom_filter_size: usize,
     pub writer_output: WO,
-    pub table_ids: Vec<u32>,
+    pub avg_key_size: usize,
+    pub avg_value_size: usize,
 }
 
 pub struct SstableBuilder<W: SstableWriter> {
@@ -103,33 +101,21 @@ pub struct SstableBuilder<W: SstableWriter> {
     raw_value: BytesMut,
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     last_bloom_filter_key_length: usize,
-    add_bloom_filter_key_counts: usize,
+
+    total_key_size: usize,
+    total_value_size: usize,
 }
 
 impl<W: SstableWriter> SstableBuilder<W> {
-    pub fn new_for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
-        Self {
-            writer,
-            block_builder: BlockBuilder::new(BlockBuilderOptions {
-                capacity: options.block_capacity,
-                restart_interval: options.restart_interval,
-                compression_algorithm: options.compression_algorithm,
-            }),
-            block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
-            table_ids: BTreeSet::new(),
-            user_key_hashes: Vec::with_capacity(options.estimate_bloom_filter_capacity),
-            last_table_id: 0,
-            options,
-            key_count: 0,
+    pub fn for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
+        Self::new(
             sstable_id,
-            raw_value: BytesMut::new(),
-            last_full_key: vec![],
-            filter_key_extractor: Arc::new(FilterKeyExtractorImpl::FullKey(
+            writer,
+            options,
+            Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),
             )),
-            last_bloom_filter_key_length: 0,
-            add_bloom_filter_key_counts: 0,
-        }
+        )
     }
 
     pub fn new(
@@ -156,12 +142,13 @@ impl<W: SstableWriter> SstableBuilder<W> {
             sstable_id,
             filter_key_extractor,
             last_bloom_filter_key_length: 0,
-            add_bloom_filter_key_counts: 0,
+            total_key_size: 0,
+            total_value_size: 0,
         }
     }
 
     /// Add kv pair to sstable.
-    pub fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) -> HummockResult<()> {
+    pub async fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) -> HummockResult<()> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
@@ -185,6 +172,9 @@ impl<W: SstableWriter> SstableBuilder<W> {
         extract_key = self.filter_key_extractor.extract(extract_key);
 
         self.block_builder.add(full_key, self.raw_value.as_ref());
+        self.total_key_size += full_key.len();
+        self.total_value_size += self.raw_value.len();
+
         self.raw_value.clear();
 
         // add bloom_filter check
@@ -203,7 +193,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.last_full_key.extend_from_slice(full_key);
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
-            self.build_block()?;
+            self.build_block().await?;
         }
         self.key_count += 1;
 
@@ -222,16 +212,15 @@ impl<W: SstableWriter> SstableBuilder<W> {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
+    pub async fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.clone();
 
-        self.build_block()?;
-        // The extra 4 bytes is for the size footer.
-        let data_len = self.writer.data_len() + 4;
+        self.build_block().await?;
+        let meta_offset = self.writer.data_len() as u64;
         assert!(!smallest_key.is_empty());
 
-        let meta = SstableMeta {
+        let mut meta = SstableMeta {
             block_metas: self.block_metas,
             bloom_filter: if self.options.bloom_false_positive > 0.0 {
                 let bits_per_key = Bloom::bloom_bits_per_key(
@@ -242,35 +231,52 @@ impl<W: SstableWriter> SstableBuilder<W> {
             } else {
                 vec![]
             },
-            estimated_size: data_len as u32,
+            estimated_size: 0,
             key_count: self.key_count as u32,
             smallest_key,
             largest_key,
             version: VERSION,
+            meta_offset,
         };
-
+        meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
+        let sst_info = SstableInfo {
+            id: self.sstable_id,
+            key_range: Some(risingwave_pb::hummock::KeyRange {
+                left: meta.smallest_key.clone(),
+                right: meta.largest_key.clone(),
+                inf: false,
+            }),
+            file_size: meta.estimated_size as u64,
+            table_ids: self.table_ids.into_iter().collect(),
+            meta_offset: meta.meta_offset,
+        };
         tracing::trace!(
-            "meta_size {} bloom_filter_size {}  add_key_counts {} add_bloom_filter_counts {}",
+            "meta_size {} bloom_filter_size {}  add_key_counts {} ",
             meta.encoded_size(),
             meta.bloom_filter.len(),
             self.key_count,
-            self.add_bloom_filter_key_counts
         );
+        let bloom_filter_size = meta.bloom_filter.len();
+        let avg_key_size = self.total_key_size / self.key_count;
+        let avg_value_size = self.total_value_size / self.key_count;
 
-        let writer_output = self.writer.finish(meta.block_metas.len() as u32)?;
+        let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
-            sstable_id: self.sstable_id,
-            meta,
+            sst_info,
+            bloom_filter_size,
             writer_output,
-            table_ids: self.table_ids.into_iter().collect(),
+            avg_key_size,
+            avg_value_size,
         })
     }
 
     pub fn approximate_len(&self) -> usize {
-        self.writer.data_len() + self.block_builder.approximate_len() + 4
+        self.writer.data_len()
+            + self.block_builder.approximate_len()
+            + self.user_key_hashes.len() * 4
     }
 
-    fn build_block(&mut self) -> HummockResult<()> {
+    async fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
             return Ok(());
@@ -279,7 +285,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         let mut block_meta = self.block_metas.last_mut().unwrap();
         block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
         let block = self.block_builder.build();
-        self.writer.write_block(block, block_meta)?;
+        self.writer.write_block(block, block_meta).await?;
         block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
         self.block_builder.clear();
         Ok(())
@@ -317,29 +323,37 @@ pub(super) mod tests {
             restart_interval: 16,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: 0,
         };
 
-        let b = SstableBuilder::new_for_test(0, mock_sst_writer(&opt), opt);
+        let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
 
-        b.finish().unwrap();
+        b.finish().await.unwrap();
     }
 
     #[tokio::test]
-    async fn test_smallest_key_and_largest_key() {
+    async fn test_basic() {
         let opt = default_builder_opt_for_test();
-        let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opt), opt);
+        let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)))
+                .await
                 .unwrap();
         }
 
-        let output = b.finish().unwrap();
-        let meta = output.meta;
+        let output = b.finish().await.unwrap();
+        let info = output.sst_info;
 
-        assert_eq!(test_key_of(0), meta.smallest_key);
-        assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), meta.largest_key);
+        assert_eq!(test_key_of(0), info.key_range.as_ref().unwrap().left);
+        assert_eq!(
+            test_key_of(TEST_KEYS_COUNT - 1),
+            info.key_range.as_ref().unwrap().right
+        );
+        let (data, meta) = output.writer_output;
+        assert_eq!(info.file_size, meta.estimated_size as u64);
+        let offset = info.meta_offset as usize;
+        let meta2 = SstableMeta::decode(&mut &data[offset..]).unwrap();
+        assert_eq!(meta2, meta);
     }
 
     async fn test_with_bloom_filter(with_blooms: bool) {
@@ -351,7 +365,6 @@ pub(super) mod tests {
             restart_interval: 16,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             compression_algorithm: CompressionAlgorithm::None,
-            estimate_bloom_filter_capacity: 0,
         };
 
         // build remote table

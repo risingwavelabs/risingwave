@@ -59,9 +59,9 @@ impl TableFunctionExecutor {
         let mut len = 0;
         for array in self.table_function.eval(&dummy_chunk)? {
             len += array.len();
-            builder.append_array(&array)?;
+            builder.append_array(&array);
         }
-        let array = Arc::new(builder.finish()?);
+        let array = Arc::new(builder.finish());
         let ret = DataChunk::new(vec![Column::new(array)], len);
         yield ret
     }

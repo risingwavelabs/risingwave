@@ -33,6 +33,7 @@ pub struct FileCacheOptions {
     pub capacity: usize,
     pub total_buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
+    pub cache_meta_fallocate_unit: usize,
 
     pub flush_buffer_hooks: Vec<Arc<dyn FlushBufferHook>>,
 }
@@ -186,6 +187,7 @@ where
             capacity: options.capacity,
             buffer_capacity,
             cache_file_fallocate_unit: options.cache_file_fallocate_unit,
+            cache_meta_fallocate_unit: options.cache_meta_fallocate_unit,
             metrics: metrics.clone(),
         })
         .await?;
@@ -265,7 +267,7 @@ where
         }
 
         timer.observe_duration();
-        self.metrics.cache_miss_counter.inc();
+        self.metrics.cache_miss.inc();
 
         Ok(None)
     }
@@ -342,6 +344,7 @@ mod tests {
             capacity: CAPACITY,
             total_buffer_capacity: 2 * BUFFER_CAPACITY,
             cache_file_fallocate_unit: FALLOCATE_UNIT,
+            cache_meta_fallocate_unit: 1024 * 1024, // 1 MiB
 
             flush_buffer_hooks,
         };

@@ -20,8 +20,8 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
-use risingwave_common::util::ordered::OrderedRowSerializer;
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
+use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
+use risingwave_common::util::value_encoding::deserialize_datum;
 
 use super::ColumnDescMapping;
 
@@ -40,6 +40,16 @@ pub fn serialize_pk_with_vnode(
     [&vnode.to_be_bytes(), pk_bytes.as_slice()].concat()
 }
 
+// NOTE: Only for debug purpose now
+pub fn deserialize_pk_with_vnode(
+    key: &[u8],
+    deserializer: &OrderedRowDeserializer,
+) -> Result<(VirtualNode, Row)> {
+    let vnode = VirtualNode::from_be_bytes(key[0..VIRTUAL_NODE_SIZE].try_into().unwrap());
+    let pk = deserializer.deserialize(&key[VIRTUAL_NODE_SIZE..])?;
+    Ok((vnode, pk))
+}
+
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
     let column_id = from_slice::<u32>(bytes)? ^ (1 << 31);
     Ok((column_id as i32).into())
@@ -49,16 +59,6 @@ pub fn parse_raw_key_to_vnode_and_key(raw_key: &[u8]) -> (VirtualNode, &[u8]) {
     let (vnode_bytes, key_bytes) = raw_key.split_at(VIRTUAL_NODE_SIZE);
     let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
     (vnode, key_bytes)
-}
-
-/// used for streaming table serialize
-pub fn serialize_value(row: Row) -> Result<Vec<u8>> {
-    let mut value_bytes = vec![];
-    for cell in &row.0 {
-        value_bytes.extend(serialize_datum(cell)?);
-    }
-    let res = value_bytes;
-    Ok(res)
 }
 
 /// used for batch table deserialize

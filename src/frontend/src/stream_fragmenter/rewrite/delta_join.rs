@@ -138,7 +138,7 @@ fn build_delta_join_inner(
                         .collect(),
                     exchange_a0l0.append_only,
                 )
-                .to_state_table_prost(),
+                .to_internal_table_prost(),
             ),
         },
     );
@@ -181,7 +181,7 @@ fn build_delta_join_inner(
                         .collect(),
                     exchange_a1l1.append_only,
                 )
-                .to_state_table_prost(),
+                .to_internal_table_prost(),
             ),
         },
     );

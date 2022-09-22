@@ -60,6 +60,9 @@ pub enum StatementType {
     OTHER,
     // EMPTY is used when query statement is empty (e.g. ";").
     EMPTY,
+    BEGIN,
+    COMMIT,
+    ROLLBACK,
 }
 
 impl std::fmt::Display for StatementType {
@@ -90,6 +93,13 @@ impl StatementType {
                 | StatementType::COPY
                 | StatementType::FETCH
                 | StatementType::SELECT
+        )
+    }
+
+    pub fn is_dml(&self) -> bool {
+        matches!(
+            self,
+            StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE
         )
     }
 }

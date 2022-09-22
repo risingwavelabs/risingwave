@@ -21,7 +21,7 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::LocalFrontend;
-use risingwave_frontend::{handler, Binder, FrontendOpts, Planner};
+use risingwave_frontend::{handler, Binder, FrontendOpts, Planner, WithOptions};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
     create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
@@ -35,10 +35,6 @@ pub struct SqlsmithEnv {
     session: Arc<SessionImpl>,
     tables: Vec<Table>,
     setup_sql: String,
-}
-
-lazy_static::lazy_static! {
-    static ref SQLSMITH_ENV: SqlsmithEnv = setup_sqlsmith_with_seed(0).unwrap();
 }
 
 /// Executes sql queries, prints recoverable errors.
@@ -157,8 +153,12 @@ fn test_batch_query(
     // The generated SQL must be parsable.
     let statements = parse_sql(&sql);
     let stmt = statements[0].clone();
-    let context: OptimizerContextRef =
-        OptimizerContext::new(session.clone(), Arc::from(sql)).into();
+    let context: OptimizerContextRef = OptimizerContext::new(
+        session.clone(),
+        Arc::from(sql),
+        WithOptions::try_from(&stmt)?,
+    )
+    .into();
 
     match stmt {
         Statement::Query(_) => {
@@ -213,16 +213,18 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
 
 pub fn run() {
     let args = Arguments::from_args();
+    let env = Arc::new(setup_sqlsmith_with_seed(0).unwrap());
 
     let num_tests = 512;
     let tests = (0..num_tests)
         .map(|i| {
+            let env = env.clone();
             Trial::test(format!("run_sqlsmith_on_frontend_{}", i), move || {
                 let SqlsmithEnv {
                     session,
                     tables,
                     setup_sql,
-                } = &*SQLSMITH_ENV;
+                } = &*env;
                 test_batch_query(session.clone(), tables.clone(), i, setup_sql)?;
                 let test_stream_query =
                     test_stream_query(session.clone(), tables.clone(), i, setup_sql);

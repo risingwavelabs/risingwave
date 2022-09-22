@@ -29,27 +29,29 @@ message StopMutation {
 message UpdateMutation {
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-    uint64 dispatcher_id = 1;
+    uint32 actor_id = 1;
+    uint64 dispatcher_id = 2;
     // The hash mapping for consistent hash.
     // For dispatcher types other than HASH, this is ignored.
-    ActorMapping hash_mapping = 2;
+    ActorMapping hash_mapping = 3;
     // Added downstream actors.
-    repeated uint32 added_downstream_actor_id = 3;
+    repeated uint32 added_downstream_actor_id = 4;
     // Removed downstream actors.
-    repeated uint32 removed_downstream_actor_id = 4;
+    repeated uint32 removed_downstream_actor_id = 5;
   }
-  // TODO: These actor ids should be the same as those in `DispatcherUpdate`.
-  // We may find a way to deduplicate this.
   message MergeUpdate {
+    // Merge executor can be uniquely identified by a combination of actor id and upstream fragment id.
+    uint32 actor_id = 1;
+    uint32 upstream_fragment_id = 2;
     // Added upstream actors.
-    repeated uint32 added_upstream_actor_id = 1;
+    repeated uint32 added_upstream_actor_id = 3;
     // Removed upstream actors.
-    repeated uint32 removed_upstream_actor_id = 2;
+    repeated uint32 removed_upstream_actor_id = 4;
   }
-  // Dispatcher updates for each upstream actor.
-  map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
-  // Merge updates for each downstream actor.
-  map<uint32, MergeUpdate> actor_merge_update = 2;
+  // Dispatcher updates.
+  repeated DispatcherUpdate dispatcher_update = 1;
+  // Merge updates.
+  repeated MergeUpdate merge_update = 2;
   // Vnode bitmap updates for each actor.
   map<uint32, common.Buffer> actor_vnode_bitmap_update = 3;
   // All actors to be dropped in this update.
@@ -195,12 +197,16 @@ message HashJoinNode {
   catalog.Table left_table = 6;
   // Used for internal table states.
   catalog.Table right_table = 7;
+  // Used for internal table states.
+  catalog.Table left_degree_table = 8;
+  // Used for internal table states.
+  catalog.Table right_degree_table = 9;
+  // The output indices of current node
+  repeated uint32 output_indices = 10;
+  repeated bool null_safe = 11;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
-  bool is_append_only = 8;
-  // The output indices of current node
-  repeated uint32 output_indices = 9;
-  repeated bool null_safe = 10;
+  bool is_append_only = 12;
 }
 
 message DynamicFilterNode {
@@ -247,14 +253,17 @@ message HopWindowNode {
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
   uint32 upstream_fragment_id = 2;
+  // Type of the upstream dispatcher. If there's always one upstream according to this
+  // type, the compute node may use the `ReceiverExecutor` as an optimization.
+  DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. TODO: remove this field.
-  repeated plan_common.Field fields = 3;
+  repeated plan_common.Field fields = 4;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
 // and maybe `DispatcherNode` later.
 message ExchangeNode {
-  DispatchStrategy strategy = 2;
+  DispatchStrategy strategy = 1;
 }
 
 // ChainNode is used for mv on mv.

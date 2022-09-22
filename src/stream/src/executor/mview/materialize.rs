@@ -17,8 +17,6 @@ use std::sync::Arc;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::Op::*;
-use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
@@ -28,7 +26,8 @@ use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
-    BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    ExecutorInfo, Message, PkIndicesRef,
 };
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
@@ -39,6 +38,8 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
+
+    actor_context: ActorContextRef,
 
     info: ExecutorInfo,
 }
@@ -52,6 +53,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         store: S,
         key: Vec<OrderPair>,
         executor_id: u64,
+        actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
     ) -> Self {
@@ -65,6 +67,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             input,
             state_table,
             arrange_columns: arrange_columns.clone(),
+            actor_context,
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,
@@ -74,7 +77,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
-    pub fn new_for_test(
+    pub fn for_test(
         input: BoxedExecutor,
         store: S,
         table_id: TableId,
@@ -102,6 +105,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             input,
             state_table,
             arrange_columns: arrange_columns.clone(),
+            actor_context: Default::default(),
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,
@@ -112,47 +116,30 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        let input = self.input.execute();
+        let mut input = self.input.execute();
+        let barrier = expect_first_barrier(&mut input).await?;
+        self.state_table.init_epoch(barrier.epoch.prev);
+
+        // The first barrier message should be propagated.
+        yield Message::Barrier(barrier);
+
         #[for_await]
         for msg in input {
             let msg = msg?;
             yield match msg {
                 Message::Chunk(chunk) => {
-                    for (idx, op) in chunk.ops().iter().enumerate() {
-                        // check visibility
-                        let visible = chunk
-                            .visibility()
-                            .as_ref()
-                            .map(|x| x.is_set(idx).unwrap())
-                            .unwrap_or(true);
-                        if !visible {
-                            continue;
-                        }
-
-                        // assemble pk row
-
-                        // assemble row
-                        let row = Row(chunk
-                            .columns()
-                            .iter()
-                            .map(|x| x.array_ref().datum_at(idx))
-                            .collect_vec());
-
-                        match op {
-                            Insert | UpdateInsert => {
-                                self.state_table.insert(row)?;
-                            }
-                            Delete | UpdateDelete => {
-                                self.state_table.delete(row)?;
-                            }
-                        }
-                    }
-
+                    self.state_table.write_chunk(chunk.clone());
                     Message::Chunk(chunk)
                 }
                 Message::Barrier(b) => {
                     // FIXME(ZBW): use a better error type
                     self.state_table.commit(b.epoch.prev).await?;
+
+                    // Update the vnode bitmap for the state table if asked.
+                    if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
+                        self.state_table.update_vnode_bitmap(vnode_bitmap);
+                    }
+
                     Message::Barrier(b)
                 }
             }
@@ -232,10 +219,11 @@ mod tests {
             schema.clone(),
             PkIndices::new(),
             vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(chunk1),
-                Message::Barrier(Barrier::default()),
+                Message::Barrier(Barrier::new_test_barrier(2)),
                 Message::Chunk(chunk2),
-                Message::Barrier(Barrier::default()),
+                Message::Barrier(Barrier::new_test_barrier(3)),
             ],
         );
 
@@ -245,7 +233,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let mut table = StorageTable::new_for_test(
+        let mut table = StorageTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -253,7 +241,7 @@ mod tests {
             vec![0],
         );
 
-        let mut materialize_executor = Box::new(MaterializeExecutor::new_for_test(
+        let mut materialize_executor = Box::new(MaterializeExecutor::for_test(
             Box::new(source),
             memory_state_store,
             table_id,
@@ -262,6 +250,7 @@ mod tests {
             1,
         ))
         .execute();
+        materialize_executor.next().await.transpose().unwrap();
 
         materialize_executor.next().await.transpose().unwrap();
 

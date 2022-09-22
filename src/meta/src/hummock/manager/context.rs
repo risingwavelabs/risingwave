@@ -15,10 +15,11 @@
 use std::collections::HashSet;
 use std::ops::DerefMut;
 
+use fail::fail_point;
 use function_name::named;
 use risingwave_hummock_sdk::HummockContextId;
 
-use crate::hummock::error::Result;
+use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{
     commit_multi_var, read_lock, start_measure_real_process_timer, write_lock,
 };
@@ -39,10 +40,20 @@ where
         &self,
         context_ids: impl AsRef<[HummockContextId]>,
     ) -> Result<()> {
+        fail_point!("release_contexts_metastore_err", |_| Err(
+            Error::MetaStoreError(anyhow::anyhow!("failpoint metastore error"))
+        ));
+        fail_point!("release_contexts_internal_err", |_| Err(
+            Error::InternalError(anyhow::anyhow!("failpoint internal error"))
+        ));
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let (compact_statuses, compact_task_assignment) =
             compaction.cancel_assigned_tasks_for_context_ids(context_ids.as_ref())?;
+        for context_id in context_ids.as_ref() {
+            self.compactor_manager
+                .purge_heartbeats_for_context(*context_id);
+        }
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);

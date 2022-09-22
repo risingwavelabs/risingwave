@@ -73,13 +73,12 @@ message Table {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated plan_common.ColumnOrder order_key = 6;
+  repeated plan_common.ColumnOrder pk = 6;
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
   }
   bool is_index = 10;
-  uint32 index_on_id = 11;
   repeated int32 distribution_key = 12;
   // pk_indices of the corresponding materialize operator's output.
   repeated int32 stream_key = 13;
@@ -89,6 +88,9 @@ message Table {
   uint32 fragment_id = 17;
   // an optional column index which is the vnode of each row computed by the table's consistent hash distribution
   ColumnIndex vnode_col_idx = 18;
+  // The column indices which are stored in the state store's value with row-encoding.
+  // Currently is not supported yet and expected to be `[0..columns.len()]`.
+  repeated int32 value_indices = 19;
 }
 
 message Schema {

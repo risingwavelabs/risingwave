@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
     IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
@@ -51,6 +52,7 @@ use crate::session::{AuthContext, FrontendEnv, OptimizerContext, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
+use crate::utils::WithOptions;
 use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
@@ -68,6 +70,10 @@ impl SessionManager for LocalFrontend {
         _user_name: &str,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
+    }
+
+    fn cancel_queries_in_session(&self, _session_id: SessionId) {
+        todo!()
     }
 }
 
@@ -120,10 +126,17 @@ impl LocalFrontend {
                 let mut binder = Binder::new(&session);
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
-                .plan(bound)
-                .unwrap()
-                .gen_batch_distributed_plan()
+            Planner::new(
+                OptimizerContext::new(
+                    session,
+                    Arc::from(raw_sql.as_str()),
+                    WithOptions::try_from(statement)?,
+                )
+                .into(),
+            )
+            .plan(bound)
+            .unwrap()
+            .gen_batch_distributed_plan()
         } else {
             unreachable!()
         }
@@ -138,6 +151,8 @@ impl LocalFrontend {
                 DEFAULT_SUPER_USER_ID,
             )),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
 
@@ -151,6 +166,8 @@ impl LocalFrontend {
             self.env.clone(),
             Arc::new(AuthContext::new(database, user_name, user_id)),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
 }

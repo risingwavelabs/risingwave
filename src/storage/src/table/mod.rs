@@ -15,15 +15,14 @@
 pub mod batch_table;
 pub mod streaming_table;
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_COUNT};
-use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::error::StorageResult;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
@@ -44,14 +43,12 @@ pub struct Distribution {
 impl Distribution {
     /// Fallback distribution for singleton or tests.
     pub fn fallback() -> Self {
-        lazy_static::lazy_static! {
-            /// A bitmap that only the default vnode is set.
-            static ref FALLBACK_VNODES: Arc<Bitmap> = {
-                let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
-                vnodes.set(DEFAULT_VNODE as _, true);
-                vnodes.finish().into()
-            };
-        }
+        /// A bitmap that only the default vnode is set.
+        static FALLBACK_VNODES: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
+            let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
+            vnodes.set(DEFAULT_VNODE as _, true);
+            vnodes.finish().into()
+        });
         Self {
             dist_key_indices: vec![],
             vnodes: FALLBACK_VNODES.clone(),
@@ -60,10 +57,9 @@ impl Distribution {
 
     /// Distribution that accesses all vnodes, mainly used for tests.
     pub fn all_vnodes(dist_key_indices: Vec<usize>) -> Self {
-        lazy_static::lazy_static! {
-            /// A bitmap that all vnodes are set.
-            static ref ALL_VNODES: Arc<Bitmap> = Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).into();
-        }
+        /// A bitmap that all vnodes are set.
+        static ALL_VNODES: LazyLock<Arc<Bitmap>> =
+            LazyLock::new(|| Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).into());
         Self {
             dist_key_indices,
             vnodes: ALL_VNODES.clone(),
@@ -88,7 +84,7 @@ pub trait TableIter: Send {
             match self.next_row().await? {
                 Some(row) => {
                     for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
-                        builder.append_datum(&datum)?;
+                        builder.append_datum(&datum);
                     }
                     row_count += 1;
                 }
@@ -97,10 +93,10 @@ pub trait TableIter: Send {
         }
 
         let chunk = {
-            let columns: Vec<Column> = builders
+            let columns: Vec<_> = builders
                 .into_iter()
-                .map(|builder| builder.finish().map(Into::into))
-                .try_collect()?;
+                .map(|builder| builder.finish().into())
+                .collect();
             DataChunk::new(columns, row_count)
         };
 
@@ -112,22 +108,40 @@ pub trait TableIter: Send {
     }
 }
 
-/// Get vnode value with `indices` on the given `row`. Should not be used directly.
+/// Get vnode value with `indices` on the given `row`.
 fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
-        row.hash_by_indices(indices, &CRC32FastBuilder {})
+        row.hash_by_indices(indices, &Crc32FastBuilder {})
             .to_vnode()
     };
 
     tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
+    check_vnode_is_set(vnode, vnodes);
 
-    // FIXME: temporary workaround for local agg, may not needed after we have a vnode builder
-    if !indices.is_empty() {
-        check_vnode_is_set(vnode, vnodes);
-    }
     vnode
+}
+
+/// Get vnode values with `indices` on the given `chunk`.
+fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) -> Vec<VirtualNode> {
+    if indices.is_empty() {
+        vec![DEFAULT_VNODE; chunk.capacity()]
+    } else {
+        chunk
+            .get_hash_values(indices, Crc32FastBuilder {})
+            .into_iter()
+            .zip_eq(chunk.vis().iter())
+            .map(|(h, vis)| {
+                let vnode = h.to_vnode();
+                // Ignore the invisible rows.
+                if vis {
+                    check_vnode_is_set(vnode, vnodes);
+                }
+                vnode
+            })
+            .collect()
+    }
 }
 
 /// Check whether the given `vnode` is set in the `vnodes` of this table.

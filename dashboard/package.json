@@ -6,33 +6,47 @@
     "start": "next start",
     "build-static": "next build && next export",
     "gen-proto": "./scripts/generate_proto.sh",
-    "lint": "prettier --check .",
-    "format": "prettier --write ."
+    "lint": "prettier --check . && next lint",
+    "format": "prettier --write . && next lint --fix",
+    "mock-server": "node ./mock-server.js"
   },
   "dependencies": {
     "@chakra-ui/react": "^2.3.1",
     "@emotion/react": "^11.10.4",
     "@emotion/styled": "^11.10.4",
-    "@mui/icons-material": "^5.3.1",
-    "@mui/material": "^5.3.1",
+    "@loadable/component": "5.15.2",
+    "@types/d3": "^7.4.0",
     "@types/lodash": "^4.14.184",
     "bootstrap-icons": "^1.9.1",
-    "d3": "^7.3.0",
+    "d3": "^7.6.1",
+    "d3-axis": "^3.0.0",
+    "d3-dag": "^0.11.4",
+    "d3-hierarchy": "^3.1.2",
+    "d3-interpolate": "^3.0.1",
+    "d3-scale": "^4.0.2",
+    "d3-selection": "^3.0.0",
     "fabric": "^5.2.1",
     "framer-motion": "^6.5.1",
     "lodash": "^4.17.21",
     "next": "^12.0.9",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-flow-renderer": "10.3.16",
+    "react-json-view": "^1.21.3",
     "react-syntax-highlighter": "^15.5.0",
+    "styled-components": "5.3.0",
     "ts-proto": "^1.125.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^5.16.2",
     "@testing-library/react": "^13.3.0",
+    "@types/loadable__component": "^5.13.4",
     "@types/node": "^18.7.14",
+    "@types/styled-components": "^5.1.26",
     "@typescript-eslint/eslint-plugin": "^5.36.1",
     "eslint": "^8.23.0",
+    "eslint-config-next": "12.2.5",
+    "eslint-config-prettier": "^8.5.0",
     "eslint-config-standard-with-typescript": "^22.0.0",
     "eslint-plugin-import": "^2.26.0",
     "eslint-plugin-n": "^15.2.5",
@@ -42,5 +56,15 @@
     "prettier": "^2.7.1",
     "prettier-plugin-organize-imports": "^3.1.1",
     "typescript": "^4.8.2"
+  },
+  "overrides": {
+    "react-json-view": {
+      "react": "^18.2.0",
+      "react-dom": "^18.2.0"
+    },
+    "flux": {
+      "react": "^18.2.0",
+      "react-dom": "^18.2.0"
+    }
   }
 }

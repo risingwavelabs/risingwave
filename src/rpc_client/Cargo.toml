@@ -9,6 +9,7 @@ async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 paste = "1"
+rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
@@ -22,6 +23,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-retry = "0.3"
+tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 

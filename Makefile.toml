@@ -7,7 +7,7 @@ extend = [
   { path = "src/risedevtool/kafka.toml" },
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
-  { path = "src/frontend/test_runner/planner_test.toml" },
+  { path = "src/frontend/planner_test/planner_test.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -22,7 +22,7 @@ is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
   set_env RISEDEV_BUILD_TARGET_DIR "${CARGO_MAKE_RUST_TARGET_TRIPLE}/"
-  set_env RISEDEV_RUSTFLAGS "--cfg tokio_unstable -Zsanitizer=thread"
+  set_env RISEDEV_RUSTFLAGS "-Ctarget-cpu=native --cfg tokio_unstable -Zsanitizer=thread"
 else
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS ""
   set_env RISEDEV_BUILD_TARGET_DIR ""
@@ -451,7 +451,7 @@ description = "Run unit tests"
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
@@ -505,6 +505,18 @@ script = """
 set -e
 
 cargo run -p risingwave_simulation "$@"
+"""
+
+[tasks.sslt-cov]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Run e2e tests in deterministic simulation mode and report code coverage"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim-cov" }
+script = """
+#!/bin/bash
+set -e
+
+cargo llvm-cov run -p risingwave_simulation --html "$@"
 """
 
 [tasks.check-hakari]
@@ -637,10 +649,25 @@ extend = "slt"
 args = ["${@}", "./e2e_test/batch/**/*.slt"]
 description = "Run all batch e2e tests"
 
+[tasks.slt-generated]
+category = "RiseDev - SQLLogicTest"
+extend = "slt"
+args = ["${@}", "./e2e_test/generated/**/*.slt"]
+description = "Run all generated e2e tests"
+
 [tasks.slt-all]
 category = "RiseDev - SQLLogicTest"
-run_task = { name = ["slt-streaming", "slt-batch"] }
-description = "Run all batch and streaming e2e tests"
+run_task = { name = ["slt-streaming", "slt-batch", "slt-generated"] }
+description = "Run all e2e tests"
+
+[tasks.docslt]
+category = "RiseDev - SQLLogicTest"
+description = "Extract SQL examples written in SQLLogicTest syntax from Rust doc comments"
+script = '''
+#!/bin/bash
+set -e
+cargo run --bin risedev-docslt -- "$@"
+'''
 
 [tasks.compose]
 category = "RiseDev - Compose"

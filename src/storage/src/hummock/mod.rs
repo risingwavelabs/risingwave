@@ -67,9 +67,11 @@ pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::{CompactionGroupClient, DummyCompactionGroupClient};
+use crate::hummock::compaction_group_client::{
+    CompactionGroupClientImpl, DummyCompactionGroupClient,
+};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -81,7 +83,7 @@ use crate::monitor::StoreLocalStatistic;
 pub struct HummockStorage {
     options: Arc<StorageConfig>,
 
-    local_version_manager: Arc<LocalVersionManager>,
+    local_version_manager: LocalVersionManagerRef,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
@@ -90,7 +92,7 @@ pub struct HummockStorage {
     /// Statistics
     stats: Arc<StateStoreMetrics>,
 
-    compaction_group_client: Arc<dyn CompactionGroupClient>,
+    compaction_group_client: Arc<CompactionGroupClientImpl>,
 
     sstable_id_manager: SstableIdManagerRef,
 
@@ -100,7 +102,7 @@ pub struct HummockStorage {
 
 impl HummockStorage {
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
-    pub async fn for_test(
+    pub fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -111,22 +113,21 @@ impl HummockStorage {
             sstable_store,
             hummock_meta_client,
             Arc::new(StateStoreMetrics::unused()),
-            Arc::new(DummyCompactionGroupClient::new(
-                StaticCompactionGroupId::StateDefault.into(),
+            Arc::new(CompactionGroupClientImpl::Dummy(
+                DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
             )),
             filter_key_extractor_manager,
         )
-        .await
     }
 
     /// Creates a [`HummockStorage`].
-    pub async fn new(
+    pub fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
-        compaction_group_client: Arc<dyn CompactionGroupClient>,
+        compaction_group_client: Arc<CompactionGroupClientImpl>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
@@ -144,11 +145,10 @@ impl HummockStorage {
             write_conflict_detector,
             sstable_id_manager.clone(),
             filter_key_extractor_manager,
-        )
-        .await;
+        );
 
         let instance = Self {
-            options: options.clone(),
+            options,
             local_version_manager,
             hummock_meta_client,
             sstable_store,
@@ -209,7 +209,7 @@ impl HummockStorage {
         self.sstable_store.clone()
     }
 
-    pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
+    pub fn local_version_manager(&self) -> &LocalVersionManagerRef {
         &self.local_version_manager
     }
 
@@ -260,7 +260,7 @@ impl HummockStorage {
                     }
 
                     UncommittedData::Sst((_, table_info)) => {
-                        let table = self.sstable_store.sstable(table_info.id, stats).await?;
+                        let table = self.sstable_store.sstable(&table_info, stats).await?;
                         table_counts += 1;
 
                         if let Some(data) = self

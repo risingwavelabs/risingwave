@@ -38,6 +38,9 @@
 #![feature(map_try_insert)]
 #![feature(hash_drain_filter)]
 #![feature(is_some_with)]
+#![feature(btree_drain_filter)]
+#![feature(result_option_inspect)]
+#![feature(once_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
@@ -138,10 +141,6 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value = "604800")]
     min_sst_retention_time_sec: u64,
 
-    /// Compaction scheduler retries compactor selection with this interval.
-    #[clap(long, default_value = "5")]
-    compactor_selection_retry_interval_sec: u64,
-
     /// The spin interval when collecting global GC watermark in hummock
     #[clap(long, default_value = "5")]
     collect_gc_watermark_spin_interval_sec: u64,
@@ -149,6 +148,17 @@ pub struct MetaNodeOpts {
     /// Enable sanity check when SSTs are committed. By default disabled.
     #[clap(long)]
     enable_committed_sst_sanity_check: bool,
+
+    /// Schedule compaction for all compaction groups with this interval.
+    #[clap(long, default_value = "60")]
+    pub periodic_compaction_interval_sec: u64,
+
+    /// Seconds compaction scheduler should stall when there is no available compactor.
+    #[clap(long, default_value = "5")]
+    pub no_available_compactor_stall_sec: u64,
+
+    #[clap(long, default_value = "10")]
+    node_num_monitor_interval_sec: u64,
 }
 
 use std::future::Future;
@@ -203,13 +213,16 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
                 checkpoint_interval,
-                max_idle_ms,
                 in_flight_barrier_nums,
+                minimal_scheduling: meta_config.streaming.minimal_scheduling,
+                max_idle_ms,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
                 min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
-                compactor_selection_retry_interval_sec: opts.compactor_selection_retry_interval_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
+                periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
+                no_available_compactor_stall_sec: opts.no_available_compactor_stall_sec,
+                node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
             },
         )
         .await

@@ -32,12 +32,13 @@ use crate::hummock::{
     CachePolicy, HummockStateStoreIter, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
     SstableStoreRef, SstableWriter,
 };
+use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {
-        sstable_size_mb: 256,
+        sstable_size_mb: 4,
         block_size_kb: 64,
         bloom_false_positive: 0.1,
         share_buffers_sync_parallelism: 2,
@@ -64,9 +65,22 @@ pub fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, StorageValue)> {
     )]
 }
 
+pub fn gen_dummy_batch_several_keys(epoch: u64, n: usize) -> Vec<(Bytes, StorageValue)> {
+    let mut kvs = vec![];
+    let v = Bytes::from(b"value1".to_vec().repeat(100));
+    for idx in 0..n {
+        kvs.push((
+            Bytes::from(iterator_test_key_of_epoch(idx, epoch)),
+            StorageValue::new_put(v.clone()),
+        ));
+    }
+    kvs
+}
+
 pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
     let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
     let mut max_key: Vec<u8> = batches[0].end_key().to_vec();
+    let mut file_size = 0;
     for batch in batches.iter().skip(1) {
         if min_key.as_slice() > batch.start_key() {
             min_key = batch.start_key().to_vec();
@@ -74,6 +88,7 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
         if max_key.as_slice() < batch.end_key() {
             max_key = batch.end_key().to_vec();
         }
+        file_size += batch.size() as u64;
     }
     SstableInfo {
         id,
@@ -82,8 +97,9 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
             right: max_key,
             inf: false,
         }),
-        file_size: batches.len() as u64,
+        file_size,
         table_ids: vec![],
+        meta_offset: 0,
     }
 }
 
@@ -97,7 +113,6 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
         restart_interval: DEFAULT_RESTART_INTERVAL,
         bloom_false_positive: 0.1,
         compression_algorithm: CompressionAlgorithm::None,
-        ..Default::default()
     }
 }
 
@@ -114,36 +129,50 @@ pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> InMemWriter {
 }
 
 /// Generates sstable data and metadata from given `kv_iter`
-pub fn gen_test_sstable_data(
+pub async fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
-) -> (Bytes, SstableMeta, Vec<u32>) {
-    let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opts), opts);
+) -> (Bytes, SstableMeta) {
+    let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice()).unwrap();
+        b.add(&key, value.as_slice()).await.unwrap();
     }
-    let output = b.finish().unwrap();
-    (output.writer_output, output.meta, output.table_ids)
+    let output = b.finish().await.unwrap();
+    output.writer_output
 }
 
 /// Write the data and meta to `sstable_store`.
 pub async fn put_sst(
     sst_id: HummockSstableId,
     data: Bytes,
-    meta: SstableMeta,
+    mut meta: SstableMeta,
     sstable_store: SstableStoreRef,
     mut options: SstableWriterOptions,
-) -> HummockResult<()> {
+) -> HummockResult<SstableInfo> {
     options.policy = CachePolicy::NotFill;
     let mut writer = sstable_store.clone().create_sst_writer(sst_id, options);
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
-        writer.write_block(&data[offset..end_offset], block_meta)?;
+        writer
+            .write_block(&data[offset..end_offset], block_meta)
+            .await?;
     }
-    let writer_output = writer.finish(meta.block_metas.len() as u32)?;
+    meta.meta_offset = writer.data_len() as u64;
+    let sst = SstableInfo {
+        id: sst_id,
+        key_range: Some(KeyRange {
+            left: meta.smallest_key.clone(),
+            right: meta.largest_key.clone(),
+            inf: false,
+        }),
+        file_size: meta.estimated_size as u64,
+        table_ids: vec![],
+        meta_offset: meta.meta_offset,
+    };
+    let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;
-    sstable_store.put_sst_meta(sst_id, meta).await
+    Ok(sst)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -160,18 +189,17 @@ pub async fn gen_test_sstable_inner(
         policy,
     };
     let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
-    let mut b = SstableBuilder::new_for_test(sst_id, writer, opts);
+    let mut b = SstableBuilder::for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice()).unwrap();
+        b.add(&key, value.as_slice()).await.unwrap();
     }
-    let output = b.finish().unwrap();
+    let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
-    let sst = Sstable::new(sst_id, output.meta.clone());
-    sstable_store
-        .put_sst_meta(sst_id, output.meta)
+    let table = sstable_store
+        .sstable(&output.sst_info, &mut StoreLocalStatistic::default())
         .await
         .unwrap();
-    sst
+    table.value().as_ref().clone()
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`

@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -27,7 +28,7 @@ use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::executor::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
@@ -99,6 +100,8 @@ pub struct LookupExecutorParams<S: StateStore> {
     pub arrange_join_key_indices: Vec<usize>,
 
     pub state_table: StateTable<S>,
+
+    pub cache_size: usize,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -115,6 +118,7 @@ impl<S: StateStore> LookupExecutor<S> {
             schema: output_schema,
             column_mapping,
             state_table,
+            cache_size,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -210,7 +214,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(),
+            lookup_cache: LookupCache::new(cache_size),
         }
     }
 
@@ -274,15 +278,6 @@ impl<S: StateStore> LookupExecutor<S> {
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {
-                    let last_barrier = self
-                        .last_barrier
-                        .as_ref()
-                        .expect("data received before a barrier");
-                    let lookup_epoch = if self.arrangement.use_current_epoch {
-                        last_barrier.epoch.curr
-                    } else {
-                        last_barrier.epoch.prev
-                    };
                     let chunk = chunk.compact()?;
                     let (chunk, ops) = chunk.into_parts();
 
@@ -294,7 +289,7 @@ impl<S: StateStore> LookupExecutor<S> {
                     )?;
 
                     for (op, row) in ops.iter().zip_eq(chunk.rows()) {
-                        for matched_row in self.lookup_one_row(&row, lookup_epoch).await? {
+                        for matched_row in self.lookup_one_row(&row).await? {
                             tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
                             if let Some(chunk) = builder.append_row(*op, &row, &matched_row)? {
@@ -332,27 +327,42 @@ impl<S: StateStore> LookupExecutor<S> {
             // data. Therefore, it is also okay to simply set prev epoch to 0.
 
             self.last_barrier = Some(Barrier {
-                epoch: Epoch {
+                epoch: EpochPair {
                     prev: 0,
                     curr: barrier.epoch.curr,
                 },
                 ..barrier
             });
+            if self.arrangement.use_current_epoch {
+                self.arrangement.state_table.init_epoch(barrier.epoch.curr);
+            } else {
+                self.arrangement.state_table.init_epoch(0);
+            };
             return Ok(());
         } else {
+            // there is no write operation on the arrangement table by the lookup executor, so here
+            // the `state_table::commit(epoch)` just means the data in the epoch will be visible by
+            // the lookup executor
+            // TODO(st1page): maybe we should not use state table here.
+            if self.arrangement.use_current_epoch {
+                self.arrangement
+                    .state_table
+                    .commit_no_data_expected(barrier.epoch.curr);
+            } else {
+                self.arrangement
+                    .state_table
+                    .commit_no_data_expected(barrier.epoch.prev);
+            };
             self.last_barrier = Some(barrier)
         }
+
         Ok(())
     }
 
     /// Lookup all rows corresponding to a join key in shared buffer.
-    async fn lookup_one_row(
-        &mut self,
-        stream_row: &RowRef<'_>,
-        lookup_epoch: u64,
-    ) -> StreamExecutorResult<Vec<Row>> {
+    async fn lookup_one_row(&mut self, stream_row: &RowRef<'_>) -> StreamExecutorResult<Vec<Row>> {
         // fast-path for empty look-ups.
-        if lookup_epoch == 0 {
+        if self.arrangement.state_table.epoch() == 0 {
             return Ok(vec![]);
         }
 
@@ -371,7 +381,7 @@ impl<S: StateStore> LookupExecutor<S> {
             let all_data_iter = self
                 .arrangement
                 .state_table
-                .iter_with_pk_prefix(&lookup_row, lookup_epoch)
+                .iter_with_pk_prefix(&lookup_row)
                 .await?;
             pin_mut!(all_data_iter);
             while let Some(inner) = all_data_iter.next().await {
