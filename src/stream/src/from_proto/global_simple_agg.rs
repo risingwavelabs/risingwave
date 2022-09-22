@@ -26,7 +26,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GlobalSimpleAgg)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
@@ -49,6 +49,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             agg_calls,
             params.pk_indices,
             params.executor_id,
+            stream.config.developer.unsafe_extreme_cache_size,
             state_tables,
             state_table_col_mappings,
         )?

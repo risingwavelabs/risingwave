@@ -34,6 +34,8 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     agg_calls: Vec<AggCall>,
     key_indices: Vec<usize>,
     pk_indices: PkIndices,
+    group_by_cache_size: usize,
+    extreme_cache_size: usize,
     executor_id: u64,
     state_tables: Vec<StateTable<S>>,
     state_table_col_mappings: Vec<Vec<usize>>,
@@ -52,6 +54,8 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.pk_indices,
             args.executor_id,
             args.key_indices,
+            args.group_by_cache_size,
+            args.extreme_cache_size,
             args.state_tables,
             args.state_table_col_mappings,
             args.metrics,
@@ -67,7 +71,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashAgg)?;
         let key_indices = node
@@ -102,6 +106,8 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             agg_calls,
             key_indices,
             pk_indices: params.pk_indices,
+            group_by_cache_size: stream.config.developer.unsafe_hash_agg_cache_size,
+            extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
             executor_id: params.executor_id,
             state_tables,
             state_table_col_mappings,

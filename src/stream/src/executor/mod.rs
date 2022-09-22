@@ -41,7 +41,7 @@ use risingwave_pb::stream_plan::{
 use smallvec::SmallVec;
 
 use crate::error::StreamResult;
-use crate::task::ActorId;
+use crate::task::{ActorId, FragmentId};
 
 mod actor;
 mod barrier_align;
@@ -187,13 +187,15 @@ impl std::fmt::Debug for BoxedExecutor {
 
 pub const INVALID_EPOCH: u64 = 0;
 
+type UpstreamFragmentId = FragmentId;
+
 /// See [`risingwave_pb::stream_plan::barrier::Mutation`] for the semantics of each mutation.
 #[derive(Debug, Clone, PartialEq, EnumAsInner)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
     Update {
-        dispatchers: HashMap<ActorId, DispatcherUpdate>,
-        merges: HashMap<ActorId, MergeUpdate>,
+        dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
+        merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
         vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
     },
@@ -313,11 +315,15 @@ impl Barrier {
 
     /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor
     /// with `actor_id`.
-    pub fn as_update_merge(&self, actor_id: ActorId) -> Option<&MergeUpdate> {
+    pub fn as_update_merge(
+        &self,
+        actor_id: ActorId,
+        upstream_fragment_id: UpstreamFragmentId,
+    ) -> Option<&MergeUpdate> {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
-                Mutation::Update { merges, .. } => merges.get(&actor_id),
+                Mutation::Update { merges, .. } => merges.get(&(actor_id, upstream_fragment_id)),
                 _ => None,
             })
     }
@@ -363,8 +369,8 @@ impl Mutation {
                 vnode_bitmaps,
                 dropped_actors,
             } => ProstMutation::Update(UpdateMutation {
-                actor_dispatcher_update: dispatchers.clone(),
-                actor_merge_update: merges.clone(),
+                dispatcher_update: dispatchers.values().flatten().cloned().collect(),
+                merge_update: merges.values().cloned().collect(),
                 actor_vnode_bitmap_update: vnode_bitmaps
                     .iter()
                     .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
@@ -417,8 +423,16 @@ impl Mutation {
             }
 
             ProstMutation::Update(update) => Mutation::Update {
-                dispatchers: update.actor_dispatcher_update.clone(),
-                merges: update.actor_merge_update.clone(),
+                dispatchers: update
+                    .dispatcher_update
+                    .iter()
+                    .map(|u| (u.actor_id, u.clone()))
+                    .into_group_map(),
+                merges: update
+                    .merge_update
+                    .iter()
+                    .map(|u| ((u.actor_id, u.upstream_fragment_id), u.clone()))
+                    .collect(),
                 vnode_bitmaps: update
                     .actor_vnode_bitmap_update
                     .iter()
