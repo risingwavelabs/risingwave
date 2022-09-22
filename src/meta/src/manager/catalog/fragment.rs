@@ -311,10 +311,9 @@ where
 
             self.notify_fragment_mapping(&delete_table_fragments, Operation::Delete)
                 .await;
-            Ok(())
-        } else {
-            bail!("table_fragment not exist: id={}", table_id);
         }
+
+        Ok(())
     }
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
