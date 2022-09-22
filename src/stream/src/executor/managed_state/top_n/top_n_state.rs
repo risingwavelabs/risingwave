@@ -199,7 +199,7 @@ mod tests {
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
             );
-            tb.init_epoch(0);
+            tb.init_epoch(0).await;
             tb
         };
         let mut managed_state = ManagedTopNState::new(
@@ -268,7 +268,7 @@ mod tests {
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
             );
-            tb.init_epoch(0);
+            tb.init_epoch(0).await;
             tb
         };
         let mut managed_state = ManagedTopNState::new(

@@ -47,7 +47,7 @@ pub trait TopNExecutorBase: Send + 'static {
 
     /// Update the vnode bitmap for the state tables, only used by Group Top-N since it's
     /// distributed.
-    fn update_state_table_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {}
+    async fn update_state_table_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {}
 
     async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()>;
 }

@@ -308,7 +308,6 @@ impl<S: StateStore> LookupExecutor<S> {
     }
 
     /// Store the barrier.
-    #[expect(clippy::unused_async)]
     async fn process_barrier(&mut self, barrier: Barrier) -> StreamExecutorResult<()> {
         if self.last_barrier.is_none() {
             assert_ne!(barrier.epoch.prev, 0, "lookup requires prev epoch != 0");
@@ -334,9 +333,12 @@ impl<S: StateStore> LookupExecutor<S> {
                 ..barrier
             });
             if self.arrangement.use_current_epoch {
-                self.arrangement.state_table.init_epoch(barrier.epoch.curr);
+                self.arrangement
+                    .state_table
+                    .init_epoch(barrier.epoch.curr)
+                    .await;
             } else {
-                self.arrangement.state_table.init_epoch(0);
+                self.arrangement.state_table.init_epoch(0).await;
             };
             return Ok(());
         } else {

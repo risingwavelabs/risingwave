@@ -42,7 +42,7 @@ async fn test_state_table() -> StorageResult<()> {
     );
 
     let mut epoch = 0;
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await;
 
     state_table.insert(Row(vec![
         Some(1_i32.into()),
@@ -167,7 +167,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     );
 
     let mut epoch: u64 = 0;
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await;
 
     state_table.insert(Row(vec![
         Some(6_i32.into()),
@@ -336,7 +336,7 @@ async fn test_state_table_iter() {
     );
 
     let mut epoch = 0;
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await;
 
     state.insert(Row(vec![
         Some(1_i32.into()),
@@ -559,7 +559,7 @@ async fn test_state_table_iter_with_prefix() {
     );
 
     let mut epoch: u64 = 0;
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await;
 
     state.insert(Row(vec![
         Some(1_i32.into()),
@@ -672,7 +672,7 @@ async fn test_mem_table_assertion() {
         order_types,
         pk_index,
     );
-    state_table.init_epoch(0);
+    state_table.init_epoch(0).await;
     state_table.insert(Row(vec![
         Some(1_i32.into()),
         Some(11_i32.into()),
@@ -706,7 +706,7 @@ async fn test_state_table_iter_with_value_indices() {
         vec![2],
     );
     let mut epoch: u64 = 0;
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await;
 
     state.insert(Row(vec![
         Some(1_i32.into()),

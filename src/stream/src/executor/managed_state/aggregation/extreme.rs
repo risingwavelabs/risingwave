@@ -348,7 +348,7 @@ mod tests {
         );
 
         let mut epoch = 0;
-        state_table.init_epoch(epoch);
+        state_table.init_epoch(epoch).await;
         epoch += 1;
 
         {
@@ -461,7 +461,7 @@ mod tests {
         );
 
         let mut epoch = 0;
-        state_table.init_epoch(epoch);
+        state_table.init_epoch(epoch).await;
         epoch += 1;
 
         {
@@ -582,8 +582,8 @@ mod tests {
         );
 
         let mut epoch = 0;
-        state_table_1.init_epoch(epoch);
-        state_table_2.init_epoch(epoch);
+        state_table_1.init_epoch(epoch).await;
+        state_table_2.init_epoch(epoch).await;
         epoch += 1;
 
         let mut managed_state_1 = GenericExtremeState::new(
@@ -683,7 +683,7 @@ mod tests {
         );
 
         let mut epoch = 0;
-        state_table.init_epoch(epoch);
+        state_table.init_epoch(epoch).await;
         epoch += 1;
 
         {
@@ -785,7 +785,7 @@ mod tests {
             vec![0, 1], // [a, _row_id]
         );
         let mut epoch = 0;
-        state_table.init_epoch(epoch);
+        state_table.init_epoch(epoch).await;
         epoch += 1;
         let mut managed_state = GenericExtremeState::new(
             agg_call.clone(),
@@ -917,7 +917,7 @@ mod tests {
         );
 
         let mut epoch = 0;
-        state_table.init_epoch(epoch);
+        state_table.init_epoch(epoch).await;
         epoch += 1;
 
         {

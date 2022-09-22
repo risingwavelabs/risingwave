@@ -216,7 +216,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     }
 
     async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.managed_state.state_table.init_epoch(epoch);
+        self.managed_state.state_table.init_epoch(epoch).await;
         self.managed_state
             .init_topn_cache(None, &mut self.cache)
             .await

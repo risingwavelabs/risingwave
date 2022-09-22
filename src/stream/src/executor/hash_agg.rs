@@ -462,7 +462,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         for state_table in &mut extra.state_tables {
-            state_table.init_epoch(barrier.epoch.prev);
+            state_table.init_epoch(barrier.epoch.prev).await;
         }
 
         let mut epoch = barrier.epoch.curr;
@@ -487,7 +487,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(extra.ctx.id) {
                         for state_table in &mut extra.state_tables {
-                            state_table.update_vnode_bitmap(vnode_bitmap.clone());
+                            state_table.update_vnode_bitmap(vnode_bitmap.clone()).await;
                         }
                     }
 

@@ -407,7 +407,7 @@ async fn test_row_seq_scan() -> Result<()> {
     );
 
     let mut epoch: u64 = 0;
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await;
     epoch += 1;
     state.insert(Row(vec![
         Some(1_i32.into()),

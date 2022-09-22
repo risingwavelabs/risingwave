@@ -118,7 +118,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     async fn execute_inner(mut self) {
         let mut input = self.input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch.prev);
+        self.state_table.init_epoch(barrier.epoch.prev).await;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -137,7 +137,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                     // Update the vnode bitmap for the state table if asked.
                     if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
-                        self.state_table.update_vnode_bitmap(vnode_bitmap);
+                        self.state_table.update_vnode_bitmap(vnode_bitmap).await;
                     }
 
                     Message::Barrier(b)

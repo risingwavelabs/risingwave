@@ -264,7 +264,7 @@ mod tests {
             ManagedArrayAggState::new(agg_call, None, input_pk_indices, state_table_col_mapping, 0);
 
         let mut epoch = 0;
-        state_table.init_epoch(epoch);
+        state_table.init_epoch(epoch).await;
         epoch += 1;
 
         let chunk = StreamChunk::from_pretty(
@@ -347,7 +347,7 @@ mod tests {
             ManagedArrayAggState::new(agg_call, None, input_pk_indices, state_table_col_mapping, 0);
 
         let mut epoch = 0;
-        state_table.init_epoch(epoch);
+        state_table.init_epoch(epoch).await;
         epoch += 1;
 
         {
@@ -460,7 +460,7 @@ mod tests {
         );
 
         let mut epoch = 0;
-        state_table.init_epoch(epoch);
+        state_table.init_epoch(epoch).await;
         epoch += 1;
 
         {

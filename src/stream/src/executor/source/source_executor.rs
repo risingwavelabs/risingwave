@@ -71,8 +71,8 @@ pub struct SourceExecutor<S: StateStore> {
 
     state_cache: HashMap<SplitId, SplitImpl>,
 
-    #[expect(dead_code)]
     /// Expected barrier latency
+    #[expect(dead_code)]
     expected_barrier_latency_ms: u64,
 }
 

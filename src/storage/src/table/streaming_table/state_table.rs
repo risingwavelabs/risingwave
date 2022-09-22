@@ -31,6 +31,7 @@ use risingwave_common::types::VirtualNode;
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use tracing::trace;
 
@@ -316,26 +317,42 @@ impl<S: StateStore> StateTable<S> {
         self.keyspace.table_id()
     }
 
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    pub fn init_epoch(&mut self, epoch: u64) {
-        match self.epoch {
-            Some(prev_epoch) => {
-                panic!(
-                    "init the state table's epoch twice, table_id: {}, prev_epoch: {}, new_epoch: {}",
-                    self.table_id(),
-                    prev_epoch,
-                    epoch
-                )
-            }
-            None => {
-                self.epoch = Some(epoch);
-            }
+    /// Get the newest epoch of the state store and panic if the `init_epoch()` has never be called.
+    /// The `epoch` should be a previous epoch.
+    pub async fn init_epoch(&mut self, epoch: u64) {
+        if let Some(prev_epoch) = self.epoch {
+            panic!(
+                "init the state table's epoch twice, table_id: {}, prev_epoch: {}, new_epoch: {}",
+                self.table_id(),
+                prev_epoch,
+                epoch
+            )
         }
+
+        self.epoch = Some(epoch);
+        self.wait_epoch().await;
     }
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     pub fn epoch(&self) -> u64 {
         self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id()))
+    }
+
+    /// Wait for the current epoch of the state store is committed, this is necessary for scaling.
+    ///
+    /// When scaling,
+    /// - some new executors will be created (with `init_epoch`),
+    /// - or the vnode bitmap of existing executors will be changed (with `update_vnode_bitmap`).
+    /// Therefore, the state table might be used to operate on the data from new partitions which is
+    /// not in the shared buffer. In this case, the state table should first ensure that the data
+    /// from new partitions is visible in this compute node, by manually calling
+    /// [`StateStore::try_wait_epoch`].
+    async fn wait_epoch(&self) {
+        self.keyspace
+            .state_store()
+            .try_wait_epoch(HummockReadEpoch::Committed(self.epoch()))
+            .await
+            .expect("wait epoch failed") // `try_wait_epoch` should never fails, so we can unwrap it
     }
 
     /// Get the vnode value with given (prefix of) primary key
@@ -419,7 +436,9 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+    /// Update the vnode bitmap for this state table. Should ensure `update_epoch` is called before
+    /// calling this function.
+    pub async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
         assert!(
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
@@ -430,7 +449,9 @@ impl<S: StateStore> StateTable<S> {
                 "should not update vnode bitmap for singleton table"
             );
         }
+
         self.vnodes = new_vnodes;
+        self.wait_epoch().await;
     }
 }
 

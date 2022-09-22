@@ -163,7 +163,7 @@ mod tests {
             vec![],
         );
         let mut epoch: u64 = 0;
-        state_table.init_epoch(epoch);
+        state_table.init_epoch(epoch).await;
         epoch += 1;
 
         let mut managed_state =
@@ -219,7 +219,7 @@ mod tests {
             pk_index,
         );
         let mut epoch: u64 = 0;
-        state_table.init_epoch(epoch);
+        state_table.init_epoch(epoch).await;
         epoch += 1;
 
         let mut managed_state = ManagedValueState::new(

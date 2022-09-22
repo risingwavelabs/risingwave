@@ -223,14 +223,15 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
         &self.info.identity
     }
 
-    fn update_state_table_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
+    async fn update_state_table_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
         self.managed_state
             .state_table
-            .update_vnode_bitmap(vnode_bitmap);
+            .update_vnode_bitmap(vnode_bitmap)
+            .await;
     }
 
     async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.managed_state.state_table.init_epoch(epoch);
+        self.managed_state.state_table.init_epoch(epoch).await;
         Ok(())
     }
 }

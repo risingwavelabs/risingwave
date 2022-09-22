@@ -258,7 +258,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         let barrier = expect_first_barrier(&mut input).await?;
         for table in &mut state_tables {
-            table.init_epoch(barrier.epoch.prev);
+            table.init_epoch(barrier.epoch.prev).await;
         }
         let mut epoch = barrier.epoch.curr;
 

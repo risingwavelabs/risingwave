@@ -66,8 +66,8 @@ impl<S: StateStore> RangeCache<S> {
         }
     }
 
-    pub fn init(&mut self, epoch: EpochPair) {
-        self.state_table.init_epoch(epoch.prev);
+    pub async fn init(&mut self, epoch: EpochPair) {
+        self.state_table.init_epoch(epoch.prev).await;
         self.current_epoch = epoch.curr;
     }
 

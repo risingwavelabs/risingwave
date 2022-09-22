@@ -261,8 +261,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pin_mut!(aligned_stream);
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
-        self.right_table.init_epoch(barrier.epoch.prev);
-        self.range_cache.init(barrier.epoch);
+        self.right_table.init_epoch(barrier.epoch.prev).await;
+        self.range_cache.init(barrier.epoch).await;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -360,7 +360,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.range_cache
                             .state_table
-                            .update_vnode_bitmap(vnode_bitmap);
+                            .update_vnode_bitmap(vnode_bitmap)
+                            .await;
                     }
 
                     yield Message::Barrier(barrier);

@@ -196,8 +196,8 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         // self.ht.clear();
     }
 
-    pub fn init(&mut self, epoch: EpochPair) {
-        self.ht.init(epoch);
+    pub async fn init(&mut self, epoch: EpochPair) {
+        self.ht.init(epoch).await;
     }
 }
 
@@ -609,8 +609,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         pin_mut!(aligned_stream);
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
-        self.side_l.init(barrier.epoch);
-        self.side_r.init(barrier.epoch);
+        self.side_l.init(barrier.epoch).await;
+        self.side_r.init(barrier.epoch).await;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -676,8 +676,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone());
-                        self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
+                        self.side_l
+                            .ht
+                            .update_vnode_bitmap(vnode_bitmap.clone())
+                            .await;
+                        self.side_r.ht.update_vnode_bitmap(vnode_bitmap).await;
                     }
 
                     // Report metrics of cached join rows/entries

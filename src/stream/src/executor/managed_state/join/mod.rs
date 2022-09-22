@@ -325,19 +325,25 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.alloc.bytes_in_use()
     }
 
-    pub fn init(&mut self, epoch: EpochPair) {
+    pub async fn init(&mut self, epoch: EpochPair) {
         self.current_epoch = epoch.curr;
-        self.state.table.init_epoch(epoch.prev);
-        self.degree_state.table.init_epoch(epoch.prev);
+        self.state.table.init_epoch(epoch.prev).await;
+        self.degree_state.table.init_epoch(epoch.prev).await;
     }
 
     pub fn update_epoch(&mut self, epoch: u64) {
         self.current_epoch = epoch;
     }
 
-    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
-        self.degree_state.table.update_vnode_bitmap(vnode_bitmap);
+    pub async fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
+        self.state
+            .table
+            .update_vnode_bitmap(vnode_bitmap.clone())
+            .await;
+        self.degree_state
+            .table
+            .update_vnode_bitmap(vnode_bitmap)
+            .await;
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look

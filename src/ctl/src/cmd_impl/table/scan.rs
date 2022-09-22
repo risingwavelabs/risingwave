@@ -88,7 +88,7 @@ async fn do_scan(
     // We use state table here instead of cell-based table to support iterating with u64::MAX epoch.
     let state_table = {
         let mut tb = make_state_table(hummock.clone(), &table);
-        tb.init_epoch(u64::MAX);
+        tb.init_epoch(u64::MAX).await;
         tb
     };
     let stream = state_table.iter().await?;

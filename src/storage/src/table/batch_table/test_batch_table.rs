@@ -58,7 +58,7 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
         pk_indices,
     );
     let mut epoch: u64 = 0;
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await;
     epoch += 1;
 
     state.insert(Row(vec![Some(1_i32.into()), None, None]));
@@ -129,7 +129,7 @@ async fn test_storage_get_row_for_string() {
         pk_indices,
     );
     let mut epoch: u64 = 0;
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await;
     epoch += 1;
 
     state.insert(Row(vec![
@@ -201,7 +201,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         pk_indices.clone(),
     );
     let mut epoch: u64 = 0;
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await;
     epoch += 1;
 
     let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
@@ -283,7 +283,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         value_indices,
     );
     let mut epoch: u64 = 0;
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await;
     epoch += 1;
 
     state.insert(Row(vec![Some(1_i32.into()), None, None]));
@@ -352,7 +352,7 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         value_indices,
     );
     let mut epoch: u64 = 0;
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await;
     epoch += 1;
 
     state.insert(Row(vec![
