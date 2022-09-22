@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::time::Duration;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -205,25 +205,28 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    /// drain collect rx less than `prev_epoch` in barrier manager.
-    pub fn drain_collect_rx(&self, prev_epoch: u64) {
+    /// Clear all collect rx in barrier manager.
+    pub fn clear_all_collect_rx(&self) {
         let core = self.core.lock();
         let mut barrier_manager = core.context.lock_barrier_manager();
-        barrier_manager.drain_collect_rx(prev_epoch);
+        barrier_manager.clear_collect_rx();
     }
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier(&self, epoch: u64) -> CollectResult {
+    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<CollectResult> {
         let (rx, timer) = {
             let core = self.core.lock();
             let mut barrier_manager = core.context.lock_barrier_manager();
             barrier_manager.remove_collect_rx(epoch)
         };
         // Wait for all actors finishing this barrier.
-        let result = rx.expect("no rx for local mode").await.unwrap();
+        let result = rx
+            .expect("no rx for local mode")
+            .await
+            .context("failed to collect barrier")?;
         timer.expect("no timer for test").observe_duration();
-        result
+        Ok(result)
     }
 
     pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
@@ -282,23 +285,10 @@ impl LocalStreamManager {
     }
 
     /// Force stop all actors on this worker.
-    pub async fn stop_all_actors(&self, barrier: &Barrier) -> StreamResult<()> {
-        let (actor_ids_to_send, actor_ids_to_collect) = {
-            let core = self.core.lock();
-            let actor_ids_to_send = core.context.lock_barrier_manager().all_senders();
-            let actor_ids_to_collect = core.handles.keys().cloned().collect::<HashSet<_>>();
-            (actor_ids_to_send, actor_ids_to_collect)
-        };
-        if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
-            return Ok(());
-        }
-
-        self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
-
-        self.collect_barrier(barrier.epoch.prev).await;
+    pub async fn stop_all_actors(&self) -> StreamResult<()> {
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-        self.drain_collect_rx(barrier.epoch.prev);
+        self.clear_all_collect_rx();
         self.core.lock().drop_all_actors();
 
         Ok(())
@@ -586,8 +576,10 @@ impl LocalStreamManagerCore {
 
             let handle = {
                 let actor = async move {
-                    // unwrap the actor result to panic on error
-                    actor.run().await.expect("actor failed");
+                    let _ = actor.run().await.inspect_err(|err| {
+                        // TODO: check error type and panic if it's unexpected.
+                        tracing::error!(actor=%actor_id, error=%err, "actor exit");
+                    });
                 };
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {
@@ -707,16 +699,18 @@ impl LocalStreamManagerCore {
         handle.abort();
     }
 
-    /// `drop_all_actors` is invoked by meta node via RPC once the stop barrier arrives at all the
-    /// sink. All the actors in the actors should stop themselves before this method is invoked.
+    /// `drop_all_actors` is invoked by meta node via RPC for recovery purpose.
     fn drop_all_actors(&mut self) {
         for (actor_id, handle) in self.handles.drain() {
-            self.context.retain_channel(|&(up_id, _)| up_id != actor_id);
-            self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
-            self.actors.remove(&actor_id);
-            // Task should have already stopped when this method is invoked.
+            tracing::debug!("force stopping actor {}", actor_id);
             handle.abort();
         }
+        self.actors.clear();
+        self.context.clear_channels();
+        if let Some(stack_trace_manager) = self.stack_trace_manager.as_mut() {
+            std::mem::take(stack_trace_manager);
+        }
+        self.actor_monitor_tasks.clear();
         self.context.actor_infos.write().clear();
     }
 
