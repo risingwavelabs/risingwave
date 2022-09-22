@@ -29,7 +29,7 @@ use crate::task::{
     self, BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, TaskId,
 };
 
-const LOCAL_EXECUTE_BUFFER_SIZE: usize = 1024;
+const LOCAL_EXECUTE_BUFFER_SIZE: usize = 64;
 
 #[derive(Clone)]
 pub struct BatchServiceImpl {
@@ -143,7 +143,12 @@ impl TaskService for BatchServiceImpl {
         })?;
         let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
         let mut writer = GrpcExchangeWriter::new(tx.clone());
-        output.take_data(&mut writer).await?;
+        self.mgr.runtime().spawn(async move {
+            match output.take_data(&mut writer).await {
+                Ok(_) => Ok(()),
+                Err(e) => tx.clone().send(Err(e.into())).await
+            }
+        });
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
