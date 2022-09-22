@@ -116,7 +116,6 @@ message SourceNode {
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
   catalog.Table state_table = 4;
-//  uint32 state_table_id = 4; // use state_table_id as state store prefix
 }
 
 message SinkNode {
