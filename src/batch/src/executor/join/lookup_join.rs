@@ -117,7 +117,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             .collect_vec();
         let pk_indices = self
             .table_desc
-            .order_key
+            .pk
             .iter()
             .map(|col| col.index as _)
             .collect_vec();
@@ -641,10 +641,10 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .collect_vec();
 
         let mut probe_side_key_idxs = vec![];
-        for order_key in &table_desc.order_key {
+        for pk in &table_desc.pk {
             let key_idx = probe_side_column_ids
                 .iter()
-                .position(|&i| table_desc.columns[order_key.index as usize].column_id == i)
+                .position(|&i| table_desc.columns[pk.index as usize].column_id == i)
                 .ok_or_else(|| {
                     internal_error("Probe side key is not part of its output columns")
                 })?;

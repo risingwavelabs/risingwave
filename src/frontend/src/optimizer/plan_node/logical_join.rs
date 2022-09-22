@@ -871,6 +871,9 @@ impl PredicatePushdown for LogicalJoin {
             new_on,
             self.output_indices.clone(),
         );
+
+        let mut mapping = self.i2o_col_mapping();
+        predicate = predicate.rewrite_expr(&mut mapping);
         LogicalFilter::create(new_join.into(), predicate)
     }
 }

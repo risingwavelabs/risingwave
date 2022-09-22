@@ -42,9 +42,6 @@ use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::JoinType::LeftAnti;
 use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
 
-/// Limit number of the cached entries (one per join key) on each side.
-pub const JOIN_CACHE_CAP: usize = 1 << 16;
-
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
@@ -426,6 +423,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
+        cache_size: usize,
         state_table_l: StateTable<S>,
         degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
@@ -547,7 +545,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_CAP,
+                    cache_size,
                     join_key_data_types_l,
                     state_all_data_types_l.clone(),
                     state_table_l,
@@ -568,7 +566,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_CAP,
+                    cache_size,
                     join_key_data_types_r,
                     state_all_data_types_r.clone(),
                     state_table_r,
@@ -1040,6 +1038,7 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
+            1 << 16,
             state_l,
             degree_state_l,
             state_r,
@@ -1108,6 +1107,7 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
+            1 << 16,
             state_l,
             degree_state_l,
             state_r,

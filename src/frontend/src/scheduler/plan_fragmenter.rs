@@ -654,7 +654,7 @@ mod tests {
             Rc::new(TableDesc {
                 table_id: 0.into(),
                 stream_key: vec![],
-                order_key: vec![],
+                pk: vec![],
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,
