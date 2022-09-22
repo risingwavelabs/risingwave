@@ -47,7 +47,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         }
     }
 
-    fn string_to_scalar(rhs: impl ToString) -> ScalarImpl {
+    fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
         ScalarImpl::Utf8(rhs.to_string())
     }
 
