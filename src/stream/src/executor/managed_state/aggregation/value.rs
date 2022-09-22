@@ -98,9 +98,10 @@ impl ManagedValueState {
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
-    pub fn get_output(&self) -> StreamExecutorResult<Datum> {
-        debug_assert!(!self.is_dirty());
-        self.state.get_output()
+    pub fn get_output(&self) -> Datum {
+        self.state
+            .get_output()
+            .expect("agg call throw an error in streamAgg")
     }
 
     /// Check if this state needs a flush.
@@ -121,7 +122,7 @@ impl ManagedValueState {
 
         let mut v = vec![];
         v.extend_from_slice(&self.group_key.as_ref().unwrap_or_else(Row::empty).0);
-        v.push(self.state.get_output()?);
+        v.push(self.get_output());
 
         state_table.insert(Row::new(v));
 
@@ -187,20 +188,14 @@ mod tests {
         state_table.commit(epoch).await.unwrap();
 
         // get output
-        assert_eq!(
-            managed_state.get_output().unwrap(),
-            Some(ScalarImpl::Int64(3))
-        );
+        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(3)));
 
         // reload the state and check the output
         let managed_state =
             ManagedValueState::new(create_test_count_state(), None, None, &state_table)
                 .await
                 .unwrap();
-        assert_eq!(
-            managed_state.get_output().unwrap(),
-            Some(ScalarImpl::Int64(3))
-        );
+        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(3)));
     }
 
     fn create_test_max_agg_append_only() -> AggCall {
@@ -253,19 +248,13 @@ mod tests {
         state_table.commit(epoch).await.unwrap();
 
         // get output
-        assert_eq!(
-            managed_state.get_output().unwrap(),
-            Some(ScalarImpl::Int64(2))
-        );
+        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(2)));
 
         // reload the state and check the output
         let managed_state =
             ManagedValueState::new(create_test_max_agg_append_only(), None, None, &state_table)
                 .await
                 .unwrap();
-        assert_eq!(
-            managed_state.get_output().unwrap(),
-            Some(ScalarImpl::Int64(2))
-        );
+        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(2)));
     }
 }

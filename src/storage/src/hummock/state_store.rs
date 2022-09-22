@@ -33,7 +33,10 @@ use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
 use super::utils::{search_sst_idx, validate_epoch};
-use super::{BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType};
+use super::{
+    get_from_order_sorted_uncommitted_data, get_from_table, hit_sstable_bloom_filter,
+    BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType,
+};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     Backward, DirectedUserIteratorBuilder, DirectionEnum, Forward, HummockIteratorDirection,
@@ -193,7 +196,7 @@ impl HummockStorage {
                             .in_span(Span::enter_with_local_parent("get_sstable"))
                             .await?;
 
-                        if Self::hit_sstable_bloom_filter(
+                        if hit_sstable_bloom_filter(
                             sstable.value(),
                             bloom_filter_key,
                             &mut local_stats,
@@ -220,7 +223,7 @@ impl HummockStorage {
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
-                        if !Self::hit_sstable_bloom_filter(
+                        if !hit_sstable_bloom_filter(
                             sstable.value(),
                             bloom_filter_key,
                             &mut local_stats,
@@ -302,15 +305,15 @@ impl HummockStorage {
         // Query shared buffer. Return the value without iterating SSTs if found
         for uncommitted_data in shared_buffer_data {
             // iterate over uncommitted data in order index in descending order
-            let (value, table_count) = self
-                .get_from_order_sorted_uncommitted_data(
-                    uncommitted_data,
-                    &internal_key,
-                    &mut local_stats,
-                    key,
-                    check_bloom_filter,
-                )
-                .await?;
+            let (value, table_count) = get_from_order_sorted_uncommitted_data(
+                self.sstable_store.clone(),
+                uncommitted_data,
+                &internal_key,
+                &mut local_stats,
+                key,
+                check_bloom_filter,
+            )
+            .await?;
             if let Some(v) = value {
                 local_stats.report(self.stats.as_ref());
                 return Ok(v.into_user_value());
@@ -318,15 +321,15 @@ impl HummockStorage {
             table_counts += table_count;
         }
         for sync_uncommitted_data in sync_uncommitted_data {
-            let (value, table_count) = self
-                .get_from_order_sorted_uncommitted_data(
-                    sync_uncommitted_data,
-                    &internal_key,
-                    &mut local_stats,
-                    key,
-                    check_bloom_filter,
-                )
-                .await?;
+            let (value, table_count) = get_from_order_sorted_uncommitted_data(
+                self.sstable_store.clone(),
+                sync_uncommitted_data,
+                &internal_key,
+                &mut local_stats,
+                key,
+                check_bloom_filter,
+            )
+            .await?;
             if let Some(v) = value {
                 local_stats.report(self.stats.as_ref());
                 return Ok(v.into_user_value());
@@ -349,14 +352,14 @@ impl HummockStorage {
                             .sstable(table_info, &mut local_stats)
                             .await?;
                         table_counts += 1;
-                        if let Some(v) = self
-                            .get_from_table(
-                                table,
-                                &internal_key,
-                                check_bloom_filter,
-                                &mut local_stats,
-                            )
-                            .await?
+                        if let Some(v) = get_from_table(
+                            self.sstable_store.clone(),
+                            table,
+                            &internal_key,
+                            check_bloom_filter,
+                            &mut local_stats,
+                        )
+                        .await?
                         {
                             local_stats.report(self.stats.as_ref());
                             return Ok(v.into_user_value());
@@ -391,9 +394,14 @@ impl HummockStorage {
                         .sstable(&level.table_infos[table_info_idx], &mut local_stats)
                         .await?;
                     table_counts += 1;
-                    if let Some(v) = self
-                        .get_from_table(table, &internal_key, check_bloom_filter, &mut local_stats)
-                        .await?
+                    if let Some(v) = get_from_table(
+                        self.sstable_store.clone(),
+                        table,
+                        &internal_key,
+                        check_bloom_filter,
+                        &mut local_stats,
+                    )
+                    .await?
                     {
                         local_stats.report(self.stats.as_ref());
                         return Ok(v.into_user_value());
