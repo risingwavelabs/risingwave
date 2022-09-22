@@ -1,14 +1,41 @@
 # Remove "-Ctarget-feature=+avx2" if your x86_64 target does not support AVX2 vector extensions
 [target.x86_64-unknown-linux-gnu]
 rustflags = [
-    "-Clink-arg=-fuse-ld=lld", "-Clink-arg=-Wl,--no-rosegment", "-Ctarget-feature=+avx2", "--cfg", "tokio_unstable"
+    "-Clink-arg=-fuse-ld=lld",
+    "-Clink-arg=-Wl,--no-rosegment",
+    "-Ctarget-feature=+avx2",
+    "--cfg",
+    "tokio_unstable",
 ]
 
 # Remove "-Ctarget-feature=+neon" if your aarch64 target does not support NEON vector extensions
 [target.aarch64-unknown-linux-gnu]
 rustflags = [
-    "-Clink-arg=-fuse-ld=lld", "-Clink-arg=-Wl,--no-rosegment", "-Ctarget-feature=+neon", "--cfg", "tokio_unstable"
+    "-Clink-arg=-fuse-ld=lld",
+    "-Clink-arg=-Wl,--no-rosegment",
+    "-Ctarget-feature=+neon",
+    "--cfg",
+    "tokio_unstable",
 ]
 
 [build]
-rustflags = ["-Ctarget-cpu=native", "--cfg", "tokio_unstable"]
+rustflags = [
+    "-Ctarget-cpu=native",
+    "--cfg",
+    "tokio_unstable",
+    # lints
+    # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
+    "-Wclippy::dbg_macro",
+    "-Wclippy::disallowed_methods",
+    "-Wclippy::disallowed_types",
+    "-Wclippy::doc_markdown",
+    "-Wclippy::explicit_into_iter_loop",
+    "-Wclippy::explicit_iter_loop",
+    "-Wclippy::inconsistent_struct_constructor",
+    "-Wclippy::unused_async",
+    "-Wclippy::map_flatten",
+    "-Wclippy::no_effect_underscore_binding",
+    "-Wclippy::await_holding_lock",
+    "-Dunused_must_use",
+    "-Wrustdoc::broken_intra_doc_links"
+]
