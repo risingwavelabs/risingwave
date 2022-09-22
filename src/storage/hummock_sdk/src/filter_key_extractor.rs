@@ -48,7 +48,7 @@ impl FilterKeyExtractorImpl {
             .collect();
 
         let pk_indices: Vec<usize> = table_catalog
-            .order_key
+            .pk
             .iter()
             .map(|col_order| col_order.index as usize)
             .collect();
@@ -168,7 +168,7 @@ impl SchemaFilterKeyExtractor {
 
         // column_index in pk
         let pk_indices: Vec<usize> = table_catalog
-            .order_key
+            .pk
             .iter()
             .map(|col_order| col_order.index as usize)
             .collect();
@@ -180,7 +180,7 @@ impl SchemaFilterKeyExtractor {
             .collect();
 
         let order_types: Vec<OrderType> = table_catalog
-            .order_key
+            .pk
             .iter()
             .map(|col_order| {
                 OrderType::from_prost(
@@ -384,7 +384,6 @@ mod tests {
     fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
         ProstTable {
             is_index: false,
-            index_on_id: 0,
             id: 0,
             schema_id: 0,
             database_id: 0,
@@ -443,7 +442,7 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            order_key: vec![
+            pk: vec![
                 ColumnOrder {
                     order_type: 1, // Ascending
                     index: 1,

@@ -34,7 +34,7 @@ message StorageTableDesc {
   uint32 table_id = 1;
   repeated ColumnDesc columns = 2;
   // TODO: may refactor primary key representations
-  repeated ColumnOrder order_key = 3;
+  repeated ColumnOrder pk = 3;
   repeated uint32 dist_key_indices = 4;
   uint32 retention_seconds = 5;
   repeated uint32 value_indices = 6;

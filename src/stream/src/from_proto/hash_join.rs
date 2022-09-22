@@ -32,7 +32,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
@@ -141,6 +141,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
+            cache_size: stream.config.developer.unsafe_join_cache_size,
             state_table_l,
             degree_state_table_l,
             state_table_r,
@@ -169,6 +170,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     cond: Option<BoxedExpression>,
     op_info: String,
+    cache_size: usize,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
@@ -196,6 +198,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.executor_id,
             args.cond,
             args.op_info,
+            args.cache_size,
             args.state_table_l,
             args.degree_state_table_l,
             args.state_table_r,
