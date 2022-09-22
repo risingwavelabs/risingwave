@@ -191,7 +191,7 @@ impl LocalBarrierManager {
     /// remove all collect rx less than `prev_epoch`
     pub fn drain_collect_rx(&mut self, prev_epoch: u64) {
         self.collect_complete_receiver
-            .drain_filter(|x, _| x < &prev_epoch);
+            .drain_filter(|x, _| x <= &prev_epoch);
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
