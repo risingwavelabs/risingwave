@@ -321,7 +321,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     pub fn init(&mut self, epoch: Epoch) {
-        self.current_epoch = epoch.curr;
+        self.update_epoch(epoch.curr);
         self.state.table.init_epoch(epoch.prev);
         self.degree_state.table.init_epoch(epoch.prev);
     }

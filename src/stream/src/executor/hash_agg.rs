@@ -473,11 +473,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 PrecomputedBuildHasher,
             ))
         };
+
+        // First barrier
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         for state_table in &mut extra.state_tables {
             state_table.init_epoch(barrier.epoch.prev);
         }
+        state_map.update_epoch(barrier.epoch.curr);
 
         let mut epoch = barrier.epoch.curr;
         yield Message::Barrier(barrier);
