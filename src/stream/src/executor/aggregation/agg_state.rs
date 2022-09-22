@@ -46,8 +46,8 @@ pub const ROW_COUNT_COLUMN: usize = 0;
 
 impl<S: StateStore> AggState<S> {
     pub fn row_count(&mut self) -> i64 {
-        if let ManagedStateImpl::Value(count_state) = self.managed_states[ROW_COUNT_COLUMN] {
-            Ok(count_state.get_output().map(|x| *x.as_int64()).unwrap_or(0))
+        if let ManagedStateImpl::Value(count_state) = &self.managed_states[ROW_COUNT_COLUMN] {
+            count_state.get_output().map(|x| *x.as_int64()).unwrap_or(0)
         } else {
             unreachable!("streamAgg's count state must be a value state");
         }
