@@ -24,7 +24,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::log::trace;
 
 use crate::error::{PsqlError, PsqlResult};
-use crate::pg_extended::{PgPortal, PgStatement};
+use crate::pg_extended::{PgPortal, PgStatement, PreparedStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
@@ -311,7 +311,7 @@ where
     async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         tracing::trace!("(extended query)parse query: {}", sql);
-        // 1. Create the types description.
+        // Create the types description.
         let types = msg
             .type_ids
             .iter()
@@ -328,58 +328,17 @@ where
                 || lower_sql.starts_with("describe")
         };
 
+        let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), types)?;
+
         // 2. Create the row description.
         let fields: Vec<PgFieldDescriptor> = if is_query_sql {
-            if types.is_empty() {
-                let session = self.session.clone().unwrap();
-                session
-                    .infer_return_type(sql)
-                    .await
-                    .map_err(PsqlError::ParseError)?
-            } else {
-                // Process the statement with params.
-                // For now, we can only process the statement type like this e.g. 'select
-                // $1,$2,$3...'. The following process only consider statement as
-                // 'select $1,$2,$3...'.
+            let sql = prepared_statement.instance_default()?;
 
-                // Get the generic params e.g. [$1,$2,$3]
-                let generic_params: Vec<&str> = sql
-                    .split(&[' ', ',', ';'])
-                    .skip(1)
-                    .into_iter()
-                    .take_while(|x| !x.is_empty())
-                    .collect();
-
-                // Strip the '$' from the generic params e.g. [1,2,3]
-                let mut idx = Vec::with_capacity(generic_params.len());
-                for x in generic_params.iter() {
-                    // NOTE: Assume all output are generic params.
-                    let str = x
-                        .strip_prefix('$')
-                        .ok_or_else(|| PsqlError::ParseError("Invalid generic param".into()))?;
-                    // NOTE: Assume all generic are valid.
-                    let v: i32 = str
-                        .parse()
-                        .map_err(|e| PsqlError::ParseError(Box::new(e)))?;
-                    if !v.is_positive() {
-                        return Err(PsqlError::ParseError("Invalid generic param".into()));
-                    }
-                    idx.push(v);
-                }
-
-                // Create the PgFieldDescriptor according the type of generic params.
-                let mut res = Vec::with_capacity(idx.len());
-                for x in idx.iter() {
-                    if ((x - 1) as usize) >= types.len() {
-                        return Err(PsqlError::ParseError("Invalid generic param".into()));
-                    }
-                    res.push(PgFieldDescriptor::new(
-                        String::new(),
-                        types[(x - 1) as usize].to_owned(),
-                    ));
-                }
-                res
-            }
+            let session = self.session.clone().unwrap();
+            session
+                .infer_return_type(&sql)
+                .await
+                .map_err(PsqlError::ParseError)?
         } else {
             vec![]
         };
@@ -387,8 +346,7 @@ where
         // 3. Create the statement.
         let statement = PgStatement::new(
             cstr_to_str(&msg.statement_name).unwrap().to_string(),
-            msg.sql_bytes,
-            types,
+            prepared_statement,
             fields,
             is_query_sql,
         );
@@ -457,10 +415,7 @@ where
                 .ok_or_else(PsqlError::no_portal_in_execute)?
         };
 
-        tracing::trace!(
-            "(extended query)execute query: {}",
-            cstr_to_str(&portal.query_string()).unwrap()
-        );
+        tracing::trace!("(extended query)execute query: {}", portal.query_string());
 
         // 2. Execute instance statement using portal.
         let session = self.session.clone().unwrap();
