@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(backtrace)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
@@ -40,6 +39,8 @@
 #![feature(hash_drain_filter)]
 #![feature(is_some_with)]
 #![feature(let_chains)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 

@@ -14,7 +14,6 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![feature(backtrace)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -48,6 +47,8 @@
 #![feature(result_option_inspect)]
 #![feature(never_type)]
 #![feature(btreemap_alloc)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 
 #[macro_use]
 extern crate tracing;
