@@ -56,7 +56,7 @@ impl StreamTopN {
     }
 
     pub fn topn_order(&self) -> &Order {
-        &self.logical.topn_order()
+        self.logical.topn_order()
     }
 }
 

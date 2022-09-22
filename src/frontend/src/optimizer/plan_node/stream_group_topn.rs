@@ -65,11 +65,11 @@ impl StreamGroupTopN {
     }
 
     pub fn topn_order(&self) -> &Order {
-        &self.logical.topn_order()
+        self.logical.topn_order()
     }
 
     pub fn group_key(&self) -> &[usize] {
-        &self.logical.group_key()
+        self.logical.group_key()
     }
 }
 
