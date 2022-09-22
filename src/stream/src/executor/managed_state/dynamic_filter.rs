@@ -110,7 +110,7 @@ impl<S: StateStore> RangeCache<S> {
         &self,
         range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
         _latest_is_lower: bool,
-    ) -> Range<ScalarImpl, HashSet<Row>> {
+    ) -> Range<'_, ScalarImpl, HashSet<Row>> {
         // TODO (cache behaviour):
         // What we want: At the end of every epoch we will try to read
         // ranges based on the new value. The values in the range may not all be cached.

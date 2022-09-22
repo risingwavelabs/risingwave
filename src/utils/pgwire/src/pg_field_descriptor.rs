@@ -110,7 +110,7 @@ pub enum TypeOid {
 pub struct TypeOidError(i32);
 
 impl fmt::Display for TypeOidError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "oid:{} can't be supported", self.0)
     }
 }

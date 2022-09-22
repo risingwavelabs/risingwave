@@ -145,13 +145,13 @@ pub(crate) static LE: Comparison = Comparison::Le;
 pub(crate) static GE: Comparison = Comparison::Ge;
 
 #[inline(always)]
-pub fn gen_struct_cmp(op: Comparison) -> fn(StructRef, StructRef) -> Result<bool> {
+pub fn gen_struct_cmp(op: Comparison) -> fn(StructRef<'_>, StructRef<'_>) -> Result<bool> {
     use crate::gen_cmp;
     gen_cmp!(op)
 }
 
 #[inline(always)]
-pub fn gen_list_cmp(op: Comparison) -> fn(ListRef, ListRef) -> Result<bool> {
+pub fn gen_list_cmp(op: Comparison) -> fn(ListRef<'_>, ListRef<'_>) -> Result<bool> {
     use crate::gen_cmp;
     gen_cmp!(op)
 }

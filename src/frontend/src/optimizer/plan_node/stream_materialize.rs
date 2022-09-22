@@ -194,7 +194,7 @@ impl StreamMaterialize {
 }
 
 impl fmt::Display for StreamMaterialize {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let table = self.table();
 
         let column_names = table

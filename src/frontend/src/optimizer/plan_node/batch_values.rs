@@ -52,7 +52,7 @@ impl BatchValues {
 }
 
 impl fmt::Display for BatchValues {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BatchValues")
             .field("rows", &self.logical.rows())
             .finish()

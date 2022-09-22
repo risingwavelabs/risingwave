@@ -121,7 +121,7 @@ impl Executor for MockSource {
         &self.schema
     }
 
-    fn pk_indices(&self) -> super::PkIndicesRef {
+    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
         &self.pk_indices
     }
 

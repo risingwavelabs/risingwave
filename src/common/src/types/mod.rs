@@ -442,7 +442,7 @@ pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
 
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_ref_into(
-    datum_ref: &DatumRef,
+    datum_ref: &DatumRef<'_>,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     // By default, `null` is treated as largest in PostgreSQL.
@@ -456,7 +456,7 @@ pub fn serialize_datum_ref_into(
 }
 
 pub fn serialize_datum_ref_not_null_into(
-    datum_ref: &DatumRef,
+    datum_ref: &DatumRef<'_>,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     datum_ref
