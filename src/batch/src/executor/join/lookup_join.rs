@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -300,6 +301,8 @@ pub struct LookupJoinExecutor<P> {
     identity: String,
 }
 
+const AT_LEAST_BATCH_READ_SIZE: usize = 512;
+
 impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
     fn schema(&self) -> &Schema {
         &self.schema
@@ -315,20 +318,46 @@ impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
 }
 
 impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
+    #[try_stream(boxed, ok = Vec<DataChunk>, error = RwError)]
+    async fn batch_read(mut stream: BoxedDataChunkStream) {
+        // Read at least AT_LEAST_BATCH_READ_SIZE rows.
+        let mut cnt = 0;
+        let mut chunk_list = vec![];
+        while let Some(build_chunk) = stream.next().await {
+            let build_chunk = build_chunk?;
+            cnt += build_chunk.cardinality();
+            chunk_list.push(build_chunk);
+            if cnt < AT_LEAST_BATCH_READ_SIZE {
+                continue;
+            } else {
+                yield chunk_list;
+                cnt = 0;
+                chunk_list = vec![];
+            }
+        }
+        if !chunk_list.is_empty() {
+            yield chunk_list;
+        }
+    }
+
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let mut build_side_stream = self.build_child.take().unwrap().execute();
+        let mut build_side_batch_read_stream: BoxStream<'static, Result<Vec<DataChunk>>> =
+            LookupJoinExecutor::<P>::batch_read(self.build_child.take().unwrap().execute());
 
-        while let Some(build_chunk) = build_side_stream.next().await {
-            let build_chunk = build_chunk?.compact()?;
+        while let Some(chunk_list) = build_side_batch_read_stream.next().await {
+            let chunk_list = chunk_list?;
 
             // Group rows with the same key datums together
-            let groups = build_chunk.rows().into_group_map_by(|row| {
-                self.build_side_key_idxs
-                    .iter()
-                    .map(|&idx| row.value_at(idx).to_owned_datum())
-                    .collect_vec()
-            });
+            let groups = chunk_list
+                .iter()
+                .flat_map(|chunk| chunk.rows())
+                .into_group_map_by(|row| {
+                    self.build_side_key_idxs
+                        .iter()
+                        .map(|&idx| row.value_at(idx).to_owned_datum())
+                        .collect_vec()
+                });
 
             let mut row_keys = vec![];
             let mut all_row_refs = vec![];
