@@ -50,13 +50,13 @@ impl PgFieldDescriptor {
         };
 
         Self {
-            type_modifier,
-            format_code,
             name,
             table_oid,
             col_attr_num,
-            type_len,
             type_oid,
+            type_len,
+            type_modifier,
+            format_code,
         }
     }
 
@@ -110,7 +110,7 @@ pub enum TypeOid {
 pub struct TypeOidError(i32);
 
 impl fmt::Display for TypeOidError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "oid:{} can't be supported", self.0)
     }
 }

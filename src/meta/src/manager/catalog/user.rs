@@ -114,7 +114,7 @@ impl UserManager {
     pub fn get_user_grant_relation_entry(
         &mut self,
         user_id: UserId,
-    ) -> Entry<UserId, HashSet<u32>> {
+    ) -> Entry<'_, UserId, HashSet<u32>> {
         self.user_grant_relation.entry(user_id)
     }
 

@@ -169,14 +169,14 @@ where
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg)?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
-            FeMessage::CancelQuery(m) => self.process_cancel_msg(m).await?,
+            FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => self.process_parse_msg(m).await?,
             FeMessage::Bind(m) => self.process_bind_msg(m).await?,
             FeMessage::Execute(m) => self.process_execute_msg(m).await?,
-            FeMessage::Describe(m) => self.process_describe_msg(m).await?,
+            FeMessage::Describe(m) => self.process_describe_msg(m)?,
             FeMessage::Sync => self.stream.write_no_flush(&BeMessage::ReadyForQuery)?,
-            FeMessage::Close(m) => self.process_close_msg(m).await?,
+            FeMessage::Close(m) => self.process_close_msg(m)?,
             FeMessage::Flush => self.stream.flush().await?,
         }
         self.stream.flush().await?;
@@ -270,7 +270,7 @@ where
         Ok(())
     }
 
-    async fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
+    fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
         let session_id = (m.target_process_id, m.target_secret_key);
         self.session_mgr.cancel_queries_in_session(session_id);
         self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
@@ -291,7 +291,7 @@ where
         if res.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if res.is_query() {
-            self.process_response_results(res, false).await?;
+            self.process_response_results(res, false)?;
         } else {
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
@@ -428,7 +428,7 @@ where
         if res.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if res.is_query() {
-            self.process_response_results(res, true).await?;
+            self.process_response_results(res, true)?;
         } else {
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
@@ -442,7 +442,7 @@ where
         Ok(())
     }
 
-    async fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
+    fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
         //  b'S' => Statement
         //  b'P' => Portal
         tracing::trace!(
@@ -503,7 +503,7 @@ where
         Ok(())
     }
 
-    async fn process_close_msg(&mut self, msg: FeCloseMessage) -> PsqlResult<()> {
+    fn process_close_msg(&mut self, msg: FeCloseMessage) -> PsqlResult<()> {
         let name = cstr_to_str(&msg.name).unwrap().to_string();
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {
@@ -515,7 +515,7 @@ where
         Ok(())
     }
 
-    async fn process_response_results(
+    fn process_response_results(
         &mut self,
         res: PgResponse,
         is_extended: bool,

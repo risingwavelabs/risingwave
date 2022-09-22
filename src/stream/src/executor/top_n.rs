@@ -564,7 +564,7 @@ impl TopNCacheTrait for TopNCache<true> {
 
 pub fn generate_executor_pk_indices_info(
     order_pairs: &[OrderPair],
-    pk_indices: PkIndicesRef,
+    pk_indices: PkIndicesRef<'_>,
     schema: &Schema,
 ) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
     let mut internal_key_indices = vec![];
@@ -680,7 +680,7 @@ where
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 

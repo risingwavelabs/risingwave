@@ -415,7 +415,7 @@ pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue
 ///
 /// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
 pub fn list_cast(
-    input: ListRef,
+    input: ListRef<'_>,
     source_elem_type: &DataType,
     target_elem_type: &DataType,
 ) -> Result<ListValue> {
@@ -436,7 +436,7 @@ pub fn list_cast(
 /// mutual recursion with `list_cast` so that we can cast nested lists (e.g., varchar[][] to
 /// int[][]).
 fn scalar_cast(
-    source: ScalarRefImpl,
+    source: ScalarRefImpl<'_>,
     source_type: &DataType,
     target_type: &DataType,
 ) -> Result<ScalarImpl> {

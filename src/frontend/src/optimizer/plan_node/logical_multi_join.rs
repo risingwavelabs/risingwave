@@ -51,7 +51,7 @@ pub struct LogicalMultiJoin {
 }
 
 impl fmt::Display for LogicalMultiJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "LogicalMultiJoin {{ on: {} }}", {
             let fields = self
                 .inputs

@@ -211,7 +211,7 @@ macro_rules! dispatch_sync {
     }
 }
 
-/// This macro routes the object store operation to the real implementation by the ObjectStoreImpl
+/// This macro routes the object store operation to the real implementation by the `ObjectStoreImpl`
 /// enum type and the `path`.
 ///
 /// For `path`, if the `path` starts with `LOCAL_OBJECT_STORE_PATH_PREFIX`, it indicates that the
@@ -258,7 +258,7 @@ macro_rules! object_store_impl_method_body {
     };
 }
 
-/// This macro routes the object store operation to the real implementation by the ObjectStoreImpl
+/// This macro routes the object store operation to the real implementation by the `ObjectStoreImpl`
 /// enum type and the `paths`. It is a modification of the macro above to work with a slice of
 /// strings instead of just a single one.
 ///
@@ -736,10 +736,7 @@ pub async fn parse_remote_object_store(
     }
 }
 
-pub async fn parse_local_object_store(
-    url: &str,
-    metrics: Arc<ObjectStoreMetrics>,
-) -> ObjectStoreImpl {
+pub fn parse_local_object_store(url: &str, metrics: Arc<ObjectStoreMetrics>) -> ObjectStoreImpl {
     match url {
         disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(
             DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),
