@@ -78,7 +78,7 @@ impl StreamNode for StreamTopN {
             offset: self.logical.offset() as u64,
             table: Some(
                 self.logical
-                    .infer_internal_table_catalog(None)
+                    .infer_internal_table_catalog(None, None)
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),

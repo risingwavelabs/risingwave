@@ -100,6 +100,8 @@ pub struct LookupExecutorParams<S: StateStore> {
     pub arrange_join_key_indices: Vec<usize>,
 
     pub state_table: StateTable<S>,
+
+    pub cache_size: usize,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -116,6 +118,7 @@ impl<S: StateStore> LookupExecutor<S> {
             schema: output_schema,
             column_mapping,
             state_table,
+            cache_size,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -211,7 +214,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(),
+            lookup_cache: LookupCache::new(cache_size),
         }
     }
 
