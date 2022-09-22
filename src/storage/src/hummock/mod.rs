@@ -72,7 +72,7 @@ use crate::hummock::compaction_group_client::{
     CompactionGroupClientImpl, DummyCompactionGroupClient,
 };
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -84,7 +84,7 @@ use crate::monitor::StoreLocalStatistic;
 pub struct HummockStorage {
     options: Arc<StorageConfig>,
 
-    local_version_manager: Arc<LocalVersionManager>,
+    local_version_manager: LocalVersionManagerRef,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
@@ -210,7 +210,7 @@ impl HummockStorage {
         self.sstable_store.clone()
     }
 
-    pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
+    pub fn local_version_manager(&self) -> &LocalVersionManagerRef {
         &self.local_version_manager
     }
 

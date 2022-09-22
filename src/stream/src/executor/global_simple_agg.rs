@@ -68,6 +68,8 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
 
     /// State table column mappings for each aggregation calls,
     state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
+
+    extreme_cache_size: usize,
 }
 
 impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
@@ -89,12 +91,14 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
 }
 
 impl<S: StateStore> GlobalSimpleAggExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
+        extreme_cache_size: usize,
         mut state_tables: Vec<StateTable<S>>,
         state_table_col_mappings: Vec<Vec<usize>>,
     ) -> StreamResult<Self> {
@@ -124,6 +128,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 .map(StateTableColumnMapping::new)
                 .map(Arc::new)
                 .collect(),
+            extreme_cache_size,
         })
     }
 
@@ -136,6 +141,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         _input_schema: &Schema,
         states: &mut Option<AggState<S>>,
         chunk: StreamChunk,
+        extreme_cache_size: usize,
         state_tables: &mut [StateTable<S>],
         state_table_col_mappings: &[Arc<StateTableColumnMapping>],
     ) -> StreamExecutorResult<()> {
@@ -150,6 +156,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 None,
                 agg_calls,
                 input_pk_indices.to_vec(),
+                extreme_cache_size,
                 state_tables,
                 state_table_col_mappings,
             )
@@ -243,6 +250,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             input_schema,
             mut states,
             agg_calls,
+            extreme_cache_size,
             mut state_tables,
             state_table_col_mappings,
         } = self;
@@ -269,6 +277,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         &input_schema,
                         &mut states,
                         chunk,
+                        extreme_cache_size,
                         &mut state_tables,
                         &state_table_col_mappings,
                     )

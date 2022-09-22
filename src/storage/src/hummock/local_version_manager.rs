@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::iter::once;
 use std::ops::RangeBounds;
+use std::ops::{Deref, RangeBounds};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use std::sync::Arc;
@@ -146,6 +147,40 @@ impl BufferTracker {
     }
 }
 
+/// A holder for any external reference to `LocalVersionManager`.
+///
+/// For the term `external`, it means any external usage of `LocalVersionManager` other than some
+/// worker tasks related to `LocalVersionManager` and holding a reference to it.
+///
+/// Upon dropping such holder, it means there is no any external usage of the `LocalVersionManager`,
+/// and we can send the shutdown message to the `LocalVersionRelatedWorker` to gracefully shutdown
+/// the worker.
+pub struct LocalVersionManagerExternalHolder {
+    local_version_manager: Arc<LocalVersionManager>,
+    shutdown_sender: mpsc::UnboundedSender<SharedBufferEvent>,
+}
+
+impl Drop for LocalVersionManagerExternalHolder {
+    fn drop(&mut self) {
+        let _ = self
+            .shutdown_sender
+            .send(SharedBufferEvent::Shutdown)
+            .inspect_err(|e| {
+                error!("unable to send shutdown. Err: {}", e);
+            });
+    }
+}
+
+impl Deref for LocalVersionManagerExternalHolder {
+    type Target = LocalVersionManager;
+
+    fn deref(&self) -> &Self::Target {
+        self.local_version_manager.deref()
+    }
+}
+
+pub type LocalVersionManagerRef = Arc<LocalVersionManagerExternalHolder>;
+
 /// The `LocalVersionManager` maintains a local copy of storage service's hummock version data.
 /// By acquiring a `ScopedLocalVersion`, the `Sstables` of this version is guaranteed to be valid
 /// during the lifetime of `ScopedLocalVersion`. Internally `LocalVersionManager` will pin/unpin the
@@ -166,6 +201,7 @@ impl Drop for LocalVersionManager {
 }
 
 impl LocalVersionManager {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
@@ -174,7 +210,7 @@ impl LocalVersionManager {
         write_conflict_detector: Option<Arc<ConflictDetector>>,
         sstable_id_manager: SstableIdManagerRef,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-    ) -> Arc<LocalVersionManager> {
+    ) -> LocalVersionManagerRef {
         let (pinned_version_manager_tx, pinned_version_manager_rx) =
             tokio::sync::mpsc::unbounded_channel();
         let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
@@ -202,7 +238,7 @@ impl LocalVersionManager {
                 // TODO: enable setting the ratio with config
                 capacity * 4 / 5,
                 capacity,
-                buffer_event_sender,
+                buffer_event_sender.clone(),
             ),
             write_conflict_detector: write_conflict_detector.clone(),
 
@@ -230,7 +266,10 @@ impl LocalVersionManager {
             buffer_event_receiver,
         ));
 
-        local_version_manager
+        Arc::new(LocalVersionManagerExternalHolder {
+            local_version_manager,
+            shutdown_sender: buffer_event_sender,
+        })
     }
 
     #[cfg(any(test, feature = "test"))]
@@ -239,7 +278,7 @@ impl LocalVersionManager {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
-    ) -> Arc<LocalVersionManager> {
+    ) -> LocalVersionManagerRef {
         Self::new(
             options.clone(),
             sstable_store,
@@ -567,7 +606,7 @@ impl LocalVersionManager {
     }
 
     pub fn read_filter<R, B>(
-        self: &Arc<LocalVersionManager>,
+        self: &LocalVersionManager,
         read_epoch: HummockEpoch,
         key_range: &R,
     ) -> ReadVersion
@@ -681,7 +720,7 @@ impl LocalVersionManager {
 
     pub async fn start_flush_controller_worker(
         local_version_manager: Arc<LocalVersionManager>,
-        mut buffer_size_change_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
+        mut shared_buffer_event_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
     ) {
         let try_flush_shared_buffer = |upload_handle_manager: &mut UploadHandleManager| {
             // Keep issuing new flush task until flush is not needed or we can issue
@@ -939,6 +978,7 @@ impl LocalVersionManager {
                         notifier.send(()).unwrap();
                     }
                     SharedBufferEvent::Shutdown => {
+                        info!("buffer tracker shutdown");
                         break;
                     }
                 };

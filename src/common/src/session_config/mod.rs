@@ -22,13 +22,14 @@ use crate::error::{ErrorCode, RwError};
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 6] = [
+const CONFIG_KEYS: [&str; 7] = [
     "RW_IMPLICIT_FLUSH",
     "QUERY_MODE",
     "EXTRA_FLOAT_DIGITS",
     "APPLICATION_NAME",
     "DATESTYLE",
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
+    "MAX_SPLIT_RANGE_GAP",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -39,6 +40,7 @@ const EXTRA_FLOAT_DIGITS: usize = 2;
 const APPLICATION_NAME: usize = 3;
 const DATE_STYLE: usize = 4;
 const BATCH_ENABLE_LOOKUP_JOIN: usize = 5;
+const MAX_SPLIT_RANGE_GAP: usize = 6;
 
 trait ConfigEntry: Default + FromStr<Err = RwError> {
     fn entry_name() -> &'static str;
@@ -157,6 +159,7 @@ type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 // TODO: We should use more specified type here.
 type DateStyle = ConfigString<DATE_STYLE>;
 type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, false>;
+type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
 
 #[derive(Default)]
 pub struct ConfigMap {
@@ -180,6 +183,9 @@ pub struct ConfigMap {
 
     /// To force the usage of lookup join instead of hash join in batch execution
     batch_enable_lookup_join: BatchEnableLookupJoin,
+
+    /// It's the max gap allowed to transform small range scan scan into multi point lookup.
+    max_split_range_gap: MaxSplitRangeGap,
 }
 
 impl ConfigMap {
@@ -196,6 +202,8 @@ impl ConfigMap {
             self.date_style = val.parse()?;
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
             self.batch_enable_lookup_join = val.parse()?;
+        } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
+            self.max_split_range_gap = val.parse()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -251,7 +259,12 @@ impl ConfigMap {
             VariableInfo{
                 name : BatchEnableLookupJoin::entry_name().to_lowercase(),
                 setting : self.batch_enable_lookup_join.to_string(),
-                description : String::from("To enable the usage of lookup join instead of hash join when possible for local batch execution")
+                description : String::from("To enable the usage of lookup join instead of hash join when possible for local batch execution.")
+            },
+            VariableInfo{
+                name : MaxSplitRangeGap::entry_name().to_lowercase(),
+                setting : self.max_split_range_gap.to_string(),
+                description : String::from("It's the max gap allowed to transform small range scan scan into multi point lookup.")
             },
         ]
     }
@@ -278,5 +291,13 @@ impl ConfigMap {
 
     pub fn get_batch_enable_lookup_join(&self) -> bool {
         *self.batch_enable_lookup_join
+    }
+
+    pub fn get_max_split_range_gap(&self) -> u64 {
+        if *self.max_split_range_gap < 0 {
+            0
+        } else {
+            *self.max_split_range_gap as u64
+        }
     }
 }

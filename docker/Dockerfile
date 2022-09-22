@@ -24,6 +24,14 @@ RUN rustup self update \
 
 RUN cargo fetch
 RUN mkdir -p /risingwave/bin
+
+ARG simd_disabled=false
+
+RUN if [ "$simd_disabled" == "true" ]; then \
+    echo "Disabling SIMD build flags for risingwave" && \
+    . scripts/cargo-config-disable-simd.sh; \
+  fi
+
 RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features static-link && \
   mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
   cargo clean
