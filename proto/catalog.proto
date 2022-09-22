@@ -78,6 +78,7 @@ message Table {
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
   }
+  bool is_index = 10;
   repeated int32 distribution_key = 12;
   // pk_indices of the corresponding materialize operator's output.
   repeated int32 stream_key = 13;

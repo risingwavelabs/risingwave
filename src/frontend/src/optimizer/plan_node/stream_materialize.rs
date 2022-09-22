@@ -169,6 +169,7 @@ impl StreamMaterialize {
             pk: pk_list,
             stream_key: pk_indices.clone(),
             distribution_key: base.dist.dist_column_indices().to_vec(),
+            is_index,
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,

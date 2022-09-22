@@ -68,6 +68,8 @@ pub struct TableCatalog {
     /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
 
+    pub is_index: bool,
+
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
 
@@ -170,6 +172,7 @@ impl TableCatalog {
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
+            is_index: self.is_index,
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -215,6 +218,7 @@ impl From<ProstTable> for TableCatalog {
             name,
             pk,
             columns,
+            is_index: tb.is_index,
             distribution_key: tb
                 .distribution_key
                 .iter()
@@ -260,6 +264,7 @@ mod tests {
     #[test]
     fn test_into_table_catalog() {
         let table: TableCatalog = ProstTable {
+            is_index: false,
             id: 0,
             schema_id: 0,
             database_id: 0,
@@ -315,6 +320,7 @@ mod tests {
         assert_eq!(
             table,
             TableCatalog {
+                is_index: false,
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),

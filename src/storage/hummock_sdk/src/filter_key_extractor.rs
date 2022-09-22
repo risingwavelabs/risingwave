@@ -383,6 +383,7 @@ mod tests {
 
     fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
         ProstTable {
+            is_index: false,
             id: 0,
             schema_id: 0,
             database_id: 0,
