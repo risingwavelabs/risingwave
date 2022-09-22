@@ -224,7 +224,7 @@ impl LocalStreamManager {
         let result = rx
             .expect("no rx for local mode")
             .await
-            .map_err(|err| anyhow!("{}", err))?;
+            .context("failed to collect barrier")?;
         timer.expect("no timer for test").observe_duration();
         Ok(result)
     }
@@ -576,9 +576,9 @@ impl LocalStreamManagerCore {
 
             let handle = {
                 let actor = async move {
-                    // unwrap the actor result to panic on error
-                    let _ = actor.run().await.inspect_err(|_e| {
+                    let _ = actor.run().await.inspect_err(|err| {
                         // TODO: check error type and panic if it's unexpected.
+                        tracing::debug!(actor=%actor_id, error=%err, "actor exit");
                     });
                 };
                 #[auto_enums::auto_enum(Future)]
@@ -699,7 +699,7 @@ impl LocalStreamManagerCore {
         handle.abort();
     }
 
-    /// `drop_all_actors` is invoked by meta node via RPC.
+    /// `drop_all_actors` is invoked by meta node via RPC for recovery purpose.
     fn drop_all_actors(&mut self) {
         for (actor_id, handle) in self.handles.drain() {
             tracing::debug!("force stopping actor {}", actor_id);

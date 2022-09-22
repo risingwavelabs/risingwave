@@ -279,9 +279,6 @@ where
             let chain_actor_ids = table_fragments.chain_actor_ids();
             let mut dependent_tables = Vec::with_capacity(dependent_table_ids.len());
             for dependent_table_id in dependent_table_ids {
-                if !map.contains_key(&dependent_table_id) {
-                    continue;
-                }
                 let mut dependent_table = map
                     .get(&dependent_table_id)
                     .ok_or_else(|| anyhow!("table_fragment not exist: id={}", dependent_table_id))?
