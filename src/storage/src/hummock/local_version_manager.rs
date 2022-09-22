@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::iter::once;
-use std::ops::RangeBounds;
 use std::ops::{Deref, RangeBounds};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
@@ -192,12 +191,6 @@ pub struct LocalVersionManager {
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
-}
-
-impl Drop for LocalVersionManager {
-    fn drop(&mut self) {
-        self.buffer_tracker.send_event(SharedBufferEvent::Shutdown);
-    }
 }
 
 impl LocalVersionManager {
@@ -773,7 +766,7 @@ impl LocalVersionManager {
         loop {
             let select_result = match select(
                 upload_handle_manager.next_finished_epoch(),
-                buffer_size_change_receiver.recv().boxed(),
+                shared_buffer_event_receiver.recv().boxed(),
             )
             .await
             {
