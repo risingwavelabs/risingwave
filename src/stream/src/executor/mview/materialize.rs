@@ -118,7 +118,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     async fn execute_inner(mut self) {
         let mut input = self.input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch.prev);
+        self.state_table.init_epoch(barrier.epoch);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -133,7 +133,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 }
                 Message::Barrier(b) => {
                     // FIXME(ZBW): use a better error type
-                    self.state_table.commit(b.epoch.prev).await?;
+                    self.state_table.commit(b.epoch).await?;
 
                     // Update the vnode bitmap for the state table if asked.
                     if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {

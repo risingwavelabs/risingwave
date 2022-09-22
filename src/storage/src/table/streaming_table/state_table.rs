@@ -28,6 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
 use risingwave_common::types::VirtualNode;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
@@ -99,7 +100,7 @@ pub struct StateTable<S: StateStore> {
     value_indices: Vec<usize>,
 
     /// the epoch flush to the state store last time
-    epoch: Option<u64>,
+    epoch: Option<EpochPair>,
 }
 
 // initialize
@@ -317,14 +318,14 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    pub fn init_epoch(&mut self, epoch: u64) {
+    pub fn init_epoch(&mut self, epoch: EpochPair) {
         match self.epoch {
             Some(prev_epoch) => {
                 panic!(
                     "init the state table's epoch twice, table_id: {}, prev_epoch: {}, new_epoch: {}",
                     self.table_id(),
-                    prev_epoch,
-                    epoch
+                    prev_epoch.curr,
+                    epoch.curr
                 )
             }
             None => {
@@ -335,7 +336,12 @@ impl<S: StateStore> StateTable<S> {
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     pub fn epoch(&self) -> u64 {
-        self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id()))
+        self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).curr
+    }
+
+    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    pub fn prev_epoch(&self) -> u64 {
+        self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).prev
     }
 
     /// Get the vnode value with given (prefix of) primary key
@@ -542,18 +548,18 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    fn update_epoch(&mut self, new_epoch: u64) {
+    fn update_epoch(&mut self, new_epoch: EpochPair) {
         assert!(
-            self.epoch() <= new_epoch,
+            self.epoch() <= new_epoch.curr,
             "state table commit a committed epoch, table_id: {}, prev_epoch: {}, new_epoch: {}",
             self.table_id(),
             self.epoch(),
-            new_epoch
+            new_epoch.curr
         );
         self.epoch = Some(new_epoch);
     }
 
-    pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
+    pub async fn commit(&mut self, new_epoch: EpochPair) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.batch_write_rows(mem_table, new_epoch).await?;
         self.update_epoch(new_epoch);
@@ -565,17 +571,17 @@ impl<S: StateStore> StateTable<S> {
     /// in the epoch will be visible
     pub fn commit_no_data_expected(&mut self, new_epoch: u64) {
         assert!(!self.is_dirty());
-        self.update_epoch(new_epoch);
+        self.update_epoch(EpochPair::new_test_epoch(new_epoch));
     }
 
     /// Write to state store.
     async fn batch_write_rows(
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
-        epoch: u64,
+        epoch: EpochPair,
     ) -> StorageResult<()> {
         let mut local = self.keyspace.start_write_batch(WriteOptions {
-            epoch,
+            epoch: epoch.curr,
             table_id: self.table_id(),
         });
         for (pk, row_op) in buffer {
@@ -585,7 +591,7 @@ impl<S: StateStore> StateTable<S> {
                         // If we want to insert a row, it should not exist in storage.
                         let storage_row = self
                             .keyspace
-                            .get(&pk, false, self.get_read_option(epoch))
+                            .get(&pk, false, self.get_read_option(epoch.curr))
                             .await?;
 
                         // It's normal for some executors to fail this assert, you can use
@@ -605,7 +611,7 @@ impl<S: StateStore> StateTable<S> {
                         // have the same old_value as recorded.
                         let storage_row = self
                             .keyspace
-                            .get(&pk, false, self.get_read_option(epoch))
+                            .get(&pk, false, self.get_read_option(epoch.curr))
                             .await?;
                         // It's normal for some executors to fail this assert, you can use
                         // `.disable_sanity_check()` on state table to disable this check.
@@ -625,7 +631,7 @@ impl<S: StateStore> StateTable<S> {
                         // have the same old_value as recorded.
                         let storage_row = self
                             .keyspace
-                            .get(&pk, false, self.get_read_option(epoch))
+                            .get(&pk, false, self.get_read_option(epoch.curr))
                             .await?;
 
                         // It's normal for some executors to fail this assert, you can use

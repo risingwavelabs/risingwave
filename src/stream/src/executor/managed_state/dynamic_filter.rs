@@ -50,12 +50,12 @@ pub struct RangeCache<S: StateStore> {
     num_rows_stored: usize,
     #[allow(unused)]
     capacity: usize,
-    current_epoch: u64,
+    current_epoch: EpochPair,
 }
 
 impl<S: StateStore> RangeCache<S> {
     /// Create a [`RangeCache`] with given capacity and epoch
-    pub fn new(state_table: StateTable<S>, current_epoch: u64, capacity: usize) -> Self {
+    pub fn new(state_table: StateTable<S>, current_epoch: EpochPair, capacity: usize) -> Self {
         Self {
             cache: BTreeMap::new(),
             state_table,
@@ -67,8 +67,8 @@ impl<S: StateStore> RangeCache<S> {
     }
 
     pub fn init(&mut self, epoch: EpochPair) {
-        self.state_table.init_epoch(epoch.prev);
-        self.current_epoch = epoch.curr;
+        self.state_table.init_epoch(epoch);
+        self.current_epoch = epoch;
     }
 
     /// Insert a row and corresponding scalar value key into cache (if within range) and
@@ -154,7 +154,7 @@ impl<S: StateStore> RangeCache<S> {
     }
 
     /// Updates the current epoch
-    pub fn update_epoch(&mut self, epoch: u64) {
+    pub fn update_epoch(&mut self, epoch: EpochPair) {
         self.current_epoch = epoch;
     }
 }

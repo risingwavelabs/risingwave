@@ -32,6 +32,7 @@ use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::data::data_type::TypeName;
@@ -406,9 +407,9 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![0],
     );
 
-    let mut epoch: u64 = 0;
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch += 1;
+    epoch.inc();
     state.insert(Row(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),

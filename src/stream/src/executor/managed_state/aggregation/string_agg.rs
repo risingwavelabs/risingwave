@@ -249,6 +249,7 @@ mod tests {
     use risingwave_common::array::{Row, StreamChunk, StreamChunkTestExt};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
@@ -300,9 +301,9 @@ mod tests {
             0,
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
 
         let chunk = StreamChunk::from_pretty(
             " T T i i I
@@ -317,7 +318,7 @@ mod tests {
             .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
             .await?;
 
-        epoch += 1;
+        epoch.inc();
         agg_state.flush(&mut state_table)?;
         state_table.commit(epoch).await.unwrap();
 
@@ -376,9 +377,9 @@ mod tests {
             0,
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
 
         let chunk = StreamChunk::from_pretty(
             " T T I
@@ -393,7 +394,7 @@ mod tests {
             .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
             .await?;
 
-        epoch += 1;
+        epoch.inc();
         agg_state.flush(&mut state_table)?;
         state_table.commit(epoch).await.unwrap();
 
@@ -461,9 +462,9 @@ mod tests {
             0,
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -481,7 +482,7 @@ mod tests {
 
             agg_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            epoch.inc();
 
             let res = agg_state.get_output(&state_table).await?;
             match res {
@@ -566,9 +567,9 @@ mod tests {
             0,
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
         {
             let chunk = StreamChunk::from_pretty(
                 " T T i i I
@@ -584,7 +585,7 @@ mod tests {
 
             agg_state.flush(&mut state_table)?;
             state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            epoch.inc();
 
             let res = agg_state.get_output(&state_table).await?;
             match res {

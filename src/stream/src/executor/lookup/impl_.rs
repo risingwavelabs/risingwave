@@ -334,9 +334,11 @@ impl<S: StateStore> LookupExecutor<S> {
                 ..barrier
             });
             if self.arrangement.use_current_epoch {
-                self.arrangement.state_table.init_epoch(barrier.epoch.curr);
+                self.arrangement.state_table.init_epoch(barrier.epoch);
             } else {
-                self.arrangement.state_table.init_epoch(0);
+                self.arrangement
+                    .state_table
+                    .init_epoch(EpochPair::new_test_epoch(barrier.epoch.prev));
             };
             return Ok(());
         } else {
@@ -362,7 +364,7 @@ impl<S: StateStore> LookupExecutor<S> {
     /// Lookup all rows corresponding to a join key in shared buffer.
     async fn lookup_one_row(&mut self, stream_row: &RowRef<'_>) -> StreamExecutorResult<Vec<Row>> {
         // fast-path for empty look-ups.
-        if self.arrangement.state_table.epoch() == 0 {
+        if self.arrangement.state_table.prev_epoch() == 0 {
             return Ok(vec![]);
         }
 

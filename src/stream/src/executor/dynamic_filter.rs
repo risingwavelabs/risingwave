@@ -23,6 +23,7 @@ use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
@@ -83,7 +84,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
-            range_cache: RangeCache::new(state_table_l, 0, usize::MAX),
+            range_cache: RangeCache::new(state_table_l, EpochPair::new_test_epoch(1), usize::MAX),
             right_table: state_table_r,
             is_right_table_writer,
             metrics,
@@ -261,7 +262,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pin_mut!(aligned_stream);
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
-        self.right_table.init_epoch(barrier.epoch.prev);
+        self.right_table.init_epoch(barrier.epoch);
         self.range_cache.init(barrier.epoch);
 
         // The first barrier message should be propagated.
@@ -344,7 +345,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     if self.is_right_table_writer {
                         if let Some(row) = current_epoch_row.take() {
                             self.right_table.insert(row);
-                            self.right_table.commit(barrier.epoch.prev).await?;
+                            self.right_table.commit(barrier.epoch).await?;
                         }
                     }
 
@@ -352,7 +353,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     // We have flushed all the state for the prev epoch. We can now update the
                     // epochs.
-                    self.range_cache.update_epoch(barrier.epoch.curr);
+                    self.range_cache.update_epoch(barrier.epoch);
 
                     prev_epoch_value = Some(curr);
 

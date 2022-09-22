@@ -23,6 +23,7 @@ use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::epoch::EpochPair;
 
 use super::expect_first_barrier;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
@@ -34,7 +35,7 @@ pub trait TopNExecutorBase: Send + 'static {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
 
     /// Flush the buffered chunk to the storage backend.
-    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()>;
+    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 
     /// See [`Executor::schema`].
     fn schema(&self) -> &Schema;
@@ -49,7 +50,7 @@ pub trait TopNExecutorBase: Send + 'static {
     /// distributed.
     fn update_state_table_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {}
 
-    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()>;
+    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
@@ -91,9 +92,9 @@ where
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        self.inner.init(barrier.epoch.prev).await?;
+        self.inner.init(barrier.epoch).await?;
 
-        let mut epoch = barrier.epoch.curr;
+        let mut epoch = barrier.epoch;
 
         yield Message::Barrier(barrier);
 
@@ -104,7 +105,7 @@ where
                 Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(epoch).await?;
-                    epoch = barrier.epoch.curr;
+                    epoch = barrier.epoch;
                     yield Message::Barrier(barrier)
                 }
             };

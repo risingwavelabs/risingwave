@@ -194,7 +194,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     async fn flush_data(
         schema: &Schema,
         states: &mut Option<AggState<S>>,
-        epoch: u64,
+        epoch: EpochPair,
         state_tables: &mut [StateTable<S>],
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // --- Flush states to the state store ---
@@ -258,9 +258,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         let barrier = expect_first_barrier(&mut input).await?;
         for table in &mut state_tables {
-            table.init_epoch(barrier.epoch.prev);
+            table.init_epoch(barrier.epoch);
         }
-        let mut epoch = barrier.epoch.curr;
+        let mut epoch = barrier.epoch;
 
         yield Message::Barrier(barrier);
 
@@ -284,12 +284,12 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                     .await?;
                 }
                 Message::Barrier(barrier) => {
-                    let next_epoch = barrier.epoch.curr;
+                    let next_epoch = barrier.epoch;
                     if let Some(chunk) =
                         Self::flush_data(&info.schema, &mut states, epoch, &mut state_tables)
                             .await?
                     {
-                        assert_eq!(epoch, barrier.epoch.prev);
+                        assert_eq!(epoch.curr, barrier.epoch.prev);
                         yield Message::Chunk(chunk);
                     }
                     yield Message::Barrier(barrier);

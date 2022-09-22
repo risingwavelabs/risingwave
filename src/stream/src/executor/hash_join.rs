@@ -227,7 +227,7 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Identity string
     identity: String,
     /// Epoch
-    epoch: u64,
+    epoch: EpochPair,
 
     #[expect(dead_code)]
     /// Logical Operator Info
@@ -590,7 +590,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             cond,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
+            epoch: EpochPair::new_test_epoch(1),
             append_only_optimize,
             metrics,
         }
@@ -669,7 +669,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 }
                 AlignedMessage::Barrier(barrier) => {
                     self.flush_data().await?;
-                    let epoch = barrier.epoch.curr;
+                    let epoch = barrier.epoch;
                     self.side_l.ht.update_epoch(epoch);
                     self.side_r.ht.update_epoch(epoch);
                     self.epoch = epoch;

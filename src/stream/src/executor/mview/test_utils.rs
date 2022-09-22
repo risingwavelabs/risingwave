@@ -15,6 +15,7 @@
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -45,9 +46,9 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
         vec![OrderType::Ascending],
         vec![0],
     );
-    let mut epoch: u64 = 0;
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch += 1;
+    epoch.inc();
 
     for idx in 0..row_count {
         let idx = idx as i32;
