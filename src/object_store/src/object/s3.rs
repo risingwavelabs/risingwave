@@ -19,6 +19,7 @@ use aws_sdk_s3::client::fluent_builders::GetObject;
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
+use aws_smithy_http::body::SdkBody;
 use aws_smithy_types::retry::RetryConfig;
 use fail::fail_point;
 use futures::future::try_join_all;
@@ -280,7 +281,10 @@ impl StreamingUploader for S3StreamingUploader {
 }
 
 fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
-    Body::wrap_stream(stream::iter(data.into_iter().map(ObjectResult::Ok))).into()
+    SdkBody::retryable(move || {
+        Body::wrap_stream(stream::iter(data.clone().into_iter().map(ObjectResult::Ok))).into()
+    })
+    .into()
 }
 
 /// Object store with S3 backend
