@@ -38,7 +38,7 @@ pub struct InMemStreamingUploader {
 
 #[async_trait::async_trait]
 impl StreamingUploader for InMemStreamingUploader {
-    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         fail_point!("mem_write_bytes_err", |_| Err(ObjectError::internal(
             "mem write bytes error"
         )));
@@ -93,7 +93,7 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         Ok(Box::new(InMemStreamingUploader {
             path: path.to_string(),
             buf: BytesMut::new(),
@@ -301,11 +301,11 @@ mod tests {
         let obj = Bytes::from("123456789");
 
         let store = InMemObjectStore::new();
-        let mut uploader = store.streaming_upload("/abc").await.unwrap();
+        let mut uploader = store.streaming_upload("/abc").unwrap();
 
-        blocks.into_iter().for_each(|b| {
-            uploader.write_bytes(b).unwrap();
-        });
+        for block in blocks {
+            uploader.write_bytes(block).await.unwrap();
+        }
         uploader.finish().await.unwrap();
 
         // Read whole object.

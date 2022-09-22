@@ -25,6 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -35,15 +36,11 @@ use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Epoch, Executor, Message, PkIndices,
-    PkIndicesRef,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::JoinType::LeftAnti;
 use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
-
-/// Limit number of the cached entries (one per join key) on each side.
-pub const JOIN_CACHE_CAP: usize = 1 << 16;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -199,7 +196,7 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         // self.ht.clear();
     }
 
-    pub fn init(&mut self, epoch: Epoch) {
+    pub fn init(&mut self, epoch: EpochPair) {
         self.ht.init(epoch);
     }
 }
@@ -426,6 +423,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
+        cache_size: usize,
         state_table_l: StateTable<S>,
         degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
@@ -547,7 +545,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_CAP,
+                    cache_size,
                     join_key_data_types_l,
                     state_all_data_types_l.clone(),
                     state_table_l,
@@ -568,7 +566,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_CAP,
+                    cache_size,
                     join_key_data_types_r,
                     state_all_data_types_r.clone(),
                     state_table_r,
@@ -935,7 +933,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::{ActorContext, Barrier, Epoch, Message};
+    use crate::executor::{ActorContext, Barrier, EpochPair, Message};
 
     fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
@@ -1040,6 +1038,7 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
+            1 << 16,
             state_l,
             degree_state_l,
             state_r,
@@ -1108,6 +1107,7 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
+            1 << 16,
             state_l,
             degree_state_l,
             state_r,
@@ -2161,7 +2161,7 @@ mod tests {
         tx_r.push_barrier(2, false);
 
         // get the aligned barrier here
-        let expected_epoch = Epoch::new_test_epoch(2);
+        let expected_epoch = EpochPair::new_test_epoch(2);
         assert!(matches!(
             hash_join.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier {
@@ -2258,7 +2258,7 @@ mod tests {
         tx_r.push_barrier(2, false);
 
         // get the aligned barrier here
-        let expected_epoch = Epoch::new_test_epoch(2);
+        let expected_epoch = EpochPair::new_test_epoch(2);
         assert!(matches!(
             hash_join.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier {

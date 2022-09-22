@@ -22,7 +22,8 @@ use syn::{DataStruct, DeriveInput};
 
 mod generate;
 
-// This attribute will be placed before any pb types, including messages and enums.
+/// This attribute will be placed before any pb types, including messages and enums.
+/// See `prost/helpers/README.md` for more details.
 #[cfg_attr(coverage, no_coverage)]
 #[proc_macro_derive(AnyPB)]
 #[proc_macro_error]

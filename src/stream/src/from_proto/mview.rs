@@ -43,6 +43,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             store,
             order_key,
             params.executor_id,
+            params.actor_context,
             params.vnode_bitmap.map(Arc::new),
             table,
         );
@@ -76,8 +77,15 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
         let vnodes = params.vnode_bitmap.map(Arc::new);
 
-        let executor =
-            MaterializeExecutor::new(input, store, keys, params.executor_id, vnodes, table);
+        let executor = MaterializeExecutor::new(
+            input,
+            store,
+            keys,
+            params.executor_id,
+            params.actor_context,
+            vnodes,
+            table,
+        );
 
         Ok(executor.boxed())
     }

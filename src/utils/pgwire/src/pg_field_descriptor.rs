@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
 use std::{error, fmt};
 
 #[derive(Debug, Clone)]
@@ -49,13 +50,13 @@ impl PgFieldDescriptor {
         };
 
         Self {
-            type_modifier,
-            format_code,
             name,
             table_oid,
             col_attr_num,
-            type_len,
             type_oid,
+            type_len,
+            type_modifier,
+            format_code,
         }
     }
 
@@ -88,7 +89,7 @@ impl PgFieldDescriptor {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TypeOid {
     Boolean,
     BigInt,
@@ -163,6 +164,30 @@ impl TypeOid {
             TypeOid::Timestampz => 1184,
             TypeOid::Decimal => 1700,
             TypeOid::Interval => 1186,
+        }
+    }
+}
+
+impl FromStr for TypeOid {
+    type Err = TypeOidError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.to_ascii_lowercase();
+        match s.as_str() {
+            "boolean" => Ok(TypeOid::Boolean),
+            "bigint" => Ok(TypeOid::BigInt),
+            "smallint" => Ok(TypeOid::SmallInt),
+            "int" | "int4" => Ok(TypeOid::Int),
+            "float4" => Ok(TypeOid::Float4),
+            "float8" => Ok(TypeOid::Float8),
+            "varchar" => Ok(TypeOid::Varchar),
+            "date" => Ok(TypeOid::Date),
+            "time" => Ok(TypeOid::Time),
+            "timestamp" => Ok(TypeOid::Timestamp),
+            "timestampz" => Ok(TypeOid::Timestampz),
+            "decimal" => Ok(TypeOid::Decimal),
+            "interval" => Ok(TypeOid::Interval),
+            _ => Err(TypeOidError(0)),
         }
     }
 }

@@ -84,7 +84,8 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
-    cache: TopNCache,
+    /// TODO: support WITH TIES
+    cache: TopNCache<false>,
 
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -124,7 +125,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit),
+            cache: TopNCache::new(num_offset, num_limit, order_pairs.len()),
             key_indices,
         })
     }
@@ -237,7 +238,7 @@ mod tests {
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
     use crate::executor::top_n_appendonly::AppendOnlyTopNExecutor;
-    use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices};
+    use crate::executor::{Barrier, Executor, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -289,20 +290,11 @@ mod tests {
             schema,
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(1),
-                    ..Barrier::default()
-                }),
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(2),
-                    ..Barrier::default()
-                }),
+                Message::Barrier(Barrier::new_test_barrier(2)),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(3),
-                    ..Barrier::default()
-                }),
+                Message::Barrier(Barrier::new_test_barrier(3)),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
             ],
         ))
