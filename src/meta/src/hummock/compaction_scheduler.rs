@@ -147,6 +147,9 @@ where
                     break;
                 }
             };
+
+            request_channel.unschedule(compaction_group);
+
             // Wait for a compactor to become available.
             let compactor = loop {
                 if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
@@ -156,6 +159,7 @@ where
                     self.compaction_resume_notifier.notified().await;
                 }
             };
+
             // Pick a task and assign it to this compactor.
             sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
             self.pick_and_assign(compaction_group, compactor, request_channel.clone())
@@ -222,7 +226,6 @@ where
             .hummock_manager
             .get_compact_task(compaction_group)
             .await;
-        request_channel.unschedule(compaction_group);
         let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
