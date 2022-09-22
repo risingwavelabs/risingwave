@@ -25,6 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -35,8 +36,7 @@ use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Epoch, Executor, Message, PkIndices,
-    PkIndicesRef,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::JoinType::LeftAnti;
@@ -196,7 +196,7 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         // self.ht.clear();
     }
 
-    pub fn init(&mut self, epoch: Epoch) {
+    pub fn init(&mut self, epoch: EpochPair) {
         self.ht.init(epoch);
     }
 }
@@ -933,7 +933,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::{ActorContext, Barrier, Epoch, Message};
+    use crate::executor::{ActorContext, Barrier, EpochPair, Message};
 
     fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
@@ -2161,7 +2161,7 @@ mod tests {
         tx_r.push_barrier(2, false);
 
         // get the aligned barrier here
-        let expected_epoch = Epoch::new_test_epoch(2);
+        let expected_epoch = EpochPair::new_test_epoch(2);
         assert!(matches!(
             hash_join.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier {
@@ -2258,7 +2258,7 @@ mod tests {
         tx_r.push_barrier(2, false);
 
         // get the aligned barrier here
-        let expected_epoch = Epoch::new_test_epoch(2);
+        let expected_epoch = EpochPair::new_test_epoch(2);
         assert!(matches!(
             hash_join.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier {

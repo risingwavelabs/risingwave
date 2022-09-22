@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::property::{Distribution, OrderDisplay};
+use crate::optimizer::property::{Distribution, Order, OrderDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -55,23 +55,38 @@ impl StreamGroupTopN {
             vnode_col_idx,
         }
     }
+
+    pub fn limit(&self) -> usize {
+        self.logical.limit()
+    }
+
+    pub fn offset(&self) -> usize {
+        self.logical.offset()
+    }
+
+    pub fn topn_order(&self) -> &Order {
+        self.logical.topn_order()
+    }
+
+    pub fn group_key(&self) -> &[usize] {
+        self.logical.group_key()
+    }
 }
 
 impl StreamNode for StreamGroupTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let group_key = self.logical.group_key();
-        if self.logical.limit() == 0 {
+        if self.limit() == 0 {
             panic!("topN's limit shouldn't be 0.");
         }
         let table = self
             .logical
-            .infer_internal_table_catalog(Some(group_key), self.vnode_col_idx)
+            .infer_internal_table_catalog(self.vnode_col_idx)
             .with_id(state.gen_table_id_wrapped());
         let group_topn_node = GroupTopNNode {
-            limit: self.logical.limit() as u64,
-            offset: self.logical.offset() as u64,
-            group_key: group_key.iter().map(|idx| *idx as u32).collect(),
+            limit: self.limit() as u64,
+            offset: self.offset() as u64,
+            group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             table: Some(table.to_internal_table_prost()),
         };
 
@@ -89,15 +104,15 @@ impl fmt::Display for StreamGroupTopN {
             &format!(
                 "{}",
                 OrderDisplay {
-                    order: self.logical.topn_order(),
+                    order: self.topn_order(),
                     input_schema
                 }
             ),
         );
         builder
-            .field("limit", &format_args!("{}", self.logical.limit()))
-            .field("offset", &format_args!("{}", self.logical.offset()))
-            .field("group_key", &format_args!("{:?}", self.logical.group_key()))
+            .field("limit", &format_args!("{}", self.limit()))
+            .field("offset", &format_args!("{}", self.offset()))
+            .field("group_key", &format_args!("{:?}", self.group_key()))
             .finish()
     }
 }

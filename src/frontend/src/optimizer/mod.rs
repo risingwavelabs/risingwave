@@ -36,7 +36,6 @@ use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterializ
 use self::plan_visitor::has_logical_over_agg;
 use self::property::RequiredDist;
 use self::rule::*;
-use crate::catalog::TableId;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
 use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply, PlanVisitor};
@@ -447,16 +446,12 @@ impl PlanRoot {
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
-            None,
+            false,
         )
     }
 
     /// Optimize and generate a create index plan.
-    pub fn gen_create_index_plan(
-        &mut self,
-        mv_name: String,
-        index_on: TableId,
-    ) -> Result<StreamMaterialize> {
+    pub fn gen_create_index_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_stream_plan()?;
         StreamMaterialize::create(
             stream_plan,
@@ -464,7 +459,7 @@ impl PlanRoot {
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
-            Some(index_on),
+            true,
         )
     }
 
