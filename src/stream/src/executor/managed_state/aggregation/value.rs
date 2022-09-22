@@ -99,7 +99,6 @@ impl ManagedValueState {
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
     pub fn get_output(&self) -> Datum {
-        debug_assert!(!self.is_dirty());
         self.state
             .get_output()
             .expect("agg call throw an error in streamAgg")
