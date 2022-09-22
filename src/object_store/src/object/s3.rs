@@ -516,7 +516,7 @@ impl S3ObjectStore {
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
         let sdk_config = aws_config::from_env()
-            .retry_config(RetryConfig::new().with_max_attempts(4))
+            .retry_config(RetryConfig::standard().with_max_attempts(4))
             .load()
             .await;
         let client = Client::new(&sdk_config);
