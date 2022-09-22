@@ -38,6 +38,7 @@ type TaskId = u64;
 
 /// Wraps the stream between meta node and compactor node.
 /// Compactor node will re-establish the stream when the previous one fails.
+#[derive(Debug)]
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
@@ -324,6 +325,11 @@ impl CompactorManager {
 
     pub fn compactor_num(&self) -> usize {
         self.policy.read().compactor_num()
+    }
+
+    /// Return the maximum number of tasks that can be assigned to all compactors.
+    pub fn max_concurrent_task_number(&self) -> usize {
+        self.policy.read().max_concurrent_task_num()
     }
 }
 

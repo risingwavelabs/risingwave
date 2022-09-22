@@ -45,7 +45,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
@@ -87,8 +87,10 @@ pub struct HummockManager<S: MetaStore> {
 
     metrics: Arc<MetaMetrics>,
 
-    // `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
-    compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
+    // `compaction_request_channel` is used to schedule a compaction for specified
+    // CompactionGroupId
+    compaction_request_channel: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
+    compaction_resume_notifier: parking_lot::RwLock<Option<Arc<Notify>>>,
 
     compactor_manager: CompactorManagerRef,
 }
@@ -202,7 +204,8 @@ where
             metrics,
             cluster_manager,
             compaction_group_manager,
-            compaction_scheduler: parking_lot::RwLock::new(None),
+            compaction_request_channel: parking_lot::RwLock::new(None),
+            compaction_resume_notifier: parking_lot::RwLock::new(None),
             compactor_manager,
             max_committed_epoch: AtomicU64::new(0),
             max_current_epoch: AtomicU64::new(0),
@@ -904,6 +907,7 @@ where
                     compact_task.compaction_group_id,
                 ))?,
         );
+        let assigned_task_num = compaction.compact_task_assignment.len();
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         let assignee_context_id = compact_task_assignment
@@ -991,7 +995,13 @@ where
             // policy.
             self.compactor_manager
                 .report_compact_task(context_id, compact_task);
-
+            // Tell compaction scheduler to resume compaction if there's any compactor becoming
+            // available.
+            if assigned_task_num == self.compactor_manager.max_concurrent_task_number() {
+                if let Some(notifier) = self.compaction_resume_notifier.read().as_ref() {
+                    notifier.notify_one();
+                }
+            }
             // Update compaaction task count.
             //
             // A corner case is that the compactor is deleted
@@ -1392,8 +1402,13 @@ where
         read_lock!(self, versioning).await
     }
 
-    pub fn set_compaction_scheduler(&self, sender: CompactionRequestChannelRef) {
-        *self.compaction_scheduler.write() = Some(sender);
+    pub fn set_compaction_scheduler(
+        &self,
+        sender: CompactionRequestChannelRef,
+        notifier: Arc<Notify>,
+    ) {
+        *self.compaction_request_channel.write() = Some(sender);
+        *self.compaction_resume_notifier.write() = Some(notifier);
     }
 
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.
@@ -1432,7 +1447,7 @@ where
 
     /// Sends a compaction request to compaction scheduler.
     pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> Result<bool> {
-        if let Some(sender) = self.compaction_scheduler.read().as_ref() {
+        if let Some(sender) = self.compaction_request_channel.read().as_ref() {
             sender
                 .try_send(compaction_group)
                 .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))

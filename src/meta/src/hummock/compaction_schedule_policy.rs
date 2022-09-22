@@ -75,6 +75,8 @@ pub trait CompactionSchedulePolicy: Send + Sync {
     fn report_compact_task(&mut self, context_id: HummockContextId, compact_task: &CompactTask);
 
     fn compactor_num(&self) -> usize;
+
+    fn max_concurrent_task_num(&self) -> usize;
 }
 
 // This strategy is retained just for reference, it is not used.
@@ -179,6 +181,13 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
 
     fn compactor_num(&self) -> usize {
         self.compactors.len()
+    }
+
+    fn max_concurrent_task_num(&self) -> usize {
+        self.compactor_map
+            .values()
+            .map(|c| c.max_concurrent_task_number() as usize)
+            .sum()
     }
 }
 
@@ -344,6 +353,13 @@ impl CompactionSchedulePolicy for ScoredPolicy {
     fn compactor_num(&self) -> usize {
         self.score_to_compactor.len()
     }
+
+    fn max_concurrent_task_num(&self) -> usize {
+        self.score_to_compactor
+            .values()
+            .map(|c| c.max_concurrent_task_number() as usize)
+            .sum()
+    }
 }
 
 #[cfg(test)]
@@ -427,13 +443,17 @@ mod tests {
         let mut policy = RoundRobinPolicy::new();
         // No compactors by default.
         assert_eq!(policy.compactors.len(), 0);
+        assert_eq!(policy.max_concurrent_task_num(), 0);
 
-        let mut receiver = policy.add_compactor(1, u64::MAX);
+        let mut receiver = policy.add_compactor(1, 1000);
         assert_eq!(policy.compactors.len(), 1);
-        let _receiver_2 = policy.add_compactor(2, u64::MAX);
+        assert_eq!(policy.max_concurrent_task_num(), 1000);
+        let _receiver_2 = policy.add_compactor(2, 1000);
         assert_eq!(policy.compactors.len(), 2);
+        assert_eq!(policy.max_concurrent_task_num(), 2000);
         policy.remove_compactor(2);
         assert_eq!(policy.compactors.len(), 1);
+        assert_eq!(policy.max_concurrent_task_num(), 1000);
 
         // No compact task there.
         assert!(matches!(
@@ -457,6 +477,7 @@ mod tests {
 
         policy.remove_compactor(compactor.context_id());
         assert_eq!(policy.compactors.len(), 0);
+        assert_eq!(policy.max_concurrent_task_num(), 0);
         drop(compactor);
         assert!(matches!(
             receiver.try_recv().unwrap_err(),
@@ -563,24 +584,28 @@ mod tests {
         assert_eq!(policy.context_id_to_score.len(), 0);
         assert_eq!(policy.score_to_compactor.len(), 0);
 
-        policy.add_compactor(1, u64::MAX);
+        policy.add_compactor(1, 1000);
         assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 1);
-        let _receiver_2 = policy.add_compactor(2, u64::MAX);
+        assert_eq!(policy.max_concurrent_task_num(), 1000);
+        let _receiver_2 = policy.add_compactor(2, 1000);
         assert_eq!(policy.context_id_to_score.len(), 2);
         assert_eq!(policy.score_to_compactor.len(), 2);
+        assert_eq!(policy.max_concurrent_task_num(), 2000);
 
         policy.remove_compactor(2);
         assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 1);
+        assert_eq!(policy.max_concurrent_task_num(), 1000);
 
         policy.pause_compactor(1);
         assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 0);
 
-        let mut receiver = policy.add_compactor(1, u64::MAX);
+        let mut receiver = policy.add_compactor(1, 1000);
         assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 1);
+        assert_eq!(policy.max_concurrent_task_num(), 1000);
 
         // Pending bytes are initialized correctly.
         assert_eq!(*policy.context_id_to_score.get(&1).unwrap(), 0);
@@ -611,6 +636,8 @@ mod tests {
         policy.remove_compactor(compactor.context_id());
         assert_eq!(policy.context_id_to_score.len(), 0);
         assert_eq!(policy.score_to_compactor.len(), 0);
+        assert_eq!(policy.max_concurrent_task_num(), 0);
+
         drop(compactor);
         assert!(matches!(
             receiver.try_recv().unwrap_err(),
