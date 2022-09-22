@@ -27,6 +27,7 @@ use risingwave_common::array::{ArrayImpl, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::{ConnectorState, SplitImpl};
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -209,44 +210,9 @@ pub enum Mutation {
     Resume,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Epoch {
-    pub curr: u64,
-    pub prev: u64,
-}
-
-impl Epoch {
-    pub fn new(curr: u64, prev: u64) -> Self {
-        assert!(curr > prev);
-        Self { curr, prev }
-    }
-
-    #[cfg(test)]
-    pub fn inc(&self) -> Self {
-        Self {
-            curr: self.curr + 1,
-            prev: self.prev + 1,
-        }
-    }
-
-    pub fn new_test_epoch(curr: u64) -> Self {
-        assert!(curr > 0);
-        Self::new(curr, curr - 1)
-    }
-}
-
-impl Default for Epoch {
-    fn default() -> Self {
-        Self {
-            curr: 1,
-            prev: INVALID_EPOCH,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Barrier {
-    pub epoch: Epoch,
+    pub epoch: EpochPair,
     pub mutation: Option<Arc<Mutation>>,
     pub checkpoint: bool,
 
@@ -258,9 +224,10 @@ impl Barrier {
     /// Create a plain barrier.
     pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
-            epoch: Epoch::new_test_epoch(epoch),
+            epoch: EpochPair::new_test_epoch(epoch),
             checkpoint: true,
-            ..Default::default()
+            mutation: Default::default(),
+            passed_actors: Default::default(),
         }
     }
 
@@ -528,7 +495,7 @@ impl Barrier {
         let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {
             checkpoint: prost.checkpoint,
-            epoch: Epoch::new(epoch.curr, epoch.prev),
+            epoch: EpochPair::new(epoch.curr, epoch.prev),
             mutation,
             passed_actors: prost.get_passed_actors().clone(),
         })
