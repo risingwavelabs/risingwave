@@ -592,6 +592,14 @@ impl LogicalJoin {
             return None;
         }
 
+        match logical_join.join_type() {
+            JoinType::RightOuter
+            | JoinType::RightSemi
+            | JoinType::RightAnti
+            | JoinType::FullOuter => return None,
+            _ => {}
+        };
+
         let logical_scan = self.right.as_logical_scan().unwrap();
         let table_desc = logical_scan.table_desc().clone();
         let output_column_ids = logical_scan.output_column_ids();

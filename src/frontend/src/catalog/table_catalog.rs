@@ -68,11 +68,10 @@ pub struct TableCatalog {
     /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
 
+    pub is_index: bool,
+
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
-
-    /// If set to Some(TableId), then this table is an index on another table.
-    pub is_index_on: Option<TableId>,
 
     /// The appendonly attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
     /// on this to derive an append-only stream plan
@@ -173,8 +172,7 @@ impl TableCatalog {
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
-            is_index: self.is_index_on.is_some(),
-            index_on_id: self.is_index_on.unwrap_or_default().table_id(),
+            is_index: self.is_index,
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -220,11 +218,7 @@ impl From<ProstTable> for TableCatalog {
             name,
             pk,
             columns,
-            is_index_on: if tb.is_index {
-                Some(tb.index_on_id.into())
-            } else {
-                None
-            },
+            is_index: tb.is_index,
             distribution_key: tb
                 .distribution_key
                 .iter()
@@ -271,7 +265,6 @@ mod tests {
     fn test_into_table_catalog() {
         let table: TableCatalog = ProstTable {
             is_index: false,
-            index_on_id: 0,
             id: 0,
             schema_id: 0,
             database_id: 0,
@@ -327,7 +320,7 @@ mod tests {
         assert_eq!(
             table,
             TableCatalog {
-                is_index_on: None,
+                is_index: false,
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
