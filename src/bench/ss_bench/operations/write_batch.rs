@@ -83,7 +83,7 @@ impl Operations {
         &mut self,
         store: &impl StateStore,
         opts: &Opts,
-        context: Option<(Arc<CompactorContext>, Arc<LocalVersionManager>)>,
+        context: Option<(Arc<CompactorContext>, LocalVersionManagerRef)>,
     ) {
         let (prefixes, keys) = Workload::new_random_keys(opts, opts.writes as u64, &mut self.rng);
         let values = Workload::new_values(opts, opts.writes as u64, &mut self.rng);
