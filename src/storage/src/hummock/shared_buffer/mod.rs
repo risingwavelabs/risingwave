@@ -208,6 +208,8 @@ pub enum SharedBufferEvent {
 
     /// Clear shared buffer and reset all states
     Clear(oneshot::Sender<()>),
+
+    Shutdown,
 }
 
 impl SharedBuffer {

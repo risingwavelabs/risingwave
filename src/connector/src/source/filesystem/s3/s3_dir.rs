@@ -181,7 +181,8 @@ impl From<S3Properties> for S3SourceBasicConfig {
 pub(crate) fn new_s3_client(s3_source_config: S3SourceConfig) -> s3_client::Client {
     let config_for_s3 = match s3_source_config.custom_config {
         Some(conf) => {
-            let retry_conf = aws_config::RetryConfig::new().with_max_attempts(conf.max_retry_times);
+            let retry_conf =
+                aws_config::RetryConfig::standard().with_max_attempts(conf.max_retry_times);
             let timeout_conf = aws_config::timeout::Config::new().with_http_timeouts(
                 Http::new()
                     .with_connect_timeout(TriState::Set(conf.conn_time_out))

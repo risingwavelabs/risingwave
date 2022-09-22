@@ -200,9 +200,9 @@ impl IndexSelectionRule {
         );
 
         let conjunctions = index
-            .primary_table_order_key_ref_to_index_table()
+            .primary_table_pk_ref_to_index_table()
             .iter()
-            .zip_eq(index.primary_table.order_key.iter())
+            .zip_eq(index.primary_table.pk.iter())
             .map(|(x, y)| {
                 Self::create_null_safe_equal_expr(
                     x.index,
@@ -289,7 +289,7 @@ impl IndexSelectionRule {
         );
 
         let conjunctions = primary_table_desc
-            .order_key
+            .pk
             .iter()
             .enumerate()
             .map(|(x, y)| {
@@ -465,7 +465,7 @@ impl IndexSelectionRule {
                 match p2s_mapping.get(column_index.as_ref().unwrap()) {
                     None => continue, // not found, prune this index
                     Some(&idx) => {
-                        if index.index_table.order_key()[0].index != idx {
+                        if index.index_table.pk()[0].index != idx {
                             // not match, prune this index
                             continue;
                         }
@@ -490,7 +490,7 @@ impl IndexSelectionRule {
         let primary_table_desc = logical_scan.table_desc();
         if let Some(idx) = column_index {
             assert_eq!(conjunctions.len(), 1);
-            if primary_table_desc.order_key[0].column_idx != idx {
+            if primary_table_desc.pk[0].column_idx != idx {
                 return result;
             }
         }
@@ -499,7 +499,7 @@ impl IndexSelectionRule {
             logical_scan.table_name().to_string(),
             false,
             primary_table_desc
-                .order_key
+                .pk
                 .iter()
                 .map(|x| x.column_idx)
                 .collect_vec(),
@@ -547,7 +547,7 @@ impl IndexSelectionRule {
                 index.index_table.name.to_string(),
                 false,
                 index
-                    .primary_table_order_key_ref_to_index_table()
+                    .primary_table_pk_ref_to_index_table()
                     .iter()
                     .map(|x| x.index)
                     .collect_vec(),
@@ -674,7 +674,7 @@ impl<'a> TableScanIoEstimator<'a> {
                 // add order key twice for its appearance both in key and value
                 .chain(
                     table_desc
-                        .order_key
+                        .pk
                         .iter()
                         .map(|x| &table_desc.columns[x.column_idx]),
                 )
