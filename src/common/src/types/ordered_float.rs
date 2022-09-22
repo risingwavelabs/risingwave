@@ -55,7 +55,7 @@ use core::str::FromStr;
 pub use num_traits::Float;
 use num_traits::{
     AsPrimitive, Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub,
-    FromPrimitive, Num, NumCast, One, Signed, ToPrimitive, Zero,
+    FromPrimitive, Num, One, Signed, ToPrimitive, Zero,
 };
 
 // masks for the parts of the IEEE 754 float
@@ -566,7 +566,7 @@ impl<T: One> One for OrderedFloat<T> {
     }
 }
 
-impl<T: NumCast> NumCast for OrderedFloat<T> {
+impl<T: num_traits::NumCast> num_traits::NumCast for OrderedFloat<T> {
     #[inline]
     fn from<F: ToPrimitive>(n: F) -> Option<Self> {
         T::from(n).map(OrderedFloat)
@@ -944,7 +944,7 @@ fn raw_double_bits<F: Float>(f: &F) -> u64 {
     }
 
     let exp_u64 = exp as u16 as u64;
-    let sign_u64 = if sign > 0 { 1u64 } else { 0u64 };
+    let sign_u64 = u64::from(sign > 0);
     (man & MAN_MASK) | ((exp_u64 << 52) & EXP_MASK) | ((sign_u64 << 63) & SIGN_MASK)
 }
 

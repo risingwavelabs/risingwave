@@ -213,7 +213,7 @@ impl Bitmap {
     }
 
     fn num_bytes(num_bits: usize) -> usize {
-        num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 }
+        num_bits / 8 + usize::from(num_bits % 8 > 0)
     }
 
     /// Returns the number of valid bits in the bitmap,
