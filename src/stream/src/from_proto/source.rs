@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
+use crate::executor::state::SourceStateHandler;
+use crate::executor::state_table_handler::SourceStateTableHandler;
 use crate::executor::SourceExecutor;
 
 pub struct SourceExecutorBuilder;
@@ -57,17 +61,24 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             Field::with_name(column_desc.data_type.clone(), column_desc.name.clone())
         }));
         let schema = Schema::new(fields);
-        let keyspace = Keyspace::table_root(store, &TableId::new(node.state_table_id));
+        println!("state table: {:?}", node.state_table);
+
         let vnodes = params
             .vnode_bitmap
             .expect("vnodes not set for source executor");
+
+        let state_table_handler = SourceStateTableHandler::from_table_catalog(
+            node.state_table.as_ref().unwrap(),
+            store,
+            Some(Arc::new(vnodes.clone())),
+        );
 
         Ok(Box::new(SourceExecutor::new(
             params.actor_context,
             source_id,
             source_desc,
             vnodes,
-            keyspace,
+            state_table_handler,
             column_ids,
             schema,
             params.pk_indices,

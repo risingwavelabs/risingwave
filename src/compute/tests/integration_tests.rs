@@ -43,6 +43,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor::state_table_handler::SourceStateTableHandler;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
@@ -90,6 +91,7 @@ impl SingleChunkExecutor {
 #[tokio::test]
 async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_pb::data::DataType;
+    use risingwave_stream::executor::state_table_handler::default_source_internal_table;
 
     let memory_state_store = MemoryStateStore::new();
     let source_manager = Arc::new(MemSourceManager::default());
@@ -141,14 +143,18 @@ async fn test_table_materialize() -> StreamResult<()> {
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
-    let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
     let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+    let state_table = SourceStateTableHandler::from_table_catalog(
+        &default_source_internal_table(0x2333),
+        MemoryStateStore::new(),
+        Some(vnodes.clone().into()),
+    );
     let stream_source = SourceExecutor::new(
         ActorContext::create(0x3f3f3f),
         source_table_id,
         source_desc,
         vnodes,
-        keyspace,
+        state_table,
         all_column_ids.clone(),
         all_schema.clone(),
         PkIndices::from([0]),

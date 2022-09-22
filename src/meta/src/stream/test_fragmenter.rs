@@ -100,6 +100,25 @@ fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
     }
 }
 
+fn make_source_internal_table(id: u32) -> ProstTable {
+    let columns = vec![
+        make_column(TypeName::Varchar, 0),
+        make_column(TypeName::Varchar, 1),
+    ];
+    ProstTable {
+        id,
+        schema_id: SchemaId::placeholder() as u32,
+        database_id: DatabaseId::placeholder() as u32,
+        name: String::new(),
+        columns,
+        order_key: vec![ColumnOrder {
+            index: 0,
+            order_type: 2,
+        }],
+        ..Default::default()
+    }
+}
+
 fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
     let mut columns = vec![make_column(TypeName::Int64, 0)];
     if !is_agg_value {
@@ -133,7 +152,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             source_id: 1,
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
-            state_table_id: 1,
+            state_table: Some(make_source_internal_table(1)),
         })),
         stream_key: vec![2],
         ..Default::default()

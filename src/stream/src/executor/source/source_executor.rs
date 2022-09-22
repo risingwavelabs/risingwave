@@ -36,6 +36,7 @@ use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::source::state::SourceStateHandler;
+use crate::executor::source::state_table_handler::SourceStateTableHandler;
 use crate::executor::*;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
@@ -67,7 +68,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     source_identify: String,
 
-    split_state_store: SourceStateHandler<S>,
+    split_state_store: SourceStateTableHandler<S>,
 
     state_cache: HashMap<SplitId, SplitImpl>,
 
@@ -83,7 +84,7 @@ impl<S: StateStore> SourceExecutor<S> {
         source_id: TableId,
         source_desc: SourceDesc,
         vnodes: Bitmap,
-        keyspace: Keyspace<S>,
+        state_table: SourceStateTableHandler<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
         pk_indices: PkIndices,
@@ -112,7 +113,7 @@ impl<S: StateStore> SourceExecutor<S> {
             metrics: streaming_metrics,
             stream_source_splits: vec![],
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
-            split_state_store: SourceStateHandler::new(keyspace),
+            split_state_store: state_table,
             state_cache: HashMap::new(),
             expected_barrier_latency_ms,
         })
@@ -517,7 +518,11 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+        let state_table = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            MemoryStateStore::new(),
+            None,
+        );
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let executor = SourceExecutor::new(
@@ -525,7 +530,7 @@ mod tests {
             table_id,
             source_desc,
             vnodes,
-            keyspace,
+            state_table,
             column_ids,
             schema,
             pk_indices,
@@ -641,14 +646,19 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+        let state_table = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            MemoryStateStore::new(),
+            None,
+        );
+
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
         let executor = SourceExecutor::new(
             ActorContext::create(0x3f3f3f),
             table_id,
             source_desc,
             vnodes,
-            keyspace,
+            state_table,
             column_ids,
             schema,
             pk_indices,
@@ -758,20 +768,24 @@ mod tests {
 
         let source_desc = source_manager.get_source(&source_table_id).unwrap();
         let mem_state_store = MemoryStateStore::new();
-        let keyspace = Keyspace::table_root(mem_state_store.clone(), &TableId::from(0x2333));
+
         let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
         let schema = get_schema(&column_ids, &source_desc);
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
-        let source_state_handler = SourceStateHandler::new(keyspace.clone());
+        let source_state_handler = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            mem_state_store.clone(),
+            None,
+        );
 
         let source_exec = SourceExecutor::new(
             ActorContext::create(0),
             source_table_id,
             source_desc,
             vnodes,
-            keyspace.clone(),
+            source_state_handler.clone(),
             column_ids.clone(),
             schema,
             pk_indices,
@@ -854,9 +868,8 @@ mod tests {
 
         // there must exist state for new add partition
         source_state_handler
-            .restore_states("3-1".to_string().into(), curr_epoch + 1)
-            .await
-            .unwrap()
+            .get("3-1".to_string().into(), curr_epoch + 1)
+            .await.unwrap()
             .unwrap();
 
         let chunk_2 = (materialize.next().await.unwrap().unwrap())

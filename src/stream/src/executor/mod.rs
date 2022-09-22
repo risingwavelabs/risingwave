@@ -74,7 +74,7 @@ mod rearranged_chain;
 mod receiver;
 mod simple;
 mod sink;
-mod source;
+pub mod source;
 mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
