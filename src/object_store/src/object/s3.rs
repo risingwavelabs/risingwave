@@ -594,9 +594,6 @@ impl S3ObjectStore {
 #[cfg(not(madsim))]
 mod tests {
     use std::sync::Arc;
-    use std::time::Instant;
-
-    use bytes::Bytes;
 
     use crate::object::object_metrics::ObjectStoreMetrics;
     use crate::object::s3::S3_NUM_PREFIXES;
