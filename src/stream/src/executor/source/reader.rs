@@ -161,14 +161,14 @@ mod tests {
         table_source.write_chunk(StreamChunk::default()).unwrap();
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
-        barrier_tx.send(Barrier::default()).unwrap();
+        barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
         assert_matches!(next!().unwrap(), Either::Left(_));
 
         // Pause the stream.
         stream.pause_source();
 
         // Write a barrier.
-        barrier_tx.send(Barrier::default()).unwrap();
+        barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
         // Then write a chunk.
         table_source.write_chunk(StreamChunk::default()).unwrap();
 
