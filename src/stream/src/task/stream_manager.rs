@@ -578,7 +578,7 @@ impl LocalStreamManagerCore {
                 let actor = async move {
                     let _ = actor.run().await.inspect_err(|err| {
                         // TODO: check error type and panic if it's unexpected.
-                        tracing::debug!(actor=%actor_id, error=%err, "actor exit");
+                        tracing::error!(actor=%actor_id, error=%err, "actor exit");
                     });
                 };
                 #[auto_enums::auto_enum(Future)]
