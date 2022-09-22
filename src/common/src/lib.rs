@@ -27,7 +27,6 @@
 #![deny(unused_must_use)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
 #![feature(fn_traits)]

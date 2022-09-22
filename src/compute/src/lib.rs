@@ -26,8 +26,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(generic_associated_types)]
-#![feature(let_else)]
 #![feature(generators)]
 #![feature(type_alias_impl_trait)]
 #![cfg_attr(coverage, feature(no_coverage))]

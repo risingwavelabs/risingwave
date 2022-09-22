@@ -42,12 +42,12 @@ services:
       retries: 5
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220913
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220922
     volumes:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220913
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220922
     depends_on:
       db:
         condition: service_healthy

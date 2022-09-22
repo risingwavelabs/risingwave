@@ -30,7 +30,6 @@
 #![feature(negative_impls)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
-#![feature(let_else)]
 #![feature(trait_alias)]
 #![feature(drain_filter)]
 #![feature(if_let_guard)]
