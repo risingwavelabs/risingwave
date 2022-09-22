@@ -923,14 +923,15 @@ async fn test_hummock_compaction_task_heartbeat() {
     .await
     .unwrap();
 
+    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()
         .unwrap();
-    let compactor = hummock_manager
-        .assign_compaction_task(&compact_task)
+    hummock_manager
+        .assign_compaction_task(&compact_task, compactor.context_id())
         .await
         .unwrap();
 
@@ -968,14 +969,15 @@ async fn test_hummock_compaction_task_heartbeat() {
         .await
         .unwrap());
 
+    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()
         .unwrap();
-    let compactor = hummock_manager
-        .assign_compaction_task(&compact_task)
+    hummock_manager
+        .assign_compaction_task(&compact_task, compactor.context_id())
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
@@ -1039,14 +1041,15 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     .await
     .unwrap();
 
+    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()
         .unwrap();
-    let compactor = hummock_manager
-        .assign_compaction_task(&compact_task)
+    hummock_manager
+        .assign_compaction_task(&compact_task, compactor.context_id())
         .await
         .unwrap();
     assert_eq!(
