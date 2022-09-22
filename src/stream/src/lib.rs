@@ -36,6 +36,7 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(map_first_last)]
 #![feature(let_else)]
+#![feature(let_chains)]
 #![feature(hash_drain_filter)]
 #![feature(drain_filter)]
 #![feature(generators)]

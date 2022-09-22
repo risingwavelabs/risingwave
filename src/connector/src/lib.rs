@@ -33,6 +33,7 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
+#![feature(let_chains)]
 
 pub mod aws_utils;
 pub mod error;

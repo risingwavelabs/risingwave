@@ -33,6 +33,7 @@
 #![feature(fn_traits)]
 #![feature(assert_matches)]
 #![feature(let_else)]
+#![feature(let_chains)]
 #![feature(lint_reasons)]
 #![feature(type_alias_impl_trait)]
 #![feature(generators)]
