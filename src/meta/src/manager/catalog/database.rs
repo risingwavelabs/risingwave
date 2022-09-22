@@ -161,6 +161,17 @@ where
             .collect())
     }
 
+    pub async fn list_stream_job_ids(&self) -> MetaResult<impl Iterator<Item = RelationId> + '_> {
+        let tables = Table::list(self.env.meta_store()).await?;
+        let sinks = Sink::list(self.env.meta_store()).await?;
+        let indexes = Index::list(self.env.meta_store()).await?;
+        Ok(tables
+            .into_iter()
+            .map(|t| t.id)
+            .chain(sinks.into_iter().map(|s| s.id))
+            .chain(indexes.into_iter().map(|i| i.id)))
+    }
+
     pub fn has_database(&self, database: &Database) -> bool {
         self.databases.contains(database.get_name())
     }
