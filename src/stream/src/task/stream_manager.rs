@@ -233,34 +233,26 @@ impl LocalStreamManager {
         (result, complete_receiver.checkpoint)
     }
 
-    pub async fn sync_epoch(
-        &self,
-        epoch: u64,
-        checkpoint: bool,
-    ) -> StreamResult<Vec<LocalSstableInfo>> {
-        if checkpoint {
-            let timer = self
-                .core
-                .lock()
-                .streaming_metrics
-                .barrier_sync_latency
-                .start_timer();
-            let res = dispatch_state_store!(self.state_store(), store, {
-                match store.sync(epoch).await {
-                    Ok(sync_result) => Ok(sync_result.uncommitted_ssts),
-                    Err(e) => {
-                        tracing::error!(
+    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
+        let timer = self
+            .core
+            .lock()
+            .streaming_metrics
+            .barrier_sync_latency
+            .start_timer();
+        let res = dispatch_state_store!(self.state_store(), store, {
+            match store.sync(epoch).await {
+                Ok(sync_result) => Ok(sync_result.uncommitted_ssts),
+                Err(e) => {
+                    tracing::error!(
                         "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
                         epoch, e);
-                        Err(e.into())
-                    }
+                    Err(e.into())
                 }
-            });
-            timer.observe_duration();
-            res
-        } else {
-            Ok(vec![])
-        }
+            }
+        });
+        timer.observe_duration();
+        res
     }
 
     pub async fn clear_storage_buffer(&self) {
@@ -308,12 +300,13 @@ impl LocalStreamManager {
             return Ok(());
         }
 
+        self.drain_collect_rx(barrier.epoch.prev);
+
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
         self.collect_barrier(barrier.epoch.prev).await;
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-        self.drain_collect_rx(barrier.epoch.prev);
         self.core.lock().drop_all_actors();
 
         Ok(())

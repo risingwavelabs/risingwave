@@ -150,7 +150,7 @@ impl CreateMviewProgressTracker {
                     None
                 }
             }
-            Entry::Vacant(_) => None,
+            Entry::Vacant(_) => unreachable!(),
         }
     }
 }

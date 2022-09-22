@@ -64,8 +64,8 @@ where
 
     async fn resolve_actor_info_for_recovery(&self) -> BarrierActorInfo {
         self.resolve_actor_info(
-            &mut CheckpointControl::new(self.metrics.clone(), self.checkpoint_frequency),
-            &Command::checkpoint(),
+            &mut CheckpointControl::new(self.metrics.clone()),
+            &Command::barrier(),
         )
         .await
     }

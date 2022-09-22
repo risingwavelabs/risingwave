@@ -27,16 +27,9 @@ pub(super) struct Notifier {
 
     /// Get notified when scheduled barrier is finished.
     pub finished: Option<oneshot::Sender<()>>,
-
-    /// Whether this notifier is bound to a checkpoint barrier or not.
-    pub checkpoint: bool,
 }
 
 impl Notifier {
-    pub fn bound_to_checkpoint_barrier(&self) -> bool {
-        self.checkpoint
-    }
-
     /// Notify when we are about to send a barrier.
     pub fn notify_to_send(&mut self) {
         if let Some(tx) = self.to_send.take() {

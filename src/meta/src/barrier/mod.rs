@@ -18,7 +18,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use assert_matches::assert_matches;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -116,9 +115,6 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     /// The max barrier nums in flight
     in_flight_barrier_nums: usize,
 
-    /// There will be a checkpoint for every n barriers
-    checkpoint_frequency: usize,
-
     cluster_manager: ClusterManagerRef<S>,
 
     pub(crate) catalog_manager: CatalogManagerRef<S>,
@@ -156,21 +152,13 @@ struct CheckpointControl<S: MetaStore> {
 
     /// Get notified when we finished Create MV and collect a barrier(checkpoint = true)
     finished_notifiers: Vec<Notifier>,
-
-    /// The numbers of barrier (checkpoint = false) since the last barrier (checkpoint = true)
-    num_uncheckpointed_barrier: usize,
-
-    /// Force checkpoint in next barrier.
-    force_checkpoint: bool,
-
-    checkpoint_frequency: usize,
 }
 
 impl<S> CheckpointControl<S>
 where
     S: MetaStore,
 {
-    fn new(metrics: Arc<MetaMetrics>, checkpoint_frequency: usize) -> Self {
+    fn new(metrics: Arc<MetaMetrics>) -> Self {
         Self {
             command_ctx_queue: Default::default(),
             creating_tables: Default::default(),
@@ -179,42 +167,18 @@ where
             removing_actors: Default::default(),
             metrics,
             finished_notifiers: Default::default(),
-            num_uncheckpointed_barrier: 0,
-            checkpoint_frequency,
-            force_checkpoint: false,
-        }
-    }
-
-    /// Whether the barrier(checkpoint = true) should be injected.
-    fn try_get_checkpoint(&mut self) -> bool {
-        self.num_uncheckpointed_barrier >= self.checkpoint_frequency || self.force_checkpoint
-    }
-
-    /// Make the `checkpoint` of the next barrier must be true
-    fn force_checkpoint_in_next_barrier(&mut self) {
-        self.force_checkpoint = true;
-    }
-
-    /// Update the `num_uncheckpointed_barrier`
-    fn update_num_uncheckpointed_barrier(&mut self, checkpoint: bool) {
-        if checkpoint {
-            self.num_uncheckpointed_barrier = 0;
-            self.force_checkpoint = false;
-        } else {
-            self.num_uncheckpointed_barrier += 1
         }
     }
 
     /// To add `finished_notifiers`, we need an barrier(checkpoint = true) to handle it
-    fn add_finished_notifiers(&mut self, mut finished_notifiers: Vec<Notifier>) {
-        self.finished_notifiers.append(&mut finished_notifiers);
+    fn add_finished_notifiers(&mut self, finished_notifiers: Vec<Notifier>) {
+        self.finished_notifiers.extend(finished_notifiers);
     }
 
     /// Process `finished_notifiers`, send success message
     fn post_finished_notifiers(&mut self) {
-        let finished_notifiers = take(&mut self.finished_notifiers);
-        finished_notifiers
-            .into_iter()
+        self.finished_notifiers
+            .drain(..)
             .for_each(Notifier::notify_finished);
     }
 
@@ -310,7 +274,6 @@ where
 
     /// Enqueue a barrier command, and init its state to `InFlight`.
     fn enqueue_command(&mut self, command_ctx: Arc<CommandContext<S>>, notifiers: Vec<Notifier>) {
-        self.update_num_uncheckpointed_barrier(command_ctx.checkpoint);
         let timer = self.metrics.barrier_latency.start_timer();
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
@@ -447,9 +410,7 @@ enum BarrierEpochState {
     /// This barrier is current in-flight on the stream graph of compute nodes.
     InFlight,
 
-    /// This barrier is completed or failed. We use a bool to mark if this barrier needs to do
-    /// checkpoint, If it is false, we will just use `update_current_epoch` instead of
-    /// `commit_epoch`
+    /// This barrier is completed or failed.
     Completed(Vec<BarrierCompleteResponse>),
 }
 
@@ -472,13 +433,11 @@ where
         let enable_recovery = env.opts.enable_recovery;
         let interval = env.opts.barrier_interval;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
-        let checkpoint_frequency = env.opts.checkpoint_frequency;
         tracing::info!(
-            "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}, checkpoint_frequency={}",
+            "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",
             interval,
             enable_recovery,
             in_flight_barrier_nums,
-            checkpoint_frequency,
         );
 
         Self {
@@ -486,7 +445,6 @@ where
             enable_recovery,
             scheduled_barriers,
             in_flight_barrier_nums,
-            checkpoint_frequency,
             cluster_manager,
             catalog_manager,
             fragment_manager,
@@ -533,8 +491,7 @@ where
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut barrier_timer: Option<HistogramTimer> = None;
         let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut checkpoint_control =
-            CheckpointControl::new(self.metrics.clone(), self.checkpoint_frequency);
+        let mut checkpoint_control = CheckpointControl::new(self.metrics.clone());
         loop {
             tokio::select! {
                 biased;
@@ -570,7 +527,7 @@ where
             let Scheduled {
                 command,
                 notifiers,
-                mut checkpoint,
+                checkpoint,
             } = self.scheduled_barriers.pop_or_default().await;
             let info = self
                 .resolve_actor_info(&mut checkpoint_control, &command)
@@ -597,7 +554,6 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
-            checkpoint = checkpoint || checkpoint_control.try_get_checkpoint();
 
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
@@ -748,14 +704,8 @@ where
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
             tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
-            self.do_recovery(
-                err,
-                fail_node.into_iter(),
-                state,
-                tracker,
-                checkpoint_control,
-            )
-            .await;
+            self.do_recovery(err, fail_node, state, tracker, checkpoint_control)
+                .await;
             return;
         }
         // change the state is Complete
@@ -868,7 +818,7 @@ where
                     // if we collect a barrier(checkpoint = false),
                     // we need to ensure that command is Plain and the notifier's checkpoint is
                     // false
-                    assert_matches!(node.command_ctx.command, Command::Plain(_));
+                    assert!(!node.command_ctx.command.need_checkpoint());
                 }
 
                 node.command_ctx.post_collect().await?;
@@ -876,9 +826,6 @@ where
                 // Notify about collected.
                 let mut notifiers = take(&mut node.notifiers);
                 notifiers.iter_mut().for_each(|notifier| {
-                    if !checkpoint {
-                        assert!(!notifier.bound_to_checkpoint_barrier())
-                    }
                     notifier.notify_collected();
                 });
 
@@ -894,7 +841,7 @@ where
 
                 // Force checkpoint in next barrier to finish creating mv.
                 if !finished_notifiers.is_empty() && !checkpoint {
-                    checkpoint_control.force_checkpoint_in_next_barrier();
+                    self.scheduled_barriers.force_checkpoint_in_next_barrier();
                 }
                 checkpoint_control.add_finished_notifiers(finished_notifiers);
 

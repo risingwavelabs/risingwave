@@ -14,6 +14,7 @@
 
 use std::collections::VecDeque;
 use std::iter::once;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -37,6 +38,14 @@ struct Inner {
 
     /// When `queue` is not empty anymore, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
+
+    /// The numbers of barrier (checkpoint = false) since the last barrier (checkpoint = true)
+    num_uncheckpointed_barrier: AtomicUsize,
+
+    /// Force checkpoint in next barrier.
+    force_checkpoint: AtomicBool,
+
+    checkpoint_frequency: usize,
 }
 
 /// The sender side of the barrier scheduling queue.
@@ -51,10 +60,20 @@ pub struct BarrierScheduler<S: MetaStore> {
 impl<S: MetaStore> BarrierScheduler<S> {
     /// Create a pair of [`BarrierScheduler`] and [`ScheduledBarriers`], for scheduling barriers
     /// from different managers, and executing them in the barrier manager, respectively.
-    pub fn new_pair(hummock_manager: HummockManagerRef<S>) -> (Self, ScheduledBarriers) {
+    pub fn new_pair(
+        hummock_manager: HummockManagerRef<S>,
+        checkpoint_frequency: usize,
+    ) -> (Self, ScheduledBarriers) {
+        tracing::info!(
+            "Starting barrier scheduler with: checkpoint_frequency={:?}",
+            checkpoint_frequency,
+        );
         let inner = Arc::new(Inner {
             queue: RwLock::new(VecDeque::new()),
             changed_tx: watch::channel(()).0,
+            num_uncheckpointed_barrier: AtomicUsize::new(0),
+            checkpoint_frequency,
+            force_checkpoint: AtomicBool::new(false),
         });
 
         (
@@ -79,11 +98,8 @@ impl<S: MetaStore> BarrierScheduler<S> {
 
     /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
     /// default checkpoint barrier will be created.
-    async fn attach_notifiers(&self, new_notifiers: Vec<Notifier>) {
+    async fn attach_notifiers(&self, new_notifiers: Vec<Notifier>, new_checkpoint: bool) {
         let mut queue = self.inner.queue.write().await;
-        let new_checkpoint = new_notifiers
-            .iter()
-            .any(|notifier| notifier.bound_to_checkpoint_barrier());
         match queue.front_mut() {
             Some(Scheduled {
                 notifiers,
@@ -94,10 +110,10 @@ impl<S: MetaStore> BarrierScheduler<S> {
                 *checkpoint = *checkpoint || new_checkpoint;
             }
             None => {
-                // If no command scheduled, create periodic checkpoint barrier by default.
+                // If no command scheduled, create a periodic barrier by default.
                 queue.push_back(Scheduled {
-                    notifiers: new_notifiers.into_iter().collect(),
-                    command: Command::checkpoint(),
+                    notifiers: new_notifiers,
+                    command: Command::barrier(),
                     checkpoint: new_checkpoint,
                 });
                 if queue.len() == 1 {
@@ -113,10 +129,9 @@ impl<S: MetaStore> BarrierScheduler<S> {
         let (tx, rx) = oneshot::channel();
         let notifier = Notifier {
             collected: Some(tx),
-            checkpoint,
             ..Default::default()
         };
-        self.attach_notifiers(vec![notifier]).await;
+        self.attach_notifiers(vec![notifier], checkpoint).await;
         rx.await.unwrap()
     }
 
@@ -143,15 +158,14 @@ impl<S: MetaStore> BarrierScheduler<S> {
                 is_create_mv,
             });
             scheduleds.push(Scheduled {
+                checkpoint: command.need_checkpoint(),
                 command,
                 notifiers: once(Notifier {
                     collected: Some(collect_tx),
                     finished: Some(finish_tx),
-                    checkpoint: true,
                     ..Default::default()
                 })
                 .collect(),
-                checkpoint: true,
             });
         }
 
@@ -210,13 +224,23 @@ impl ScheduledBarriers {
     /// Pop a scheduled barrier from the queue, or a default checkpoint barrier if not exists.
     pub(super) async fn pop_or_default(&self) -> Scheduled {
         let mut queue = self.inner.queue.write().await;
-
-        // If no command scheduled, create periodic checkpoint barrier by default.
-        queue.pop_front().unwrap_or_else(|| Scheduled {
-            command: Command::checkpoint(),
-            notifiers: Default::default(),
-            checkpoint: false,
-        })
+        let checkpoint = self.try_get_checkpoint();
+        let scheduled = match queue.pop_front() {
+            Some(mut scheduled) => {
+                scheduled.checkpoint = scheduled.checkpoint || checkpoint;
+                scheduled
+            }
+            None => {
+                // If no command scheduled, create a periodic barrier by default.
+                Scheduled {
+                    command: Command::barrier(),
+                    notifiers: Default::default(),
+                    checkpoint,
+                }
+            }
+        };
+        self.update_num_uncheckpointed_barrier(scheduled.checkpoint);
+        scheduled
     }
 
     /// Wait for at least one scheduled barrier in the queue.
@@ -238,6 +262,34 @@ impl ScheduledBarriers {
             notifiers.into_iter().for_each(|notify| {
                 notify.notify_collection_failed(anyhow!("Scheduled barrier abort.").into())
             })
+        }
+    }
+
+    /// Whether the barrier(checkpoint = true) should be injected.
+    fn try_get_checkpoint(&self) -> bool {
+        self.inner
+            .num_uncheckpointed_barrier
+            .load(Ordering::Relaxed)
+            >= self.inner.checkpoint_frequency
+            || self.inner.force_checkpoint.load(Ordering::Relaxed)
+    }
+
+    /// Make the `checkpoint` of the next barrier must be true
+    pub(crate) fn force_checkpoint_in_next_barrier(&self) {
+        self.inner.force_checkpoint.store(true, Ordering::Relaxed)
+    }
+
+    /// Update the `num_uncheckpointed_barrier`
+    fn update_num_uncheckpointed_barrier(&self, checkpoint: bool) {
+        if checkpoint {
+            self.inner
+                .num_uncheckpointed_barrier
+                .store(0, Ordering::Relaxed);
+            self.inner.force_checkpoint.store(false, Ordering::Relaxed);
+        } else {
+            self.inner
+                .num_uncheckpointed_barrier
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 }

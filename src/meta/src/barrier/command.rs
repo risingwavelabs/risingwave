@@ -111,7 +111,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn checkpoint() -> Self {
+    pub fn barrier() -> Self {
         Self::Plain(None)
     }
 
@@ -153,6 +153,11 @@ impl Command {
         // like scaling and migration, which must pause the concurrent checkpoint to ensure the
         // previous checkpoint has been done.
         matches!(self, Self::Plain(Some(Mutation::Pause(_))))
+    }
+
+    pub fn need_checkpoint(&self) -> bool {
+        // todo! Reviewing the flow of different command to reduce the amount of checkpoint
+        !matches!(self, Command::Plain(None | Some(Mutation::Resume(_))))
     }
 }
 

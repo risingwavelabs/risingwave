@@ -47,7 +47,7 @@ enum ManagedBarrierStateInner {
 #[derive(Debug)]
 pub(super) struct BarrierState {
     prev_epoch: u64,
-    barrier_inner: ManagedBarrierStateInner,
+    inner: ManagedBarrierStateInner,
     checkpoint: bool,
 }
 
@@ -78,7 +78,7 @@ impl ManagedBarrierState {
     fn may_notify(&mut self, curr_epoch: u64) {
         let to_notify = match self.epoch_barrier_state_map.get(&curr_epoch) {
             Some(BarrierState {
-                barrier_inner:
+                inner:
                     ManagedBarrierStateInner::Issued {
                         remaining_actors, ..
                     },
@@ -91,7 +91,8 @@ impl ManagedBarrierState {
             while let Some((
                 _,
                 &BarrierState {
-                    ref barrier_inner, ..
+                    inner: ref barrier_inner,
+                    ..
                 },
             )) = self.epoch_barrier_state_map.first_key_value()
             {
@@ -125,7 +126,7 @@ impl ManagedBarrierState {
                     state_store.seal_epoch(barrier_state.prev_epoch, barrier_state.checkpoint);
                 });
 
-                match barrier_state.barrier_inner {
+                match barrier_state.inner {
                     ManagedBarrierStateInner::Issued {
                         collect_notifier, ..
                     } => {
@@ -161,7 +162,7 @@ impl ManagedBarrierState {
         match self.epoch_barrier_state_map.get_mut(&barrier.epoch.curr) {
             Some(&mut BarrierState {
                 prev_epoch,
-                barrier_inner:
+                inner:
                     ManagedBarrierStateInner::Stashed {
                         ref mut collected_actors,
                     },
@@ -173,7 +174,7 @@ impl ManagedBarrierState {
             }
             Some(&mut BarrierState {
                 prev_epoch,
-                barrier_inner:
+                inner:
                     ManagedBarrierStateInner::Issued {
                         ref mut remaining_actors,
                         ..
@@ -194,7 +195,7 @@ impl ManagedBarrierState {
                     barrier.epoch.curr,
                     BarrierState {
                         prev_epoch: barrier.epoch.prev,
-                        barrier_inner: ManagedBarrierStateInner::Stashed {
+                        inner: ManagedBarrierStateInner::Stashed {
                             collected_actors: once(actor_id).collect(),
                         },
                         checkpoint: barrier.checkpoint,
@@ -214,7 +215,7 @@ impl ManagedBarrierState {
     ) {
         let inner = match self.epoch_barrier_state_map.get_mut(&barrier.epoch.curr) {
             Some(&mut BarrierState {
-                barrier_inner:
+                inner:
                     ManagedBarrierStateInner::Stashed {
                         ref mut collected_actors,
                     },
@@ -231,7 +232,7 @@ impl ManagedBarrierState {
                 }
             }
             Some(&mut BarrierState {
-                barrier_inner: ManagedBarrierStateInner::Issued { .. },
+                inner: ManagedBarrierStateInner::Issued { .. },
                 ..
             }) => {
                 panic!(
@@ -251,7 +252,7 @@ impl ManagedBarrierState {
             barrier.epoch.curr,
             BarrierState {
                 prev_epoch: barrier.epoch.prev,
-                barrier_inner: inner,
+                inner,
                 checkpoint: barrier.checkpoint,
             },
         );

@@ -85,7 +85,7 @@ pub struct StreamingConfig {
     #[serde(default = "default::chunk_size")]
     pub chunk_size: u32,
 
-    /// The interval of periodic checkpointing.
+    /// The interval of periodic barrier.
     #[serde(default = "default::barrier_interval_ms")]
     pub barrier_interval_ms: u32,
 
@@ -93,6 +93,7 @@ pub struct StreamingConfig {
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
+    /// There will be a checkpoint for every n barriers
     #[serde(default = "default::checkpoint_frequency")]
     pub checkpoint_frequency: usize,
 
