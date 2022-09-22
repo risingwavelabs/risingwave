@@ -87,6 +87,7 @@ mod integration_tests;
 mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
+use anyhow::Context;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
@@ -579,7 +580,7 @@ pub async fn expect_first_barrier(
         .next()
         .stack_trace("expect_first_barrier")
         .await
-        .expect("failed to extract the first message: stream closed unexpectedly")?;
+        .context("failed to extract the first message: stream closed unexpectedly")??;
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");
@@ -595,7 +596,7 @@ pub async fn expect_first_barrier_from_aligned_stream(
         .next()
         .stack_trace("expect_first_barrier")
         .await
-        .expect("failed to extract the first message: stream closed unexpectedly")?;
+        .context("failed to extract the first message: stream closed unexpectedly")??;
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");
