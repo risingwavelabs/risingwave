@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::iter;
 use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -1385,7 +1386,7 @@ impl DataChunkMutator {
     ) -> Self {
         let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
 
-        for (&start_row_id, &end_row_id) in repeat_n(&0, 1)
+        for (&start_row_id, &end_row_id) in iter::once(&0)
             .chain(first_output_row_ids.iter())
             .tuple_windows()
             .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
@@ -1428,7 +1429,7 @@ impl DataChunkMutator {
     ) -> Self {
         let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
 
-        for (&start_row_id, &end_row_id) in repeat_n(&0, 1)
+        for (&start_row_id, &end_row_id) in iter::once(&0)
             .chain(first_output_row_ids.iter())
             .tuple_windows()
             .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
@@ -1521,7 +1522,7 @@ impl DataChunkMutator {
     ) -> Self {
         let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
 
-        for (&start_row_id, &end_row_id) in repeat_n(&0, 1)
+        for (&start_row_id, &end_row_id) in iter::once(&0)
             .chain(first_output_row_id.iter())
             .tuple_windows()
             .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)

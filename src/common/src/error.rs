@@ -16,7 +16,6 @@ use std::backtrace::Backtrace;
 use std::convert::Infallible;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
-use std::sync::Arc;
 
 use memcomparable::Error as MemComparableError;
 use risingwave_pb::ProstFieldNotFound;
@@ -146,10 +145,10 @@ pub fn internal_error(msg: impl Into<String>) -> RwError {
     ErrorCode::InternalError(msg.into()).into()
 }
 
-#[derive(Clone)]
+// #[derive(Clone)]
 pub struct RwError {
-    inner: Arc<ErrorCode>,
-    backtrace: Arc<Backtrace>,
+    inner: Box<ErrorCode>,
+    backtrace: Box<Backtrace>,
 }
 
 impl From<RwError> for tonic::Status {
@@ -172,8 +171,8 @@ impl RwError {
 impl From<ErrorCode> for RwError {
     fn from(code: ErrorCode) -> Self {
         Self {
-            inner: Arc::new(code),
-            backtrace: Arc::new(Backtrace::capture()),
+            inner: Box::new(code),
+            backtrace: Box::new(Backtrace::capture()),
         }
     }
 }
@@ -181,8 +180,8 @@ impl From<ErrorCode> for RwError {
 impl From<JoinError> for RwError {
     fn from(join_error: JoinError) -> Self {
         Self {
-            inner: Arc::new(ErrorCode::InternalError(join_error.to_string())),
-            backtrace: Arc::new(Backtrace::capture()),
+            inner: Box::new(ErrorCode::InternalError(join_error.to_string())),
+            backtrace: Box::new(Backtrace::capture()),
         }
     }
 }

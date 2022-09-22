@@ -50,13 +50,13 @@ impl PgFieldDescriptor {
         };
 
         Self {
-            type_modifier,
-            format_code,
             name,
             table_oid,
             col_attr_num,
-            type_len,
             type_oid,
+            type_len,
+            type_modifier,
+            format_code,
         }
     }
 

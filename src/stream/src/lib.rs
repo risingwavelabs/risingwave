@@ -14,20 +14,7 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::disallowed_types)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
 #![feature(iterator_try_collect)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(more_qualified_paths)]
@@ -49,6 +36,7 @@
 #![feature(once_cell)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
+#![feature(btree_drain_filter)]
 
 #[macro_use]
 extern crate tracing;
