@@ -45,12 +45,12 @@ impl<S: StateStore> Debug for AggState<S> {
 pub const ROW_COUNT_COLUMN: usize = 0;
 
 impl<S: StateStore> AggState<S> {
-    pub async fn row_count(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<i64> {
-        Ok(self.managed_states[ROW_COUNT_COLUMN]
-            .get_output(state_table)
-            .await?
-            .map(|x| *x.as_int64())
-            .unwrap_or(0))
+    pub fn row_count(&mut self) -> i64 {
+        if let ManagedStateImpl::Value(count_state) = self.managed_states[ROW_COUNT_COLUMN] {
+            Ok(count_state.get_output().map(|x| *x.as_int64()).unwrap_or(0))
+        } else {
+            unreachable!("streamAgg's count state must be a value state");
+        }
     }
 
     pub fn prev_row_count(&self) -> i64 {
@@ -102,7 +102,7 @@ impl<S: StateStore> AggState<S> {
             return Ok(0);
         }
 
-        let row_count = self.row_count(&state_tables[ROW_COUNT_COLUMN]).await?;
+        let row_count = self.row_count();
         let prev_row_count = self.prev_row_count();
 
         trace!(
