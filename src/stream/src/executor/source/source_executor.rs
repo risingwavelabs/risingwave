@@ -28,14 +28,13 @@ use risingwave_connector::source::{ConnectorState, SplitId, SplitImpl, SplitMeta
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::row_id::RowIdGenerator;
 use risingwave_source::*;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::reader::SourceReaderStream;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::source::state::SourceStateHandler;
 use crate::executor::source::state_table_handler::SourceStateTableHandler;
 use crate::executor::*;
 
@@ -869,7 +868,8 @@ mod tests {
         // there must exist state for new add partition
         source_state_handler
             .get("3-1".to_string().into(), curr_epoch + 1)
-            .await.unwrap()
+            .await
+            .unwrap()
             .unwrap();
 
         let chunk_2 = (materialize.next().await.unwrap().unwrap())

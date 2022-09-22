@@ -19,7 +19,6 @@ use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::executor::state::SourceStateHandler;
 use crate::executor::state_table_handler::SourceStateTableHandler;
 use crate::executor::SourceExecutor;
 

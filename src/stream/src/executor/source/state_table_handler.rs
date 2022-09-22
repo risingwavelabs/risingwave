@@ -51,9 +51,9 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         ScalarImpl::Utf8(rhs.to_string())
     }
 
-    pub(crate) async fn get(&self, key: SplitId, epoch: u64) -> StreamExecutorResult<Option<Row>> {
+    pub(crate) async fn get(&self, key: SplitId, _epoch: u64) -> StreamExecutorResult<Option<Row>> {
         self.state_store
-            .get_row(&Row::new(vec![Some(Self::string_to_scalar(key))]), epoch)
+            .get_row(&Row::new(vec![Some(Self::string_to_scalar(key))]))
             .await
             .map_err(StreamExecutorError::from)
     }
@@ -92,6 +92,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             // TODO should be a clear Error Code
             bail!("states require not null");
         } else {
+            self.state_store.init_epoch(epoch);
             for split_impl in states {
                 self.set(split_impl.id(), split_impl.encode_to_bytes(), epoch)
                     .await?;
@@ -109,13 +110,10 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     ) -> StreamExecutorResult<Option<SplitImpl>> {
         Ok(match self.get(stream_source_split.id(), epoch).await? {
             None => None,
-            Some(row) => {
-                println!("row {:?}", row);
-                match row.0.get(1).unwrap() {
-                    Some(ScalarImpl::Utf8(s)) => Some(SplitImpl::restore_from_bytes(s.as_bytes())?),
-                    _ => unreachable!(),
-                }
-            }
+            Some(row) => match row.0.get(1).unwrap() {
+                Some(ScalarImpl::Utf8(s)) => Some(SplitImpl::restore_from_bytes(s.as_bytes())?),
+                _ => unreachable!(),
+            },
         })
     }
 }
@@ -148,9 +146,8 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
         name: String::new(),
         columns,
         is_index: false,
-        index_on_id: 0,
         value_indices: vec![0, 1],
-        order_key: vec![ColumnOrder {
+        pk: vec![ColumnOrder {
             index: 0,
             order_type: 1,
         }],
@@ -161,13 +158,8 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
 #[cfg(test)]
 pub(crate) mod tests {
     use risingwave_common::array::Row;
-    use risingwave_common::catalog::{DatabaseId, SchemaId};
     use risingwave_common::types::{Datum, ScalarImpl};
     use risingwave_connector::source::kafka::KafkaSplit;
-    use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -182,15 +174,13 @@ pub(crate) mod tests {
         let b: Arc<str> = String::from("b").into();
         let b: Datum = Some(ScalarImpl::Utf8(b.as_ref().into()));
 
+        state_table.init_epoch(100100);
         state_table.insert(Row::new(vec![a.clone(), b.clone()]));
         state_table.commit(100100).await.unwrap();
 
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
-        let _resp = state_table
-            .get_row(&Row::new(vec![a]), 100102)
-            .await
-            .unwrap();
+        let _resp = state_table.get_row(&Row::new(vec![a])).await.unwrap();
         // println!("{:?}", resp.unwrap().0[1].as_ref().unwrap().get_ident());
     }
 
