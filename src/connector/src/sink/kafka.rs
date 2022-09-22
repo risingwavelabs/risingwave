@@ -14,10 +14,10 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use futures::{Future, TryFutureExt};
 use itertools::Itertools;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
@@ -29,7 +29,6 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
-use tokio::task;
 use tracing::warn;
 
 use super::{Sink, SinkError};
@@ -55,7 +54,7 @@ pub struct KafkaConfig {
     pub identifier: String,
 
     pub timeout: Duration,
-    pub max_retry_num: i32,
+    pub max_retry_num: u32,
     pub retry_interval: Duration,
 }
 
@@ -104,36 +103,30 @@ pub struct KafkaSink {
 }
 
 impl KafkaSink {
-    pub fn new(config: KafkaConfig) -> Result<Self> {
+    pub async fn new(config: KafkaConfig) -> Result<Self> {
         Ok(KafkaSink {
             config: config.clone(),
-            conductor: KafkaTransactionConductor::new(config)?,
+            conductor: KafkaTransactionConductor::new(config).await?,
             in_transaction_epoch: None,
             state: KafkaSinkState::Init,
         })
     }
 
     // any error should report to upper level and requires revert to previous epoch.
-    pub async fn do_with_retry<F, FutKR, T>(&self, f: F) -> KafkaResult<T>
+    pub async fn do_with_retry<'a, F, FutKR, T>(&'a self, f: F) -> KafkaResult<T>
     where
-        F: Fn(KafkaTransactionConductor) -> FutKR,
-        FutKR: Future<Output = KafkaResult<T>>,
+        F: Fn(&'a KafkaTransactionConductor) -> FutKR,
+        FutKR: Future<Output = KafkaResult<T>> + 'a,
     {
-        let conductor = self.conductor.clone();
         let mut err_placeholder = KafkaError::Canceled;
         for _ in 0..self.config.max_retry_num {
-            match f(conductor.clone()).await {
-                Ok(res) => {
-                    return Ok(res);
-                }
-                Err(e) => {
-                    err_placeholder = e;
-                }
+            match f(&self.conductor).await {
+                Ok(res) => return Ok(res),
+                Err(e) => err_placeholder = e,
             }
             // a back off policy
             tokio::time::sleep(self.config.retry_interval).await;
         }
-
         Err(err_placeholder)
     }
 
@@ -462,12 +455,13 @@ pub struct KafkaTransactionConductor {
 }
 
 impl KafkaTransactionConductor {
-    fn new(config: KafkaConfig) -> Result<Self> {
+    async fn new(config: KafkaConfig) -> Result<Self> {
         let inner = ClientConfig::new()
             .set("bootstrap.servers", config.brokers.as_str())
             .set("message.timeout.ms", "5000")
             .set("transactional.id", config.identifier.as_str()) // required by kafka transaction
             .create_with_context(DefaultProducerContext)
+            .await
             .expect("Producer creation error");
 
         Ok(KafkaTransactionConductor {
@@ -477,39 +471,25 @@ impl KafkaTransactionConductor {
         })
     }
 
-    fn init_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
-        let inner = self.inner.clone();
-        let timeout = self.properties.timeout;
-        task::spawn_blocking(move || inner.init_transactions(timeout))
-            .unwrap_or_else(|_| Err(KafkaError::Canceled))
+    async fn init_transaction(&self) -> KafkaResult<()> {
+        self.inner.init_transactions(self.properties.timeout).await
     }
 
-    fn start_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
-        let inner = Arc::clone(&self.inner);
-        task::spawn_blocking(move || inner.begin_transaction())
-            .unwrap_or_else(|_| Err(KafkaError::Canceled))
+    async fn start_transaction(&self) -> KafkaResult<()> {
+        self.inner.begin_transaction()
     }
 
-    fn commit_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
-        let inner = Arc::clone(&self.inner);
-        let timeout = self.properties.timeout;
-        task::spawn_blocking(move || inner.commit_transaction(timeout))
-            .unwrap_or_else(|_| Err(KafkaError::Canceled))
+    async fn commit_transaction(&self) -> KafkaResult<()> {
+        self.inner.commit_transaction(self.properties.timeout).await
     }
 
-    fn abort_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
-        let inner = Arc::clone(&self.inner);
-        let timeout = self.properties.timeout;
-        task::spawn_blocking(move || inner.abort_transaction(timeout))
-            .unwrap_or_else(|_| Err(KafkaError::Canceled))
+    async fn abort_transaction(&self) -> KafkaResult<()> {
+        self.inner.abort_transaction(self.properties.timeout).await
     }
 
-    fn flush(&self) -> impl Future<Output = KafkaResult<()>> {
-        let inner = Arc::clone(&self.inner);
-        let timeout = self.properties.timeout;
-        task::spawn_blocking(move || inner.flush(timeout))
-            .map_ok(|_| KafkaResult::Ok(()))
-            .unwrap_or_else(|_| Err(KafkaError::Canceled))
+    async fn flush(&self) -> KafkaResult<()> {
+        self.inner.flush(self.properties.timeout).await;
+        Ok(())
     }
 
     #[expect(clippy::unused_async)]
@@ -525,21 +505,16 @@ impl KafkaTransactionConductor {
     }
 }
 
+#[cfg(test)]
 mod test {
-    #[allow(unused_imports)]
     use maplit::hashmap;
-    #[allow(unused_imports)]
-    use risingwave_common::types::OrderedF32;
-    #[allow(unused_imports)]
-    use risingwave_common::{
-        array,
-        array::{
-            column::Column, ArrayBuilder, ArrayImpl, F32Array, F32ArrayBuilder, I32Array,
-            I32ArrayBuilder, StructArray,
-        },
+    use risingwave_common::array;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{
+        ArrayBuilder, ArrayImpl, F32Array, F32ArrayBuilder, I32Array, I32ArrayBuilder, StructArray,
     };
+    use risingwave_common::types::OrderedF32;
 
-    #[allow(unused_imports)]
     use super::*;
 
     #[ignore]
