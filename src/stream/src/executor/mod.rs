@@ -75,6 +75,7 @@ mod receiver;
 mod simple;
 mod sink;
 mod source;
+pub mod subtask;
 mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
@@ -121,8 +122,8 @@ pub use wrapper::WrapperExecutor;
 use self::barrier_align::AlignedMessageStream;
 
 pub type BoxedExecutor = Box<dyn Executor>;
-pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
+pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
