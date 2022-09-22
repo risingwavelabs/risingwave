@@ -177,6 +177,7 @@ where
             FeMessage::Describe(m) => self.process_describe_msg(m).await?,
             FeMessage::Sync => self.stream.write_no_flush(&BeMessage::ReadyForQuery)?,
             FeMessage::Close(m) => self.process_close_msg(m).await?,
+            FeMessage::Flush => self.stream.flush().await?,
         }
         self.stream.flush().await?;
         Ok(false)
