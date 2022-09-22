@@ -31,6 +31,7 @@ impl SplitReader for PubsubSplitReader {
         let topic = client.topic(&properties.topic);
         let subscription = client.subscription(&properties.subscription);
 
+        // ! Perhaps the split enumerator should be responsible for creating subscriptions.
         if !subscription
             .exists(None, None)
             .await
@@ -60,6 +61,8 @@ impl SplitReader for PubsubSplitReader {
         if next_batch.is_empty() {
             return Ok(None);
         }
+
+        // TODO: acks go here?
 
         let source_message_batch: Vec<SourceMessage> =
             next_batch.into_iter().map(|rm| rm.into()).collect();
