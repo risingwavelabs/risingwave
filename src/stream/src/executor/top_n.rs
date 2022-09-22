@@ -155,6 +155,10 @@ pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
+/// `WITH_TIES` supports the semantic of `FETCH FIRST n ROWS WITH TIES` and `RANK() <= n`.
+///
+/// `OFFSET m FETCH FIRST n ROWS WITH TIES` and `m <= RANK() <= n` are not supported now,
+/// since they have different semantics.
 pub struct TopNCache<const WITH_TIES: bool> {
     /// Rows in the range `[0, offset)`
     pub low: BTreeMap<OrderedRow, Row>,
@@ -233,11 +237,11 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     }
 
     pub fn is_low_cache_full(&self) -> bool {
-        debug_assert!(self.low.len() <= self.offset);
+        assert!(self.low.len() <= self.offset);
         let full = self.low.len() == self.offset;
         if !full {
-            debug_assert!(self.middle.is_empty());
-            debug_assert!(self.high.is_empty());
+            assert!(self.middle.is_empty());
+            assert!(self.high.is_empty());
         }
         full
     }
@@ -245,13 +249,13 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     pub fn is_middle_cache_full(&self) -> bool {
         // For WITH_TIES, the middle cache can exceed the capacity.
         if !WITH_TIES {
-            debug_assert!(self.middle.len() <= self.limit);
+            assert!(self.middle.len() <= self.limit);
         }
         let full = self.middle.len() >= self.limit;
         if full {
-            debug_assert!(self.is_low_cache_full());
+            assert!(self.is_low_cache_full());
         } else {
-            debug_assert!(self.high.is_empty());
+            assert!(self.high.is_empty());
         }
         full
     }
@@ -259,11 +263,11 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     pub fn is_high_cache_full(&self) -> bool {
         // For WITH_TIES, the high cache can exceed the capacity.
         if !WITH_TIES {
-            debug_assert!(self.high.len() <= self.high_capacity);
+            assert!(self.high.len() <= self.high_capacity);
         }
         let full = self.high.len() >= self.high_capacity;
         if full {
-            debug_assert!(self.is_middle_cache_full());
+            assert!(self.is_middle_cache_full());
         }
         full
     }
@@ -422,7 +426,7 @@ impl TopNCacheTrait for TopNCache<true> {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<Row>,
     ) {
-        debug_assert!(self.low.is_empty());
+        assert!(self.low.is_empty());
 
         let elem_to_compare_with_middle = (ordered_pk_row, row);
 
@@ -532,7 +536,7 @@ impl TopNCacheTrait for TopNCache<true> {
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
                 let high_first_sort_key = high_first.0.prefix(self.sort_key_len);
-                debug_assert!(high_first_sort_key > middle_last_sort_key);
+                assert!(high_first_sort_key > middle_last_sort_key);
 
                 res_ops.push(Op::Insert);
                 res_rows.push(high_first.1.clone());
