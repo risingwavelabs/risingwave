@@ -33,7 +33,7 @@ where
     T2: TryInto<u32> + Debug,
 {
     general_shift(l, r, |a, b| {
-        a.checked_shl(b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_shl(b).ok_or_else(|| ExprError::NumericOutOfRange)
     })
 }
 
@@ -44,7 +44,7 @@ where
     T2: TryInto<u32> + Debug,
 {
     general_shift(l, r, |a, b| {
-        a.checked_shr(b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_shr(b).ok_or_else(|| ExprError::NumericOutOfRange)
     })
 }
 

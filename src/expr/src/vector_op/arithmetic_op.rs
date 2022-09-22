@@ -34,7 +34,7 @@ where
     T3: CheckedAdd<Output = T3>,
 {
     general_atm(l, r, |a, b| {
-        a.checked_add(b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_add(b).ok_or_else(|| ExprError::NumericOutOfRange)
     })
 }
 
@@ -46,7 +46,8 @@ where
     T3: CheckedSub,
 {
     general_atm(l, r, |a, b| {
-        a.checked_sub(&b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_sub(&b)
+            .ok_or_else(|| ExprError::NumericOutOfRange)
     })
 }
 
@@ -58,7 +59,8 @@ where
     T3: CheckedMul,
 {
     general_atm(l, r, |a, b| {
-        a.checked_mul(&b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_mul(&b)
+            .ok_or_else(|| ExprError::NumericOutOfRange)
     })
 }
 
@@ -88,13 +90,15 @@ where
     T3: CheckedRem,
 {
     general_atm(l, r, |a, b| {
-        a.checked_rem(&b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_rem(&b)
+            .ok_or_else(|| ExprError::NumericOutOfRange)
     })
 }
 
 #[inline(always)]
 pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
-    expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
+    expr.checked_neg()
+        .ok_or_else(|| ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
@@ -148,7 +152,7 @@ pub fn interval_timestamp_add<T1, T2, T3>(
     l: IntervalUnit,
     r: NaiveDateTimeWrapper,
 ) -> Result<NaiveDateTimeWrapper> {
-    r.checked_add(l).ok_or(ExprError::NumericOutOfRange)
+    r.checked_add(l).ok_or_else(|| ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
@@ -190,7 +194,7 @@ pub fn date_int_add<T1, T2, T3>(l: NaiveDateWrapper, r: i32) -> Result<NaiveDate
         .checked_add_signed(chrono::Duration::days(r as i64))
         .map(NaiveDateWrapper::new);
 
-    date_wrapper.ok_or(ExprError::NumericOutOfRange)
+    date_wrapper.ok_or_else(|| ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
@@ -224,7 +228,8 @@ pub fn interval_int_mul<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<IntervalUn
 where
     T2: TryInto<i32> + Debug,
 {
-    l.checked_mul_int(r).ok_or(ExprError::NumericOutOfRange)
+    l.checked_mul_int(r)
+        .ok_or_else(|| ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
@@ -282,7 +287,7 @@ pub fn interval_float_div<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<Interval
 where
     T2: TryInto<OrderedF64> + Debug,
 {
-    l.div_float(r).ok_or(ExprError::NumericOutOfRange)
+    l.div_float(r).ok_or_else(|| ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
@@ -290,7 +295,7 @@ pub fn interval_float_mul<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<Interval
 where
     T2: TryInto<OrderedF64> + Debug,
 {
-    l.mul_float(r).ok_or(ExprError::NumericOutOfRange)
+    l.mul_float(r).ok_or_else(|| ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
@@ -298,7 +303,7 @@ pub fn float_interval_mul<T1, T2, T3>(l: T1, r: IntervalUnit) -> Result<Interval
 where
     T1: TryInto<OrderedF64> + Debug,
 {
-    r.mul_float(l).ok_or(ExprError::NumericOutOfRange)
+    r.mul_float(l).ok_or_else(|| ExprError::NumericOutOfRange)
 }
 
 #[cfg(test)]

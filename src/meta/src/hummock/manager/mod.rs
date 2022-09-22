@@ -615,7 +615,7 @@ where
                 .compaction_group_manager()
                 .compaction_group(compaction_group_id)
                 .await
-                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
+                .ok_or_else(|| Error::InvalidCompactionGroup(compaction_group_id))?;
             let mut compact_statuses =
                 BTreeMapTransaction::new(&mut compaction.compaction_statuses);
             let new_compact_status = compact_statuses.new_entry_insert_txn(
@@ -631,7 +631,7 @@ where
             compaction
                 .compaction_statuses
                 .get_mut(&compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
+                .ok_or_else(|| Error::InvalidCompactionGroup(compaction_group_id))?,
         );
         let (current_version, watermark) = {
             let versioning_guard = read_lock!(self, versioning).await;
@@ -727,7 +727,7 @@ where
                     compaction
                         .compaction_statuses
                         .get(&compaction_group_id)
-                        .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
+                        .ok_or_else(|| Error::InvalidCompactionGroup(compaction_group_id))?,
                 ),
                 &current_version,
                 compaction_group_id,
@@ -905,9 +905,7 @@ where
             compaction
                 .compaction_statuses
                 .get_mut(&compact_task.compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(
-                    compact_task.compaction_group_id,
-                ))?,
+                .ok_or_else(|| Error::InvalidCompactionGroup(compact_task.compaction_group_id))?,
         );
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
@@ -1037,9 +1035,9 @@ where
                 compaction
                     .compaction_statuses
                     .get(&compact_task.compaction_group_id)
-                    .ok_or(Error::InvalidCompactionGroup(
-                        compact_task.compaction_group_id,
-                    ))?,
+                    .ok_or_else(|| {
+                        Error::InvalidCompactionGroup(compact_task.compaction_group_id)
+                    })?,
             ),
             read_lock!(self, versioning).await.current_version.borrow(),
             compact_task.compaction_group_id,

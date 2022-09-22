@@ -103,7 +103,7 @@ where
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
                 x.checked_add(&(y.to_owned_scalar()).into())
-                    .ok_or(ExprError::NumericOutOfRange)?,
+                    .ok_or_else(|| ExprError::NumericOutOfRange)?,
             ),
             (Some(x), None) => Some(x.clone()),
             (None, Some(y)) => Some((y.to_owned_scalar()).into()),
@@ -118,7 +118,7 @@ where
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
                 x.checked_sub(&(y.to_owned_scalar()).into())
-                    .ok_or(ExprError::NumericOutOfRange)?,
+                    .ok_or_else(|| ExprError::NumericOutOfRange)?,
             ),
             (Some(x), None) => Some(x.clone()),
             (None, Some(y)) => Some((-y.to_owned_scalar()).into()),

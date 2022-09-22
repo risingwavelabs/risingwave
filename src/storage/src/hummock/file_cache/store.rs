@@ -309,7 +309,7 @@ where
         // Read guard should be held during reading meta and loading data.
         let guard = self.meta_file.read().await;
 
-        let (bloc, _key) = guard.get(slot).ok_or(Error::InvalidSlot(slot))?;
+        let (bloc, _key) = guard.get(slot).ok_or_else(|| Error::InvalidSlot(slot))?;
         let offset = bloc.bidx as u64 * self.block_size as u64;
         let blen = bloc.blen(self.block_size as u32) as usize;
 

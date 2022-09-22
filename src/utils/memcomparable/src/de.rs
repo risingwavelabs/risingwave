@@ -364,7 +364,7 @@ impl<'de, 'a, B: Buf + 'de> de::Deserializer<'de> for &'a mut Deserializer<B> {
         V: Visitor<'de>,
     {
         let u = self.input.get_u32();
-        visitor.visit_char(char::from_u32(u).ok_or(Error::InvalidCharEncoding(u))?)
+        visitor.visit_char(char::from_u32(u).ok_or_else(|| Error::InvalidCharEncoding(u))?)
     }
 
     fn deserialize_str<V>(self, _visitor: V) -> Result<V::Value>

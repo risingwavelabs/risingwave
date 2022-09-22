@@ -321,7 +321,7 @@ impl CompactionGroupManagerInner {
                 } else {
                     compaction_groups
                         .get_mut(*compaction_group_id)
-                        .ok_or(Error::InvalidCompactionGroup(*compaction_group_id))?
+                        .ok_or_else(|| Error::InvalidCompactionGroup(*compaction_group_id))?
                 };
             compaction_group.member_table_ids.insert(*table_id);
             compaction_group
@@ -351,10 +351,10 @@ impl CompactionGroupManagerInner {
                 .index
                 .get(table_id)
                 .cloned()
-                .ok_or(Error::InvalidCompactionGroupMember(*table_id))?;
+                .ok_or_else(|| Error::InvalidCompactionGroupMember(*table_id))?;
             let mut compaction_group = compaction_groups
                 .get_mut(compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
+                .ok_or_else(|| Error::InvalidCompactionGroup(compaction_group_id))?;
             compaction_group.member_table_ids.remove(table_id);
             compaction_group.table_id_to_options.remove(table_id);
             if compaction_group_id > StaticCompactionGroupId::END as CompactionGroupId
@@ -384,7 +384,7 @@ impl CompactionGroupManagerInner {
         for compaction_group_id in compaction_group_ids {
             let compaction_group = compaction_groups
                 .get_mut(compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
+                .ok_or_else(|| Error::InvalidCompactionGroup(compaction_group_id))?;
             if compaction_group_id > StaticCompactionGroupId::END as CompactionGroupId
                 && compaction_group.member_table_ids.is_empty()
             {

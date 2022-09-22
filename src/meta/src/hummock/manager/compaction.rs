@@ -58,7 +58,7 @@ impl Compaction {
                     .expect("compact_task shouldn't be None");
                 let mut compact_status = compact_statuses
                     .get_mut(task.compaction_group_id)
-                    .ok_or(Error::InvalidCompactionGroup(task.compaction_group_id))?;
+                    .ok_or_else(|| Error::InvalidCompactionGroup(task.compaction_group_id))?;
                 compact_status.report_compact_task(
                     assignment
                         .compact_task

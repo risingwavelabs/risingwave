@@ -122,7 +122,7 @@ impl BatchManager {
         self.tasks
             .lock()
             .get(&task_id)
-            .ok_or(TaskNotFound)?
+            .ok_or_else(|| TaskNotFound)?
             .get_task_output(output_id)
     }
 
@@ -186,7 +186,7 @@ impl BatchManager {
             .tasks
             .lock()
             .get(task_id)
-            .ok_or(TaskNotFound)?
+            .ok_or_else(|| TaskNotFound)?
             .get_error())
     }
 

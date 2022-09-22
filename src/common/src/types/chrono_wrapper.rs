@@ -100,14 +100,14 @@ impl NaiveDateWrapper {
     pub fn with_days(days: i32) -> memcomparable::Result<Self> {
         Ok(NaiveDateWrapper::new(
             NaiveDate::from_num_days_from_ce_opt(days)
-                .ok_or(memcomparable::Error::InvalidNaiveDateEncoding(days))?,
+                .ok_or_else(|| memcomparable::Error::InvalidNaiveDateEncoding(days))?,
         ))
     }
 
     pub fn with_days_value(days: i32) -> value_encoding::Result<Self> {
         Ok(NaiveDateWrapper::new(
             NaiveDate::from_num_days_from_ce_opt(days)
-                .ok_or(ValueEncodingError::InvalidNaiveDateEncoding(days))?,
+                .ok_or_else(|| ValueEncodingError::InvalidNaiveDateEncoding(days))?,
         ))
     }
 
@@ -138,14 +138,14 @@ impl NaiveTimeWrapper {
     pub fn with_secs_nano(secs: u32, nano: u32) -> memcomparable::Result<Self> {
         Ok(NaiveTimeWrapper::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
-                .ok_or(memcomparable::Error::InvalidNaiveTimeEncoding(secs, nano))?,
+                .ok_or_else(|| memcomparable::Error::InvalidNaiveTimeEncoding(secs, nano))?,
         ))
     }
 
     pub fn with_secs_nano_value(secs: u32, nano: u32) -> value_encoding::Result<Self> {
         Ok(NaiveTimeWrapper::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
-                .ok_or(ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
+                .ok_or_else(|| ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
         ))
     }
 
@@ -184,17 +184,15 @@ impl NaiveTimeWrapper {
 impl NaiveDateTimeWrapper {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> memcomparable::Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
-            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
-                memcomparable::Error::InvalidNaiveDateTimeEncoding(secs, nsecs),
-            )?
+            NaiveDateTime::from_timestamp_opt(secs, nsecs)
+                .ok_or_else(|| memcomparable::Error::InvalidNaiveDateTimeEncoding(secs, nsecs))?
         }))
     }
 
     pub fn with_secs_nsecs_value(secs: i64, nsecs: u32) -> value_encoding::Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
-            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
-                ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs),
-            )?
+            NaiveDateTime::from_timestamp_opt(secs, nsecs)
+                .ok_or_else(|| ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs))?
         }))
     }
 
