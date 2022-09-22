@@ -91,9 +91,11 @@ impl_plan_tree_node_for_unary! { StreamHashAgg }
 impl StreamNode for StreamHashAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
+        let resultTable = self.
         let (internal_tables, column_mappings) = self
             .logical
             .infer_internal_table_catalog(self.vnode_col_idx);
+
         ProstStreamNode::HashAgg(HashAggNode {
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             agg_calls: self
@@ -116,6 +118,8 @@ impl StreamNode for StreamHashAgg {
                 })
                 .collect(),
             is_append_only: self.input().append_only(),
+            agg_call_states: todo!(),
+            result_table: todo!(),
         })
     }
 }

@@ -28,8 +28,8 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    ColumnMapping, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentType,
-    MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
+    DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentType, MaterializeNode,
+    ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -49,25 +49,25 @@ fn make_inputref(idx: i32) -> ExprNode {
     }
 }
 
-fn make_sum_aggcall(idx: i32) -> AggCall {
-    AggCall {
-        r#type: Type::Sum as i32,
-        args: vec![Arg {
-            input: Some(InputRefExpr { column_idx: idx }),
-            r#type: Some(DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-        }],
-        return_type: Some(DataType {
-            type_name: TypeName::Int64 as i32,
-            ..Default::default()
-        }),
-        distinct: false,
-        order_by_fields: vec![],
-        filter: None,
-    }
-}
+// fn make_sum_aggcall(idx: i32) -> AggCall {
+//     AggCall {
+//         r#type: Type::Sum as i32,
+//         args: vec![Arg {
+//             input: Some(InputRefExpr { column_idx: idx }),
+//             r#type: Some(DataType {
+//                 type_name: TypeName::Int64 as i32,
+//                 ..Default::default()
+//             }),
+//         }],
+//         return_type: Some(DataType {
+//             type_name: TypeName::Int64 as i32,
+//             ..Default::default()
+//         }),
+//         distinct: false,
+//         order_by_fields: vec![],
+//         filter: None,
+//     }
+// }
 
 fn make_field(type_name: TypeName) -> Field {
     Field {
@@ -116,6 +116,19 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
             order_type: 2,
         }],
         stream_key: vec![2],
+        ..Default::default()
+    }
+}
+
+fn make_empty_table(id: u32) -> ProstTable {
+    ProstTable {
+        id,
+        schema_id: SchemaId::placeholder() as u32,
+        database_id: DatabaseId::placeholder() as u32,
+        name: String::new(),
+        columns: vec![],
+        pk: vec![],
+        stream_key: vec![],
         ..Default::default()
     }
 }
@@ -193,15 +206,11 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     // simple agg node
     let simple_agg_node = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
-            agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
+            agg_calls: vec![],
             distribution_key: Default::default(),
-            internal_tables: vec![make_internal_table(2, true), make_internal_table(3, false)],
-            // Note: This mappings is not checked yet.
-            column_mappings: vec![
-                ColumnMapping { indices: vec![0] },
-                ColumnMapping { indices: vec![1] },
-            ],
             is_append_only: false,
+            agg_call_states: vec![],
+            result_table: Some(make_empty_table(1)),
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
@@ -239,15 +248,11 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     // agg node
     let simple_agg_node_1 = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
-            agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
+            agg_calls: vec![],
             distribution_key: Default::default(),
-            internal_tables: vec![make_internal_table(0, true), make_internal_table(1, false)],
-            // Note: This mappings is not checked yet.
-            column_mappings: vec![
-                ColumnMapping { indices: vec![0] },
-                ColumnMapping { indices: vec![1] },
-            ],
             is_append_only: false,
+            agg_call_states: vec![],
+            result_table: Some(make_empty_table(2)),
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
@@ -369,7 +374,7 @@ async fn test_fragmenter() -> MetaResult<()> {
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
-    assert_eq!(4, internal_table_ids.len());
+    assert_eq!(2, internal_table_ids.len());
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
