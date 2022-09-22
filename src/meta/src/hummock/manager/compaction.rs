@@ -100,18 +100,6 @@ where
             .count() as u64
     }
 
-    #[named]
-    pub async fn list_assigned_tasks_number(&self) -> Vec<(u32, usize)> {
-        let compaction = read_lock!(self, compaction).await;
-        compaction
-            .compact_task_assignment
-            .values()
-            .group_by(|s| s.context_id)
-            .into_iter()
-            .map(|(k, v)| (k, v.count()))
-            .collect_vec()
-    }
-
     pub async fn get_compaction_config(
         &self,
         compaction_group_id: CompactionGroupId,

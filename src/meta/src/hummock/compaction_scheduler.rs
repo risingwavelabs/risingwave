@@ -152,12 +152,7 @@ where
                 if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
                     break compactor;
                 } else {
-                    let current_compactor_tasks =
-                        self.hummock_manager.list_assigned_tasks_number().await;
-                    tracing::warn!(
-                    "No available compactor. The assigned task number for every compactor is (context_id, count):\n {:?}",
-                    current_compactor_tasks
-                );
+                    tracing::warn!("No available compactor, pausing compaction.");
                     self.compaction_resume_notifier.notified().await;
                 }
             };

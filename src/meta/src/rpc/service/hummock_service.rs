@@ -188,6 +188,22 @@ where
         let rx = self
             .compactor_manager
             .add_compactor(context_id, req.max_concurrent_task_number);
+        // Trigger compaction on all compaction groups.
+        for cg_id in self
+            .hummock_manager
+            .compaction_group_manager()
+            .compaction_group_ids()
+            .await
+        {
+            if let Err(e) = self.hummock_manager.try_send_compaction_request(cg_id) {
+                tracing::warn!(
+                    "Failed to schedule compaction for compaction group {}. {}",
+                    cg_id,
+                    e
+                );
+            }
+        }
+        self.hummock_manager.try_resume_compaction();
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 

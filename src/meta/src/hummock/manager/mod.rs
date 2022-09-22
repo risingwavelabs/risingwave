@@ -849,7 +849,6 @@ where
             },
         );
         commit_multi_var!(self, Some(assignee_context_id), compact_task_assignment)?;
-
         // Update compaction scheudle policy.
         self.compactor_manager
             .assign_compact_task(assignee_context_id, compact_task)?;
@@ -998,9 +997,7 @@ where
             // Tell compaction scheduler to resume compaction if there's any compactor becoming
             // available.
             if assigned_task_num == self.compactor_manager.max_concurrent_task_number() {
-                if let Some(notifier) = self.compaction_resume_notifier.read().as_ref() {
-                    notifier.notify_one();
-                }
+                self.try_resume_compaction();
             }
             // Update compaaction task count.
             //
@@ -1453,6 +1450,13 @@ where
                 .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))
         } else {
             Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
+        }
+    }
+
+    /// Tell compaction scheduler to resume compaction.
+    pub fn try_resume_compaction(&self) {
+        if let Some(notifier) = self.compaction_resume_notifier.read().as_ref() {
+            notifier.notify_one();
         }
     }
 
