@@ -20,6 +20,7 @@ use futures::future::join_all;
 use futures::pin_mut;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
 
@@ -27,7 +28,6 @@ use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
 use super::StreamConsumer;
 use crate::error::StreamResult;
-use crate::executor::Epoch;
 use crate::task::{ActorId, SharedContext};
 
 /// Shared by all operators of an actor.
@@ -96,7 +96,7 @@ where
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
-        futures::join!(
+        tokio::join!(
             // Drive the subtasks concurrently.
             join_all(std::mem::take(&mut self.subtasks)),
             self.run_consumer(),
@@ -115,7 +115,7 @@ where
             span
         };
 
-        let mut last_epoch: Option<Epoch> = None;
+        let mut last_epoch: Option<EpochPair> = None;
 
         let stream = Box::new(self.consumer).execute();
         pin_mut!(stream);

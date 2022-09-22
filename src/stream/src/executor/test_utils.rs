@@ -270,6 +270,7 @@ pub mod agg_executor {
                 agg_calls,
                 pk_indices,
                 executor_id,
+                1 << 10,
                 state_tables,
                 state_table_col_mappings,
             )

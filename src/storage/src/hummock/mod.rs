@@ -71,7 +71,7 @@ use crate::hummock::compaction_group_client::{
     CompactionGroupClientImpl, DummyCompactionGroupClient,
 };
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -83,7 +83,7 @@ use crate::monitor::StoreLocalStatistic;
 pub struct HummockStorage {
     options: Arc<StorageConfig>,
 
-    local_version_manager: Arc<LocalVersionManager>,
+    local_version_manager: LocalVersionManagerRef,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
@@ -161,42 +161,6 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    async fn get_from_table(
-        &self,
-        sstable: TableHolder,
-        internal_key: &[u8],
-        check_bloom_filter: bool,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<Option<HummockValue<Bytes>>> {
-        let ukey = user_key(internal_key);
-        if check_bloom_filter && !Self::hit_sstable_bloom_filter(sstable.value(), ukey, stats) {
-            return Ok(None);
-        }
-
-        // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
-        // use default before refinement.
-        let mut iter = SstableIterator::create(
-            sstable,
-            self.sstable_store.clone(),
-            Arc::new(SstableIteratorReadOptions::default()),
-        );
-        iter.seek(internal_key).await?;
-        // Iterator has seeked passed the borders.
-        if !iter.is_valid() {
-            return Ok(None);
-        }
-
-        // Iterator gets us the key, we tell if it's the key we want
-        // or key next to it.
-        let value = match key::user_key(iter.key()) == ukey {
-            true => Some(iter.value().to_bytes()),
-            false => None,
-        };
-        iter.collect_local_statistic(stats);
-
-        Ok(value)
-    }
-
     pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
         &self.hummock_meta_client
     }
@@ -209,7 +173,7 @@ impl HummockStorage {
         self.sstable_store.clone()
     }
 
-    pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
+    pub fn local_version_manager(&self) -> &LocalVersionManagerRef {
         &self.local_version_manager
     }
 
@@ -222,65 +186,110 @@ impl HummockStorage {
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
         &self.sstable_id_manager
     }
+}
 
-    pub fn hit_sstable_bloom_filter(
-        sstable_info_ref: &Sstable,
-        key: &[u8],
-        local_stats: &mut StoreLocalStatistic,
-    ) -> bool {
-        local_stats.bloom_filter_check_counts += 1;
-        let surely_not_have = sstable_info_ref.surely_not_have_user_key(key);
-
-        if surely_not_have {
-            local_stats.bloom_filter_true_negative_count += 1;
-        }
-
-        !surely_not_have
+pub async fn get_from_table(
+    sstable_store_ref: SstableStoreRef,
+    sstable: TableHolder,
+    internal_key: &[u8],
+    check_bloom_filter: bool,
+    local_stats: &mut StoreLocalStatistic,
+) -> HummockResult<Option<HummockValue<Bytes>>> {
+    let ukey = user_key(internal_key);
+    if check_bloom_filter && !hit_sstable_bloom_filter(sstable.value(), ukey, local_stats) {
+        return Ok(None);
     }
 
-    /// Get `user_value` from `OrderSortedUncommittedData`. If not get successful, return None.
-    async fn get_from_order_sorted_uncommitted_data(
-        &self,
-        order_sorted_uncommitted_data: OrderSortedUncommittedData,
-        internal_key: &[u8],
-        stats: &mut StoreLocalStatistic,
-        key: &[u8],
-        check_bloom_filter: bool,
-    ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
-        let mut table_counts = 0;
-        let epoch = key::get_epoch(internal_key);
-        for data_list in order_sorted_uncommitted_data {
-            for data in data_list {
-                match data {
-                    UncommittedData::Batch(batch) => {
-                        assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
-                        if let Some(data) = self.get_from_batch(&batch, key) {
-                            return Ok((Some(data), table_counts));
-                        }
+    // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
+    // use default before refinement.
+    let mut iter = SstableIterator::create(
+        sstable,
+        sstable_store_ref.clone(),
+        Arc::new(SstableIteratorReadOptions::default()),
+    );
+    iter.seek(internal_key).await?;
+    // Iterator has seeked passed the borders.
+    if !iter.is_valid() {
+        return Ok(None);
+    }
+
+    // Iterator gets us the key, we tell if it's the key we want
+    // or key next to it.
+    let value = match key::user_key(iter.key()) == ukey {
+        true => Some(iter.value().to_bytes()),
+        false => None,
+    };
+    iter.collect_local_statistic(local_stats);
+
+    Ok(value)
+}
+
+pub fn hit_sstable_bloom_filter(
+    sstable_info_ref: &Sstable,
+    key: &[u8],
+    local_stats: &mut StoreLocalStatistic,
+) -> bool {
+    local_stats.bloom_filter_check_counts += 1;
+    let surely_not_have = sstable_info_ref.surely_not_have_user_key(key);
+
+    if surely_not_have {
+        local_stats.bloom_filter_true_negative_count += 1;
+    }
+
+    !surely_not_have
+}
+
+/// Get `user_value` from `OrderSortedUncommittedData`. If not get successful, return None.
+pub async fn get_from_order_sorted_uncommitted_data(
+    sstable_store_ref: SstableStoreRef,
+    order_sorted_uncommitted_data: OrderSortedUncommittedData,
+    internal_key: &[u8],
+    local_stats: &mut StoreLocalStatistic,
+    key: &[u8],
+    check_bloom_filter: bool,
+) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
+    let mut table_counts = 0;
+    let epoch = key::get_epoch(internal_key);
+    for data_list in order_sorted_uncommitted_data {
+        for data in data_list {
+            match data {
+                UncommittedData::Batch(batch) => {
+                    assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
+                    if let Some(data) = get_from_batch(&batch, key, local_stats) {
+                        return Ok((Some(data), table_counts));
                     }
+                }
 
-                    UncommittedData::Sst((_, table_info)) => {
-                        let table = self.sstable_store.sstable(&table_info, stats).await?;
-                        table_counts += 1;
+                UncommittedData::Sst((_, table_info)) => {
+                    let table = sstable_store_ref.sstable(&table_info, local_stats).await?;
+                    table_counts += 1;
 
-                        if let Some(data) = self
-                            .get_from_table(table, internal_key, check_bloom_filter, stats)
-                            .await?
-                        {
-                            return Ok((Some(data), table_counts));
-                        }
+                    if let Some(data) = get_from_table(
+                        sstable_store_ref.clone(),
+                        table,
+                        internal_key,
+                        check_bloom_filter,
+                        local_stats,
+                    )
+                    .await?
+                    {
+                        return Ok((Some(data), table_counts));
                     }
                 }
             }
         }
-        Ok((None, table_counts))
     }
+    Ok((None, table_counts))
+}
 
-    /// Get `user_value` from `SharedBufferBatch`
-    fn get_from_batch(&self, batch: &SharedBufferBatch, key: &[u8]) -> Option<HummockValue<Bytes>> {
-        batch.get(key).map(|v| {
-            self.stats.get_shared_buffer_hit_counts.inc();
-            v
-        })
-    }
+/// Get `user_value` from `SharedBufferBatch`
+pub fn get_from_batch(
+    batch: &SharedBufferBatch,
+    key: &[u8],
+    local_stats: &mut StoreLocalStatistic,
+) -> Option<HummockValue<Bytes>> {
+    batch.get(key).map(|v| {
+        local_stats.get_shared_buffer_hit_counts += 1;
+        v
+    })
 }

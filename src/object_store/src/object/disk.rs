@@ -194,7 +194,7 @@ impl ObjectStore for DiskObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, _path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    fn streaming_upload(&self, _path: &str) -> ObjectResult<BoxedStreamingUploader> {
         unimplemented!("streaming upload is not implemented for disk object store");
     }
 

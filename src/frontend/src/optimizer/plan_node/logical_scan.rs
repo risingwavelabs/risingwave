@@ -237,7 +237,7 @@ impl LogicalScan {
         let id_to_tb_idx = self.table_desc.get_id_to_op_idx_mapping();
         let order = Order::new(
             self.table_desc
-                .order_key
+                .pk
                 .iter()
                 .map(|order| {
                     let idx = id_to_tb_idx
@@ -621,7 +621,7 @@ impl ToStream for LogicalScan {
                 }
                 let col_need_to_add = self
                     .table_desc
-                    .order_key
+                    .pk
                     .iter()
                     .filter_map(|c| {
                         if !col_ids.contains(&self.table_desc().columns[c.column_idx].column_id) {

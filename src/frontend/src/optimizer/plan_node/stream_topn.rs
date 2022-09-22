@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
@@ -45,6 +45,18 @@ impl StreamTopN {
             false,
         );
         StreamTopN { base, logical }
+    }
+
+    pub fn limit(&self) -> usize {
+        self.logical.limit()
+    }
+
+    pub fn offset(&self) -> usize {
+        self.logical.offset()
+    }
+
+    pub fn topn_order(&self) -> &Order {
+        self.logical.topn_order()
     }
 }
 
@@ -74,8 +86,8 @@ impl StreamNode for StreamTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let topn_node = TopNNode {
-            limit: self.logical.limit() as u64,
-            offset: self.logical.offset() as u64,
+            limit: self.limit() as u64,
+            offset: self.offset() as u64,
             table: Some(
                 self.logical
                     .infer_internal_table_catalog(None)
