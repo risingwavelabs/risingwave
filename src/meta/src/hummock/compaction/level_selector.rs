@@ -390,6 +390,7 @@ pub mod tests {
             file_size: (right - left + 1) as u64,
             table_ids: vec![],
             meta_offset: 0,
+            stale_key_count: 0,
         }
     }
 

@@ -527,6 +527,7 @@ impl Compactor {
 
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
+        let mut local_stats = StoreLocalStatistic::default();
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -547,8 +548,9 @@ impl Compactor {
                 last_key.clear();
                 last_key.extend_from_slice(iter_key);
                 watermark_can_see_last_key = false;
+            } else {
+                local_stats.skip_key_count += 1;
             }
-
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
             // key which satisfies `epoch` < `watermark`
@@ -578,12 +580,11 @@ impl Compactor {
 
             // Don't allow two SSTs to share same user key
             sst_builder
-                .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
+                .add_full_key(iter_key, iter.value(), is_new_user_key)
                 .await?;
 
             iter.next().await?;
         }
-        let mut local_stats = StoreLocalStatistic::default();
         iter.collect_local_statistic(&mut local_stats);
         local_stats.report(stats.as_ref());
         Ok(())

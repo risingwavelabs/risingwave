@@ -28,6 +28,7 @@ pub struct StoreLocalStatistic {
 
     // include multiple versions of one key.
     pub skip_key_count: u64,
+    pub total_key_count: u64,
     pub processed_key_count: u64,
     pub bloom_filter_true_negative_count: u64,
     pub remote_io_time: Arc<AtomicU64>,
@@ -55,6 +56,7 @@ impl StoreLocalStatistic {
             Ordering::Relaxed,
         );
         self.bloom_filter_check_counts += other.bloom_filter_check_counts;
+        self.total_key_count += other.total_key_count;
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
         if other.added.fetch_or(true, Ordering::Relaxed) || other.reported.load(Ordering::Relaxed) {
@@ -118,6 +120,13 @@ impl StoreLocalStatistic {
                 .iter_scan_key_counts
                 .with_label_values(&["skip"])
                 .inc_by(self.skip_key_count);
+        }
+
+        if self.total_key_count > 0 {
+            metrics
+                .iter_scan_key_counts
+                .with_label_values(&["total"])
+                .inc_by(self.total_key_count);
         }
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]

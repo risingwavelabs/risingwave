@@ -650,7 +650,7 @@ pub struct HummockStateStoreIter {
 
 impl HummockStateStoreIter {
     fn new(inner: DirectedUserIterator, metrics: Arc<StateStoreMetrics>) -> Self {
-        Self { inner, metrics }
+        Self { inner, metrics}
     }
 
     async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {

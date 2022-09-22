@@ -100,6 +100,8 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
         file_size,
         table_ids: vec![],
         meta_offset: 0,
+        stale_key_count: 0,
+        total_key_count: 0,
     }
 }
 
@@ -135,7 +137,7 @@ pub async fn gen_test_sstable_data(
 ) -> (Bytes, SstableMeta) {
     let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice()).await.unwrap();
+        b.add(&key, value.as_slice(), true).await.unwrap();
     }
     let output = b.finish().await.unwrap();
     output.writer_output
@@ -169,6 +171,8 @@ pub async fn put_sst(
         file_size: meta.estimated_size as u64,
         table_ids: vec![],
         meta_offset: meta.meta_offset,
+        stale_key_count: 0,
+        total_key_count: 0
     };
     let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;
@@ -191,7 +195,7 @@ pub async fn gen_test_sstable_inner(
     let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
     let mut b = SstableBuilder::for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice()).await.unwrap();
+        b.add(&key, value.as_slice(), true).await.unwrap();
     }
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();

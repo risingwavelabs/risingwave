@@ -145,6 +145,8 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
             file_size: 2,
             table_ids: vec![(i + 1) as u32, (i + 2) as u32],
             meta_offset: 0,
+            stale_key_count: 0,
+            total_key_count: 0,
         });
     }
     sst_info
