@@ -29,7 +29,7 @@ use crate::task::{
     self, BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, TaskId,
 };
 
-const LOCAL_EXECUTE_BUFFER_SIZE: usize = 64;
+const LOCAL_EXECUTE_BUFFER_SIZE: usize = 1024;
 
 #[derive(Clone)]
 pub struct BatchServiceImpl {
