@@ -129,7 +129,7 @@ where
                         None => {
                             tracing::warn!("Compactor Scheduler: The Hummock manager has dropped the connection,
                                 it means it has either died or started a new session. Exiting.");
-                            break;
+                            return;
                         }
                     }
                 },
@@ -156,7 +156,12 @@ where
                     break compactor;
                 } else {
                     tracing::warn!("No available compactor, pausing compaction.");
-                    self.compaction_resume_notifier.notified().await;
+                    tokio::select! {
+                        _ = self.compaction_resume_notifier.notified() => {},
+                        _ = &mut shutdown_rx => {
+                            return;
+                        }
+                    }
                 }
             };
 
@@ -165,7 +170,6 @@ where
             self.pick_and_assign(compaction_group, compactor, request_channel.clone())
                 .await;
         }
-        tracing::info!("Compaction scheduler is stopped");
     }
 
     /// Tries to pick a compaction task, schedule it to a compactor.
