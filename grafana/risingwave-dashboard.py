@@ -362,6 +362,11 @@ def section_object_storage(outer_panels):
                     "sum(rate(object_store_operation_latency_count{type=~'read|readv|list|metadata'}[$__rate_interval])) by (le, media_type, job, instance)", "{{media_type}}-read - {{job}} @ {{instance}}"
                 ),
             ]),
+            panels.timeseries_bytes("Operation Size",
+                quantile(lambda quantile, legend: panels.target(
+                    f"histogram_quantile({quantile}, sum(rate(object_store_operation_bytes_bucket[$__rate_interval])) by (le, type, job, instance))", "{{type}}" + f" p{legend}" + " - {{job}} @ {{instance}}"
+                ), [50, 90, 99, "max"])
+            ),
             panels.timeseries_ops("Operation Failure Rate", [
                 panels.target(
                     "sum(rate(object_store_failure_count[$__rate_interval])) by (instance, job, type)", "{{type}} - {{job}} @ {{instance}}"
