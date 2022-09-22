@@ -131,7 +131,9 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
-                    if let Some(update) = barrier.as_update_merge(self.actor_context.id) {
+                    if let Some(update) =
+                        barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)
+                    {
                         if !update.added_upstream_actor_id.is_empty() {
                             // Create new upstreams receivers.
                             let new_upstreams = update
@@ -415,10 +417,19 @@ mod tests {
             vec![(untouched, actor_id), (old, actor_id), (new, actor_id)],
         );
 
+        let (upstream_fragment_id, fragment_id) = (10, 18);
+
         let inputs: Vec<_> = [untouched, old]
             .into_iter()
             .map(|upstream_actor_id| {
-                new_input(&ctx, metrics.clone(), actor_id, 0, upstream_actor_id, 0)
+                new_input(
+                    &ctx,
+                    metrics.clone(),
+                    actor_id,
+                    fragment_id,
+                    upstream_actor_id,
+                    upstream_fragment_id,
+                )
             })
             .try_collect()
             .unwrap();
@@ -427,8 +438,8 @@ mod tests {
             schema,
             vec![],
             ActorContext::create(actor_id),
-            0,
-            0,
+            fragment_id,
+            upstream_fragment_id,
             inputs,
             ctx.clone(),
             233,
@@ -465,7 +476,9 @@ mod tests {
 
         // 4. Send a configuration change barrier.
         let merge_updates = maplit::hashmap! {
-            actor_id => MergeUpdate {
+            (actor_id, upstream_fragment_id) => MergeUpdate {
+                actor_id,
+                upstream_fragment_id,
                 added_upstream_actor_id: vec![new],
                 removed_upstream_actor_id: vec![old],
             }

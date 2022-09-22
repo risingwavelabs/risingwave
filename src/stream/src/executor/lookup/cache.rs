@@ -17,8 +17,6 @@ use std::collections::BTreeSet;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::collection::evictable::EvictableHashMap;
 
-use crate::executor::JOIN_CACHE_CAP;
-
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
     data: EvictableHashMap<Row, BTreeSet<Row>>,
@@ -59,9 +57,9 @@ impl LookupCache {
         self.data.evict_to_target_cap();
     }
 
-    pub fn new() -> Self {
+    pub fn new(cache_size: usize) -> Self {
         Self {
-            data: EvictableHashMap::new(JOIN_CACHE_CAP),
+            data: EvictableHashMap::new(cache_size),
         }
     }
 }

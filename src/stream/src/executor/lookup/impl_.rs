@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -27,7 +28,7 @@ use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::executor::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
@@ -99,6 +100,8 @@ pub struct LookupExecutorParams<S: StateStore> {
     pub arrange_join_key_indices: Vec<usize>,
 
     pub state_table: StateTable<S>,
+
+    pub cache_size: usize,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -115,6 +118,7 @@ impl<S: StateStore> LookupExecutor<S> {
             schema: output_schema,
             column_mapping,
             state_table,
+            cache_size,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -210,7 +214,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(),
+            lookup_cache: LookupCache::new(cache_size),
         }
     }
 
@@ -323,7 +327,7 @@ impl<S: StateStore> LookupExecutor<S> {
             // data. Therefore, it is also okay to simply set prev epoch to 0.
 
             self.last_barrier = Some(Barrier {
-                epoch: Epoch {
+                epoch: EpochPair {
                     prev: 0,
                     curr: barrier.epoch.curr,
                 },
