@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use itertools::Itertools;
@@ -118,16 +117,16 @@ impl KafkaSink {
         F: Fn(&'a KafkaTransactionConductor) -> FutKR,
         FutKR: Future<Output = KafkaResult<T>> + 'a,
     {
-        let mut err_placeholder = KafkaError::Canceled;
+        let mut err = KafkaError::Canceled;
         for _ in 0..self.config.max_retry_num {
             match f(&self.conductor).await {
                 Ok(res) => return Ok(res),
-                Err(e) => err_placeholder = e,
+                Err(e) => err = e,
             }
             // a back off policy
             tokio::time::sleep(self.config.retry_interval).await;
         }
-        Err(err_placeholder)
+        Err(err)
     }
 
     async fn send<'a, K, P>(&'a self, mut record: BaseRecord<'a, K, P>) -> KafkaResult<()>
@@ -135,29 +134,25 @@ impl KafkaSink {
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
     {
-        let mut err_placeholder = KafkaError::Canceled;
+        let mut err = KafkaError::Canceled;
 
         for _ in 0..self.config.max_retry_num {
             match self.conductor.send(record).await {
-                Ok(()) => {
-                    return Ok(());
-                }
+                Ok(()) => return Ok(()),
                 Err((e, rec)) => {
-                    err_placeholder = e;
+                    err = e;
                     record = rec;
-                    if let KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) =
-                        err_placeholder
-                    {
-                        // if the queue is full, we need to wait for some time and retry.
-                        tokio::time::sleep(self.config.retry_interval).await;
-                        continue;
-                    } else {
-                        return Err(err_placeholder);
-                    }
                 }
             }
+            if let KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) = err {
+                // if the queue is full, we need to wait for some time and retry.
+                tokio::time::sleep(self.config.retry_interval).await;
+                continue;
+            } else {
+                return Err(err);
+            }
         }
-        Err(err_placeholder)
+        Err(err)
     }
 
     fn gen_message_key(&self) -> String {
@@ -273,28 +268,18 @@ impl Sink for KafkaSink {
     // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
-        if self.state == KafkaSinkState::Init {
-            self.do_with_retry(|conductor| conductor.init_transaction())
-                .await
-                .map_err(SinkError::Kafka)?;
-            tracing::debug!("init transaction");
-        }
-
         self.do_with_retry(|conductor| conductor.start_transaction())
-            .await
-            .map_err(SinkError::Kafka)?;
+            .await?;
         tracing::debug!("begin epoch {:?}", epoch);
         Ok(())
     }
 
     async fn commit(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.flush()) // flush before commit
-            .await
-            .map_err(SinkError::Kafka)?;
+            .await?;
 
         self.do_with_retry(|conductor| conductor.commit_transaction())
-            .await
-            .map_err(SinkError::Kafka)?;
+            .await?;
         if let Some(epoch) = self.in_transaction_epoch.take() {
             self.state = KafkaSinkState::Running(epoch);
         } else {
@@ -310,8 +295,7 @@ impl Sink for KafkaSink {
 
     async fn abort(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.abort_transaction())
-            .await
-            .map_err(SinkError::Kafka)?;
+            .await?;
         tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
         self.in_transaction_epoch = None;
         Ok(())
@@ -416,9 +400,9 @@ fn fields_to_json(fields: &[Field]) -> Value {
     let mut res = Vec::new();
     fields.iter().for_each(|field| {
         res.push(json!({
-         "field": field.name,
-         "optional": true,
-         "type": field.type_name,
+            "field": field.name,
+            "optional": true,
+            "type": field.type_name,
         }))
     });
 
@@ -447,34 +431,29 @@ fn schema_to_json(schema: &Schema) -> Value {
 }
 
 /// the struct conducts all transactions with Kafka
-#[derive(Clone)]
 pub struct KafkaTransactionConductor {
-    pub properties: KafkaConfig,
-    pub inner: Arc<ThreadedProducer<DefaultProducerContext>>,
-    in_transaction: bool,
+    properties: KafkaConfig,
+    inner: ThreadedProducer<DefaultProducerContext>,
 }
 
 impl KafkaTransactionConductor {
     async fn new(config: KafkaConfig) -> Result<Self> {
-        let inner = ClientConfig::new()
-            .set("bootstrap.servers", config.brokers.as_str())
+        let inner: ThreadedProducer<DefaultProducerContext> = ClientConfig::new()
+            .set("bootstrap.servers", &config.brokers)
             .set("message.timeout.ms", "5000")
-            .set("transactional.id", config.identifier.as_str()) // required by kafka transaction
-            .create_with_context(DefaultProducerContext)
-            .await
-            .expect("Producer creation error");
+            .set("transactional.id", &config.identifier) // required by kafka transaction
+            .create()
+            .await?;
+
+        inner.init_transactions(config.timeout).await?;
 
         Ok(KafkaTransactionConductor {
             properties: config,
-            inner: Arc::new(inner),
-            in_transaction: false,
+            inner,
         })
     }
 
-    async fn init_transaction(&self) -> KafkaResult<()> {
-        self.inner.init_transactions(self.properties.timeout).await
-    }
-
+    #[expect(clippy::unused_async)]
     async fn start_transaction(&self) -> KafkaResult<()> {
         self.inner.begin_transaction()
     }
@@ -527,7 +506,7 @@ mod test {
             "kafka.topic".to_string() => "test_topic".to_string(),
         };
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::new(kafka_config.clone()).unwrap();
+        let mut sink = KafkaSink::new(kafka_config.clone()).await.unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;
