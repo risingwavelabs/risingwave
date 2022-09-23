@@ -818,7 +818,7 @@ where
             .next_idle_compactor(&compactor_assigned_task_num)
     }
 
-    /// Assign a compaction task to the compactor indentified by `assignee_context_id`.
+    /// Assign a compaction task to the compactor identified by `assignee_context_id`.
     #[named]
     pub async fn assign_compaction_task(
         &self,
