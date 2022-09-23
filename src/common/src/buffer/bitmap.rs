@@ -40,7 +40,6 @@ use itertools::Itertools;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer as ProstBuffer;
 
-use crate::array::ArrayResult;
 use crate::util::bit_util;
 
 #[derive(Default, Debug)]
@@ -235,9 +234,9 @@ impl Bitmap {
         bit_util::get_bit_raw(self.bits.as_ptr(), idx)
     }
 
-    pub fn is_set(&self, idx: usize) -> ArrayResult<bool> {
-        ensure!(idx < self.len());
-        Ok(unsafe { self.is_set_unchecked(idx) })
+    pub fn is_set(&self, idx: usize) -> bool {
+        assert!(idx < self.len());
+        unsafe { self.is_set_unchecked(idx) }
     }
 
     /// Check if the bitmap is all set to 1.
@@ -479,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bitmap_iter() -> ArrayResult<()> {
+    fn test_bitmap_iter() {
         {
             let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b01001010]));
             let mut booleans = vec![];
@@ -494,7 +493,6 @@ mod tests {
                 assert!(b);
             }
         }
-        Ok(())
     }
 
     #[test]

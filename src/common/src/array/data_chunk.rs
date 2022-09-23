@@ -85,7 +85,7 @@ impl Vis {
     /// Panics if `idx > len`.
     pub fn is_set(&self, idx: usize) -> bool {
         match self {
-            Vis::Bitmap(b) => b.is_set(idx).unwrap(),
+            Vis::Bitmap(b) => b.is_set(idx),
             Vis::Compact(c) => {
                 assert!(idx <= *c);
                 true
@@ -383,13 +383,13 @@ impl DataChunk {
     /// * `pos` - Index of look up tuple
     /// * `RowRef` - Reference of data tuple
     /// * bool - whether this tuple is visible
-    pub fn row_at(&self, pos: usize) -> ArrayResult<(RowRef<'_>, bool)> {
+    pub fn row_at(&self, pos: usize) -> (RowRef<'_>, bool) {
         let row = self.row_at_unchecked_vis(pos);
         let vis = match &self.vis2 {
-            Vis::Bitmap(bitmap) => bitmap.is_set(pos)?,
+            Vis::Bitmap(bitmap) => bitmap.is_set(pos),
             Vis::Compact(_) => true,
         };
-        Ok((row, vis))
+        (row, vis)
     }
 
     /// Random access a tuple in a data chunk. Return in a row format.

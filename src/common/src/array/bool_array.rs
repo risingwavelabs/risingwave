@@ -104,7 +104,7 @@ impl Array for BoolArray {
     #[inline(always)]
     fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
         if !self.is_null(idx) {
-            self.data.is_set(idx).unwrap().hash(state);
+            self.data.is_set(idx).hash(state);
         } else {
             NULL_VAL_FOR_HASH.hash(state);
         }

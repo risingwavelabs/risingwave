@@ -15,7 +15,7 @@
 use std::mem::swap;
 use std::sync::Arc;
 
-use futures_async_stream::try_stream;
+use futures_async_stream::stream;
 use itertools::Itertools;
 
 use crate::array::column::Column;
@@ -57,7 +57,8 @@ impl DataChunkBuilder {
         }
     }
 
-    fn ensure_builders(&mut self) -> ArrayResult<()> {
+    /// Lazily create the array builders if absent
+    fn ensure_builders(&mut self) {
         if self.array_builders.len() != self.data_types.len() {
             self.array_builders = self
                 .data_types
@@ -65,10 +66,8 @@ impl DataChunkBuilder {
                 .map(|data_type| data_type.create_array_builder(self.batch_size))
                 .collect::<Vec<ArrayBuilderImpl>>();
 
-            ensure!(self.buffered_count == 0);
+            assert!(self.buffered_count == 0);
         }
-
-        Ok(())
     }
 
     /// Returns not consumed input chunked data as sliced data chunk, and a data chunk of
@@ -82,8 +81,8 @@ impl DataChunkBuilder {
     pub fn append_chunk(
         &mut self,
         input_chunk: SlicedDataChunk,
-    ) -> ArrayResult<(Option<SlicedDataChunk>, Option<DataChunk>)> {
-        self.ensure_builders()?;
+    ) -> (Option<SlicedDataChunk>, Option<DataChunk>) {
+        self.ensure_builders();
 
         let mut new_return_offset = input_chunk.offset;
         match input_chunk.data_chunk.visibility() {
@@ -94,7 +93,7 @@ impl DataChunkBuilder {
                         continue;
                     }
 
-                    self.append_one_row_internal(&input_chunk.data_chunk, new_return_offset - 1)?;
+                    self.append_one_row_internal(&input_chunk.data_chunk, new_return_offset - 1);
                     if self.buffered_count >= self.batch_size {
                         break;
                     }
@@ -106,69 +105,60 @@ impl DataChunkBuilder {
                     input_chunk.data_chunk.capacity() - input_chunk.offset,
                 );
                 let end_offset = input_chunk.offset + num_rows_to_append;
-                (input_chunk.offset..end_offset).try_for_each(|input_row_idx| {
+                for input_row_idx in input_chunk.offset..end_offset {
                     new_return_offset += 1;
                     self.append_one_row_internal(&input_chunk.data_chunk, input_row_idx)
-                })?;
+                }
             }
         }
 
-        ensure!(self.buffered_count <= self.batch_size);
+        assert!(self.buffered_count <= self.batch_size);
 
         let returned_input_chunk = if input_chunk.data_chunk.capacity() > new_return_offset {
-            Some(input_chunk.with_new_offset_checked(new_return_offset)?)
+            Some(input_chunk.with_new_offset_checked(new_return_offset))
         } else {
             None
         };
 
         let output_chunk = if self.buffered_count == self.batch_size {
-            Some(self.build_data_chunk()?)
+            Some(self.build_data_chunk())
         } else {
             None
         };
 
-        Ok((returned_input_chunk, output_chunk))
+        (returned_input_chunk, output_chunk)
     }
 
     /// Returns all data in current buffer.
     ///
     /// If `buffered_count` is 0, `None` is returned.
-    pub fn consume_all(&mut self) -> ArrayResult<Option<DataChunk>> {
+    pub fn consume_all(&mut self) -> Option<DataChunk> {
         if self.buffered_count > 0 {
-            self.build_data_chunk().map(Some)
+            Some(self.build_data_chunk())
         } else {
-            Ok(None)
+            None
         }
     }
 
-    fn append_one_row_internal(
-        &mut self,
-        data_chunk: &DataChunk,
-        row_idx: usize,
-    ) -> ArrayResult<()> {
-        self.do_append_one_row_from_datum_refs(data_chunk.row_at(row_idx)?.0.values())
+    fn append_one_row_internal(&mut self, data_chunk: &DataChunk, row_idx: usize) {
+        self.do_append_one_row_from_datum_refs(data_chunk.row_at(row_idx).0.values());
     }
 
     fn do_append_one_row_from_datum_refs<'a>(
         &mut self,
         datum_refs: impl Iterator<Item = DatumRef<'a>>,
-    ) -> ArrayResult<()> {
+    ) {
         for (array_builder, datum_ref) in self.array_builders.iter_mut().zip_eq(datum_refs) {
             array_builder.append_datum_ref(datum_ref);
         }
         self.buffered_count += 1;
-        Ok(())
     }
 
-    fn do_append_one_row_from_datums<'a>(
-        &mut self,
-        datums: impl Iterator<Item = &'a Datum>,
-    ) -> ArrayResult<()> {
+    fn do_append_one_row_from_datums<'a>(&mut self, datums: impl Iterator<Item = &'a Datum>) {
         for (array_builder, datum) in self.array_builders.iter_mut().zip_eq(datums) {
             array_builder.append_datum(datum);
         }
         self.buffered_count += 1;
-        Ok(())
     }
 
     /// Append one row from the given iterator of datum refs.
@@ -176,21 +166,21 @@ impl DataChunkBuilder {
     pub fn append_one_row_from_datum_refs<'a>(
         &mut self,
         datum_refs: impl Iterator<Item = DatumRef<'a>>,
-    ) -> ArrayResult<Option<DataChunk>> {
-        ensure!(self.buffered_count < self.batch_size);
-        self.ensure_builders()?;
+    ) -> Option<DataChunk> {
+        assert!(self.buffered_count < self.batch_size);
+        self.ensure_builders();
 
-        self.do_append_one_row_from_datum_refs(datum_refs)?;
+        self.do_append_one_row_from_datum_refs(datum_refs);
         if self.buffered_count == self.batch_size {
-            Ok(Some(self.build_data_chunk()?))
+            Some(self.build_data_chunk())
         } else {
-            Ok(None)
+            None
         }
     }
 
     /// Append one row from the given `row_ref`.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
-    pub fn append_one_row_ref(&mut self, row_ref: RowRef<'_>) -> ArrayResult<Option<DataChunk>> {
+    pub fn append_one_row_ref(&mut self, row_ref: RowRef<'_>) -> Option<DataChunk> {
         self.append_one_row_from_datum_refs(row_ref.values())
     }
 
@@ -199,15 +189,15 @@ impl DataChunkBuilder {
     pub fn append_one_row_from_datums<'a>(
         &mut self,
         datums: impl Iterator<Item = &'a Datum>,
-    ) -> ArrayResult<Option<DataChunk>> {
-        ensure!(self.buffered_count < self.batch_size);
-        self.ensure_builders()?;
+    ) -> Option<DataChunk> {
+        assert!(self.buffered_count < self.batch_size);
+        self.ensure_builders();
 
-        self.do_append_one_row_from_datums(datums)?;
+        self.do_append_one_row_from_datums(datums);
         if self.buffered_count == self.batch_size {
-            Ok(Some(self.build_data_chunk()?))
+            Some(self.build_data_chunk())
         } else {
-            Ok(None)
+            None
         }
     }
 
@@ -219,13 +209,13 @@ impl DataChunkBuilder {
         left_row_id: usize,
         right_arrays: I2,
         right_row_id: usize,
-    ) -> ArrayResult<Option<DataChunk>>
+    ) -> Option<DataChunk>
     where
         I1: Iterator<Item = &'a ArrayImpl>,
         I2: Iterator<Item = &'a ArrayImpl>,
     {
-        ensure!(self.buffered_count < self.batch_size);
-        self.ensure_builders()?;
+        assert!(self.buffered_count < self.batch_size);
+        self.ensure_builders();
 
         for (array_builder, (array, row_id)) in self.array_builders.iter_mut().zip_eq(
             left_arrays
@@ -238,28 +228,28 @@ impl DataChunkBuilder {
         self.buffered_count += 1;
 
         if self.buffered_count == self.batch_size {
-            Ok(Some(self.build_data_chunk()?))
+            Some(self.build_data_chunk())
         } else {
-            Ok(None)
+            None
         }
     }
 
-    fn build_data_chunk(&mut self) -> ArrayResult<DataChunk> {
+    fn build_data_chunk(&mut self) -> DataChunk {
         let mut new_array_builders = vec![];
         swap(&mut new_array_builders, &mut self.array_builders);
         let cardinality = self.buffered_count;
         self.buffered_count = 0;
 
-        let columns = new_array_builders.into_iter().try_fold(
+        let columns = new_array_builders.into_iter().fold(
             Vec::with_capacity(self.data_types.len()),
-            |mut vec, array_builder| -> ArrayResult<Vec<Column>> {
+            |mut vec, array_builder| -> Vec<Column> {
                 let array = array_builder.finish();
                 let column = Column::new(Arc::new(array));
                 vec.push(column);
-                Ok(vec)
+                vec
             },
-        )?;
-        Ok(DataChunk::new(columns, cardinality))
+        );
+        DataChunk::new(columns, cardinality)
     }
 
     pub fn buffered_count(&self) -> usize {
@@ -270,11 +260,11 @@ impl DataChunkBuilder {
         self.data_types.clone()
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[stream(boxed, item = DataChunk)]
     pub async fn trunc_data_chunk(&mut self, data_chunk: DataChunk) {
-        let mut sliced_data_chunk = SlicedDataChunk::new_checked(data_chunk)?;
+        let mut sliced_data_chunk = SlicedDataChunk::new_checked(data_chunk);
         loop {
-            let (left_data, output) = self.append_chunk(sliced_data_chunk)?;
+            let (left_data, output) = self.append_chunk(sliced_data_chunk);
             match (left_data, output) {
                 (Some(left_data), Some(output)) => {
                     sliced_data_chunk = left_data;
@@ -288,7 +278,7 @@ impl DataChunkBuilder {
                     break;
                 }
                 _ => {
-                    return Err(InternalError("Data chunk builder error".to_string()).into());
+                    unreachable!();
                 }
             }
         }
@@ -296,16 +286,16 @@ impl DataChunkBuilder {
 }
 
 impl SlicedDataChunk {
-    pub fn new_checked(data_chunk: DataChunk) -> ArrayResult<Self> {
+    pub fn new_checked(data_chunk: DataChunk) -> Self {
         SlicedDataChunk::with_offset_checked(data_chunk, 0)
     }
 
-    pub fn with_offset_checked(data_chunk: DataChunk, offset: usize) -> ArrayResult<Self> {
-        ensure!(offset < data_chunk.capacity());
-        Ok(Self { data_chunk, offset })
+    pub fn with_offset_checked(data_chunk: DataChunk, offset: usize) -> Self {
+        assert!(offset < data_chunk.capacity());
+        Self { data_chunk, offset }
     }
 
-    pub fn with_new_offset_checked(self, new_offset: usize) -> ArrayResult<Self> {
+    pub fn with_new_offset_checked(self, new_offset: usize) -> Self {
         SlicedDataChunk::with_offset_checked(self.data_chunk, new_offset)
     }
 }

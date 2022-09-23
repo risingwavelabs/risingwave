@@ -647,7 +647,7 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
         let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self);
         for array_builder in array_builders.iter_mut() {
-            array_builder.deserialize_from_hash_key(&mut deserializer)
+            array_builder.deserialize_from_hash_key(&mut deserializer)?;
         }
         Ok(())
     }

@@ -184,7 +184,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     /// Check if an element is `null` or not.
     fn is_null(&self, idx: usize) -> bool {
-        self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
+        !self.null_bitmap().is_set(idx)
     }
 
     /// # Safety
