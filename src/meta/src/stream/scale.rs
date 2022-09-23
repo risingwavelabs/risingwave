@@ -24,7 +24,7 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
-use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType};
+use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::stream_plan::barrier::Mutation;
@@ -750,42 +750,9 @@ where
                             ],
                         })
                     } else {
-                        let downstream_vnode_mapping = fragment.vnode_mapping.clone().unwrap();
-                        let ParallelUnitMapping {
-                            original_indices,
-                            data,
-                            ..
-                        } = downstream_vnode_mapping;
-
-                        if added_parallel_units.len() == removed_parallel_units.len() {
-                            let replace_parallel_unit_map: BTreeMap<_, _> = removed_parallel_units
-                                .clone()
-                                .into_iter()
-                                .zip_eq(added_parallel_units.clone())
-                                .collect();
-
-                            let data = data
-                                .iter()
-                                .map(|parallel_unit_id| {
-                                    if let Some(new_parallel_unit_id) =
-                                        replace_parallel_unit_map.get(parallel_unit_id)
-                                    {
-                                        parallel_unit_to_actor_after_reschedule
-                                            [new_parallel_unit_id]
-                                    } else {
-                                        parallel_unit_to_actor_after_reschedule[parallel_unit_id]
-                                    }
-                                })
-                                .collect_vec();
-
-                            Some(ActorMapping {
-                                original_indices: original_indices.clone(),
-                                data,
-                            })
-                        } else {
-                            let updated_bitmap = fragment_updated_bitmap.get(&fragment_id).unwrap();
-                            Some(actor_mapping_from_bitmaps(updated_bitmap))
-                        }
+                        Some(actor_mapping_from_bitmaps(
+                            fragment_updated_bitmap.get(&fragment_id).unwrap(),
+                        ))
                     }
                 }
                 FragmentDistributionType::Single => None,
@@ -1179,35 +1146,12 @@ where
             }
 
             if let Some(mapping) = dispatcher.hash_mapping.as_mut() {
-                // todo we only support migration
-                match (
-                    downstream_fragment_actors_to_remove,
-                    downstream_fragment_actors_to_create,
-                ) {
-                    (Some(to_remove), Some(to_create)) if to_remove.len() == to_create.len() => {
-                        let map: HashMap<_, _> = to_remove
-                            .keys()
-                            .cloned()
-                            .zip_eq(to_create.keys().cloned())
-                            .collect();
-
-                        for actor_id in &mut mapping.data {
-                            if let Some(new_actor_id) = map.get(actor_id) {
-                                *actor_id = *new_actor_id;
-                            }
-                        }
-                    }
-                    (None, None) => {
-                        // do nothing
-                    }
-                    _ => {
-                        if let Some(downstream_updated_bitmap) =
-                            updated_bitmap.get(&downstream_fragment_id)
-                        {
-                            // if downstream scale in/out
-                            *mapping = actor_mapping_from_bitmaps(downstream_updated_bitmap)
-                        }
-                    }
+                if let Some(downstream_updated_bitmap) = updated_bitmap.get(&downstream_fragment_id)
+                {
+                    // if downstream scale in/out
+                    *mapping = actor_mapping_from_bitmaps(downstream_updated_bitmap)
+                } else {
+                    unreachable!()
                 }
             }
         }
