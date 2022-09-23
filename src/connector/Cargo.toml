@@ -38,7 +38,8 @@ paste = "1"
 prost = "0.11"
 pulsar = { version = "5", default-features = false, features = ["tokio-runtime"], rev = "7fab6a9", git = "https://github.com/skyzh/pulsar-rs" }
 rand = "0.8"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
+rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "5a00c29", features = ["cmake-build"] }
+# rdkafka = { path = "../../../madsim/madsim-rdkafka", package = "madsim-rdkafka" }
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }

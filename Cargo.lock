@@ -2814,8 +2814,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1553e1ee8f12e9b4d04aa430b6e8e38380f89cec07cf3881d410f2d2690798ea"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=5a00c29#5a00c29c1a109c149cf1aee319bd4b703df68168"
 dependencies = [
  "ahash",
  "async-channel",
@@ -2855,13 +2854,35 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8abbe137adbf2023c066b8acb3fdef0a4bec6494642ef2174d060fc99a9f80ea"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=5a00c29#5a00c29c1a109c149cf1aee319bd4b703df68168"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "madsim-rdkafka"
+version = "0.2.8-alpha"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=5a00c29#5a00c29c1a109c149cf1aee319bd4b703df68168"
+dependencies = [
+ "async-channel",
+ "async-trait",
+ "futures",
+ "futures-util",
+ "libc",
+ "log",
+ "madsim",
+ "rdkafka-sys",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "slab",
+ "spin 0.9.4",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4118,23 +4139,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdkafka"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1de127f294f2dba488ed46760b129d5ecbeabbd337ccbf3739cb29d50db2161c"
-dependencies = [
- "futures",
- "libc",
- "log",
- "rdkafka-sys",
- "serde",
- "serde_derive",
- "serde_json",
- "slab",
- "tokio",
-]
-
-[[package]]
 name = "rdkafka-sys"
 version = "4.2.0+1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4589,6 +4593,7 @@ dependencies = [
  "humantime",
  "hyper",
  "itertools",
+ "madsim-rdkafka",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -4599,7 +4604,6 @@ dependencies = [
  "prost",
  "pulsar",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_common",
  "risingwave_pb",
  "risingwave_storage",
@@ -4969,6 +4973,7 @@ dependencies = [
  "glob",
  "madsim",
  "madsim-etcd-client",
+ "madsim-rdkafka",
  "madsim-tokio",
  "rand 0.8.5",
  "risingwave_compactor",
@@ -4977,6 +4982,7 @@ dependencies = [
  "risingwave_meta",
  "risingwave_sqlsmith",
  "sqllogictest",
+ "tempfile",
  "tokio-postgres",
  "tracing",
  "workspace-hack",

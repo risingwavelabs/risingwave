@@ -486,6 +486,8 @@ impl KafkaTransactionConductor {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use maplit::hashmap;
     use risingwave_common::array;
     use risingwave_common::array::column::Column;

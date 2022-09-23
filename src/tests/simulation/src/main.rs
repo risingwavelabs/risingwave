@@ -14,8 +14,8 @@
 
 #![cfg_attr(not(madsim), allow(dead_code))]
 #![feature(once_cell)]
-#![feature(lint_reasons)]
 
+use std::path::Path;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -257,13 +257,13 @@ async fn main() {
             use rdkafka::ClientConfig;
 
             let admin = ClientConfig::new()
-                .set("bootstrap.servers", "192.168.10.1:29092")
+                .set("bootstrap.servers", "192.168.11.1:29092")
                 .create::<AdminClient<_>>()
                 .await
                 .expect("failed to create kafka admin client");
 
             let producer = ClientConfig::new()
-                .set("bootstrap.servers", "192.168.10.1:29092")
+                .set("bootstrap.servers", "192.168.11.1:29092")
                 .create::<BaseProducer>()
                 .await
                 .expect("failed to create kafka producer");
@@ -376,7 +376,7 @@ async fn kill_node() {
 }
 
 #[cfg(not(madsim))]
-#[expect(clippy::unused_async)]
+#[allow(clippy::unused_async)]
 async fn kill_node() {}
 
 async fn run_slt_task(glob: &str, host: &str) {
@@ -395,6 +395,9 @@ async fn run_slt_task(glob: &str, host: &str) {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
+        // XXX: hack for kafka source test
+        let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
+        let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
@@ -456,6 +459,23 @@ async fn run_parallel_slt_task(
         .run_parallel_async(glob, hosts.to_vec(), Risingwave::connect, jobs)
         .await
         .map_err(|e| panic!("{e}"))
+}
+
+/// Replace some strings in kafka.slt and write to a new temp file.
+fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
+    let content = std::fs::read_to_string(path).expect("failed to read file");
+    let avsc_full_path = std::fs::canonicalize("src/source/src/test_data/simple-schema.avsc")
+        .expect("failed to get schema path");
+    let content = content
+        .replace("127.0.0.1:29092", "192.168.11.1:29092")
+        .replace(
+            "/risingwave/avro-simple-schema.avsc",
+            avsc_full_path.to_str().unwrap(),
+        );
+    let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
+    std::fs::write(file.path(), content).expect("failed to write file");
+    println!("created a temp file for kafka test: {:?}", file.path());
+    file
 }
 
 struct Risingwave {
