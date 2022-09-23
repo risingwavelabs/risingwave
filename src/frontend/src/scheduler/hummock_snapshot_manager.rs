@@ -132,7 +132,7 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn get_epoch(&self, query_id: QueryId) -> SchedulerResult<HummockSnapshot> {
+    pub async fn acquire(&self, query_id: &QueryId) -> SchedulerResult<HummockSnapshot> {
         let (sender, rc) = once_channel();
         let msg = EpochOperation::RequestEpoch {
             query_id: query_id.clone(),
@@ -157,7 +157,7 @@ impl HummockSnapshotManager {
             .fetch_max(epoch.current_epoch, Ordering::Relaxed);
     }
 
-    pub async fn unpin_snapshot(&self, epoch: u64, query_id: &QueryId) {
+    pub async fn release(&self, epoch: u64, query_id: &QueryId) {
         let msg = EpochOperation::ReleaseEpoch {
             query_id: query_id.clone(),
             epoch,
