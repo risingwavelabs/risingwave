@@ -1123,6 +1123,13 @@ where
         sstables: Vec<LocalSstableInfo>,
         sst_to_context: HashMap<HummockSstableId, HummockContextId>,
     ) -> Result<()> {
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _timer = start_measure_real_process_timer!(self);
+        // Prevent commit new epochs if this flag is set
+        if versioning_guard.disable_commit_epochs {
+            return Ok(());
+        }
+
         let compaction_groups: HashMap<_, _> = self
             .compaction_group_manager
             .compaction_groups()
@@ -1183,13 +1190,6 @@ where
                 }
             }
             .await;
-        }
-
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        let _timer = start_measure_real_process_timer!(self);
-        // Prevent commit new epochs if this flag is set
-        if versioning_guard.disable_commit_epochs {
-            return Ok(());
         }
 
         for (sst_id, context_id) in &sst_to_context {
