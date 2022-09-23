@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
@@ -336,5 +337,39 @@ where
             .await
             .map_err(MetaError::from)?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
+    }
+
+    async fn get_pinned_versions_summary(
+        &self,
+        _request: Request<GetPinnedVersionsSummaryRequest>,
+    ) -> Result<Response<GetPinnedVersionsSummaryResponse>, Status> {
+        let pinned_versions = self.hummock_manager.list_pinned_version().await;
+        let workers = self
+            .hummock_manager
+            .list_workers(&pinned_versions.iter().map(|v| v.context_id).collect_vec())
+            .await;
+        Ok(Response::new(GetPinnedVersionsSummaryResponse {
+            summary: Some(PinnedVersionsSummary {
+                pinned_versions,
+                workers,
+            }),
+        }))
+    }
+
+    async fn get_pinned_snapshots_summary(
+        &self,
+        _request: Request<GetPinnedSnapshotsSummaryRequest>,
+    ) -> Result<Response<GetPinnedSnapshotsSummaryResponse>, Status> {
+        let pinned_snapshots = self.hummock_manager.list_pinned_snapshot().await;
+        let workers = self
+            .hummock_manager
+            .list_workers(&pinned_snapshots.iter().map(|p| p.context_id).collect_vec())
+            .await;
+        Ok(Response::new(GetPinnedSnapshotsSummaryResponse {
+            summary: Some(PinnedSnapshotsSummary {
+                pinned_snapshots,
+                workers,
+            }),
+        }))
     }
 }

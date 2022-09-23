@@ -389,6 +389,28 @@ message GetVersionDeltasResponse {
   HummockVersionDeltas version_deltas = 1;
 }
 
+message PinnedVersionsSummary {
+  repeated HummockPinnedVersion pinned_versions = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message PinnedSnapshotsSummary {
+  repeated HummockPinnedSnapshot pinned_snapshots = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message GetPinnedVersionsSummaryRequest {}
+
+message GetPinnedVersionsSummaryResponse {
+  PinnedVersionsSummary summary = 1;
+}
+
+message GetPinnedSnapshotsSummaryRequest {}
+
+message GetPinnedSnapshotsSummaryResponse {
+  PinnedSnapshotsSummary summary = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -406,6 +428,8 @@ service HummockManagerService {
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
+  rpc GetPinnedVersionsSummary(GetPinnedVersionsSummaryRequest) returns (GetPinnedVersionsSummaryResponse);
+  rpc GetPinnedSnapshotsSummary(GetPinnedSnapshotsSummaryRequest) returns (GetPinnedSnapshotsSummaryResponse);
 }
 
 service CompactorService {}
