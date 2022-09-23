@@ -813,11 +813,12 @@ where
                     .and_modify(|n| *n += 1)
                     .or_insert(1);
             });
+        drop(compaction_guard);
         self.compactor_manager
             .next_idle_compactor(&compactor_assigned_task_num)
     }
 
-    /// Pick an idle compactor and assigns a compaction task to it. Return the chosen compactor.
+    /// Assign a compaction task to the compactor indentified by `assignee_context_id`.
     #[named]
     pub async fn assign_compaction_task(
         &self,
