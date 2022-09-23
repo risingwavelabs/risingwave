@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -48,19 +49,19 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 
     fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
-        ScalarImpl::Utf8(rhs.to_string())
+        ScalarImpl::Utf8(rhs.into())
     }
 
     pub(crate) async fn get(&self, key: SplitId, _epoch: u64) -> StreamExecutorResult<Option<Row>> {
         self.state_store
-            .get_row(&Row::new(vec![Some(Self::string_to_scalar(key))]))
+            .get_row(&Row::new(vec![Some(Self::string_to_scalar(key.deref()))]))
             .await
             .map_err(StreamExecutorError::from)
     }
 
     async fn set(&mut self, key: SplitId, value: Bytes, epoch: u64) -> StreamExecutorResult<()> {
         let row = Row::new(vec![
-            Some(Self::string_to_scalar(key.clone())),
+            Some(Self::string_to_scalar(key.deref())),
             Some(Self::string_to_scalar(
                 String::from_utf8_lossy(&value).to_string(),
             )),
