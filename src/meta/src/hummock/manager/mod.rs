@@ -927,6 +927,13 @@ where
         compact_task: &CompactTask,
         compaction_guard: Option<RwLockWriteGuard<'_, Compaction>>,
     ) -> Result<bool> {
+        let mut compaction_guard = match compaction_guard {
+            None => write_lock!(self, compaction).await,
+            Some(compaction_guard) => compaction_guard,
+        };
+        let deterministic_mode = self.env.opts.compaction_deterministic_test;
+        let compaction = compaction_guard.deref_mut();
+        let start_time = Instant::now();
         let compaction_groups: HashSet<_> = self
             .compaction_group_manager
             .compaction_groups()
@@ -934,14 +941,6 @@ where
             .into_iter()
             .map(|group| group.group_id())
             .collect();
-        let mut compaction_guard = match compaction_guard {
-            None => write_lock!(self, compaction).await,
-            Some(compaction_guard) => compaction_guard,
-        };
-
-        let deterministic_mode = self.env.opts.compaction_deterministic_test;
-        let compaction = compaction_guard.deref_mut();
-        let start_time = Instant::now();
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
         let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
         for group_id in original_keys {
