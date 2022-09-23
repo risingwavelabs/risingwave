@@ -158,11 +158,10 @@ where
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         for fragment in table_fragment.fragments.values() {
             if !fragment.state_table_ids.is_empty() {
-                let mut mapping = fragment
+                let mapping = fragment
                     .vnode_mapping
                     .clone()
                     .expect("no data distribution found");
-                mapping.fragment_id = fragment.fragment_id;
                 self.env
                     .notification_manager()
                     .notify_frontend(operation, Info::ParallelUnitMapping(mapping))
