@@ -41,15 +41,19 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
             .iter()
             .map(|idx| *idx as usize)
             .collect();
-        Ok(AppendOnlyTopNExecutor::new(
-            input,
-            order_pairs,
-            (node.offset as usize, node.limit as usize),
-            params.pk_indices,
-            params.executor_id,
-            key_indices,
-            state_table,
-        )?
-        .boxed())
+        if node.with_ties {
+            unreachable!("Not supported yet. Banned in planner");
+        } else {
+            Ok(AppendOnlyTopNExecutor::new(
+                input,
+                order_pairs,
+                (node.offset as usize, node.limit as usize),
+                params.pk_indices,
+                params.executor_id,
+                key_indices,
+                state_table,
+            )?
+            .boxed())
+        }
     }
 }

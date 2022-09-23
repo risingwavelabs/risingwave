@@ -12,10 +12,19 @@ select x, y from (
 where rank <= 3;
 
 statement ok
+create materialized view mv_rank as 
+select x, y from (
+    select *, RANK() OVER (PARTITION BY x ORDER BY y) as rank from t
+)
+where rank <= 3;
+
+statement ok
 insert into t values 
     (1, 1), (1, 2), (1, 3), (1, 4), (1, 5),
     (2, 1), (2, 2), (2, 3), (2, 4), (2, 5),
-    (3, 1), (3, 2), (3, 3), (3, 4), (3, 5);
+    (3, 1), (3, 2), (3, 3), (3, 4), (3, 5),
+    -- ties
+    (1, 3), (2, 3), (3, 3);
 
 query II rowsort
 select * from mv;
@@ -29,6 +38,25 @@ select * from mv;
 3  1
 3  2
 3  3
+
+query II rowsort
+select * from mv_rank;
+----
+1  1
+1  2
+1  3
+1  3
+2  1
+2  2
+2  3
+2  3
+3  1
+3  2
+3  3
+3  3
+
+statement ok
+DROP MATERIALIZED VIEW mv_rank;
 
 statement ok
 drop materialized view mv;

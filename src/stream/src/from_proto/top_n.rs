@@ -41,15 +41,28 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
             .iter()
             .map(|idx| *idx as usize)
             .collect();
-        Ok(TopNExecutor::new_without_ties(
-            input,
-            order_pairs,
-            (node.offset as usize, node.limit as usize),
-            params.pk_indices,
-            params.executor_id,
-            key_indices,
-            state_table,
-        )?
-        .boxed())
+        if node.with_ties {
+            Ok(TopNExecutor::new_with_ties(
+                input,
+                order_pairs,
+                (node.offset as usize, node.limit as usize),
+                params.pk_indices,
+                params.executor_id,
+                key_indices,
+                state_table,
+            )?
+            .boxed())
+        } else {
+            Ok(TopNExecutor::new_without_ties(
+                input,
+                order_pairs,
+                (node.offset as usize, node.limit as usize),
+                params.pk_indices,
+                params.executor_id,
+                key_indices,
+                state_table,
+            )?
+            .boxed())
+        }
     }
 }

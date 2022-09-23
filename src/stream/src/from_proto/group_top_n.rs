@@ -45,16 +45,30 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             .map(|idx| *idx as usize)
             .collect();
 
-        Ok(GroupTopNExecutor::new_without_ties(
-            params.input.remove(0),
-            order_pairs,
-            (node.offset as usize, node.limit as usize),
-            params.pk_indices,
-            params.executor_id,
-            key_indices,
-            group_by,
-            state_table,
-        )?
-        .boxed())
+        if node.with_ties {
+            Ok(GroupTopNExecutor::new_with_ties(
+                params.input.remove(0),
+                order_pairs,
+                (node.offset as usize, node.limit as usize),
+                params.pk_indices,
+                params.executor_id,
+                key_indices,
+                group_by,
+                state_table,
+            )?
+            .boxed())
+        } else {
+            Ok(GroupTopNExecutor::new_without_ties(
+                params.input.remove(0),
+                order_pairs,
+                (node.offset as usize, node.limit as usize),
+                params.pk_indices,
+                params.executor_id,
+                key_indices,
+                group_by,
+                state_table,
+            )?
+            .boxed())
+        }
     }
 }

@@ -178,6 +178,7 @@ message TopNNode {
   uint64 limit = 1;
   uint64 offset = 2;
   catalog.Table table = 3;
+  bool with_ties = 4;
 }
 
 message GroupTopNNode {
@@ -186,6 +187,7 @@ message GroupTopNNode {
   uint64 offset = 2;
   repeated uint32 group_key = 3;
   catalog.Table table = 4;
+  bool with_ties = 5;
 }
 
 message HashJoinNode {
