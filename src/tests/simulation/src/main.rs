@@ -128,6 +128,19 @@ async fn main() {
                 .unwrap();
         })
         .build();
+
+    // kafka broker
+    handle
+        .create_node()
+        .name("kafka-broker")
+        .ip("192.168.11.1".parse().unwrap())
+        .init(move || async move {
+            rdkafka::SimBroker::default()
+                .serve("0.0.0.0:29092".parse().unwrap())
+                .await
+        })
+        .build();
+
     // wait for the service to be ready
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
@@ -230,6 +243,66 @@ async fn main() {
             })
             .build();
     }
+
+    // prepare data for kafka
+    handle
+        .create_node()
+        .name("kafka-producer")
+        .ip("192.168.11.2".parse().unwrap())
+        .build()
+        .spawn(async move {
+            use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+            use rdkafka::error::{KafkaError, RDKafkaErrorCode};
+            use rdkafka::producer::{BaseProducer, BaseRecord};
+            use rdkafka::ClientConfig;
+
+            let admin = ClientConfig::new()
+                .set("bootstrap.servers", "192.168.10.1:29092")
+                .create::<AdminClient<_>>()
+                .await
+                .expect("failed to create kafka admin client");
+
+            let producer = ClientConfig::new()
+                .set("bootstrap.servers", "192.168.10.1:29092")
+                .create::<BaseProducer>()
+                .await
+                .expect("failed to create kafka producer");
+
+            for file in std::fs::read_dir("scripts/source/test_data").unwrap() {
+                let file = file.unwrap();
+                let name = file.file_name().into_string().unwrap();
+                let (topic, partitions) = name.split_once('.').unwrap();
+                admin
+                    .create_topics(
+                        &[NewTopic::new(
+                            topic,
+                            partitions.parse().unwrap(),
+                            TopicReplication::Fixed(1),
+                        )],
+                        &AdminOptions::default(),
+                    )
+                    .await
+                    .expect("failed to create topic");
+
+                let content = std::fs::read(file.path()).unwrap();
+                for line in content.split(|&b| b == b'\n') {
+                    loop {
+                        let record = BaseRecord::<(), _>::to(topic).payload(line);
+                        match producer.send(record) {
+                            Ok(_) => break,
+                            Err((
+                                KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull),
+                                _,
+                            )) => {
+                                producer.flush(None).await;
+                            }
+                            Err((e, _)) => panic!("failed to send message: {}", e),
+                        }
+                    }
+                }
+                producer.flush(None).await;
+            }
+        });
 
     // wait for the service to be ready
     tokio::time::sleep(Duration::from_secs(30)).await;
