@@ -167,7 +167,7 @@ where
                 .await;
             match barrier_complete_rx.recv().await.unwrap() {
                 (_, Ok(response)) => {
-                    if let Err(err) = command_ctx.post_collect(prev_epoch).await {
+                    if let Err(err) = command_ctx.post_collect().await {
                         error!("post_collect failed: {}", err);
                         return Err(err);
                     }

@@ -850,9 +850,7 @@ where
                         uncommitted_states.uncommitted_checkpoint_post.pop_back()
                     {
                         checkpoint_control.remove_changes(command_ctx.command.changes());
-                        command_ctx
-                            .post_collect(node.command_ctx.prev_epoch)
-                            .await?;
+                        command_ctx.post_collect().await?;
 
                         // Notify about collected first.
                         notifiers.iter_mut().for_each(Notifier::notify_collected);

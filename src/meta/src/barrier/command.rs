@@ -369,14 +369,15 @@ where
     }
 
     /// Do some stuffs after barriers are collected, for the given command.
-    /// `epoch` is the epoch of the just-collected barrier.
-    pub async fn post_collect(&self, epoch: Epoch) -> MetaResult<()> {
+    pub async fn post_collect(&self) -> MetaResult<()> {
         match &self.command {
             Command::Plain(mutation) => match mutation {
                 Some(Mutation::Pause(..)) => {
                     let futures = self.info.node_map.values().map(|worker_node| async {
                         let client = self.client_pool.get(worker_node).await?;
-                        let request = WaitEpochCommitRequest { epoch: epoch.0 };
+                        let request = WaitEpochCommitRequest {
+                            epoch: self.prev_epoch.0,
+                        };
                         client.wait_epoch_commit(request).await?;
 
                         Ok::<_, MetaError>(())
