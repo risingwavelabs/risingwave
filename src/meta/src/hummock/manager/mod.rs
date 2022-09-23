@@ -935,14 +935,12 @@ where
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
-        let mut compact_status = VarTransaction::new(
-            compaction
-                .compaction_statuses
-                .get_mut(&compact_task.compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(
-                    compact_task.compaction_group_id,
-                ))?,
-        );
+        let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
+        let mut compact_status = compact_statuses
+            .get_mut(compact_task.compaction_group_id)
+            .ok_or(Error::InvalidCompactionGroup(
+                compact_task.compaction_group_id,
+            ))?;
         let assigned_task_num = compaction.compact_task_assignment.len();
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
@@ -996,7 +994,7 @@ where
             commit_multi_var!(
                 self,
                 context_id,
-                compact_status,
+                compact_statuses,
                 compact_task_assignment,
                 hummock_version_deltas
             )?;
@@ -1022,7 +1020,7 @@ where
             }
         } else {
             // The compaction task is cancelled or failed.
-            commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
+            commit_multi_var!(self, context_id, compact_statuses, compact_task_assignment)?;
         }
 
         let task_label = task_status.as_str_name();

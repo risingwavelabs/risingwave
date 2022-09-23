@@ -210,6 +210,9 @@ pub fn add_new_sub_level(
     insert_sub_level_id: u64,
     insert_table_infos: Vec<SstableInfo>,
 ) {
+    if insert_sub_level_id == u64::MAX {
+        return;
+    }
     if let Some(newest_level) = l0.sub_levels.last() {
         assert!(
             newest_level.sub_level_id < insert_sub_level_id,
