@@ -12,7 +12,7 @@ aws ec2 start-instances --instance-ids i-029fdf626052dcdaf
 
 echo "--- do ssh and run the flink benchmark steps"
 ls
-scp -o "StrictHostKeyChecking no" -i test.pem scripts/flink-bench.sh ubuntu@52.220.89.140:/home/ubuntu
+scp -o "StrictHostKeyChecking no" -i test.pem ci/scripts/flink-bench.sh ubuntu@52.220.89.140:/home/ubuntu
 ssh -o "StrictHostKeyChecking no" -i test.pem ubuntu@52.220.89.140 ./flink-bench.sh
 
 echo "--- stop the flink bench instance"
