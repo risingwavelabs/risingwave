@@ -1,11 +1,11 @@
 statement ok
-DROP MATERIALIZED SOURCE tpcc_customer;
+DROP SOURCE tpcc_customer;
 
 statement ok
-DROP MATERIALIZED SOURCE tpcc_neworder;
+DROP SOURCE tpcc_neworder;
 
 statement ok
-DROP MATERIALIZED SOURCE tpcc_orderline;
+DROP SOURCE tpcc_orderline;
 
 statement ok
-DROP MATERIALIZED SOURCE tpcc_orders;
+DROP SOURCE tpcc_orders;
