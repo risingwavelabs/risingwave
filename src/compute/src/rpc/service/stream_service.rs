@@ -182,7 +182,7 @@ impl StreamService for StreamServiceImpl {
     async fn wait_epoch_commit(
         &self,
         request: Request<WaitEpochCommitRequest>,
-    ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
+    ) -> Result<Response<WaitEpochCommitResponse>, Status> {
         let epoch = request.into_inner().epoch;
 
         dispatch_state_store!(self.env.state_store(), store, {
@@ -191,6 +191,7 @@ impl StreamService for StreamServiceImpl {
 
             store
                 .try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .stack_trace(format!("wait_epoch_commit (epoch {})", epoch))
                 .await
                 .map_err(tonic_err)?;
         });
