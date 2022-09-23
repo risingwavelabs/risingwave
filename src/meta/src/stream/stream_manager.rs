@@ -885,6 +885,13 @@ mod tests {
                 ..Default::default()
             }))
         }
+
+        async fn wait_epoch_commit(
+            &self,
+            _request: Request<WaitEpochCommitRequest>,
+        ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
+            unimplemented!()
+        }
     }
 
     struct MockServices {

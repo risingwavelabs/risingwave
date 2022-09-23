@@ -22,6 +22,7 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
+use risingwave_storage::dispatch_state_store;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
@@ -175,6 +176,26 @@ impl StreamService for StreamServiceImpl {
             checkpoint: true,
             worker_id: self.env.worker_id(),
         }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn wait_epoch_commit(
+        &self,
+        request: Request<WaitEpochCommitRequest>,
+    ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
+        let epoch = request.into_inner().epoch;
+
+        dispatch_state_store!(self.env.state_store(), store, {
+            use risingwave_hummock_sdk::HummockReadEpoch;
+            use risingwave_storage::StateStore;
+
+            store
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .await
+                .map_err(tonic_err)?;
+        });
+
+        Ok(Response::new(WaitEpochCommitResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]

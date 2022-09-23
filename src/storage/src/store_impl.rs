@@ -74,7 +74,9 @@ impl Debug for StateStoreImpl {
 
 #[macro_export]
 macro_rules! dispatch_state_store {
-    ($impl:expr, $store:ident, $body:tt) => {
+    ($impl:expr, $store:ident, $body:tt) => {{
+        use $crate::store_impl::StateStoreImpl;
+
         match $impl {
             StateStoreImpl::MemoryStateStore($store) => {
                 // WARNING: don't change this. Enabling memory backend will cause monomorphization
@@ -91,7 +93,7 @@ macro_rules! dispatch_state_store {
             }
             StateStoreImpl::HummockStateStore($store) => $body,
         }
-    };
+    }};
 }
 
 impl StateStoreImpl {
