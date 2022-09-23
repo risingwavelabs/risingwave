@@ -453,6 +453,14 @@ impl HummockVersionExt for HummockVersion {
                     );
                 }
             }
+            let has_destroy = (|| {
+                for delta in level_deltas.get_level_deltas() {
+                    if matches!(delta.delta_type, Some(DeltaType::GroupDestroy(_))) {
+                        return true;
+                    }
+                }
+                false
+            })();
             let levels = self
                 .levels
                 .get_mut(compaction_group_id)
@@ -481,7 +489,7 @@ impl HummockVersionExt for HummockVersion {
                     insert_sst_level_id, insert_table_infos
                 );
                 assert!(
-                    delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty(),
+                    delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
                     "no sst should be deleted when committing an epoch"
                 );
                 add_new_sub_level(

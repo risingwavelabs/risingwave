@@ -499,6 +499,24 @@ impl LocalVersion {
             };
 
         for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
+            for delta in level_deltas.get_level_deltas() {
+                if let Some(DeltaType::GroupConstruct(ref group_construct)) = delta.delta_type {
+                    version.levels.insert(
+                        *compaction_group_id,
+                        <Levels as HummockLevelsExt>::build_initial_levels(
+                            group_construct.get_group_config().unwrap(),
+                        ),
+                    );
+                }
+            }
+            let has_destroy = (|| {
+                for delta in level_deltas.get_level_deltas() {
+                    if matches!(delta.delta_type, Some(DeltaType::GroupDestroy(_))) {
+                        return true;
+                    }
+                }
+                false
+            })();
             let levels = version
                 .levels
                 .get_mut(compaction_group_id)
@@ -517,12 +535,13 @@ impl LocalVersion {
                         insert_table_infos,
                     } = summary;
                     assert!(
-                        delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty(),
+                        delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty()
+                            || has_destroy,
                         "there should not be any sst deleted in a commit_epoch call. Epoch: {}",
                         version_delta.max_committed_epoch
                     );
-                    assert_eq!(
-                        0, insert_sst_level_id,
+                    assert!(
+                        insert_sst_level_id == 0 || insert_table_infos.is_empty(),
                         "an commit_epoch call should always insert sst into L0, but not insert to {}",
                         insert_sst_level_id
                     );
@@ -542,6 +561,11 @@ impl LocalVersion {
                 None => {
                     // The version delta is generated from a compaction
                     levels.apply_compact_ssts(summary, true);
+                }
+            }
+            for delta in level_deltas.get_level_deltas() {
+                if matches!(delta.delta_type, Some(DeltaType::GroupDestroy(_))) {
+                    version.levels.remove(compaction_group_id);
                 }
             }
         }
