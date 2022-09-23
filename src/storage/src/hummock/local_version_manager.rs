@@ -361,7 +361,7 @@ impl LocalVersionManager {
                 );
                 return Ok(());
             }
-            HummockReadEpoch::NoWait(_) => panic!("No wait can't wait epoch"),
+            HummockReadEpoch::NoWait(_) => return Ok(()),
         };
         if wait_epoch == HummockEpoch::MAX {
             panic!("epoch should not be u64::MAX");

@@ -183,6 +183,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
@@ -258,7 +259,10 @@ mod tests {
         match materialize_executor.next().await.transpose().unwrap() {
             Some(Message::Barrier(_)) => {
                 let row = table
-                    .get_row(&Row(vec![Some(3_i32.into())]), u64::MAX)
+                    .get_row(
+                        &Row(vec![Some(3_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
                     .await
                     .unwrap();
                 assert_eq!(row, Some(Row(vec![Some(3_i32.into()), Some(6_i32.into())])));
@@ -270,7 +274,10 @@ mod tests {
         match materialize_executor.next().await.transpose().unwrap() {
             Some(Message::Barrier(_)) => {
                 let row = table
-                    .get_row(&Row(vec![Some(7_i32.into())]), u64::MAX)
+                    .get_row(
+                        &Row(vec![Some(7_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
                     .await
                     .unwrap();
                 assert_eq!(row, Some(Row(vec![Some(7_i32.into()), Some(8_i32.into())])));
