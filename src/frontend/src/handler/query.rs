@@ -22,7 +22,7 @@ use tracing::debug;
 
 use crate::binder::{Binder, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
-use crate::handler::util::{force_local_mode, to_pg_field};
+use crate::handler::util::{force_local_mode, mock_stream, to_pg_field};
 use crate::planner::Planner;
 use crate::scheduler::{
     BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
@@ -88,7 +88,12 @@ pub async fn handle_query(
         flush_for_write(&session, stmt_type).await?;
     }
 
-    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
+    Ok(PgResponse::new(
+        stmt_type,
+        rows_count,
+        Some(Box::pin(mock_stream(rows))),
+        pg_descs,
+    ))
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {

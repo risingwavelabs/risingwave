@@ -18,6 +18,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use futures_async_stream::for_await;
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
@@ -106,12 +107,18 @@ impl LocalFrontend {
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
-        self.run_sql(sql)
-            .await
-            .unwrap()
-            .iter()
-            .map(|row| format!("{:?}", row))
-            .collect()
+        let mut rsp = self.run_sql(sql).await.unwrap();
+        let stream = rsp.values_stream();
+        if let Some(stream) = stream {
+            let mut res = vec![];
+            #[for_await]
+            for row in stream {
+                res.push(format!("{:?}", row.unwrap()));
+            }
+            res
+        } else {
+            vec![]
+        }
     }
 
     /// Convert a sql (must be an `Query`) into an unoptimized batch plan.

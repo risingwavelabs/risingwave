@@ -15,19 +15,21 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::vec::IntoIter;
 
 use bytes::Bytes;
+use futures::stream::FusedStream;
+use futures::{StreamExt, TryStreamExt};
 use itertools::zip_eq;
 use postgres_types::{FromSql, Type};
 use regex::Regex;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
-use crate::pg_protocol::cstr_to_str;
-use crate::pg_response::{PgResponse, StatementType};
-use crate::pg_server::{BoxedError, Session, SessionManager};
-use crate::types::Row;
+use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
+use crate::pg_protocol::{cstr_to_str, PgStream};
+use crate::pg_response::PgResponse;
+use crate::pg_server::{Session, SessionManager};
 
 #[derive(Default)]
 pub struct PgStatement {
@@ -94,11 +96,10 @@ impl PgStatement {
         Ok(PgPortal {
             name: portal_name,
             query_string: instance_query_string,
-            result_cache: None,
-            stmt_type: None,
             row_description,
             result_format,
             is_query: self.is_query,
+            result: None,
         })
     }
 
@@ -113,11 +114,10 @@ impl PgStatement {
 pub struct PgPortal {
     name: String,
     query_string: String,
-    result_cache: Option<IntoIter<Row>>,
-    stmt_type: Option<StatementType>,
-    row_description: Vec<PgFieldDescriptor>,
     result_format: bool,
+    row_description: Vec<PgFieldDescriptor>,
     is_query: bool,
+    result: Option<PgResponse>,
 }
 
 impl PgPortal {
@@ -133,53 +133,69 @@ impl PgPortal {
         self.row_description.clone()
     }
 
-    pub async fn execute<SM: SessionManager>(
+    pub async fn execute<SM: SessionManager, S: AsyncWrite + AsyncRead + Unpin>(
         &mut self,
         session: Arc<SM::Session>,
         row_limit: usize,
-    ) -> Result<PgResponse, BoxedError> {
-        if self.result_cache.is_none() {
-            let process_res = session
-                .run_statement(&self.query_string, self.result_format)
-                .await;
+        msg_stream: &mut PgStream<S>,
+    ) -> PsqlResult<()> {
+        let result = if let Some(result) = &mut self.result {
+            result
+        } else {
+            let result = session
+                .run_statement(self.query_string.as_str(), self.result_format)
+                .await
+                .map_err(|err| PsqlError::ExecuteError(err))?;
+            self.result = Some(result);
+            self.result.as_mut().unwrap()
+        };
 
-            // Return result directly if
-            // - it's not a query result.
-            // - query result needn't cache. (row_limit == 0).
-            if !(process_res.is_ok() && process_res.as_ref().unwrap().is_query()) || row_limit == 0
-            {
-                return process_res;
-            }
-
-            // Return result need to cache.
-            self.stmt_type = Some(process_res.as_ref().unwrap().get_stmt_type());
-            self.result_cache = Some(process_res.unwrap().values().into_iter());
-        }
-
-        // Consume row_limit row.
-        let mut data_set = vec![];
-        let mut row_end = false;
-        for _ in 0..row_limit {
-            let data = self.result_cache.as_mut().unwrap().next();
-            match data {
-                Some(d) => {
-                    data_set.push(d);
-                }
-                None => {
-                    row_end = true;
-                    self.result_cache = None;
+        let mut query_end = false;
+        let mut query_row_count = 0;
+        if result.is_empty() {
+            msg_stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
+        } else if result.is_query() {
+            let stream = result.values_stream().as_mut().unwrap();
+            while row_limit == 0 || query_row_count < row_limit {
+                if let Some(row) = stream
+                    .try_next()
+                    .await
+                    .map_err(|err| PsqlError::ExecuteError(err))?
+                {
+                    msg_stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                    query_row_count += 1;
+                } else {
+                    query_end = true;
                     break;
                 }
             }
+            if stream.peekable().is_terminated() {
+                query_end = true;
+            }
+            if query_end {
+                msg_stream.write_no_flush(&BeMessage::CommandComplete(
+                    BeCommandCompleteMessage {
+                        stmt_type: result.get_stmt_type(),
+                        notice: result.get_notice(),
+                        rows_cnt: query_row_count as i32,
+                    },
+                ))?;
+            } else {
+                msg_stream.write_no_flush(&BeMessage::PortalSuspended)?;
+            }
+        } else {
+            msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                stmt_type: result.get_stmt_type(),
+                notice: result.get_notice(),
+                rows_cnt: result.get_effected_rows_cnt(),
+            }))?;
         }
 
-        Ok(PgResponse::new(
-            self.stmt_type.unwrap(),
-            data_set.len() as _,
-            data_set,
-            self.row_description.clone(),
-            row_end,
-        ))
+        if query_end || !self.result.as_ref().unwrap().is_query() {
+            self.result.take();
+        }
+
+        Ok(())
     }
 
     /// We define the statement start with ("select","values","show","with","describe") is query

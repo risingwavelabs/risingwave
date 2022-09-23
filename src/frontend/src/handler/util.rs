@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use bytes::Bytes;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
@@ -21,6 +22,15 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 
 use crate::binder::{BoundSetExpr, BoundStatement};
+
+/// Used to convert Vec<Row> to Stream<Item = Result<Row,BoxedError>> for compatible with
+/// PgResponse.
+#[try_stream(ok=Row,error=Box<dyn std::error::Error + Send + Sync>)]
+pub async fn mock_stream(rows: Vec<Row>) {
+    for row in rows {
+        yield row;
+    }
+}
 
 /// Format scalars according to postgres convention.
 fn pg_value_format(d: ScalarRefImpl<'_>, format: bool) -> Bytes {

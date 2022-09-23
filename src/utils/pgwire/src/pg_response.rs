@@ -14,7 +14,10 @@
 
 use std::fmt::Formatter;
 
+use futures::stream::BoxStream;
+
 use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -71,15 +74,25 @@ impl std::fmt::Display for StatementType {
     }
 }
 
-#[derive(Debug)]
 pub struct PgResponse {
     stmt_type: StatementType,
+    // row count of effected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
+    // don't return rows.
     row_cnt: i32,
     notice: Option<String>,
-    values: Vec<Row>,
-    // Used for row_limit mode to indicate whether run out of data
-    row_end: bool,
+    values_stream: Option<BoxStream<'static, Result<Row, BoxedError>>>,
     row_desc: Vec<PgFieldDescriptor>,
+}
+
+impl std::fmt::Debug for PgResponse {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PgResponse")
+            .field("stmt_type", &self.stmt_type)
+            .field("row_cnt", &self.row_cnt)
+            .field("notice", &self.notice)
+            .field("row_desc", &self.row_desc)
+            .finish()
+    }
 }
 
 impl StatementType {
@@ -108,31 +121,28 @@ impl PgResponse {
     pub fn new(
         stmt_type: StatementType,
         row_cnt: i32,
-        values: Vec<Row>,
+        values_stream: Option<BoxStream<'static, Result<Row, BoxedError>>>,
         row_desc: Vec<PgFieldDescriptor>,
-        row_end: bool,
     ) -> Self {
         Self {
             stmt_type,
             row_cnt,
-            values,
+            values_stream,
             row_desc,
-            row_end,
             notice: None,
         }
     }
 
     pub fn empty_result(stmt_type: StatementType) -> Self {
-        Self::new(stmt_type, 0, vec![], vec![], true)
+        Self::new(stmt_type, 0, None, vec![])
     }
 
     pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
         Self {
             stmt_type,
             row_cnt: 0,
-            values: vec![],
+            values_stream: None,
             row_desc: vec![],
-            row_end: true,
             notice: Some(notice),
         }
     }
@@ -163,19 +173,11 @@ impl PgResponse {
         self.stmt_type == StatementType::EMPTY
     }
 
-    pub fn is_row_end(&self) -> bool {
-        self.row_end
-    }
-
     pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {
         self.row_desc.clone()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Row> + '_ {
-        self.values.iter()
-    }
-
-    pub fn values(&self) -> Vec<Row> {
-        self.values.clone()
+    pub fn values_stream(&mut self) -> &mut Option<BoxStream<'static, Result<Row, BoxedError>>> {
+        &mut self.values_stream
     }
 }

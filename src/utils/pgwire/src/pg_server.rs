@@ -114,6 +114,7 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use futures_async_stream::try_stream;
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
@@ -142,6 +143,13 @@ mod tests {
 
     struct MockSession {}
 
+    impl MockSession {
+        #[try_stream(ok=Row,error=super::BoxedError)]
+        async fn run_statement_inner(res: Vec<Option<Bytes>>) {
+            yield Row::new(res);
+        }
+    }
+
     #[async_trait::async_trait]
     impl Session for MockSession {
         async fn run_statement(
@@ -165,13 +173,13 @@ mod tests {
                 })
                 .collect();
             let len = res.len();
+
             Ok(PgResponse::new(
                 StatementType::SELECT,
                 1,
-                vec![Row::new(res)],
+                Some(Box::pin(MockSession::run_statement_inner(res))),
                 // NOTE: Extended mode don't need.
                 vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar); len],
-                true,
             ))
         }
 
