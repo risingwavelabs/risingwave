@@ -29,7 +29,7 @@ use risingwave_pb::stream_plan::{
     ActorMapping, AddMutation, Dispatcher, PauseMutation, ResumeMutation, StopMutation,
     UpdateMutation,
 };
-use risingwave_pb::stream_service::DropActorsRequest;
+use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
@@ -369,9 +369,23 @@ where
     }
 
     /// Do some stuffs after barriers are collected, for the given command.
-    pub async fn post_collect(&self) -> MetaResult<()> {
+    /// `epoch` is the epoch of the just-collected barrier.
+    pub async fn post_collect(&self, epoch: Epoch) -> MetaResult<()> {
         match &self.command {
-            Command::Plain(_) => {}
+            Command::Plain(mutation) => match mutation {
+                Some(Mutation::Pause(..)) => {
+                    let futures = self.info.node_map.values().map(|worker_node| async {
+                        let client = self.client_pool.get(worker_node).await?;
+                        let request = WaitEpochCommitRequest { epoch: epoch.0 };
+                        client.wait_epoch_commit(request).await?;
+
+                        Ok::<_, MetaError>(())
+                    });
+
+                    try_join_all(futures).await?;
+                }
+                _ => {}
+            },
 
             Command::DropMaterializedView(table_id) => {
                 // Tell compute nodes to drop actors.
