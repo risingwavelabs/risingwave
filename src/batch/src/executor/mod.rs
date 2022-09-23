@@ -35,6 +35,7 @@ mod top_n;
 mod trace;
 mod union;
 mod update;
+mod utils;
 mod values;
 
 use async_recursion::async_recursion;
@@ -65,6 +66,7 @@ pub use top_n::*;
 pub use trace::*;
 pub use union::*;
 pub use update::*;
+pub use utils::*;
 pub use values::*;
 
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;

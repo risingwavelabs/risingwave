@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -52,7 +51,8 @@ use crate::executor::join::{
     concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
 };
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    utils, BoxedDataChunkListStream, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
+    Executor, ExecutorBuilder,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
@@ -301,7 +301,7 @@ pub struct LookupJoinExecutor<P> {
     identity: String,
 }
 
-const AT_LEAST_BATCH_READ_SIZE: usize = 512;
+const AT_LEAST_BUILD_SIDE_ROWS: usize = 512;
 
 impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
     fn schema(&self) -> &Schema {
@@ -318,32 +318,12 @@ impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
 }
 
 impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
-    #[try_stream(boxed, ok = Vec<DataChunk>, error = RwError)]
-    async fn batch_read(mut stream: BoxedDataChunkStream) {
-        // Read at least AT_LEAST_BATCH_READ_SIZE rows.
-        let mut cnt = 0;
-        let mut chunk_list = vec![];
-        while let Some(build_chunk) = stream.next().await {
-            let build_chunk = build_chunk?;
-            cnt += build_chunk.cardinality();
-            chunk_list.push(build_chunk);
-            if cnt < AT_LEAST_BATCH_READ_SIZE {
-                continue;
-            } else {
-                yield chunk_list;
-                cnt = 0;
-                chunk_list = vec![];
-            }
-        }
-        if !chunk_list.is_empty() {
-            yield chunk_list;
-        }
-    }
-
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let mut build_side_batch_read_stream: BoxStream<'static, Result<Vec<DataChunk>>> =
-            LookupJoinExecutor::<P>::batch_read(self.build_child.take().unwrap().execute());
+        let mut build_side_batch_read_stream: BoxedDataChunkListStream = utils::batch_read(
+            self.build_child.take().unwrap().execute(),
+            AT_LEAST_BUILD_SIDE_ROWS,
+        );
 
         while let Some(chunk_list) = build_side_batch_read_stream.next().await {
             let chunk_list = chunk_list?;
