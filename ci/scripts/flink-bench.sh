@@ -1,19 +1,3 @@
-#!/bin/bash
-
-# Exits as soon as any line fails.
-set -euo pipefail
-
-echo "--- create a pem file to store key"
-aws secretsmanager get-secret-value --secret-id "flink-bench-pem" --query "SecretString" --output text > test.pem
-chmod 400 test.pem
-
-echo "--- start the flink bench instance to run the benchmark"
-aws ec2 start-instances --instance-ids i-029fdf626052dcdaf
-
-echo "--- do ssh to the flink benchmark machine"
-ssh -o "StrictHostKeyChecking no" -i test.pem ubuntu@52.220.89.140
-printf "logged in to the flink benchmark setup\n"
-
 echo "--- starts both zookeeper and kafka"
 ./start_kafka.sh
 
@@ -61,8 +45,3 @@ printf "completed the benchmark for all the queries\n"
 
 echo "---- run Datagen source provided by Flink to generate in-memory data directly"
 ./run_datagen_source.sh
-
-echo "--- stop the flink bench instance"
-aws ec2 stop-instances --instance-ids i-029fdf626052dcdaf
-printf "stopped the flink bench instance\n"
-
