@@ -757,6 +757,18 @@ where
             // this task has been finished.
             compact_task.set_task_status(TaskStatus::Pending);
 
+            trigger_sst_stat(
+                &self.metrics,
+                Some(
+                    compaction
+                        .compaction_statuses
+                        .get(&compaction_group_id)
+                        .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
+                ),
+                &current_version,
+                compaction_group_id,
+            );
+
             tracing::trace!(
                 "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
                 compaction_group_id,
