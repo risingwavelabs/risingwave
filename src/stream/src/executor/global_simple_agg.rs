@@ -81,7 +81,7 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 

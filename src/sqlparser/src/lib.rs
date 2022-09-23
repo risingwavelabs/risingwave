@@ -31,8 +31,9 @@
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![allow(clippy::upper_case_acronyms)]
-#![allow(clippy::derive_partial_eq_without_eq)]
+#![feature(lint_reasons)]
+#![expect(clippy::derive_partial_eq_without_eq)]
+#![expect(clippy::doc_markdown)]
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;

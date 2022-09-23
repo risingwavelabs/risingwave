@@ -14,7 +14,6 @@
 
 use std::ops::{Index, IndexMut};
 
-use itertools::repeat_n;
 use risingwave_common::error::{Result, RwError};
 
 /// Id of one row in chunked data.
@@ -155,7 +154,7 @@ impl<V> TryFrom<Vec<Vec<V>>> for ChunkedData<V> {
     type Error = RwError;
 
     fn try_from(value: Vec<Vec<V>>) -> Result<Self> {
-        let chunk_offsets = repeat_n(Ok(0), 1)
+        let chunk_offsets = std::iter::once(Ok(0))
             .chain(value.iter().map(|chunk| -> Result<usize> {
                 ensure!(!chunk.is_empty(), "Chunk size can't be zero!");
                 Ok(chunk.len())

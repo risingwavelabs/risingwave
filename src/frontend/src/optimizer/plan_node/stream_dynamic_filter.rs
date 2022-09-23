@@ -61,7 +61,7 @@ impl StreamDynamicFilter {
 }
 
 impl fmt::Display for StreamDynamicFilter {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);

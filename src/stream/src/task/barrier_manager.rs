@@ -31,6 +31,7 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
+use risingwave_common::bail;
 use risingwave_storage::StateStoreImpl;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -143,9 +144,10 @@ impl LocalBarrierManager {
                 .senders
                 .get(&actor_id)
                 .unwrap_or_else(|| panic!("sender for actor {} does not exist", actor_id));
-            sender.send(barrier.clone()).unwrap_or_else(|e| {
-                panic!("failed to send barrier to actor {}: {:?}", actor_id, e.0)
-            });
+            if let Err(err) = sender.send(barrier.clone()) {
+                // return err to trigger recovery.
+                bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+            }
         }
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
@@ -176,16 +178,15 @@ impl LocalBarrierManager {
             })
     }
 
-    /// remove all collect rx less than `prev_epoch`
-    pub fn drain_collect_rx(&mut self, prev_epoch: u64) {
-        self.collect_complete_receiver
-            .drain_filter(|x, _| x <= &prev_epoch);
+    /// remove all collect rx
+    pub fn clear_collect_rx(&mut self) {
+        self.collect_complete_receiver.clear();
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
 
             BarrierState::Managed(managed_state) => {
-                managed_state.remove_stop_barrier(prev_epoch);
+                managed_state.clear_all_states();
             }
         }
     }
