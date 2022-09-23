@@ -345,7 +345,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         )
     }
 
+    /// Generate `FROM` component of a query.
+    /// NOTE: There is no stream values executor,
+    /// so tables must be non-empty so we can choose from there.
     fn gen_from(&mut self, with_tables: Vec<Table>) -> Vec<TableWithJoins> {
+        assert!(!self.tables.is_empty());
         let mut from = if !with_tables.is_empty() {
             let with_table = with_tables
                 .choose(&mut self.rng)
@@ -357,12 +361,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             vec![rel]
         };
 
-        if self.is_mview {
-            // TODO: These constraints are workarounds required by mview.
-            // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/4024>.
-            assert!(!self.tables.is_empty());
-            return from;
-        }
         let mut lateral_contexts = vec![];
         for _ in 0..self.tables.len() {
             if self.flip_coin() {
