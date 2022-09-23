@@ -98,7 +98,7 @@ where
         Ok(())
     }
 
-    pub async fn get_catalog_core_guard(&self) -> MutexGuard<CatalogManagerCore<S>> {
+    pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore<S>> {
         self.core.lock().await
     }
 }
@@ -738,7 +738,7 @@ where
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
         } else {
-            bail!("source or table already exist");
+            bail!("source or table already exists");
         }
     }
 
@@ -1063,6 +1063,16 @@ where
             .database
             .list_source_ids(schema_id)
             .await
+    }
+
+    pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<RelationId>> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_stream_job_ids()
+            .await
+            .map(|iter| iter.collect())
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {

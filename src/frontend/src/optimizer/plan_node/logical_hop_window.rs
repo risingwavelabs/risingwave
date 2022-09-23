@@ -196,7 +196,7 @@ impl LogicalHopWindow {
         )
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(
             f,
             "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
@@ -310,7 +310,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
 impl_plan_tree_node_for_unary! {LogicalHopWindow}
 
 impl fmt::Display for LogicalHopWindow {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalHopWindow")
     }
 }

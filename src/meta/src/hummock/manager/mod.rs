@@ -1393,7 +1393,7 @@ where
     }
 
     #[named]
-    pub async fn get_read_guard(&self) -> RwLockReadGuard<Versioning> {
+    pub async fn get_read_guard(&self) -> RwLockReadGuard<'_, Versioning> {
         read_lock!(self, versioning).await
     }
 

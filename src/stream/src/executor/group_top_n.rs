@@ -28,16 +28,17 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
 use super::managed_state::top_n::ManagedTopNState;
-use super::top_n::{generate_executor_pk_indices_info, TopNCache};
+use super::top_n::{generate_executor_pk_indices_info, TopNCache, TopNCacheTrait};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 use crate::error::StreamResult;
 
-pub type GroupTopNExecutor<S> = TopNExecutorWrapper<InnerGroupTopNExecutorNew<S>>;
+pub type GroupTopNExecutor<S, const WITH_TIES: bool> =
+    TopNExecutorWrapper<InnerGroupTopNExecutorNew<S, WITH_TIES>>;
 
-impl<S: StateStore> GroupTopNExecutor<S> {
+impl<S: StateStore> GroupTopNExecutor<S, false> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn new_without_ties(
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
@@ -67,7 +68,39 @@ impl<S: StateStore> GroupTopNExecutor<S> {
     }
 }
 
-pub struct InnerGroupTopNExecutorNew<S: StateStore> {
+impl<S: StateStore> GroupTopNExecutor<S, true> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_ties(
+        input: Box<dyn Executor>,
+        order_pairs: Vec<OrderPair>,
+        offset_and_limit: (usize, usize),
+        pk_indices: PkIndices,
+        executor_id: u64,
+        key_indices: Vec<usize>,
+        group_by: Vec<usize>,
+        state_table: StateTable<S>,
+    ) -> StreamResult<Self> {
+        let info = input.info();
+        let schema = input.schema().clone();
+
+        Ok(TopNExecutorWrapper {
+            input,
+            inner: InnerGroupTopNExecutorNew::new(
+                info,
+                schema,
+                order_pairs,
+                offset_and_limit,
+                pk_indices,
+                executor_id,
+                key_indices,
+                group_by,
+                state_table,
+            )?,
+        })
+    }
+}
+
+pub struct InnerGroupTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
     /// Schema of the executor.
@@ -95,14 +128,16 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore> {
     group_by: Vec<usize>,
 
     /// group key -> cache for this group
-    caches: HashMap<Vec<Datum>, TopNCache>,
+    caches: HashMap<Vec<Datum>, TopNCache<WITH_TIES>>,
 
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
+
+    sort_key_len: usize,
 }
 
-impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
+impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
@@ -139,12 +174,17 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
             key_indices,
             group_by,
             caches: HashMap::new(),
+            sort_key_len: order_pairs.len(),
         })
     }
 }
 
 #[async_trait]
-impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
+impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase
+    for InnerGroupTopNExecutorNew<S, WITH_TIES>
+where
+    TopNCache<WITH_TIES>: TopNCacheTrait,
+{
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
@@ -165,7 +205,7 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
             match entry {
                 Occupied(_) => {}
                 Vacant(entry) => {
-                    let mut topn_cache = TopNCache::new(self.offset, self.limit);
+                    let mut topn_cache = TopNCache::new(self.offset, self.limit, self.sort_key_len);
                     self.managed_state
                         .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
                         .await?;
@@ -215,7 +255,7 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -363,7 +403,7 @@ mod tests {
             &[1, 2, 0],
         );
         let top_n_executor = Box::new(
-            GroupTopNExecutor::new(
+            GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
                 order_types,
                 (0, 2),
@@ -455,7 +495,7 @@ mod tests {
             &[1, 2, 0],
         );
         let top_n_executor = Box::new(
-            GroupTopNExecutor::new(
+            GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
                 order_types,
                 (1, 2),
@@ -540,7 +580,7 @@ mod tests {
             &[1, 2, 0],
         );
         let top_n_executor = Box::new(
-            GroupTopNExecutor::new(
+            GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
                 order_types,
                 (0, 2),

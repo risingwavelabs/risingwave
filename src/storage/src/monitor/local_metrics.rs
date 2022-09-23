@@ -33,6 +33,7 @@ pub struct StoreLocalStatistic {
     pub bloom_filter_true_negative_count: u64,
     pub remote_io_time: Arc<AtomicU64>,
     pub bloom_filter_check_counts: u64,
+    pub get_shared_buffer_hit_counts: u64,
 
     #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
     reported: AtomicBool,
@@ -57,6 +58,7 @@ impl StoreLocalStatistic {
             Ordering::Relaxed,
         );
         self.bloom_filter_check_counts += other.bloom_filter_check_counts;
+        self.get_shared_buffer_hit_counts += other.get_shared_buffer_hit_counts;
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
         if other.added.fetch_or(true, Ordering::Relaxed) || other.reported.load(Ordering::Relaxed) {
@@ -128,6 +130,12 @@ impl StoreLocalStatistic {
                 .iter_scan_key_counts
                 .with_label_values(&["skip_delete"])
                 .inc_by(self.skip_delete_key_count);
+        }
+
+        if self.get_shared_buffer_hit_counts > 0 {
+            metrics
+                .get_shared_buffer_hit_counts
+                .inc_by(self.get_shared_buffer_hit_counts);
         }
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
