@@ -17,10 +17,31 @@ fi
 
 echo "--- start Node Exporter, Pushgateway, Prometheus and Grafana"
 ./start_four_monitoring_components.sh
-if ./show_four_monitoring_components.sh | grep 'node_exporter' | grep 'grafana-server' | grep 'pushgateway' | grep 'prometheus'; then
-  printf "all services have started successfully\n"
+if ./show_four_monitoring_components.sh | grep 'node_exporter'; then
+  printf "node_exporter has started successfully\n"
 else
-  printf "above services did not start\n"
+  printf "node_exporter did not start\n"
+  exit 1
+fi
+
+if ./show_four_monitoring_components.sh | grep 'grafana-server'; then
+  printf "grafana-server has started successfully\n"
+else
+  printf "grafana-server did not start\n"
+  exit 1
+fi
+
+if ./show_four_monitoring_components.sh | grep 'pushgateway'; then
+  printf "pushgateway has started successfully\n"
+else
+  printf "pushgateway did not start\n"
+  exit 1
+fi
+
+if ./show_four_monitoring_components.sh | grep 'prometheus'; then
+  printf "prometheus has started successfully\n"
+else
+  printf "prometheus did not start\n"
   exit 1
 fi
 
@@ -47,3 +68,6 @@ printf "completed the benchmark for all the queries\n"
 
 echo "---- run Datagen source provided by Flink to generate in-memory data directly"
 ./run_datagen_source.sh
+
+echo "---- restart the flink for the graceful start of next benchmark"
+./restart-flink.sh
