@@ -594,7 +594,7 @@ impl<S: StateStore> StateTable<S> {
                             storage_row.is_none(),
                             "overwriting an existing row:\nin-storage: {:?}\nto-be-written: {:?}",
                             storage_row.unwrap(),
-                            row
+                            streaming_deserialize(&self.data_types, row.as_ref())
                         );
                     }
                     local.put(pk, StorageValue::new_put(row));
@@ -614,7 +614,7 @@ impl<S: StateStore> StateTable<S> {
                             storage_row.as_ref().unwrap() == &old_row,
                             "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?}",
                             storage_row.as_ref().unwrap(),
-                            old_row
+                            streaming_deserialize(&self.data_types, old_row.as_ref())
                         );
                     }
                     local.delete(pk);
@@ -633,13 +633,13 @@ impl<S: StateStore> StateTable<S> {
                         assert!(
                             storage_row.is_some(),
                             "update a non-existing row: {:?}",
-                            old_row
+                            streaming_deserialize(&self.data_types, old_row.as_ref())
                         );
                         assert!(
                             storage_row.as_ref().unwrap() == &old_row,
                             "value mismatch when updating row: {:?} != {:?}",
                             storage_row,
-                            old_row
+                            streaming_deserialize(&self.data_types, old_row.as_ref())
                         );
                     }
                     local.put(pk, StorageValue::new_put(new_row));
