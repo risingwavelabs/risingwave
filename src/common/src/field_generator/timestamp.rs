@@ -52,8 +52,7 @@ impl TimestampField {
         let milliseconds = self.max_past.num_milliseconds();
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
         let max_milliseconds = rng.gen_range(0..=milliseconds);
-        let res = self.local_now - Duration::milliseconds(max_milliseconds);
-        res
+        self.local_now - Duration::milliseconds(max_milliseconds)
     }
 
     pub fn generate(&mut self, offset: u64) -> Value {
