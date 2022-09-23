@@ -1,6 +1,6 @@
 steps:
   - label: "flink nexmark benchmark"
-    command: "ci/scripts/flink-bench.sh"
+    command: "ci/scripts/main-flink-bench.sh"
     agents:
       queue: "benchmark"
     timeout_in_minutes: 30
