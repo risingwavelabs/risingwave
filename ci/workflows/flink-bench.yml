@@ -1,12 +1,6 @@
 steps:
   - label: "flink nexmark benchmark"
     command: "ci/scripts/flink-bench.sh"
-    plugins:
-      - ./ci/plugins/benchmark
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GITHUB_TOKEN: github-token
-            BENCH_TOKEN: bench-token
     agents:
       queue: "benchmark"
     timeout_in_minutes: 30

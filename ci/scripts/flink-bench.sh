@@ -3,15 +3,15 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-echo "==========================================="
-echo "start the flink bench instance to run the benchmark"
-echo "==========================================="
+echo "--- create a pem file to store key"
+aws secretsmanager get-secret-value --secret-id "flink-bench-pem" --query "SecretString" --output text > test.pem
+chmod 400 test.pem
+
+echo "--- start the flink bench instance to run the benchmark"
 aws ec2 start-instances --instance-ids i-029fdf626052dcdaf
 
-echo "==========================================="
-echo "do ssh to the flink benchmark machine"
-echo "==========================================="
-ssh -o "StrictHostKeyChecking no" ubuntu@52.220.89.140
+echo "--- do ssh to the flink benchmark machine"
+.ssh ssh -o "StrictHostKeyChecking no" -i test.pem ubuntu@52.220.89.140
 printf "logged in to the flink benchmark setup\n"
 
 echo "==========================================="
