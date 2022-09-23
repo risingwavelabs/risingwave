@@ -70,7 +70,8 @@ enum StageState {
 }
 
 enum StageMessage {
-    Stop,
+    /// Contains the reason why need to stop (e.g. Execution failure).
+    Stop(String),
 }
 
 #[derive(Debug)]
@@ -214,12 +215,12 @@ impl StageExecution {
         }
     }
 
-    pub async fn stop(&self) {
+    pub async fn stop(&self, err_str: String) {
         // Send message to tell Stage Runner stop.
         if let Some(shutdown_tx) = self.shutdown_rx.write().await.take() {
             // It's possible that the stage has not been scheduled, so the channel sender is
             // None.
-            if shutdown_tx.send(StageMessage::Stop).is_err() {
+            if shutdown_tx.send(StageMessage::Stop(err_str)).is_err() {
                 // The stage runner handle has already closed. so do no-op.
             }
         }
@@ -364,6 +365,11 @@ impl StageRunner {
                         if let Some(stauts_res_inner) = status_res {
                             // The status can be Running, Finished, Failed etc. This stream contains status from
                             // different tasks.
+                            //
+                            //
+                            // Note: For Task execution failure, it now becomes a Rpc Error and will return here.
+                            // Do not process this as task status like Running/Finished/ etc.
+                            // This will also wrap the final printed error with 'RpcError: ...', but this is not a problem now so solve it later.
                             let status = stauts_res_inner.map_err(|e| RpcError(e.into()))?;
                             use risingwave_pb::task_service::task_info::TaskStatus as TaskStatusProst;
                             match TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status).unwrap() {
@@ -378,11 +384,6 @@ impl StageRunner {
                                         self.notify_schedule_next_stage().await;
                                         sent_signal_to_next = true;
                                     }
-                                }
-
-                                TaskStatusProst::Failed => {
-                                    // Throw the error and caller write the event to channel.
-                                    return Err(SchedulerError::TaskExecutionError);
                                 }
 
                                 TaskStatusProst::Finished => {
@@ -438,27 +439,30 @@ impl StageRunner {
         let mut terminated_chunk_stream = chunk_stream.take_until(shutdown_rx);
         #[for_await]
         for chunk in &mut terminated_chunk_stream {
-            let is_err = chunk.is_err();
-            result_tx
-                .send(chunk.map_err(|e| e.into()))
-                .await
-                .expect("The receiver should always existed! ");
-
-            // if errors, send failed message to QueryResultFetcher.
-            if is_err {
-                return Err(SchedulerError::TaskExecutionError);
+            if let Err(ref e) = chunk {
+                let err_str = e.to_string();
+                result_tx
+                    .send(chunk.map_err(|e| e.into()))
+                    .await
+                    .expect("The receiver should always existed! ");
+                // Different from below, return this function and report error.
+                return Err(SchedulerError::TaskExecutionError(err_str));
+            } else {
+                result_tx
+                    .send(chunk.map_err(|e| e.into()))
+                    .await
+                    .expect("The receiver should always existed! ");
             }
         }
 
-        // TODO: Fill in the Execution Message.
         if let Some(err) = terminated_chunk_stream.take_result() {
             let stage_message = err.expect("Sender should always existed!");
 
             // Terminated by other tasks execution error, so no need to return error here.
             match stage_message {
-                StageMessage::Stop => {
-                    // Tell Query Result Fetcher to stop polling.
-                    if let Err(_e) = result_tx.send(Err(TaskExecutionError)).await {
+                StageMessage::Stop(err_str) => {
+                    // Tell Query Result Fetcher to stop polling and attach failure reason as str.
+                    if let Err(_e) = result_tx.send(Err(TaskExecutionError(err_str))).await {
                         warn!("Send task execution failed");
                     }
                 }

@@ -15,6 +15,7 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::StreamExt;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
@@ -291,7 +292,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let (mut state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
         // Init the state receivers. Swap out later.
         *self.state_rx.lock() = Some(state_rx);
-        self.change_state_notify(TaskStatus::Running, &mut state_tx)
+        self.change_state_notify(TaskStatus::Running, &mut state_tx, None)
             .await?;
 
         // Clone `self` to make compiler happy because of the move block.
@@ -320,12 +321,14 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 {
                     // Prints the entire backtrace of error.
                     error!("Execution failed [{:?}]: {:?}", &task_id, &e);
+                    let err_str = e.to_string();
                     *failure.lock() = Some(e);
-                    if let Err(_e) = t_1
-                        .change_state_notify(TaskStatus::Failed, &mut state_tx)
+                    if let Err(_e) = self
+                        .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str))
                         .await
                     {
                         // It's possible to send fail. Same reason in `.try_execute`.
+                        warn!("send task execution error message fail!");
                     }
                 }
             };
@@ -366,25 +369,33 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         Ok(())
     }
 
-    /// Change state and notify frontend for task status.
+    /// Change state and notify frontend for task status. This function can not be used to
     pub async fn change_state_notify(
         &self,
         task_status: TaskStatus,
         state_tx: &mut tokio::sync::mpsc::Sender<TaskInfoResponseResult>,
+        err_str: Option<String>,
     ) -> BatchResult<()> {
         self.change_state(task_status);
-        // Notify frontend the task status.
-        state_tx
-            .send(Ok(TaskInfoResponse {
-                task_info: Some(TaskInfo {
-                    task_id: Some(TaskId::default().to_prost()),
-                    task_status: task_status.into(),
-                }),
-                // TODO: Fill the real status.
-                ..Default::default()
-            }))
-            .await
-            .map_err(|_| SenderError)
+        if let Some(err_str) = err_str {
+            state_tx
+                .send(Err(RwError::from(anyhow!(err_str)).into()))
+                .await
+                .map_err(|_| SenderError)
+        } else {
+            // Notify frontend the task status.
+            state_tx
+                .send(Ok(TaskInfoResponse {
+                    task_info: Some(TaskInfo {
+                        task_id: Some(TaskId::default().to_prost()),
+                        task_status: task_status.into(),
+                    }),
+                    // TODO: Fill the real status.
+                    ..Default::default()
+                }))
+                .await
+                .map_err(|_| SenderError)
+        }
     }
 
     pub fn change_state(&self, task_status: TaskStatus) {
@@ -446,7 +457,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 }
             }
         }
-        if let Err(_e) = self.change_state_notify(state, state_tx).await {}
+
+        if let Err(_e) = self.change_state_notify(state, state_tx, None).await {}
         Ok(())
     }
 
