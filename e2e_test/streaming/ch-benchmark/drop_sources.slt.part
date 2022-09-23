@@ -2,15 +2,6 @@ statement ok
 DROP MATERIALIZED SOURCE tpcc_customer;
 
 statement ok
-DROP MATERIALIZED SOURCE tpcc_district;
-
-statement ok
-DROP MATERIALIZED SOURCE tpcc_history;
-
-statement ok
-DROP MATERIALIZED SOURCE tpcc_item;
-
-statement ok
 DROP MATERIALIZED SOURCE tpcc_neworder;
 
 statement ok
@@ -18,9 +9,3 @@ DROP MATERIALIZED SOURCE tpcc_orderline;
 
 statement ok
 DROP MATERIALIZED SOURCE tpcc_orders;
-
-statement ok
-DROP MATERIALIZED SOURCE tpcc_stock;
-
-statement ok
-DROP MATERIALIZED SOURCE tpcc_warehouse;
