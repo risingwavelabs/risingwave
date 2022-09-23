@@ -646,9 +646,10 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
 
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
         let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self);
-        array_builders.iter_mut().try_for_each(|array_builder| {
+        for array_builder in array_builders.iter_mut() {
             array_builder.deserialize_from_hash_key(&mut deserializer)
-        })
+        }
+        Ok(())
     }
 
     fn null_bitmap(&self) -> &FixedBitSet {
@@ -890,7 +891,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         keys.into_iter()
-            .for_each(|k| k.deserialize_to_builders(&mut array_builders[..]).unwrap());
+            .for_each(|k| k.deserialize_to_builders(&mut array_builders[..]));
 
         let array = array_builders.pop().unwrap().finish();
         let i32_vec = array
