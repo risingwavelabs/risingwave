@@ -16,6 +16,7 @@ else
 fi
 
 echo "--- start Node Exporter, Pushgateway, Prometheus and Grafana"
+./start_four_monitoring_components.sh
 if ./show_four_monitoring_components.sh | grep 'node_exporter' | grep 'grafana-server' | grep 'pushgateway' | grep 'prometheus'; then
   printf "all services have started successfully\n"
 else
@@ -24,6 +25,7 @@ else
 fi
 
 echo "--- starts both the Flink cluster and Nexmark monitoring service"
+./restart-flink.sh
 if jps | grep -e "CpuMetricSender" -e "TaskManagerRunner" > /dev/null; then
   printf "flink cluster and nexmark started."
   printf "TaskManagerRunner represents the Flink and CpuMetricSender represents Nexmark monitoring service\n"
