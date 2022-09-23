@@ -1,3 +1,6 @@
+echo "--- set the FLINK_HOME value"
+export FLINK_HOME=/home/ubuntu/flink
+
 echo "--- starts both zookeeper and kafka"
 ./start_kafka.sh
 
