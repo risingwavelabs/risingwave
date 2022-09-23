@@ -37,7 +37,7 @@ pub struct ArrayConcatExpression {
     left: BoxedExpression,
     right: BoxedExpression,
     op: Operation,
-    op_func: fn(DatumRef, DatumRef) -> Datum,
+    op_func: fn(DatumRef<'_>, DatumRef<'_>) -> Datum,
 }
 
 impl std::fmt::Debug for ArrayConcatExpression {
@@ -94,7 +94,7 @@ impl ArrayConcatExpression {
     /// ----
     /// {123}
     /// ```
-    fn concat_array(left: DatumRef, right: DatumRef) -> Datum {
+    fn concat_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, right) => right.map(ScalarRefImpl::into_scalar_impl),
             (left, None) => left.map(ScalarRefImpl::into_scalar_impl),
@@ -143,7 +143,7 @@ impl ArrayConcatExpression {
     /// ----
     /// NULL
     /// ```
-    fn append_array(left: DatumRef, right: DatumRef) -> Datum {
+    fn append_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, None) => None,
             (None, right) => {
@@ -191,7 +191,7 @@ impl ArrayConcatExpression {
     /// select array_append(null::int[], null::int);
     /// ----
     /// {NULL}
-    fn append_value(left: DatumRef, right: DatumRef) -> Datum {
+    fn append_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, right) => {
                 Some(ListValue::new(vec![right.map(ScalarRefImpl::into_scalar_impl)]).into())
@@ -240,7 +240,7 @@ impl ArrayConcatExpression {
     /// select array_cat(null::int[], null::int[][]);
     /// ----
     /// NULL
-    fn prepend_array(left: DatumRef, right: DatumRef) -> Datum {
+    fn prepend_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, None) => None,
             (left, None) => {
@@ -287,7 +287,7 @@ impl ArrayConcatExpression {
     /// select array_prepend(null::int, null::int[]);
     /// ----
     /// {NULL}
-    fn prepend_value(left: DatumRef, right: DatumRef) -> Datum {
+    fn prepend_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (left, None) => {
                 Some(ListValue::new(vec![left.map(ScalarRefImpl::into_scalar_impl)]).into())
@@ -307,7 +307,7 @@ impl ArrayConcatExpression {
         }
     }
 
-    fn evaluate(&self, left: DatumRef, right: DatumRef) -> Datum {
+    fn evaluate(&self, left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         (self.op_func)(left, right)
     }
 }

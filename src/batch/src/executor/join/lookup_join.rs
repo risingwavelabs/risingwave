@@ -542,7 +542,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     /// evaluated to hide the rows in the join result that don't match the condition.
     fn do_inner_join(
         &self,
-        cur_row: &RowRef,
+        cur_row: &RowRef<'_>,
         probe_side_chunk: DataChunk,
     ) -> Result<Option<DataChunk>> {
         let build_side_chunk = convert_row_to_chunk(
@@ -564,7 +564,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     }
 
     /// Pad the row out with NULLs and return it.
-    fn do_left_outer_join(&self, cur_row: &RowRef) -> Result<Option<DataChunk>> {
+    fn do_left_outer_join(&self, cur_row: &RowRef<'_>) -> Result<Option<DataChunk>> {
         let mut build_datum_refs = cur_row.values().collect_vec();
 
         let builder_data_types = self.chunk_builder.data_types();
@@ -580,7 +580,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     }
 
     /// Converts row to a data chunk
-    fn convert_row_for_builder(&self, cur_row: &RowRef) -> Result<Option<DataChunk>> {
+    fn convert_row_for_builder(&self, cur_row: &RowRef<'_>) -> Result<Option<DataChunk>> {
         Ok(Some(convert_row_to_chunk(
             cur_row,
             1,
@@ -602,7 +602,7 @@ pub struct LookupJoinExecutorBuilder {}
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [build_child]: [_; 1] = inputs.try_into().unwrap();

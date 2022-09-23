@@ -109,7 +109,7 @@ impl FilterKeyExtractor for DummyFilterKeyExtractor {
     }
 }
 
-/// [`SchemaFilterKeyExtractor`] build from table_catalog and extract a `full_key` to prefix for
+/// [`SchemaFilterKeyExtractor`] build from `table_catalog` and extract a `full_key` to prefix for
 #[derive(Default)]
 pub struct FixedLengthFilterKeyExtractor {
     fixed_length: usize,
@@ -127,8 +127,8 @@ impl FixedLengthFilterKeyExtractor {
     }
 }
 
-/// [`SchemaFilterKeyExtractor`] build from table_catalog and transform a `full_key` to prefix for
-/// prefix_bloom_filter
+/// [`SchemaFilterKeyExtractor`] build from `table_catalog` and transform a `full_key` to prefix for
+/// `prefix_bloom_filter`
 pub struct SchemaFilterKeyExtractor {
     /// Each stateful operator has its own read pattern, partly using prefix scan.
     /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
@@ -307,7 +307,7 @@ impl FilterKeyExtractorManagerInner {
     }
 }
 
-/// FilterKeyExtractorManager is a wrapper for inner, and provide a protected read and write
+/// `FilterKeyExtractorManager` is a wrapper for inner, and provide a protected read and write
 /// interface, its thread safe
 #[derive(Default)]
 pub struct FilterKeyExtractorManager {
@@ -320,7 +320,7 @@ impl FilterKeyExtractorManager {
         self.inner.update(table_id, filter_key_extractor);
     }
 
-    /// Remove a mapping by table_id
+    /// Remove a mapping by `table_id`
     pub fn remove(&self, table_id: u32) {
         self.inner.remove(table_id);
     }
@@ -332,7 +332,7 @@ impl FilterKeyExtractorManager {
 
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
-    /// table_id does not util version update (notify), and retry to get
+    /// `table_id` does not util version update (notify), and retry to get
     pub async fn acquire(&self, table_id_set: HashSet<u32>) -> FilterKeyExtractorImpl {
         self.inner.acquire(table_id_set).await
     }
@@ -384,7 +384,6 @@ mod tests {
     fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
         ProstTable {
             is_index: false,
-            index_on_id: 0,
             id: 0,
             schema_id: 0,
             database_id: 0,

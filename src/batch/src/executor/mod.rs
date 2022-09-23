@@ -105,7 +105,7 @@ impl std::fmt::Debug for BoxedExecutor {
 #[async_trait::async_trait]
 pub trait BoxedExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor>;
 }

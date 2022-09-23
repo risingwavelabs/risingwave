@@ -145,11 +145,7 @@ impl SchemaCatalog {
     pub fn iter_mv(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| {
-                v.associated_source_id.is_none()
-                    && v.is_index_on.is_none()
-                    && valid_table_name(&v.name)
-            })
+            .filter(|(_, v)| v.associated_source_id.is_none() && valid_table_name(&v.name))
             .map(|(_, v)| v)
     }
 

@@ -79,12 +79,12 @@ impl StreamMaterialize {
         user_order_by: Order,
         user_cols: FixedBitSet,
         out_names: Vec<String>,
-        is_index_on: Option<TableId>,
+        is_index: bool,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
             _ => {
-                if is_index_on.is_some() {
+                if is_index {
                     RequiredDist::PhysicalDist(Distribution::HashShard(
                         user_order_by.field_order.iter().map(|x| x.index).collect(),
                     ))
@@ -168,8 +168,8 @@ impl StreamMaterialize {
             columns,
             pk: pk_list,
             stream_key: pk_indices.clone(),
-            is_index_on,
             distribution_key: base.dist.dist_column_indices().to_vec(),
+            is_index,
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
@@ -194,7 +194,7 @@ impl StreamMaterialize {
 }
 
 impl fmt::Display for StreamMaterialize {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let table = self.table();
 
         let column_names = table

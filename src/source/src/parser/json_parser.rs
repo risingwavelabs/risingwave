@@ -60,7 +60,7 @@ impl SourceParser for JsonParser {
 
         use crate::parser::common::simd_json_parse_value;
         let mut payload_mut = payload.to_vec();
-        let value: BorrowedValue = simd_json::to_borrowed_value(&mut payload_mut)
+        let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {
@@ -136,14 +136,14 @@ mod tests {
                 row.value_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(1.23.into())))
             );
-            // Usage of avx2 results in a floating point error. Since it is
+            // Usage of avx2 or neon(used by M1) results in a floating point error. Since it is
             // very small (close to precision of f64) we ignore it.
-            #[cfg(target_feature = "avx2")]
+            #[cfg(any(target_feature = "avx2", target_feature = "neon"))]
             assert_eq!(
                 row.value_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(1.2345000000000002.into())))
             );
-            #[cfg(not(target_feature = "avx2"))]
+            #[cfg(not(any(target_feature = "avx2", target_feature = "neon")))]
             assert_eq!(
                 row.value_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(1.2345.into())))
