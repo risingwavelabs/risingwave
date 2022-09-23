@@ -167,7 +167,7 @@ pub(crate) use start_measure_real_process_timer;
 
 use super::Compactor;
 
-static CACEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
+static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [
         TaskStatus::ManualCanceled,
         TaskStatus::NoAvailCanceled,
@@ -764,7 +764,7 @@ where
     }
 
     pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
-        assert!(CACEL_STATUS_SET.contains(&compact_task.task_status()));
+        assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
         self.report_compact_task_impl(None, compact_task, None)
             .await
     }

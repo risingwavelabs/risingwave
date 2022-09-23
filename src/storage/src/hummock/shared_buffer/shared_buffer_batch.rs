@@ -19,6 +19,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::CompactionGroupId;
 use tokio::sync::mpsc;
 use tracing::error;
@@ -30,13 +31,14 @@ use crate::hummock::shared_buffer::SharedBufferEvent;
 use crate::hummock::shared_buffer::SharedBufferEvent::BufferRelease;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
+use crate::storage_value::StorageValue;
 
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     size: usize,
-    buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
+    buffer_release_notifier: Option<mpsc::UnboundedSender<SharedBufferEvent>>,
 }
 
 impl Deref for SharedBufferBatchInner {
@@ -49,12 +51,13 @@ impl Deref for SharedBufferBatchInner {
 
 impl Drop for SharedBufferBatchInner {
     fn drop(&mut self) {
-        let _ = self
-            .buffer_release_notifier
-            .send(BufferRelease(self.size))
-            .inspect_err(|e| {
-                error!("unable to notify buffer size change: {:?}", e);
-            });
+        if let Some(buffer_release_notifier) = self.buffer_release_notifier.as_ref() {
+            let _ = buffer_release_notifier
+                .send(BufferRelease(self.size))
+                .inspect_err(|e| {
+                    error!("unable to notify buffer size change: {:?}", e);
+                });
+        }
     }
 }
 
@@ -84,7 +87,7 @@ pub struct SharedBufferBatch {
 }
 
 impl SharedBufferBatch {
-    pub fn new(
+    pub fn new_with_notifier(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
         buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
@@ -102,7 +105,34 @@ impl SharedBufferBatch {
             inner: Arc::new(SharedBufferBatchInner {
                 payload: sorted_items,
                 size,
-                buffer_release_notifier,
+                buffer_release_notifier: Some(buffer_release_notifier),
+            }),
+            epoch,
+            compaction_group_id,
+            table_id,
+        }
+    }
+
+    // TODO: for read_version refactor without notify release buffer
+    #[allow(unused)]
+    pub fn new(
+        sorted_items: Vec<SharedBufferItem>,
+        epoch: HummockEpoch,
+        compaction_group_id: CompactionGroupId,
+        table_id: u32,
+    ) -> Self {
+        let size: usize = Self::measure_batch_size(&sorted_items);
+
+        #[cfg(debug_assertions)]
+        {
+            Self::check_table_prefix(table_id, &sorted_items)
+        }
+
+        Self {
+            inner: Arc::new(SharedBufferBatchInner {
+                payload: sorted_items,
+                size,
+                buffer_release_notifier: None,
             }),
             epoch,
             compaction_group_id,
@@ -307,6 +337,21 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
 }
 
+pub fn build_shared_buffer_item_batches(
+    kv_pairs: Vec<(Bytes, StorageValue)>,
+    epoch: HummockEpoch,
+) -> Vec<SharedBufferItem> {
+    kv_pairs
+        .into_iter()
+        .map(|(key, value)| {
+            (
+                Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
+                value.into(),
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -343,7 +388,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value1")),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::new(
+        let shared_buffer_batch = SharedBufferBatch::new_with_notifier(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
             mpsc::unbounded_channel().0,
@@ -421,7 +466,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value3")),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::new(
+        let shared_buffer_batch = SharedBufferBatch::new_with_notifier(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
             mpsc::unbounded_channel().0,

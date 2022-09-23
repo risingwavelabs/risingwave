@@ -41,7 +41,7 @@ fn gen_interleave_shared_buffer_batch_iter(
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::new_with_notifier(
             batch_data,
             2333,
             mpsc::unbounded_channel().0,
@@ -75,7 +75,7 @@ fn gen_interleave_shared_buffer_batch_enum_iter(
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::new_with_notifier(
             batch_data,
             2333,
             mpsc::unbounded_channel().0,

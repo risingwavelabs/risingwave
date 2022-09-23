@@ -28,7 +28,6 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 #[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
-use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockReadEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::{pin_version_response, HummockVersion};
@@ -45,7 +44,7 @@ use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use super::SstableStoreRef;
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
+use crate::hummock::shared_buffer::shared_buffer_batch::build_shared_buffer_item_batches;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
 use crate::hummock::utils::validate_table_key_range;
@@ -401,21 +400,6 @@ impl LocalVersionManager {
         }
     }
 
-    pub fn build_shared_buffer_item_batches(
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: HummockEpoch,
-    ) -> Vec<SharedBufferItem> {
-        kv_pairs
-            .into_iter()
-            .map(|(key, value)| {
-                (
-                    Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
-                    value.into(),
-                )
-            })
-            .collect_vec()
-    }
-
     pub async fn write_shared_buffer(
         &self,
         epoch: HummockEpoch,
@@ -423,8 +407,8 @@ impl LocalVersionManager {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         table_id: u32,
     ) -> HummockResult<usize> {
-        let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
-        let batch = SharedBufferBatch::new(
+        let sorted_items = build_shared_buffer_item_batches(kv_pairs, epoch);
+        let batch = SharedBufferBatch::new_with_notifier(
             sorted_items,
             epoch,
             self.buffer_tracker.buffer_event_sender.clone(),

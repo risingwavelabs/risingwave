@@ -500,7 +500,7 @@ mod tests {
             ));
         }
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::new_with_notifier(
             shared_buffer_items,
             epoch,
             mpsc::unbounded_channel().0,

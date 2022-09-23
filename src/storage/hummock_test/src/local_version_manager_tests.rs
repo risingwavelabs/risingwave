@@ -24,7 +24,9 @@ use risingwave_pb::hummock::HummockVersion;
 use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
-use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
+    build_shared_buffer_item_batches, SharedBufferBatch,
+};
 use risingwave_storage::hummock::shared_buffer::UncommittedData;
 use risingwave_storage::hummock::test_utils::{
     default_config_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
@@ -74,12 +76,10 @@ async fn test_update_pinned_version() {
         let local_version = local_version_manager.get_local_version();
         assert_eq!(
             local_version.get_shared_buffer(epochs[i]).unwrap().size(),
-            SharedBufferBatch::measure_batch_size(
-                &LocalVersionManager::build_shared_buffer_item_batches(
-                    batches[i].clone(),
-                    epochs[i]
-                )
-            )
+            SharedBufferBatch::measure_batch_size(&build_shared_buffer_item_batches(
+                batches[i].clone(),
+                epochs[i]
+            ))
         );
     }
 
@@ -96,8 +96,8 @@ async fn test_update_pinned_version() {
     assert!(local_version.get_shared_buffer(epochs[2]).is_some(),);
 
     let build_batch = |pairs, epoch| {
-        SharedBufferBatch::new(
-            LocalVersionManager::build_shared_buffer_item_batches(pairs, epoch),
+        SharedBufferBatch::new_with_notifier(
+            build_shared_buffer_item_batches(pairs, epoch),
             epoch,
             unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
@@ -164,9 +164,10 @@ async fn test_update_pinned_version() {
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert_eq!(
         local_version.get_shared_buffer(epochs[1]).unwrap().size(),
-        SharedBufferBatch::measure_batch_size(
-            &LocalVersionManager::build_shared_buffer_item_batches(batches[1].clone(), epochs[1])
-        )
+        SharedBufferBatch::measure_batch_size(&build_shared_buffer_item_batches(
+            batches[1].clone(),
+            epochs[1]
+        ))
     );
 
     let _ = local_version_manager
@@ -242,8 +243,8 @@ async fn test_update_uncommitted_ssts() {
             .await
             .unwrap();
         let local_version = local_version_manager.get_local_version();
-        let batch = SharedBufferBatch::new(
-            LocalVersionManager::build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
+        let batch = SharedBufferBatch::new_with_notifier(
+            build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
             epochs[i],
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
@@ -434,12 +435,10 @@ async fn test_clear_shared_buffer() {
         let local_version = local_version_manager.get_local_version();
         assert_eq!(
             local_version.get_shared_buffer(epochs[i]).unwrap().size(),
-            SharedBufferBatch::measure_batch_size(
-                &LocalVersionManager::build_shared_buffer_item_batches(
-                    batches[i].clone(),
-                    epochs[i]
-                )
-            )
+            SharedBufferBatch::measure_batch_size(&build_shared_buffer_item_batches(
+                batches[i].clone(),
+                epochs[i]
+            ))
         );
     }
 
