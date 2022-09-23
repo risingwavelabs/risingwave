@@ -334,7 +334,14 @@ where
                 .upstream_fragment_ids
                 .push(upstream_fragment_id as FragmentId);
 
-            fragment.vnode_mapping = upstream_fragment_vnode_info.vnode_mapping.clone();
+            let mut vnode_mapping = upstream_fragment_vnode_info.vnode_mapping.clone();
+            // The upstream vnode_mapping is cloned here,
+            // so the fragment id in the mapping needs to be changed to the id of this fragment
+            if let Some(mapping) = vnode_mapping.as_mut() {
+                assert_ne!(mapping.fragment_id, fragment.fragment_id);
+                mapping.fragment_id = fragment.fragment_id;
+            }
+            fragment.vnode_mapping = vnode_mapping;
         }
         Ok(())
     }
