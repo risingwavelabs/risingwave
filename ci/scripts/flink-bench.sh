@@ -6,7 +6,7 @@ echo "--- starts both zookeeper and kafka"
 sleep 5
 
 if jps | grep 'QuorumPeerMain'; then
-  echo "zookeeper started\n"
+  printf "zookeeper started\n"
 else
   printf "zookeeper did not start\n"
   exit 1
@@ -69,10 +69,10 @@ echo "--- check the number of records in the Kafka topic"
 ./show_kafka_topic_records.sh "topic"
 
 echo "--- run the benchmark"
-./run_kafka_source.sh ${QUERIES:-q0,q1,q2,q3,q4,q5,q6,q7,q8,q9,q10,q11,q12,q13,q14,q15,q16,q17,q18,q19,q20,q21,q22}
+./run_kafka_source.sh "${QUERIES:-q0,q1,q2,q3,q4,q5,q6,q7,q8,q9,q10,q11,q12,q13,q14,q15,q16,q17,q18,q19,q20,q21,q22}"
 printf "completed the benchmark for all the queries\n"
 
-echo "---- run Datagen source provided by Flink to generate in-memory data directly"
+echo "---- run datagen source provided by flink to generate in-memory data directly"
 ./run_datagen_source.sh
 
 echo "---- restart the flink for the graceful start of next benchmark"
