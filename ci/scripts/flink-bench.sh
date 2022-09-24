@@ -3,6 +3,7 @@ export FLINK_HOME=/home/ubuntu/flink
 
 echo "--- starts both zookeeper and kafka"
 ./start_kafka.sh
+sleep 5
 
 if jps | grep 'QuorumPeerMain'; then
   echo "zookeeper started\n"
@@ -20,6 +21,7 @@ fi
 
 echo "--- start Node Exporter, Pushgateway, Prometheus and Grafana"
 ./start_four_monitoring_components.sh
+sleep 5
 if ./show_four_monitoring_components.sh | grep 'node_exporter'; then
   printf "node_exporter has started successfully\n"
 else
@@ -50,6 +52,7 @@ fi
 
 echo "--- starts both the Flink cluster and Nexmark monitoring service"
 ./restart-flink.sh
+sleep 5
 if jps | grep -e "CpuMetricSender" -e "TaskManagerRunner" > /dev/null; then
   printf "flink cluster and nexmark started."
   printf "TaskManagerRunner represents the Flink and CpuMetricSender represents Nexmark monitoring service\n"
