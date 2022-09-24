@@ -246,7 +246,7 @@ impl QueryRunner {
                         // So we can now unpin their epoch.
                         tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
                         self.hummock_snapshot_manager
-                            .unpin_snapshot(self.epoch, self.query.query_id())
+                            .release(self.epoch, self.query.query_id())
                             .await;
                     }
 

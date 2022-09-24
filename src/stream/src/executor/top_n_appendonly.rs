@@ -84,7 +84,8 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
-    cache: TopNCache,
+    /// TODO: support WITH TIES
+    cache: TopNCache<false>,
 
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -124,7 +125,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit),
+            cache: TopNCache::new(num_offset, num_limit, order_pairs.len()),
             key_indices,
         })
     }
@@ -207,7 +208,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 

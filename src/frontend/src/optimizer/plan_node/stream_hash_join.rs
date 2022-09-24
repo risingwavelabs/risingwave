@@ -135,7 +135,7 @@ impl StreamHashJoin {
 }
 
 impl fmt::Display for StreamHashJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = if self.is_append_only {
             f.debug_struct("StreamAppendOnlyHashJoin")
         } else {

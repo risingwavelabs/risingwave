@@ -121,7 +121,7 @@ impl NestedLoopJoinExecutor {
     fn concatenate_and_eval(
         expr: &dyn Expression,
         left_row_types: &[DataType],
-        left_row: RowRef,
+        left_row: RowRef<'_>,
         right_chunk: &DataChunk,
     ) -> Result<DataChunk> {
         let left_chunk = convert_row_to_chunk(&left_row, right_chunk.capacity(), left_row_types)?;
@@ -134,7 +134,7 @@ impl NestedLoopJoinExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [left_child, right_child]: [_; 2] = inputs.try_into().unwrap();

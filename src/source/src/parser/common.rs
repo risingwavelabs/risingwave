@@ -102,7 +102,7 @@ pub(crate) fn json_parse_value(column: &ColumnDesc, value: Option<&Value>) -> Re
     target_feature = "neon",
     target_feature = "simd128"
 ))]
-fn do_parse_simd_json_value(column: &ColumnDesc, v: &BorrowedValue) -> Result<ScalarImpl> {
+fn do_parse_simd_json_value(column: &ColumnDesc, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
     let v = match column.data_type {
         DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
         DataType::Int16 => ScalarImpl::Int16(
@@ -149,7 +149,7 @@ fn do_parse_simd_json_value(column: &ColumnDesc, v: &BorrowedValue) -> Result<Sc
 #[inline]
 pub(crate) fn simd_json_parse_value(
     column: &ColumnDesc,
-    value: Option<&BorrowedValue>,
+    value: Option<&BorrowedValue<'_>>,
 ) -> Result<Datum> {
     match value {
         None | Some(BorrowedValue::Static(StaticNode::Null)) => Ok(None),

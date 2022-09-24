@@ -113,7 +113,7 @@ impl LogicalSource {
 impl_plan_tree_node_for_leaf! {LogicalSource}
 
 impl fmt::Display for LogicalSource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "LogicalSource {{ source: {}, columns: [{}] }}",

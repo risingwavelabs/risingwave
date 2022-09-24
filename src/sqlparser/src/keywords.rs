@@ -48,7 +48,7 @@ macro_rules! define_keywords {
     ),*) => {
         #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-        #[allow(non_camel_case_types)]
+        #[expect(non_camel_case_types, clippy::enum_variant_names)]
         pub enum Keyword {
             NoKeyword,
             $($ident),*

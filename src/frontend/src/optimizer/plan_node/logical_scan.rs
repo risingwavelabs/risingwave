@@ -411,7 +411,7 @@ impl LogicalScan {
 impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl fmt::Display for LogicalScan {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         if self.predicate.always_true() {
             write!(

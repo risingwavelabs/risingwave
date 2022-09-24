@@ -17,6 +17,7 @@
 
 #![deny(missing_docs)]
 #![feature(lint_reasons)]
+#![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 mod de;
 mod error;
