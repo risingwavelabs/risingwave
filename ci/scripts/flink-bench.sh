@@ -77,5 +77,3 @@ echo "---- run datagen source provided by flink to generate in-memory data direc
 
 echo "---- restart the flink for the graceful start of next benchmark"
 ./restart-flink.sh
-
-exit 0
