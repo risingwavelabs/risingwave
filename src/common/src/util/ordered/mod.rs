@@ -89,4 +89,54 @@ impl OrderedRow {
         res.iter_mut().for_each(|byte| *byte = !*byte);
         Ok(res)
     }
+
+    pub fn prefix(&self, n: usize) -> Self {
+        debug_assert!(n <= self.0.len());
+        OrderedRow(self.0[..n].to_vec())
+    }
+
+    pub fn starts_with(&self, other: &Self) -> bool {
+        self.0.starts_with(&other.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ScalarImpl;
+
+    fn make_row(values: Vec<i64>) -> OrderedRow {
+        let row = Row(values
+            .into_iter()
+            .map(|v| Some(ScalarImpl::Int64(v)))
+            .collect());
+        OrderedRow::new(row, ORDER_TYPES)
+    }
+
+    const ORDER_TYPES: &[OrderType] = &[
+        OrderType::Ascending,
+        OrderType::Descending,
+        OrderType::Ascending,
+    ];
+
+    #[test]
+    fn test_prefix() {
+        let row = make_row(vec![1, 2, 3]);
+
+        assert!(row.prefix(0) < row.prefix(1));
+        assert!(row.prefix(1) < row.prefix(2));
+        assert!(row.prefix(2) < row.prefix(3));
+        assert_eq!(row.prefix(3), row);
+
+        let row2 = make_row(vec![1, 3, 3]);
+        assert!(row.prefix(1) < row2);
+        assert!(row.prefix(2) > row2);
+    }
+
+    #[should_panic]
+    #[test]
+    fn test_prefix_panic() {
+        let row = make_row(vec![1, 2, 3]);
+        row.prefix(4);
+    }
 }

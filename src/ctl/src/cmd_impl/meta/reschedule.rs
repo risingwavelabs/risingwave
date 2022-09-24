@@ -71,7 +71,7 @@ pub async fn reschedule(mut plan: String, dry_run: bool) -> Result<()> {
             .and_then(|mat| mat.as_str().parse::<u32>().ok())
             .ok_or_else(|| anyhow!("plan \"{}\" does not have a valid fragment id", plan))?;
 
-        let split_fn = |mat: Match| {
+        let split_fn = |mat: Match<'_>| {
             mat.as_str()
                 .split(',')
                 .map(|id_str| id_str.parse::<u32>().map_err(Error::msg))

@@ -98,7 +98,7 @@ impl LogicalTopN {
         &self.group_key
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         let input = self.input();
         let input_schema = input.schema();
@@ -286,7 +286,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
 }
 impl_plan_tree_node_for_unary! {LogicalTopN}
 impl fmt::Display for LogicalTopN {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalTopN")
     }
 }

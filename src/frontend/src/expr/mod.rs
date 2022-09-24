@@ -58,7 +58,7 @@ pub use type_inference::{
 };
 pub use utils::*;
 
-/// the trait of bound exprssions
+/// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {
     /// Get the return type of the expr
     fn return_type(&self) -> DataType;
@@ -67,18 +67,32 @@ pub trait Expr: Into<ExprImpl> {
     fn to_expr_proto(&self) -> ExprNode;
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
-pub enum ExprImpl {
-    // ColumnRef(Box<BoundColumnRef>), might be used in binder.
-    InputRef(Box<InputRef>),
-    CorrelatedInputRef(Box<CorrelatedInputRef>),
-    Literal(Box<Literal>),
-    FunctionCall(Box<FunctionCall>),
-    AggCall(Box<AggCall>),
-    Subquery(Box<Subquery>),
-    TableFunction(Box<TableFunction>),
-    WindowFunction(Box<WindowFunction>),
+macro_rules! impl_expr_impl {
+    ($($t:ident),*) => {
+        #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
+        pub enum ExprImpl {
+            $($t(Box<$t>),)*
+        }
+        $(
+        impl From<$t> for ExprImpl {
+            fn from(o: $t) -> ExprImpl {
+                ExprImpl::$t(Box::new(o))
+            }
+        })*
+    };
 }
+
+impl_expr_impl!(
+    // BoundColumnRef, might be used in binder.
+    CorrelatedInputRef,
+    InputRef,
+    Literal,
+    FunctionCall,
+    AggCall,
+    Subquery,
+    TableFunction,
+    WindowFunction
+);
 
 impl ExprImpl {
     /// A literal int value.
@@ -595,54 +609,6 @@ impl Expr for ExprImpl {
                 unreachable!("Window function should not be converted to ExprNode")
             }
         }
-    }
-}
-
-impl From<InputRef> for ExprImpl {
-    fn from(input_ref: InputRef) -> Self {
-        ExprImpl::InputRef(Box::new(input_ref))
-    }
-}
-
-impl From<Literal> for ExprImpl {
-    fn from(literal: Literal) -> Self {
-        ExprImpl::Literal(Box::new(literal))
-    }
-}
-
-impl From<FunctionCall> for ExprImpl {
-    fn from(func_call: FunctionCall) -> Self {
-        ExprImpl::FunctionCall(Box::new(func_call))
-    }
-}
-
-impl From<AggCall> for ExprImpl {
-    fn from(agg_call: AggCall) -> Self {
-        ExprImpl::AggCall(Box::new(agg_call))
-    }
-}
-
-impl From<Subquery> for ExprImpl {
-    fn from(subquery: Subquery) -> Self {
-        ExprImpl::Subquery(Box::new(subquery))
-    }
-}
-
-impl From<CorrelatedInputRef> for ExprImpl {
-    fn from(correlated_input_ref: CorrelatedInputRef) -> Self {
-        ExprImpl::CorrelatedInputRef(Box::new(correlated_input_ref))
-    }
-}
-
-impl From<TableFunction> for ExprImpl {
-    fn from(tf: TableFunction) -> Self {
-        ExprImpl::TableFunction(Box::new(tf))
-    }
-}
-
-impl From<WindowFunction> for ExprImpl {
-    fn from(wf: WindowFunction) -> Self {
-        ExprImpl::WindowFunction(Box::new(wf))
     }
 }
 

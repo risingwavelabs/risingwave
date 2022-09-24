@@ -429,14 +429,24 @@ impl PreparedStatement {
                     format!("{}::DECIMAL", tmp)
                 }
                 TypeOid::Timestampz => {
-                    return Err(PsqlError::BindError(
-                        "Can't support Timestampz type in extended query mode".into(),
-                    ))
+                    if param_format {
+                        return Err(PsqlError::BindError(
+                            "Can't support Timestampz type in binary format".into(),
+                        ));
+                    } else {
+                        let tmp = cstr_to_str(raw_param).unwrap().to_string();
+                        format!("'{}'::TIMESTAMPZ", tmp)
+                    }
                 }
                 TypeOid::Interval => {
-                    return Err(PsqlError::BindError(
-                        "Can't support Interval type in extended query mode".into(),
-                    ))
+                    if param_format {
+                        return Err(PsqlError::BindError(
+                            "Can't support Interval type in binary format".into(),
+                        ));
+                    } else {
+                        let tmp = cstr_to_str(raw_param).unwrap().to_string();
+                        format!("'{}'::INTERVAL", tmp)
+                    }
                 }
             };
             params.push(str)
@@ -445,11 +455,8 @@ impl PreparedStatement {
         Ok(params)
     }
 
-    /// default_params is to create default params:[String] from type_description:[TypeOid].
-    /// The params produced by this function will be used in the
-    /// PreparedStatement::instance_default.
-    ///
-    /// type_description is a list of type oids.
+    /// `default_params` creates default params from type oids for
+    /// [`PreparedStatement::instance_default`].
     fn default_params(type_description: &[TypeOid]) -> PsqlResult<Vec<String>> {
         let mut params: _ = Vec::new();
         for oid in type_description.iter() {
@@ -483,7 +490,7 @@ impl PreparedStatement {
     fn replace_params(&self, params: &[String]) -> String {
         let mut tmp = self.raw_statement.clone();
 
-        for (idx, generic_param) in self.param_tokens.iter() {
+        for (idx, generic_param) in &self.param_tokens {
             let param = &params[*idx - 1];
             tmp = tmp.replace(generic_param, param);
         }
@@ -495,10 +502,10 @@ impl PreparedStatement {
         self.param_types.clone()
     }
 
-    /// instance_default used in parse phase.
+    /// `instance_default` used in parse phase.
     /// At parse phase, user still do not provide params but we need to infer the sql result.(The
     /// session can't support infer the sql with generic param now). Hence to get a sql without
-    /// generic param, we used default_params() to generate default params according param_types
+    /// generic param, we used `default_params()` to generate default params according `param_types`
     /// and replace the generic param with them.
     pub fn instance_default(&self) -> PsqlResult<String> {
         let default_params = Self::default_params(&self.param_types)?;

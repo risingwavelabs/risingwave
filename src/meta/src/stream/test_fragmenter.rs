@@ -390,6 +390,16 @@ async fn test_fragmenter() -> MetaResult<()> {
     assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(4, internal_table_ids.len());
 
+    let fragment_upstreams: HashMap<_, _> = table_fragments
+        .fragments
+        .iter()
+        .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))
+        .collect();
+
+    assert_eq!(fragment_upstreams.get(&1).unwrap(), &vec![2]);
+    assert_eq!(fragment_upstreams.get(&2).unwrap(), &vec![3]);
+    assert!(fragment_upstreams.get(&3).unwrap().is_empty());
+
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
     expected_downstream.insert(2, vec![1]);

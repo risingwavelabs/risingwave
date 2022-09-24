@@ -51,7 +51,7 @@ pub struct LogicalJoin {
 }
 
 impl fmt::Display for LogicalJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("LogicalJoin");
         builder.field("type", &format_args!("{:?}", self.join_type()));

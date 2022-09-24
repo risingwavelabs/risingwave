@@ -94,7 +94,7 @@ impl From<TokenizerError> for ParserError {
 }
 
 impl fmt::Display for ParserError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "sql parser error: {}",

@@ -1,7 +1,6 @@
 /* eslint-disable */
 import { Source } from "./catalog";
 import { ActorInfo, Status } from "./common";
-import { Epoch } from "./data";
 import { SstableInfo } from "./hummock";
 import { Barrier, StreamActor } from "./stream_plan";
 
@@ -50,8 +49,6 @@ export interface DropActorsResponse {
 
 export interface ForceStopActorsRequest {
   requestId: string;
-  epoch: Epoch | undefined;
-  actorIds: number[];
 }
 
 export interface ForceStopActorsResponse {
@@ -375,35 +372,23 @@ export const DropActorsResponse = {
 };
 
 function createBaseForceStopActorsRequest(): ForceStopActorsRequest {
-  return { requestId: "", epoch: undefined, actorIds: [] };
+  return { requestId: "" };
 }
 
 export const ForceStopActorsRequest = {
   fromJSON(object: any): ForceStopActorsRequest {
-    return {
-      requestId: isSet(object.requestId) ? String(object.requestId) : "",
-      epoch: isSet(object.epoch) ? Epoch.fromJSON(object.epoch) : undefined,
-      actorIds: Array.isArray(object?.actorIds) ? object.actorIds.map((e: any) => Number(e)) : [],
-    };
+    return { requestId: isSet(object.requestId) ? String(object.requestId) : "" };
   },
 
   toJSON(message: ForceStopActorsRequest): unknown {
     const obj: any = {};
     message.requestId !== undefined && (obj.requestId = message.requestId);
-    message.epoch !== undefined && (obj.epoch = message.epoch ? Epoch.toJSON(message.epoch) : undefined);
-    if (message.actorIds) {
-      obj.actorIds = message.actorIds.map((e) => Math.round(e));
-    } else {
-      obj.actorIds = [];
-    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ForceStopActorsRequest>, I>>(object: I): ForceStopActorsRequest {
     const message = createBaseForceStopActorsRequest();
     message.requestId = object.requestId ?? "";
-    message.epoch = (object.epoch !== undefined && object.epoch !== null) ? Epoch.fromPartial(object.epoch) : undefined;
-    message.actorIds = object.actorIds?.map((e) => e) || [];
     return message;
   },
 };

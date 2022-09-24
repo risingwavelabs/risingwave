@@ -53,7 +53,7 @@ impl StreamSource {
 impl_plan_tree_node_for_leaf! { StreamSource }
 
 impl fmt::Display for StreamSource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamSource");
         builder
             .field("source", &self.logical.source_catalog.name)

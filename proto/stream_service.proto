@@ -4,7 +4,6 @@ package stream_service;
 
 import "catalog.proto";
 import "common.proto";
-import "data.proto";
 import "hummock.proto";
 import "stream_plan.proto";
 
@@ -53,8 +52,6 @@ message DropActorsResponse {
 
 message ForceStopActorsRequest {
   string request_id = 1;
-  data.Epoch epoch = 2;
-  repeated uint32 actor_ids = 3;
 }
 
 message ForceStopActorsResponse {
