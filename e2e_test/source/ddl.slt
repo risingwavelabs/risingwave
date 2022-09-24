@@ -1,0 +1,73 @@
+statement ok
+create materialized source s with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format json;
+
+statement ok
+drop source s
+
+query T
+show sources
+----
+
+query T
+show tables
+----
+
+statement ok
+create source s with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format json;
+
+statement ok
+drop source s
+
+query T
+show sources
+----
+
+query T
+show tables
+----
+
+statement ok
+create source s with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format json;
+
+query T
+show sources
+----
+s
+
+query T
+show tables
+----
+
+statement ok
+drop source s
+
+statement ok
+create materialized source s with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format json;
+
+query T
+show sources
+----
+s
+
+query T
+show tables
+----
+
+statement ok
+drop source s

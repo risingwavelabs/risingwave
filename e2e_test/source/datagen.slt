@@ -1,0 +1,63 @@
+statement ok
+create materialized source s1 (v1 int, v2 float) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = '1',
+    fields.v1.end  = '10',
+    fields.v2.kind = 'sequence',
+    fields.v2.start = '11',
+    fields.v2.end = '20',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) row format json;
+
+# Wait enough time to ensure Datagen connector generate data
+sleep 2s
+
+# Will only generate 10 records since `fields.v1.end` is 10
+query II rowsort
+select v1, v2 from s1 where v1 is not null limit 15;
+----
+1 11
+2 12
+3 13
+4 14
+5 15
+6 16
+7 17
+8 18
+9 19
+10 20
+
+statement ok
+drop source s1;
+
+statement ok
+create materialized source s1 (v1 int)  with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = '1',
+    fields.v1.end = '100',
+    datagen.rows.per.second = '10',
+    datagen.split.num = '5'
+) row format json;
+
+# Wait enough time to ensure Datagen connector generate data
+sleep 2s
+
+query I
+select v1 from s1 order by v1 limit 10;
+----
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+statement ok
+drop source s1;
