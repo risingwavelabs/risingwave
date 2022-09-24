@@ -199,7 +199,7 @@ impl<S: StateStore> SourceExecutor<S> {
         (!no_change_flag).then_some(target_state)
     }
 
-    async fn take_snapshot(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn take_snapshot(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         let cache = self
             .state_cache
             .iter()
@@ -207,8 +207,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         if !cache.is_empty() {
-            self.split_state_store.take_snapshot(cache, epoch).await?
+            self.split_state_store.take_snapshot(cache).await?
         }
+        // commit anyway, even if no message saved
+        self.split_state_store
+            .state_store
+            .commit(epoch.curr)
+            .await?;
 
         Ok(())
     }
@@ -259,12 +264,13 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         let epoch = barrier.epoch.prev;
+        self.split_state_store.init_epoch(epoch);
 
         let mut boot_state = self.stream_source_splits.clone();
         for ele in &mut boot_state {
             if let Some(recover_state) = self
                 .split_state_store
-                .try_recover_from_state_store(ele, epoch)
+                .try_recover_from_state_store(ele)
                 .await?
             {
                 *ele = recover_state;
@@ -298,7 +304,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 // This branch will be preferred.
                 Either::Left(barrier) => {
                     let barrier = barrier?;
-                    let epoch = barrier.epoch.prev;
+                    let epoch = barrier.epoch;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
@@ -773,10 +779,10 @@ mod tests {
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
-        let source_state_handler = SourceStateTableHandler::from_table_catalog(
+        let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             mem_state_store.clone(),
-            None,
+            Some(Arc::from(vnodes.clone())),
         );
 
         let source_exec = SourceExecutor::new(
@@ -842,23 +848,21 @@ mod tests {
 
         assert_eq!(chunk_1, chunk_1_truth);
 
+        let new_assignments = vec![
+            SplitImpl::Datagen(DatagenSplit {
+                split_index: 0,
+                split_num: 3,
+                start_offset: None,
+            }),
+            SplitImpl::Datagen(DatagenSplit {
+                split_index: 1,
+                split_num: 3,
+                start_offset: None,
+            }),
+        ];
         let change_split_mutation = Barrier::new_test_barrier(curr_epoch + 1).with_mutation(
             Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => Some(vec![
-                    SplitImpl::Datagen(
-                        DatagenSplit {
-                            split_index: 0,
-                            split_num: 3,
-                            start_offset: None,
-                        }
-                    ), SplitImpl::Datagen(
-                        DatagenSplit {
-                            split_index: 1,
-                            split_num: 3,
-                            start_offset: None,
-                        }
-                    ),
-                ])
+                ActorId::default() => Some(new_assignments.clone())
             }),
         );
         barrier_tx.send(change_split_mutation).unwrap();
@@ -866,8 +870,9 @@ mod tests {
         let _ = materialize.next().await.unwrap(); // barrier
 
         // there must exist state for new add partition
+        source_state_handler.init_epoch(curr_epoch + 1);
         source_state_handler
-            .get("3-1".to_string().into(), curr_epoch + 1)
+            .get(new_assignments[1].id())
             .await
             .unwrap()
             .unwrap();

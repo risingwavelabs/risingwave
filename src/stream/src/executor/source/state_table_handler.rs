@@ -34,7 +34,7 @@ use crate::executor::StreamExecutorResult;
 
 #[derive(Clone)]
 pub struct SourceStateTableHandler<S: StateStore> {
-    state_store: StateTable<S>,
+    pub state_store: StateTable<S>,
 }
 
 impl<S: StateStore> SourceStateTableHandler<S> {
@@ -48,25 +48,29 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         }
     }
 
+    pub fn init_epoch(&mut self, epoch: u64) {
+        self.state_store.init_epoch(epoch);
+    }
+
     fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
         ScalarImpl::Utf8(rhs.into())
     }
 
-    pub(crate) async fn get(&self, key: SplitId, _epoch: u64) -> StreamExecutorResult<Option<Row>> {
+    pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<Row>> {
         self.state_store
             .get_row(&Row::new(vec![Some(Self::string_to_scalar(key.deref()))]))
             .await
             .map_err(StreamExecutorError::from)
     }
 
-    async fn set(&mut self, key: SplitId, value: Bytes, epoch: u64) -> StreamExecutorResult<()> {
+    async fn set(&mut self, key: SplitId, value: Bytes) -> StreamExecutorResult<()> {
         let row = Row::new(vec![
             Some(Self::string_to_scalar(key.deref())),
             Some(Self::string_to_scalar(
                 String::from_utf8_lossy(&value).to_string(),
             )),
         ]);
-        match self.get(key, epoch).await? {
+        match self.get(key).await? {
             Some(prev_row) => {
                 self.state_store.update(prev_row, row);
             }
@@ -81,11 +85,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     /// and needs to be invoked by the ``SourceReader`` to call it,
     /// and will return the error when the dependent ``StateStore`` handles the error.
     /// The caller should ensure that the passed parameters are not empty.
-    pub async fn take_snapshot<SS>(
-        &mut self,
-        states: Vec<SS>,
-        epoch: u64,
-    ) -> StreamExecutorResult<()>
+    pub async fn take_snapshot<SS>(&mut self, states: Vec<SS>) -> StreamExecutorResult<()>
     where
         SS: SplitMetaData,
     {
@@ -93,12 +93,10 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             // TODO should be a clear Error Code
             bail!("states require not null");
         } else {
-            self.state_store.init_epoch(epoch);
             for split_impl in states {
-                self.set(split_impl.id(), split_impl.encode_to_bytes(), epoch)
+                self.set(split_impl.id(), split_impl.encode_to_bytes())
                     .await?;
             }
-            self.state_store.commit(epoch).await?;
         }
         Ok(())
     }
@@ -107,9 +105,8 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     pub async fn try_recover_from_state_store(
         &mut self,
         stream_source_split: &SplitImpl,
-        epoch: u64,
     ) -> StreamExecutorResult<Option<SplitImpl>> {
-        Ok(match self.get(stream_source_split.id(), epoch).await? {
+        Ok(match self.get(stream_source_split.id()).await? {
             None => None,
             Some(row) => match row.0.get(1).unwrap() {
                 Some(ScalarImpl::Utf8(s)) => Some(SplitImpl::restore_from_bytes(s.as_bytes())?),
@@ -196,11 +193,16 @@ pub(crate) mod tests {
         let split_impl = SplitImpl::Kafka(KafkaSplit::new(0, Some(0), None, "test".into()));
         let serialized = split_impl.encode_to_bytes();
 
+        state_table_handler.init_epoch(1);
         state_table_handler
-            .take_snapshot(vec![split_impl.clone()], 1)
+            .take_snapshot(vec![split_impl.clone()])
             .await?;
+        state_table_handler.state_store.commit(2).await?;
+
+        state_table_handler.state_store.commit(3).await?;
+
         match state_table_handler
-            .try_recover_from_state_store(&split_impl, 2)
+            .try_recover_from_state_store(&split_impl)
             .await?
         {
             Some(s) => {
