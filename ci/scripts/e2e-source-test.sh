@@ -49,6 +49,6 @@ cargo make ci-start ci-kafka
 sqllogictest -p 4566 -d dev  './e2e_test/source/**/*.slt'
 
 echo "--- Run CH-benCHmark queries"
-./risedev slt -p 4566 -d dev ./e2e_test/streaming/ch-benchmark/create_sources.slt.part
-./risedev slt -p 4566 -d dev ./e2e_test/streaming/ch-benchmark/q13.slt.part
-./risedev slt -p 4566 -d dev ./e2e_test/streaming/ch-benchmark/drop_sources.slt.part
+./risedev slt -p 4566 -d dev ./e2e_test/ch-benchmark/create_sources.slt.part
+./risedev slt -p 4566 -d dev ./e2e_test/ch-benchmark/q13.slt.part
+./risedev slt -p 4566 -d dev ./e2e_test/ch-benchmark/drop_sources.slt.part
