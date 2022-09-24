@@ -15,8 +15,7 @@ scp -o "StrictHostKeyChecking no" -i test.pem ci/scripts/flink-bench.sh ubuntu@5
 ssh -o "StrictHostKeyChecking no" -i test.pem ubuntu@52.220.89.140 "chmod 756 flink-bench.sh"
 
 echo "--- queries to be run: $1"
-#ssh -o "StrictHostKeyChecking no" -i test.pem ubuntu@52.220.89.140 'bash -s' < ci/scripts/flink-bench.sh $1
-ssh -o "StrictHostKeyChecking no" -i test.pem ubuntu@52.220.89.140 'bash flink-bench.sh $1'
+ssh -t -o "StrictHostKeyChecking no" -i test.pem ubuntu@52.220.89.140 'bash flink-bench.sh $1'
 
 echo "--- stop the flink bench instance"
 aws ec2 stop-instances --instance-ids i-029fdf626052dcdaf
