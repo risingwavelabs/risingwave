@@ -179,7 +179,6 @@ pub(crate) mod tests {
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
         let _resp = state_table.get_row(&Row::new(vec![a])).await.unwrap();
-        // println!("{:?}", resp.unwrap().0[1].as_ref().unwrap().get_ident());
     }
 
     #[tokio::test]

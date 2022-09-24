@@ -60,7 +60,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             Field::with_name(column_desc.data_type.clone(), column_desc.name.clone())
         }));
         let schema = Schema::new(fields);
-        println!("state table: {:?}", node.state_table);
 
         let vnodes = params
             .vnode_bitmap
