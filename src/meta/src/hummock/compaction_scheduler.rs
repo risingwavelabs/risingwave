@@ -81,6 +81,13 @@ impl CompactionRequestChannel {
 }
 
 /// Schedules compaction task picking and assignment.
+///
+/// When no idle compactor is available, the scheduling will be paused until
+/// `compaction_resume_notifier` is `notified`. Currently there are 2 cases where scheduling can be
+/// resumed (preferably by calling `HummockManager::try_resume_compaction`):
+/// - The addition (re-subscription) of compactors
+/// - Compactor availability change. Currently it just means a compaction task is reported when all
+///   compactors are not idle.
 pub struct CompactionScheduler<S>
 where
     S: MetaStore,
@@ -148,6 +155,7 @@ where
                 }
             };
 
+            sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
             request_channel.unschedule(compaction_group);
 
             // Wait for a compactor to become available.
@@ -166,7 +174,6 @@ where
             };
 
             // Pick a task and assign it to this compactor.
-            sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
             self.pick_and_assign(compaction_group, compactor, request_channel.clone())
                 .await;
         }
