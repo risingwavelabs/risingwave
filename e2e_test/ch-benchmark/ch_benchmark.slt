@@ -5,6 +5,7 @@ include ../tpch/create_tables.slt.part
 statement ok
 flush;
 
+# include ./q01.slt.part --> precision error
 include ./q13.slt.part
 include ./q16.slt.part
 
