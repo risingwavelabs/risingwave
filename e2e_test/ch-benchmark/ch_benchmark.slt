@@ -1,11 +1,12 @@
-include ../ch-benchmark/create_sources.slt.part
+include ./create_sources.slt.part
 include ../tpch/create_tables.slt.part
 
 # Ensure that the upstream data is fully consumed
 statement ok
 flush;
 
-include ../ch-benchmark/q13.slt.part
+include ./q13.slt.part
+include ./q16.slt.part
 
-include ../ch-benchmark/drop_sources.slt.part
+include ./drop_sources.slt.part
 include ../tpch/drop_tables.slt.part
