@@ -4,8 +4,8 @@ DROP SOURCE tpcc_customer;
 statement ok
 DROP SOURCE tpcc_district;
 
-statement ok
-DROP SOURCE tpcc_history;
+# statement ok
+# DROP SOURCE tpcc_history;
 
 statement ok
 DROP SOURCE tpcc_item;
