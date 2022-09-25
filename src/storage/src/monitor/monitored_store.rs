@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
 use super::StateStoreMetrics;
+use super::hummock_trace::{HummockTrace, Operation};
 use crate::error::StorageResult;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -36,11 +37,13 @@ pub struct MonitoredStateStore<S> {
     inner: S,
 
     stats: Arc<StateStoreMetrics>,
+
+    tracer: Arc<HummockTrace>,
 }
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
-        Self { inner, stats }
+        Self { inner, stats, tracer: Arc::new(HummockTrace::new())}
     }
 }
 
@@ -99,6 +102,7 @@ where
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
+            let _ = self.tracer.new_trace_span(Operation::Get(key.to_vec()));
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
@@ -180,6 +184,7 @@ where
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            self.tracer.new_trace_span(Operation::Ingest(kv_pairs.clone()));
             if kv_pairs.is_empty() {
                 return Ok(0);
             }
@@ -243,6 +248,7 @@ where
     }
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
+        self.tracer.new_trace_span(Operation::Sync(epoch));
         async move {
             self.seal_epoch(epoch, true);
             self.await_sync_epoch(epoch).await
@@ -271,6 +277,7 @@ where
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+        self.tracer.new_trace_span(Operation::Seal(epoch, is_checkpoint));
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
