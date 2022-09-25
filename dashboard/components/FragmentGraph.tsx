@@ -1,13 +1,28 @@
-import { theme } from "@chakra-ui/react"
+import {
+  Button,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
+  theme,
+  useDisclosure,
+} from "@chakra-ui/react"
+import loadable from "@loadable/component"
 import * as d3 from "d3"
 import { cloneDeep } from "lodash"
-import { useCallback, useEffect, useRef } from "react"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import {
   ActorBox,
   ActorBoxPosition,
   generateBoxLinks,
   layout,
 } from "../lib/layout"
+import { StreamNode } from "../proto/gen/stream_plan"
+
+const ReactJson = loadable(() => import("react-json-view"))
 
 interface Point {
   x: number
@@ -78,12 +93,33 @@ export default function FragmentGraph({
 }) {
   const svgRef = useRef<any>()
 
+  const { isOpen, onOpen, onClose } = useDisclosure()
+  const [currentStreamNode, setCurrentStreamNode] = useState<StreamNode>()
+
+  const openPlanNodeDetail = useCallback(
+    () => (node: d3.HierarchyNode<any>) => {
+      const streamNode = cloneDeep(node.data.node as StreamNode)
+
+      if (streamNode) {
+        streamNode.input = []
+        setCurrentStreamNode(streamNode)
+        onOpen()
+      }
+    },
+    [onOpen]
+  )()
+
   const planNodeDependencyDagCallback = useCallback(() => {
     const deps = cloneDeep(planNodeDependencies)
     const fragmentDependencyDag = cloneDeep(fragmentDependency)
     const layoutActorResult = new Map<
       string,
-      { layoutRoot: d3.HierarchyPointNode<any>; width: number; height: number }
+      {
+        layoutRoot: d3.HierarchyPointNode<any>
+        width: number
+        height: number
+        extraInfo: string
+      }
     >()
     for (const [fragmentId, fragmentRoot] of deps) {
       const layoutRoot = treeLayoutFlip(fragmentRoot, {
@@ -98,7 +134,12 @@ export default function FragmentGraph({
           bottom: nodeRadius * 4 + actorMarginY,
         },
       })
-      layoutActorResult.set(fragmentId, { layoutRoot, width, height })
+      layoutActorResult.set(fragmentId, {
+        layoutRoot,
+        width,
+        height,
+        extraInfo: fragmentRoot.data.extraInfo,
+      })
     }
     const fragmentLayout = layout(
       fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
@@ -134,6 +175,7 @@ export default function FragmentGraph({
     x: number
     y: number
     id: string
+    extraInfo: string
   }
 
   const {
@@ -162,10 +204,10 @@ export default function FragmentGraph({
       ) => {
         gSel.attr("transform", ({ x, y }) => `translate(${x}, ${y})`)
 
-        // Actor text
-        let text = gSel.select<SVGTextElement>(".actor-text")
+        // Actor text (fragment id)
+        let text = gSel.select<SVGTextElement>(".actor-text-frag-id")
         if (text.empty()) {
-          text = gSel.append("text").attr("class", "actor-text")
+          text = gSel.append("text").attr("class", "actor-text-frag-id")
         }
 
         text
@@ -174,6 +216,22 @@ export default function FragmentGraph({
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
           .attr("dy", ({ height }) => height - actorMarginY + 12)
+          .attr("dx", ({ width }) => width - actorMarginX)
+          .attr("fill", "black")
+          .attr("font-size", 12)
+
+        // Actor text (actors)
+        let text2 = gSel.select<SVGTextElement>(".actor-text-actor-id")
+        if (text2.empty()) {
+          text2 = gSel.append("text").attr("class", "actor-text-actor-id")
+        }
+
+        text2
+          .attr("fill", "black")
+          .text(({ extraInfo }) => extraInfo)
+          .attr("font-family", "inherit")
+          .attr("text-anchor", "end")
+          .attr("dy", ({ height }) => height - actorMarginY + 24)
           .attr("dx", ({ width }) => width - actorMarginX)
           .attr("fill", "black")
           .attr("font-size", 12)
@@ -254,6 +312,7 @@ export default function FragmentGraph({
             .attr("fill", theme.colors.teal[500])
             .attr("r", nodeRadius)
             .style("cursor", "pointer")
+            .on("click", (_d: any, i: any) => openPlanNodeDetail(i))
 
           let text = g.select("text")
           if (text.empty()) {
@@ -333,12 +392,40 @@ export default function FragmentGraph({
       edgeSelection.call(applyEdge)
       edgeSelection.exit().remove()
     }
-  }, [fragmentDependencyDag, planNodeDependencyDag, links, selectedFragmentId])
+  }, [planNodeDependencyDag, links, selectedFragmentId, openPlanNodeDetail])
 
   return (
-    <svg ref={svgRef} width={`${svgWidth}px`} height={`${svgHeight}px`}>
-      <g className="actor-links" />
-      <g className="actors" />
-    </svg>
+    <Fragment>
+      <Modal isOpen={isOpen} onClose={onClose} size="5xl">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>
+            {currentStreamNode?.operatorId} -{" "}
+            {currentStreamNode?.nodeBody?.$case}
+          </ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            {isOpen && currentStreamNode && (
+              <ReactJson
+                src={currentStreamNode}
+                collapsed={3}
+                name={null}
+                displayDataTypes={false}
+              />
+            )}
+          </ModalBody>
+
+          <ModalFooter>
+            <Button colorScheme="blue" mr={3} onClick={onClose}>
+              Close
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+      <svg ref={svgRef} width={`${svgWidth}px`} height={`${svgHeight}px`}>
+        <g className="actor-links" />
+        <g className="actors" />
+      </svg>
+    </Fragment>
   )
 }
