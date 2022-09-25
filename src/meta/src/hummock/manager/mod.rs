@@ -934,13 +934,12 @@ where
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
-        let compaction_groups: HashSet<_> = self
-            .compaction_group_manager
-            .compaction_groups()
-            .await
-            .into_iter()
-            .map(|group| group.group_id())
-            .collect();
+        let compaction_groups: HashSet<_> = HashSet::from_iter(
+            self.compaction_group_manager
+                .compaction_group_ids()
+                .await
+                .into_iter(),
+        );
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
         let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
         for group_id in original_keys {
