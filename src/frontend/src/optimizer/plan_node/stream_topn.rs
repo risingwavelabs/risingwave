@@ -61,7 +61,7 @@ impl StreamTopN {
 }
 
 impl fmt::Display for StreamTopN {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.input().append_only() {
             self.logical.fmt_with_name(f, "StreamAppendOnlyTopN")
         } else {

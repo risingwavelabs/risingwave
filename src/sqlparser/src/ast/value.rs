@@ -57,7 +57,7 @@ pub enum Value {
 }
 
 impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Number(v) => write!(f, "{}", v),
             Value::DoubleQuotedString(v) => write!(f, "\"{}\"", v),
@@ -122,7 +122,7 @@ pub enum DateTimeField {
 }
 
 impl fmt::Display for DateTimeField {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             DateTimeField::Year => "YEAR",
             DateTimeField::Month => "MONTH",
@@ -137,7 +137,7 @@ impl fmt::Display for DateTimeField {
 pub struct EscapeSingleQuoteString<'a>(&'a str);
 
 impl<'a> fmt::Display for EscapeSingleQuoteString<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for c in self.0.chars() {
             if c == '\'' {
                 write!(f, "\'\'")?;
@@ -162,7 +162,7 @@ pub enum TrimWhereField {
 }
 
 impl fmt::Display for TrimWhereField {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TrimWhereField::*;
         f.write_str(match self {
             Both => "BOTH",

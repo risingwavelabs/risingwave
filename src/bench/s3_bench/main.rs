@@ -563,7 +563,7 @@ where
     impl<'de> serde::de::Visitor<'de> for StringVisitor {
         type Value = ByteSize;
 
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             formatter.write_str("ByteSize")
         }
 

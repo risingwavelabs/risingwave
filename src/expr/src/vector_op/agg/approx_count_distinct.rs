@@ -51,7 +51,7 @@ impl ApproxCountDistinct {
 
     /// Adds the count of the datum's hash into the register, if it is greater than the existing
     /// count at the register
-    fn add_datum(&mut self, datum_ref: DatumRef) {
+    fn add_datum(&mut self, datum_ref: DatumRef<'_>) {
         if datum_ref.is_none() {
             return;
         }

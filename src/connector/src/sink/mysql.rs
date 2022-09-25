@@ -137,7 +137,7 @@ fn get_builder(cfg: &MySqlConfig) -> OptsBuilder {
 struct MySqlValue(Value);
 
 impl fmt::Display for MySqlValue {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0.as_sql(true))
     }
 }

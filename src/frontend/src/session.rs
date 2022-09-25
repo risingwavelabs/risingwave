@@ -502,7 +502,7 @@ impl SessionImpl {
         self.auth_context.user_id
     }
 
-    pub fn config(&self) -> RwLockReadGuard<ConfigMap> {
+    pub fn config(&self) -> RwLockReadGuard<'_, ConfigMap> {
         self.config_map.read()
     }
 
