@@ -703,14 +703,7 @@ where
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
             HashMap::with_capacity(reschedule.len());
-        for (
-            fragment_id,
-            ParallelUnitReschedule {
-                added_parallel_units,
-                removed_parallel_units,
-            },
-        ) in reschedule
-        {
+        for (fragment_id, _) in reschedule {
             let actors_to_create = fragment_actors_to_create
                 .get(&fragment_id)
                 .cloned()
@@ -808,8 +801,6 @@ where
                 Reschedule {
                     added_actors: actors_to_create,
                     removed_actors: actors_to_remove,
-                    added_parallel_units,
-                    removed_parallel_units,
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,

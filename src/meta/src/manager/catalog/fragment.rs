@@ -579,8 +579,6 @@ where
                 let Reschedule {
                     added_actors,
                     removed_actors,
-                    added_parallel_units: _,
-                    removed_parallel_units: _,
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
