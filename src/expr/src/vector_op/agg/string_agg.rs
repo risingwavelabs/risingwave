@@ -184,7 +184,7 @@ impl Aggregator for StringAggOrdered {
             if let Some(value) = agg_col.value_at(row_id) {
                 // only need to save rows with non-empty string value to aggregate
                 let delim = delim_col.value_at(row_id).unwrap_or("");
-                let (row_ref, vis) = input.row_at(row_id)?;
+                let (row_ref, vis) = input.row_at(row_id);
                 assert!(vis);
                 self.push_row(value, delim, row_ref);
             }
@@ -212,7 +212,7 @@ impl Aggregator for StringAggOrdered {
                 .take(end_row_id - start_row_id)
                 .filter(|(_, (v, _))| v.is_some())
             {
-                let (row_ref, vis) = input.row_at(row_id)?;
+                let (row_ref, vis) = input.row_at(row_id);
                 assert!(vis);
                 self.push_row(value.unwrap(), delim.unwrap_or(""), row_ref);
             }

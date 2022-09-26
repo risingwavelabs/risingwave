@@ -479,10 +479,10 @@ impl<K: HashKey> LookupJoinExecutor<K> {
                     for output_chunk in output_chunk_builder
                         .trunc_data_chunk(chunk?.reorder_columns(&self.output_indices))
                     {
-                        yield output_chunk?
+                        yield output_chunk
                     }
                 }
-                if let Some(output_chunk) = output_chunk_builder.consume_all()? {
+                if let Some(output_chunk) = output_chunk_builder.consume_all() {
                     yield output_chunk
                 }
             } else {

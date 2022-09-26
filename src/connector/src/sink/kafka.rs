@@ -604,8 +604,7 @@ mod test {
                     array! { F32Array, [Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0), Some(6.0), Some(7.0), Some(8.0), Some(9.0),Some(10.0)] }.into(),
                 ],
                 vec![DataType::Int32, DataType::Float32],
-            )
-            .unwrap(),
+            ),
         )));
         let ops = vec![
             Op::Insert,
