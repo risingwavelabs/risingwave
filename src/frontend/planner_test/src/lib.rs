@@ -157,7 +157,7 @@ pub struct TestCaseResult {
 
 impl TestCaseResult {
     /// Convert a result to test case
-    pub fn as_test_case(self, original_test_case: &TestCase) -> Result<TestCase> {
+    pub fn into_test_case(self, original_test_case: &TestCase) -> Result<TestCase> {
         if original_test_case.binder_error.is_none() && let Some(ref err) = self.binder_error {
             return Err(anyhow!("unexpected binder error: {}", err));
         }

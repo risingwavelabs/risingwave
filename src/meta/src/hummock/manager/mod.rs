@@ -759,7 +759,7 @@ where
         task_status: TaskStatus,
     ) -> Result<bool> {
         compact_task.set_task_status(task_status);
-        fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStoreError(
+        fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore err")
         )));
         self.cancel_compact_task_impl(compact_task).await
@@ -775,7 +775,7 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<Option<CompactTask>> {
-        fail_point!("fp_get_compact_task", |_| Err(Error::MetaStoreError(
+        fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
         while let Some(task) = self
@@ -1447,7 +1447,7 @@ where
         if let Some(sender) = self.compaction_scheduler.read().as_ref() {
             sender
                 .try_send(compaction_group)
-                .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))
+                .map_err(|e| Error::Internal(anyhow::anyhow!(e.to_string())))
         } else {
             Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
         }
@@ -1490,7 +1490,7 @@ where
                 .notification_manager()
                 .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(compact_task))
                 .await;
-            Err(Error::InternalError(anyhow::anyhow!(
+            Err(Error::Internal(anyhow::anyhow!(
                 "Failed to trigger_manual_compaction"
             )))
         };
