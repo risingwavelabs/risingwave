@@ -87,7 +87,7 @@ impl QueryManager {
         let query_id = query.query_id().clone();
         let epoch = self
             .hummock_snapshot_manager
-            .get_epoch(query_id.clone())
+            .acquire(&query_id)
             .await?
             .committed_epoch;
         let query_id = query.query_id.clone();
@@ -114,7 +114,7 @@ impl QueryManager {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager
-                    .unpin_snapshot(epoch, &query_id)
+                    .release(epoch, &query_id)
                     .await;
                 return Err(e);
             }
