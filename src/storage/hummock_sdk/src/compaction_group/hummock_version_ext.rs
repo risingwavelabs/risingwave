@@ -471,10 +471,11 @@ impl HummockVersionExt for HummockVersion {
                     insert_sub_level_id,
                     insert_table_infos,
                 } = summary;
-                assert_eq!(
-                    0, insert_sst_level_id,
+                assert!(
+                    insert_sst_level_id == 0 || insert_table_infos.is_empty(),
                     "we should only add to L0 when we commit an epoch. Inserting into {} {:?}",
-                    insert_sst_level_id, insert_table_infos
+                    insert_sst_level_id,
+                    insert_table_infos
                 );
                 assert!(
                     delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,

@@ -699,7 +699,7 @@ where
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(None, &compact_task, Some(compaction_guard))
+            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard))
                 .await?;
             tracing::debug!(
                 "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
@@ -759,12 +759,7 @@ where
 
             trigger_sst_stat(
                 &self.metrics,
-                Some(
-                    compaction
-                        .compaction_statuses
-                        .get(&compaction_group_id)
-                        .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
-                ),
+                compaction.compaction_statuses.get(&compaction_group_id),
                 &current_version,
                 compaction_group_id,
             );
@@ -799,7 +794,7 @@ where
         self.cancel_compact_task_impl(compact_task).await
     }
 
-    pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
+    pub async fn cancel_compact_task_impl(&self, compact_task: &mut CompactTask) -> Result<bool> {
         assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
         self.report_compact_task_impl(None, compact_task, None)
             .await
@@ -904,7 +899,7 @@ where
     pub async fn report_compact_task(
         &self,
         context_id: HummockContextId,
-        compact_task: &CompactTask,
+        compact_task: &mut CompactTask,
     ) -> Result<bool> {
         let ret = self
             .report_compact_task_impl(Some(context_id), compact_task, None)
@@ -924,7 +919,7 @@ where
     pub async fn report_compact_task_impl(
         &self,
         context_id: Option<HummockContextId>,
-        compact_task: &CompactTask,
+        compact_task: &mut CompactTask,
         compaction_guard: Option<RwLockWriteGuard<'_, Compaction>>,
     ) -> Result<bool> {
         let mut compaction_guard = match compaction_guard {
@@ -947,11 +942,7 @@ where
                 compact_statuses.remove(group_id);
             }
         }
-        let mut compact_status = compact_statuses
-            .get_mut(compact_task.compaction_group_id)
-            .ok_or(Error::InvalidCompactionGroup(
-                compact_task.compaction_group_id,
-            ))?;
+        
         let assigned_task_num = compaction.compact_task_assignment.len();
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
@@ -981,7 +972,16 @@ where
                 }
             }
         }
-        compact_status.report_compact_task(compact_task);
+
+        match compact_statuses.get_mut(compact_task.compaction_group_id) {
+            Some(mut compact_status) => {
+                compact_status.report_compact_task(compact_task);
+            }
+            None => {
+                compact_task.set_task_status(TaskStatus::HeartbeatCanceled);
+            }
+        }
+
         let task_status = compact_task.task_status();
         debug_assert!(
             task_status != TaskStatus::Pending,
@@ -1088,14 +1088,9 @@ where
 
         trigger_sst_stat(
             &self.metrics,
-            Some(
-                compaction
-                    .compaction_statuses
-                    .get(&compact_task.compaction_group_id)
-                    .ok_or(Error::InvalidCompactionGroup(
-                        compact_task.compaction_group_id,
-                    ))?,
-            ),
+            compaction
+                .compaction_statuses
+                .get(&compact_task.compaction_group_id),
             read_lock!(self, versioning).await.current_version.borrow(),
             compact_task.compaction_group_id,
         );

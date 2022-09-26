@@ -185,12 +185,12 @@ async fn test_hummock_compaction_task() {
     compact_task.set_task_status(TaskStatus::Success);
 
     assert!(hummock_manager
-        .report_compact_task(compactor.context_id(), &compact_task)
+        .report_compact_task(compactor.context_id(), &mut compact_task)
         .await
         .unwrap());
     // Finish the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(compactor.context_id(), &compact_task)
+        .report_compact_task(compactor.context_id(), &mut compact_task)
         .await
         .unwrap());
 }
