@@ -149,9 +149,7 @@ message MaterializeNode {
 
 // it is just to express the Vec<Option<usize>>
 message OptionalColumnIndex {
-  oneof Index {
-    uint64 index = 1;
-  }
+  optional uint64 index = 1;
 }
 
 // use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extream.
