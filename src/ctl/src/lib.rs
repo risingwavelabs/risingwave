@@ -16,7 +16,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 
-use crate::cmd_impl::hummock::{list_pinned_snapshots, list_pinned_versions};
+use crate::cmd_impl::hummock::{
+    list_pinned_snapshots, list_pinned_versions, set_write_limiter_threshold,
+};
 
 mod cmd_impl;
 pub(crate) mod common;
@@ -53,7 +55,7 @@ enum Commands {
     /// Commands for tracing the compute nodes
     Trace,
     // TODO(yuhao): profile other nodes
-    /// Commands for profilng the compute nodes
+    /// Commands for profiling the compute nodes
     Profile {
         #[clap(short, long = "sleep")]
         sleep: u64,
@@ -103,6 +105,15 @@ enum HummockCommands {
     ListPinnedVersions {},
     /// List pinned snapshots of each worker.
     ListPinnedSnapshots {},
+    /// Set write limiter threshold, which is applied to all CNs.
+    SetWriteLimiterThreshold {
+        #[clap(long = "max_sub_level_number")]
+        max_sub_level_number: u64,
+        #[clap(long = "max_delay_sec")]
+        max_delay_sec: u64,
+        #[clap(long = "per_file_delay_sec")]
+        per_file_delay_sec: f32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -183,6 +194,14 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Hummock(HummockCommands::ListPinnedVersions {}) => list_pinned_versions().await?,
         Commands::Hummock(HummockCommands::ListPinnedSnapshots {}) => {
             list_pinned_snapshots().await?
+        }
+        Commands::Hummock(HummockCommands::SetWriteLimiterThreshold {
+            max_sub_level_number,
+            max_delay_sec,
+            per_file_delay_sec,
+        }) => {
+            set_write_limiter_threshold(max_sub_level_number, max_delay_sec, per_file_delay_sec)
+                .await?
         }
         Commands::Table(TableCommands::Scan { mv_name }) => cmd_impl::table::scan(mv_name).await?,
         Commands::Table(TableCommands::ScanById { table_id }) => {

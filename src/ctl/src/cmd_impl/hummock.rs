@@ -20,9 +20,10 @@ mod sst_dump;
 pub use sst_dump::*;
 mod list_version_deltas;
 pub mod observer;
+mod set_config;
 mod trigger_full_gc;
 mod trigger_manual_compaction;
-
 pub use list_version_deltas::*;
+pub use set_config::*;
 pub use trigger_full_gc::*;
 pub use trigger_manual_compaction::*;

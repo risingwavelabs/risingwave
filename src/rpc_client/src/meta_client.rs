@@ -472,6 +472,18 @@ impl MetaClient {
             .rise_ctl_get_pinned_snapshots_summary(request)
             .await
     }
+
+    pub async fn risectl_set_write_limiter_threshold(
+        &self,
+        threshold: WriteLimiterThreshold,
+    ) -> Result<RiseCtlSetWriteLimiterThresholdResponse> {
+        let reuqest = RiseCtlSetWriteLimiterThresholdRequest {
+            threshold: Some(threshold),
+        };
+        self.inner
+            .rise_ctl_set_write_limiter_threshold(reuqest)
+            .await
+    }
 }
 
 #[async_trait]
@@ -759,6 +771,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
             ,{ hummock_client, rise_ctl_get_pinned_versions_summary, RiseCtlGetPinnedVersionsSummaryRequest, RiseCtlGetPinnedVersionsSummaryResponse }
             ,{ hummock_client, rise_ctl_get_pinned_snapshots_summary, RiseCtlGetPinnedSnapshotsSummaryRequest, RiseCtlGetPinnedSnapshotsSummaryResponse }
+            ,{ hummock_client, rise_ctl_set_write_limiter_threshold, RiseCtlSetWriteLimiterThresholdRequest, RiseCtlSetWriteLimiterThresholdResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

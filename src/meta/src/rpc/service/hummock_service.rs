@@ -372,4 +372,15 @@ where
             }),
         }))
     }
+
+    async fn rise_ctl_set_write_limiter_threshold(
+        &self,
+        request: Request<RiseCtlSetWriteLimiterThresholdRequest>,
+    ) -> Result<Response<RiseCtlSetWriteLimiterThresholdResponse>, Status> {
+        let threshold = request.into_inner().threshold.unwrap();
+        self.hummock_manager
+            .set_write_limiter_threshold(threshold)
+            .await?;
+        Ok(Response::new(RiseCtlSetWriteLimiterThresholdResponse {}))
+    }
 }

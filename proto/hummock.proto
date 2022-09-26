@@ -411,6 +411,12 @@ message RiseCtlGetPinnedSnapshotsSummaryResponse {
   PinnedSnapshotsSummary summary = 1;
 }
 
+message RiseCtlSetWriteLimiterThresholdRequest {
+  WriteLimiterThreshold threshold = 1;
+}
+
+message RiseCtlSetWriteLimiterThresholdResponse {}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -430,6 +436,7 @@ service HummockManagerService {
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
   rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
   rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
+  rpc RiseCtlSetWriteLimiterThreshold(RiseCtlSetWriteLimiterThresholdRequest) returns (RiseCtlSetWriteLimiterThresholdResponse);
 }
 
 service CompactorService {}
