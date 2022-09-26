@@ -688,11 +688,18 @@ where
         source_id: SourceId,
         table_id: TableId,
     ) -> MetaResult<CatalogVersion> {
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id.into())
+            .await?;
+        let internal_table_ids = table_fragment.internal_table_ids();
+        assert!(internal_table_ids.len() == 1);
+
         // 1. Drop materialized source in catalog, source_id will be checked if it is
         // associated_source_id in mview.
         let version = self
             .catalog_manager
-            .drop_materialized_source(source_id, table_id)
+            .drop_materialized_source(source_id, table_id, internal_table_ids[0])
             .await?;
 
         // 2. Drop source and mv in table background deleter asynchronously.
