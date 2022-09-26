@@ -333,26 +333,19 @@ impl<S: StateStore> LookupExecutor<S> {
                 },
                 ..barrier
             });
-            if self.arrangement.use_current_epoch {
-                self.arrangement.state_table.init_epoch(barrier.epoch.curr);
-            } else {
-                self.arrangement.state_table.init_epoch(0);
-            };
+
+            self.arrangement.state_table.init_epoch(barrier.epoch);
             return Ok(());
         } else {
             // there is no write operation on the arrangement table by the lookup executor, so here
             // the `state_table::commit(epoch)` just means the data in the epoch will be visible by
             // the lookup executor
             // TODO(st1page): maybe we should not use state table here.
-            if self.arrangement.use_current_epoch {
-                self.arrangement
-                    .state_table
-                    .commit_no_data_expected(barrier.epoch.curr);
-            } else {
-                self.arrangement
-                    .state_table
-                    .commit_no_data_expected(barrier.epoch.prev);
-            };
+
+            self.arrangement
+                .state_table
+                .commit_no_data_expected(barrier.epoch);
+
             self.last_barrier = Some(barrier)
         }
 
@@ -378,11 +371,21 @@ impl<S: StateStore> LookupExecutor<S> {
         let mut all_rows = vec![];
         // Drop the stream.
         {
-            let all_data_iter = self
-                .arrangement
-                .state_table
-                .iter_with_pk_prefix(&lookup_row)
-                .await?;
+            let all_data_iter = match self.arrangement.use_current_epoch {
+                true => {
+                    self.arrangement
+                        .state_table
+                        .iter_with_pk_prefix(&lookup_row)
+                        .await?
+                }
+                false => {
+                    self.arrangement
+                        .state_table
+                        .iter_prev_epoch_with_pk_prefix(&lookup_row)
+                        .await?
+                }
+            };
+
             pin_mut!(all_data_iter);
             while let Some(inner) = all_data_iter.next().await {
                 // Only need value (include storage pk).
