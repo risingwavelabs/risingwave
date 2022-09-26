@@ -130,10 +130,10 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .last_key_value()
                 .unwrap()
                 .0
-                .prefix(topn_cache.sort_key_len);
+                .prefix(topn_cache.order_by_len);
             while let Some(item) = state_table_iter.next().await {
                 let topn_row = self.get_topn_row(item?.into_owned());
-                if topn_row.ordered_key.prefix(topn_cache.sort_key_len) == high_last_sort_key {
+                if topn_row.ordered_key.prefix(topn_cache.order_by_len) == high_last_sort_key {
                     topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
                 } else {
                     break;
@@ -179,10 +179,10 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .last_key_value()
                 .unwrap()
                 .0
-                .prefix(topn_cache.sort_key_len);
+                .prefix(topn_cache.order_by_len);
             while let Some(item) = state_table_iter.next().await {
                 let topn_row = self.get_topn_row(item?.into_owned());
-                if topn_row.ordered_key.prefix(topn_cache.sort_key_len) == middle_last_sort_key {
+                if topn_row.ordered_key.prefix(topn_cache.order_by_len) == middle_last_sort_key {
                     topn_cache.middle.insert(topn_row.ordered_key, topn_row.row);
                 } else {
                     topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
@@ -205,10 +205,10 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .last_key_value()
                 .unwrap()
                 .0
-                .prefix(topn_cache.sort_key_len);
+                .prefix(topn_cache.order_by_len);
             while let Some(item) = state_table_iter.next().await {
                 let topn_row = self.get_topn_row(item?.into_owned());
-                if topn_row.ordered_key.prefix(topn_cache.sort_key_len) == high_last_sort_key {
+                if topn_row.ordered_key.prefix(topn_cache.order_by_len) == high_last_sort_key {
                     topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
                 } else {
                     break;
