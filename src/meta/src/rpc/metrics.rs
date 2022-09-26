@@ -42,8 +42,10 @@ pub struct MetaMetrics {
 
     /// Max committed epoch
     pub max_committed_epoch: IntGauge,
-    /// The number of uncommitted SSTs,
-    pub uncommitted_sst_num: IntGauge,
+    /// The smallest epoch that has not been GCed.
+    pub safe_epoch: IntGauge,
+    /// The smallest epoch that is being pinned.
+    pub min_pinned_epoch: IntGauge,
     /// The number of SSTs in each level
     pub level_sst_num: IntGaugeVec,
     /// The number of SSTs to be merged to next level in each level
@@ -54,6 +56,12 @@ pub struct MetaMetrics {
     pub level_file_size: IntGaugeVec,
     /// Hummock version size
     pub version_size: IntGauge,
+    /// The version Id of current version.
+    pub current_version_id: IntGauge,
+    /// The version id of checkpoint version.
+    pub checkpoint_version_id: IntGauge,
+    /// The smallest version id that is being pinned.
+    pub min_pinned_version_id: IntGauge,
 
     /// Latency for hummock manager to acquire lock
     pub hummock_manager_lock_time: HistogramVec,
@@ -120,9 +128,13 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let uncommitted_sst_num = register_int_gauge_with_registry!(
-            "storage_uncommitted_sst_num",
-            "num of uncommitted SSTs",
+        let safe_epoch =
+            register_int_gauge_with_registry!("storage_safe_epoch", "safe epoch", registry)
+                .unwrap();
+
+        let min_pinned_epoch = register_int_gauge_with_registry!(
+            "storage_min_pinned_epoch",
+            "min pinned epoch",
             registry
         )
         .unwrap();
@@ -152,7 +164,29 @@ impl MetaMetrics {
         .unwrap();
 
         let version_size =
-            register_int_gauge_with_registry!("version_size", "version size", registry).unwrap();
+            register_int_gauge_with_registry!("storage_version_size", "version size", registry)
+                .unwrap();
+
+        let current_version_id = register_int_gauge_with_registry!(
+            "storage_current_version_id",
+            "current version id",
+            registry
+        )
+        .unwrap();
+
+        let checkpoint_version_id = register_int_gauge_with_registry!(
+            "storage_checkpoint_version_id",
+            "checkpoint version id",
+            registry
+        )
+        .unwrap();
+
+        let min_pinned_version_id = register_int_gauge_with_registry!(
+            "storage_min_pinned_version_id",
+            "min pinned version id",
+            registry
+        )
+        .unwrap();
 
         let level_file_size = register_int_gauge_vec_with_registry!(
             "storage_level_total_file_size",
@@ -197,12 +231,16 @@ impl MetaMetrics {
             in_flight_barrier_nums,
 
             max_committed_epoch,
-            uncommitted_sst_num,
+            safe_epoch,
+            min_pinned_epoch,
             level_sst_num,
             level_compact_cnt,
             compact_frequency,
             level_file_size,
             version_size,
+            current_version_id,
+            checkpoint_version_id,
+            min_pinned_version_id,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
