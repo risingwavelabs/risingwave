@@ -303,7 +303,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             ExecutorCache::Local(EvictableHashMap::with_hasher_in(
                 cache_size,
                 PrecomputedBuildHasher,
-                alloc.clone(),
+                alloc,
             ))
         };
 

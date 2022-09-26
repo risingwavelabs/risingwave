@@ -686,8 +686,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     // Report metrics of cached join rows/entries
                     for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
-                        // TODO(yuhao): Those two metric calculation cost too much time (>250ms). Those will
-                        // result in that barrier is always ready in source. Since select barrier is prefered,
+                        // TODO(yuhao): Those two metric calculation cost too much time (>250ms).
+                        // Those will result in that barrier is always ready
+                        // in source. Since select barrier is prefered,
                         // chunk would never be selected.
                         // self.metrics
                         //     .join_cached_rows

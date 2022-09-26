@@ -104,7 +104,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     pub state_table: StateTable<S>,
 
     pub lru_manager: Option<LruManagerRef>,
-    
+
     pub cache_size: usize,
 }
 

@@ -514,7 +514,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     yield Message::Barrier(barrier);
                     epoch = next_epoch;
-                    
+
                     // Update the current epoch in `ManagedLruCache`
                     if let ExecutorCache::Managed(ref mut cache) = state_map {
                         cache.update_epoch(epoch)

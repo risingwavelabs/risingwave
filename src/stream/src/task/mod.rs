@@ -97,7 +97,12 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(addr: HostAddr, state_store: StateStoreImpl,config: &StreamingConfig, enable_managed_cache: bool) -> Self {
+    pub fn new(
+        addr: HostAddr,
+        state_store: StateStoreImpl,
+        config: &StreamingConfig,
+        enable_managed_cache: bool,
+    ) -> Self {
         let create_lru_manager = || {
             LruManager::new(
                 config.total_memory_available_bytes,
@@ -121,7 +126,9 @@ impl SharedContext {
             actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
             compute_client_pool: ComputeClientPool::default(),
-            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(StateStoreImpl::for_test()))),
+            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
+                StateStoreImpl::for_test(),
+            ))),
             lru_manager: Some(LruManager::for_test()),
         }
     }
