@@ -58,7 +58,7 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
         order_types.clone(),
         pk_indices,
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
     epoch.inc();
 
@@ -69,7 +69,7 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
     state.delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
     state.commit(epoch).await.unwrap();
 
-    let mut epoch = EpochPair::new_test_epoch(2);
+    let epoch = EpochPair::new_test_epoch(2);
 
     let get_row1_res = table
         .get_row(&Row(vec![Some(1_i32.into()), None]), epoch.curr)
@@ -132,7 +132,7 @@ async fn test_storage_get_row_for_string() {
         order_types.clone(),
         pk_indices,
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
     epoch.inc();
 
@@ -204,7 +204,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
     epoch.inc();
 
@@ -289,7 +289,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         TableOption::default(),
         value_indices,
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
     epoch.inc();
 
@@ -361,7 +361,7 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         TableOption::default(),
         value_indices,
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
     epoch.inc();
 

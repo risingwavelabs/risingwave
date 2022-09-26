@@ -561,7 +561,7 @@ impl<S: StateStore> StateTable<S> {
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch).await?;
+        self.batch_write_rows(mem_table, new_epoch.prev).await?;
         self.update_epoch(new_epoch);
         Ok(())
     }
@@ -578,10 +578,10 @@ impl<S: StateStore> StateTable<S> {
     async fn batch_write_rows(
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
-        epoch: EpochPair,
+        epoch: u64,
     ) -> StorageResult<()> {
         let mut local = self.keyspace.start_write_batch(WriteOptions {
-            epoch: epoch.curr,
+            epoch,
             table_id: self.table_id(),
         });
         for (pk, row_op) in buffer {
@@ -591,7 +591,7 @@ impl<S: StateStore> StateTable<S> {
                         // If we want to insert a row, it should not exist in storage.
                         let storage_row = self
                             .keyspace
-                            .get(&pk, false, self.get_read_option(epoch.curr))
+                            .get(&pk, false, self.get_read_option(epoch))
                             .await?;
 
                         // It's normal for some executors to fail this assert, you can use
@@ -611,7 +611,7 @@ impl<S: StateStore> StateTable<S> {
                         // have the same old_value as recorded.
                         let storage_row = self
                             .keyspace
-                            .get(&pk, false, self.get_read_option(epoch.curr))
+                            .get(&pk, false, self.get_read_option(epoch))
                             .await?;
                         // It's normal for some executors to fail this assert, you can use
                         // `.disable_sanity_check()` on state table to disable this check.
@@ -631,7 +631,7 @@ impl<S: StateStore> StateTable<S> {
                         // have the same old_value as recorded.
                         let storage_row = self
                             .keyspace
-                            .get(&pk, false, self.get_read_option(epoch.curr))
+                            .get(&pk, false, self.get_read_option(epoch))
                             .await?;
 
                         // It's normal for some executors to fail this assert, you can use
@@ -670,11 +670,11 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         use_prev_epoch: bool,
     ) -> StorageResult<RowStream<'a, S>> {
-        let (mem_table_iter, storage_iter_stream) = match use_prev_epoch{
+        let (mem_table_iter, storage_iter_stream) = match use_prev_epoch {
             true => self.iter_inner(pk_prefix, self.prev_epoch()).await?,
             false => self.iter_inner(pk_prefix, self.epoch()).await?,
         };
-            
+
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
@@ -682,7 +682,6 @@ impl<S: StateStore> StateTable<S> {
                 .map(|pk_row| pk_row.map(|(_, row)| row)),
         )
     }
-
 
     /// This function scans rows from the relational table with specific `pk_prefix`, return both
     /// key and value.
@@ -704,7 +703,7 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<(MemTableIter, StorageIterInner<S>)> {
+    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
         let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);

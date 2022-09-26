@@ -266,7 +266,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         for table in &mut state_tables {
             table.init_epoch(barrier.epoch);
         }
-        let mut epoch = barrier.epoch;
 
         yield Message::Barrier(barrier);
 
@@ -290,16 +289,17 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                     .await?;
                 }
                 Message::Barrier(barrier) => {
-                    let next_epoch = barrier.epoch;
-                    if let Some(chunk) =
-                        Self::flush_data(&info.schema, &mut states, epoch, &mut state_tables)
-                            .await?
+                    if let Some(chunk) = Self::flush_data(
+                        &info.schema,
+                        &mut states,
+                        barrier.epoch,
+                        &mut state_tables,
+                    )
+                    .await?
                     {
-                        assert_eq!(epoch.curr, barrier.epoch.prev);
                         yield Message::Chunk(chunk);
                     }
                     yield Message::Barrier(barrier);
-                    epoch = next_epoch;
                 }
             }
         }

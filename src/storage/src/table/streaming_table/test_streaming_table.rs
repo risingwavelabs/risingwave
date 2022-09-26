@@ -42,7 +42,7 @@ async fn test_state_table() -> StorageResult<()> {
         pk_index,
     );
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
 
     state_table.insert(Row(vec![
@@ -167,7 +167,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
         pk_index,
     );
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
 
     state_table.insert(Row(vec![
@@ -336,7 +336,7 @@ async fn test_state_table_iter() {
         pk_index,
     );
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
     state.insert(Row(vec![
@@ -559,7 +559,7 @@ async fn test_state_table_iter_with_prefix() {
         pk_index,
     );
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
     state.insert(Row(vec![
@@ -673,7 +673,7 @@ async fn test_mem_table_assertion() {
         order_types,
         pk_index,
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
     state_table.insert(Row(vec![
         Some(1_i32.into()),
@@ -707,7 +707,7 @@ async fn test_state_table_iter_with_value_indices() {
         pk_index,
         vec![2],
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
     state.insert(Row(vec![

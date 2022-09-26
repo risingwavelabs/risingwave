@@ -94,8 +94,6 @@ where
         let barrier = expect_first_barrier(&mut input).await?;
         self.inner.init(barrier.epoch).await?;
 
-        let mut epoch = barrier.epoch;
-
         yield Message::Barrier(barrier);
 
         #[for_await]
@@ -104,8 +102,7 @@ where
             match msg {
                 Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
                 Message::Barrier(barrier) => {
-                    self.inner.flush_data(epoch).await?;
-                    epoch = barrier.epoch;
+                    self.inner.flush_data(barrier.epoch).await?;
                     yield Message::Barrier(barrier)
                 }
             };

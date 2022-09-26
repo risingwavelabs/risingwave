@@ -470,7 +470,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             state_table.init_epoch(barrier.epoch);
         }
 
-        let mut epoch = barrier.epoch;
         yield Message::Barrier(barrier);
 
         #[for_await]
@@ -481,11 +480,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     Self::apply_chunk(&mut extra, &mut state_map, chunk).await?;
                 }
                 Message::Barrier(barrier) => {
-                    let next_epoch = barrier.epoch;
-                    assert_eq!(epoch.curr, barrier.epoch.prev);
-
                     #[for_await]
-                    for chunk in Self::flush_data(&mut extra, &mut state_map, epoch) {
+                    for chunk in Self::flush_data(&mut extra, &mut state_map, barrier.epoch) {
                         yield Message::Chunk(chunk?);
                     }
 
@@ -497,7 +493,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
 
                     yield Message::Barrier(barrier);
-                    epoch = next_epoch;
                 }
             }
         }

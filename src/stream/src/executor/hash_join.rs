@@ -226,8 +226,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     cond: Option<BoxedExpression>,
     /// Identity string
     identity: String,
-    /// Epoch
-    epoch: EpochPair,
 
     #[expect(dead_code)]
     /// Logical Operator Info
@@ -590,7 +588,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             cond,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            epoch: EpochPair::new_test_epoch(1),
             append_only_optimize,
             metrics,
         }
@@ -668,11 +665,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
                 }
                 AlignedMessage::Barrier(barrier) => {
-                    self.flush_data().await?;
-                    let epoch = barrier.epoch;
-                    self.side_l.ht.update_epoch(epoch);
-                    self.side_r.ht.update_epoch(epoch);
-                    self.epoch = epoch;
+                    self.flush_data(barrier.epoch).await?;
 
                     // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
@@ -703,11 +696,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
     }
 
-    async fn flush_data(&mut self) -> StreamExecutorResult<()> {
+    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.ht.flush().await?;
-        self.side_r.ht.flush().await?;
+        self.side_l.ht.flush(epoch).await?;
+        self.side_r.ht.flush(epoch).await?;
 
         // We need to manually evict the cache to the target capacity.
         self.side_l.ht.evict_to_target_cap();

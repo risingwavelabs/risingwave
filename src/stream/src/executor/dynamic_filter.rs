@@ -23,7 +23,6 @@ use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
@@ -84,7 +83,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
-            range_cache: RangeCache::new(state_table_l, EpochPair::new_test_epoch(1), usize::MAX),
+            range_cache: RangeCache::new(state_table_l, usize::MAX),
             right_table: state_table_r,
             is_right_table_writer,
             metrics,
@@ -349,11 +348,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
 
-                    self.range_cache.flush().await?;
-
-                    // We have flushed all the state for the prev epoch. We can now update the
-                    // epochs.
-                    self.range_cache.update_epoch(barrier.epoch);
+                    self.range_cache.flush(barrier.epoch).await?;
 
                     prev_epoch_value = Some(curr);
 

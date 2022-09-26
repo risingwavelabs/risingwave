@@ -337,7 +337,9 @@ impl<S: StateStore> LookupExecutor<S> {
             if self.arrangement.use_current_epoch {
                 self.arrangement.state_table.init_epoch(barrier.epoch);
             } else {
-                self.arrangement.state_table.init_epoch(barrier.epoch);
+                self.arrangement
+                    .state_table
+                    .init_epoch(EpochPair::new_test_epoch(1));
             };
             return Ok(());
         } else {
@@ -348,7 +350,7 @@ impl<S: StateStore> LookupExecutor<S> {
             if self.arrangement.use_current_epoch {
                 self.arrangement
                     .state_table
-                    .commit_no_data_expected(barrier.epoch.prev);
+                    .commit_no_data_expected(barrier.epoch.curr);
             } else {
                 self.arrangement
                     .state_table
@@ -379,11 +381,21 @@ impl<S: StateStore> LookupExecutor<S> {
         let mut all_rows = vec![];
         // Drop the stream.
         {
-            let all_data_iter = self
-                .arrangement
-                .state_table
-                .iter_with_pk_prefix(&lookup_row, true)
-                .await?;
+            let all_data_iter = match self.arrangement.use_current_epoch {
+                true => {
+                    self.arrangement
+                        .state_table
+                        .iter_with_pk_prefix(&lookup_row, false)
+                        .await?
+                }
+                false => {
+                    self.arrangement
+                        .state_table
+                        .iter_with_pk_prefix(&lookup_row, false)
+                        .await?
+                }
+            };
+
             pin_mut!(all_data_iter);
             while let Some(inner) = all_data_iter.next().await {
                 // Only need value (include storage pk).
