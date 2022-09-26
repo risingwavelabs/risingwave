@@ -36,11 +36,6 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes);
         let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
-        let key_indices = table
-            .get_distribution_key()
-            .iter()
-            .map(|idx| *idx as usize)
-            .collect();
         if node.with_ties {
             unreachable!("Not supported yet. Banned in planner");
         } else {
@@ -48,9 +43,9 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
                 input,
                 order_pairs,
                 (node.offset as usize, node.limit as usize),
+                node.order_by_len as usize,
                 params.pk_indices,
                 params.executor_id,
-                key_indices,
                 state_table,
             )?
             .boxed())

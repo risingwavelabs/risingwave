@@ -99,6 +99,7 @@ impl StreamNode for StreamTopN {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
+            order_by_len: self.topn_order().len() as u32,
         };
         // TODO: support with ties for append only TopN
         if self.input().append_only() && !self.with_ties() {
