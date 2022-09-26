@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, Hummock
 use risingwave_pb::hummock::{CompactTaskAssignment, CompactionConfig};
 
 use crate::hummock::compaction::CompactStatus;
-use crate::hummock::error::{Error, Result};
+use crate::hummock::error::Result;
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
 use crate::model::BTreeMapTransaction;
@@ -58,15 +58,15 @@ impl Compaction {
                     .compact_task
                     .as_ref()
                     .expect("compact_task shouldn't be None");
-                let mut compact_status = compact_statuses
-                    .get_mut(task.compaction_group_id)
-                    .ok_or(Error::InvalidCompactionGroup(task.compaction_group_id))?;
-                compact_status.report_compact_task(
-                    assignment
-                        .compact_task
-                        .as_ref()
-                        .expect("compact_task shouldn't be None"),
-                );
+                if let Some(mut compact_status) = compact_statuses.get_mut(task.compaction_group_id)
+                {
+                    compact_status.report_compact_task(
+                        assignment
+                            .compact_task
+                            .as_ref()
+                            .expect("compact_task shouldn't be None"),
+                    );
+                }
             }
             // Clean up compact_task_assignment.
             let task_ids_to_remove = compact_task_assignment
