@@ -105,62 +105,94 @@ impl BufferTracker {
     }
 }
 
-pub(crate) async fn start_flush_controller_worker(
+pub(crate) struct FlushController {
     local_version_manager: Arc<LocalVersionManager>,
     buffer_tracker: Arc<BufferTracker>,
     sstable_id_manager: SstableIdManagerRef,
-    mut shared_buffer_event_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
-) {
-    let try_flush_shared_buffer = |upload_handle_manager: &mut UploadHandleManager| {
+    shared_buffer_event_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
+    upload_handle_manager: UploadHandleManager,
+    pending_write_requests: VecDeque<WriteRequest>,
+    pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
+}
+
+impl FlushController {
+    pub(crate) fn new(
+        local_version_manager: Arc<LocalVersionManager>,
+        buffer_tracker: Arc<BufferTracker>,
+        sstable_id_manager: SstableIdManagerRef,
+        shared_buffer_event_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
+    ) -> Self {
+        Self {
+            local_version_manager,
+            buffer_tracker,
+            sstable_id_manager,
+            shared_buffer_event_receiver,
+            upload_handle_manager: UploadHandleManager::new(),
+            pending_write_requests: Default::default(),
+            pending_sync_requests: Default::default(),
+        }
+    }
+
+    fn try_flush_shared_buffer(&mut self) {
         // Keep issuing new flush task until flush is not needed or we can issue
         // no more task
-        while buffer_tracker.need_more_flush() {
-            if let Some((epoch, join_handle)) = local_version_manager.clone().flush_shared_buffer()
+        while self.buffer_tracker.need_more_flush() {
+            if let Some((epoch, join_handle)) =
+                self.local_version_manager.clone().flush_shared_buffer()
             {
-                upload_handle_manager.add_epoch_handle(epoch, once(join_handle));
+                self.upload_handle_manager
+                    .add_epoch_handle(epoch, once(join_handle));
             } else {
                 break;
             }
         }
-    };
+    }
 
-    let grant_write_request = |request| {
+    fn grant_write_request(&mut self, request: WriteRequest) {
         let WriteRequest {
             batch,
             epoch,
             grant_sender: sender,
         } = request;
         let size = batch.size();
-        local_version_manager.write_shared_buffer_inner(epoch, batch);
-        buffer_tracker.global_buffer_size.fetch_add(size, Relaxed);
+        self.local_version_manager
+            .write_shared_buffer_inner(epoch, batch);
+        self.buffer_tracker
+            .global_buffer_size
+            .fetch_add(size, Relaxed);
         let _ = sender.send(()).inspect_err(|err| {
             error!("unable to send write request response: {:?}", err);
         });
-    };
+    }
 
-    let send_sync_result = |pending_sync_requests: &mut HashMap<_, oneshot::Sender<_>>,
-                            epoch: HummockEpoch,
-                            result: HummockResult<SyncResult>| {
-        if let Some(tx) = pending_sync_requests.remove(&epoch) {
+    fn send_sync_result(&mut self, epoch: HummockEpoch, result: HummockResult<SyncResult>) {
+        if let Some(tx) = self.pending_sync_requests.remove(&epoch) {
             let _ = tx.send(result).inspect_err(|e| {
                 error!("unable to send sync result. Epoch: {}. Err: {:?}", epoch, e);
             });
         } else {
             panic!("send sync result to non-requested epoch: {}", epoch);
         }
-    };
+    }
+}
 
-    let mut upload_handle_manager = UploadHandleManager::new();
-    let mut pending_write_requests: VecDeque<_> = VecDeque::new();
-    let mut pending_sync_requests: HashMap<
-        HummockEpoch,
-        oneshot::Sender<HummockResult<SyncResult>>,
-    > = HashMap::new();
+pub(crate) async fn start_flush_controller_worker(
+    local_version_manager: Arc<LocalVersionManager>,
+    buffer_tracker: Arc<BufferTracker>,
+    sstable_id_manager: SstableIdManagerRef,
+    shared_buffer_event_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
+) {
+    let mut flush_controller = FlushController::new(
+        local_version_manager,
+        buffer_tracker,
+        sstable_id_manager,
+        shared_buffer_event_receiver,
+    );
 
     loop {
         let select_result = match select(
-            upload_handle_manager.next_finished_epoch(),
-            shared_buffer_event_receiver.recv().boxed(),
+            flush_controller.upload_handle_manager.next_finished_epoch(),
+            flush_controller.shared_buffer_event_receiver.recv().boxed(),
         )
         .await
         {
@@ -173,7 +205,8 @@ pub(crate) async fn start_flush_controller_worker(
                     "now we don't cancel the join handle. So join is expected to be success",
                 );
                 // TODO: in some case we may only need the read guard.
-                let mut local_version_guard = local_version_manager.local_version.write();
+                let mut local_version_guard =
+                    flush_controller.local_version_manager.local_version.write();
                 if epoch > local_version_guard.get_max_sync_epoch() {
                     // The finished flush task does not belong to any syncing epoch.
                     continue;
@@ -186,7 +219,7 @@ pub(crate) async fn start_flush_controller_worker(
                 match sync_data.stage() {
                     SyncUncommittedDataStage::CheckpointEpochSealed(_) => {
                         let (payload, sync_size) = sync_data.start_syncing();
-                        let local_version_manager = local_version_manager.clone();
+                        let local_version_manager = flush_controller.local_version_manager.clone();
                         let join_handle = tokio::spawn(async move {
                             let _ = local_version_manager
                                 .run_sync_upload_task(payload, sync_size, sync_epoch)
@@ -195,7 +228,9 @@ pub(crate) async fn start_flush_controller_worker(
                                     error!("sync upload task failed: {}, err: {:?}", sync_epoch, e);
                                 });
                         });
-                        upload_handle_manager.add_epoch_handle(sync_epoch, once(join_handle));
+                        flush_controller
+                            .upload_handle_manager
+                            .add_epoch_handle(sync_epoch, once(join_handle));
                     }
                     SyncUncommittedDataStage::Syncing(_) => {
                         unreachable!(
@@ -203,19 +238,21 @@ pub(crate) async fn start_flush_controller_worker(
                         );
                     }
                     SyncUncommittedDataStage::Failed(_) => {
-                        send_sync_result(
-                            &mut pending_sync_requests,
+                        drop(local_version_guard);
+                        flush_controller.send_sync_result(
                             sync_epoch,
                             Err(HummockError::other("sync task failed")),
                         );
                     }
                     SyncUncommittedDataStage::Synced(ssts, sync_size) => {
-                        send_sync_result(
-                            &mut pending_sync_requests,
+                        let ssts = ssts.clone();
+                        let sync_size = *sync_size;
+                        drop(local_version_guard);
+                        flush_controller.send_sync_result(
                             sync_epoch,
                             Ok(SyncResult {
-                                sync_size: *sync_size,
-                                uncommitted_ssts: ssts.clone(),
+                                sync_size,
+                                uncommitted_ssts: ssts,
                             }),
                         );
                     }
@@ -227,46 +264,52 @@ pub(crate) async fn start_flush_controller_worker(
         if let Some(event) = event {
             match event {
                 SharedBufferEvent::WriteRequest(request) => {
-                    if buffer_tracker.can_write() {
-                        grant_write_request(request);
-                        try_flush_shared_buffer(&mut upload_handle_manager);
+                    if flush_controller.buffer_tracker.can_write() {
+                        flush_controller.grant_write_request(request);
+                        flush_controller.try_flush_shared_buffer();
                     } else {
                         info!(
                             "write request is blocked: epoch {}, size: {}",
                             request.epoch,
                             request.batch.size()
                         );
-                        pending_write_requests.push_back(request);
+                        flush_controller.pending_write_requests.push_back(request);
                     }
                 }
                 SharedBufferEvent::MayFlush => {
                     // Only check and flush shared buffer after batch has been added to shared
                     // buffer.
-                    try_flush_shared_buffer(&mut upload_handle_manager);
+                    flush_controller.try_flush_shared_buffer();
                 }
                 SharedBufferEvent::BufferRelease(size) => {
-                    buffer_tracker.global_buffer_size.fetch_sub(size, Relaxed);
+                    flush_controller
+                        .buffer_tracker
+                        .global_buffer_size
+                        .fetch_sub(size, Relaxed);
                     let mut has_granted = false;
-                    while !pending_write_requests.is_empty() && buffer_tracker.can_write() {
-                        let request = pending_write_requests.pop_front().unwrap();
+                    while !flush_controller.pending_write_requests.is_empty()
+                        && flush_controller.buffer_tracker.can_write()
+                    {
+                        let request = flush_controller.pending_write_requests.pop_front().unwrap();
                         info!(
                             "write request is granted: epoch {}, size: {}",
                             request.epoch,
                             request.batch.size()
                         );
-                        grant_write_request(request);
+                        flush_controller.grant_write_request(request);
                         has_granted = true;
                     }
                     if has_granted {
-                        try_flush_shared_buffer(&mut upload_handle_manager);
+                        flush_controller.try_flush_shared_buffer();
                     }
                 }
                 SharedBufferEvent::SyncEpoch {
                     new_sync_epoch,
                     sync_result_sender,
                 } => {
-                    if let Some(old_sync_result_sender) =
-                        pending_sync_requests.insert(new_sync_epoch, sync_result_sender)
+                    if let Some(old_sync_result_sender) = flush_controller
+                        .pending_sync_requests
+                        .insert(new_sync_epoch, sync_result_sender)
                     {
                         let _ = old_sync_result_sender
                             .send(Err(HummockError::other(
@@ -279,14 +322,15 @@ pub(crate) async fn start_flush_controller_worker(
                                 );
                             });
                     }
-                    let mut local_version_guard = local_version_manager.local_version.write();
+                    let mut local_version_guard =
+                        flush_controller.local_version_manager.local_version.write();
                     let prev_max_sync_epoch = if let Some(epoch) =
                         local_version_guard.get_prev_max_sync_epoch(new_sync_epoch)
                     {
                         epoch
                     } else {
-                        send_sync_result(
-                            &mut pending_sync_requests,
+                        drop(local_version_guard);
+                        flush_controller.send_sync_result(
                             new_sync_epoch,
                             Err(HummockError::other(format!(
                                 "no sync task on epoch: {}. May have been cleared",
@@ -295,14 +339,15 @@ pub(crate) async fn start_flush_controller_worker(
                         );
                         continue;
                     };
-                    let flush_join_handles = upload_handle_manager
+                    let flush_join_handles = flush_controller
+                        .upload_handle_manager
                         .drain_epoch_handle(prev_max_sync_epoch + 1..=new_sync_epoch);
                     if flush_join_handles.is_empty() {
                         // no pending flush to wait. Start syncing
 
                         let (payload, sync_size) =
                             local_version_guard.start_syncing(new_sync_epoch);
-                        let local_version_manager = local_version_manager.clone();
+                        let local_version_manager = flush_controller.local_version_manager.clone();
                         let join_handle = tokio::spawn(async move {
                             let _ = local_version_manager
                                 .run_sync_upload_task(payload, sync_size, new_sync_epoch)
@@ -314,42 +359,52 @@ pub(crate) async fn start_flush_controller_worker(
                                     );
                                 });
                         });
-                        upload_handle_manager.add_epoch_handle(new_sync_epoch, once(join_handle));
+                        flush_controller
+                            .upload_handle_manager
+                            .add_epoch_handle(new_sync_epoch, once(join_handle));
                     } else {
                         // some pending flush task. waiting for flush to finish.
                         // Note: the flush join handle of some previous epoch is now attached to
                         // the new sync epoch
-                        upload_handle_manager
+                        flush_controller
+                            .upload_handle_manager
                             .add_epoch_handle(new_sync_epoch, flush_join_handles.into_iter());
                     }
                 }
                 SharedBufferEvent::Clear(notifier) => {
                     // Wait for all ongoing flush to finish.
-                    let ongoing_flush_handles: Vec<_> =
-                        upload_handle_manager.drain_epoch_handle(..);
+                    let ongoing_flush_handles: Vec<_> = flush_controller
+                        .upload_handle_manager
+                        .drain_epoch_handle(..);
                     if let Err(e) = try_join_all(ongoing_flush_handles).await {
                         error!("Failed to join flush handle {:?}", e)
                     }
 
                     // There cannot be any pending write requests since we should only clear
                     // shared buffer after all actors stop processing data.
-                    assert!(pending_write_requests.is_empty());
-                    let pending_epochs = pending_sync_requests.keys().cloned().collect_vec();
+                    assert!(flush_controller.pending_write_requests.is_empty());
+                    let pending_epochs = flush_controller
+                        .pending_sync_requests
+                        .keys()
+                        .cloned()
+                        .collect_vec();
                     pending_epochs.into_iter().for_each(|epoch| {
-                        send_sync_result(
-                            &mut pending_sync_requests,
+                        flush_controller.send_sync_result(
                             epoch,
                             Err(HummockError::other("the pending sync is cleared")),
                         );
                     });
 
                     // Clear shared buffer
-                    let cleaned_epochs = local_version_manager
+                    let cleaned_epochs = flush_controller
+                        .local_version_manager
                         .local_version
                         .write()
                         .clear_shared_buffer();
                     for cleaned_epoch in cleaned_epochs {
-                        sstable_id_manager.remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
+                        flush_controller
+                            .sstable_id_manager
+                            .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
                     }
 
                     // Notify completion of the Clear event.
