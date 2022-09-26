@@ -356,6 +356,15 @@ impl<K: HashKey> LookupJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let lookup_join_build_side_schema = self.build_child.schema().clone();
+
+        let null_matched = {
+            let mut null_matched = FixedBitSet::with_capacity(self.null_safe.len());
+            for (idx, col_null_matched) in self.null_safe.iter().copied().enumerate() {
+                null_matched.set(idx, col_null_matched);
+            }
+            null_matched
+        };
+
         let mut lookup_join_build_side_batch_read_stream: BoxedDataChunkListStream =
             utils::batch_read(self.build_child.execute(), AT_LEAST_BUILD_SIDE_ROWS);
 
@@ -406,7 +415,6 @@ impl<K: HashKey> LookupJoinExecutor<K> {
             let mut build_row_count = 0;
             #[for_await]
             for build_chunk in hash_join_build_child.execute() {
-                // for build_chunk in chunk_list {
                 let build_chunk = build_chunk?;
                 if build_chunk.cardinality() > 0 {
                     build_row_count += build_chunk.cardinality();
@@ -417,13 +425,6 @@ impl<K: HashKey> LookupJoinExecutor<K> {
                 JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
             let mut next_build_row_with_same_key =
                 ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-            let null_matched = {
-                let mut null_matched = FixedBitSet::with_capacity(self.null_safe.len());
-                for (idx, col_null_matched) in self.null_safe.iter().copied().enumerate() {
-                    null_matched.set(idx, col_null_matched);
-                }
-                null_matched
-            };
 
             // Build hash map
             for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
