@@ -247,6 +247,9 @@ impl HummockSnapshotManagerCore {
         snapshot: &HummockSnapshot,
         batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
     ) {
+        if batches.is_empty() {
+            return;
+        }
         let committed_epoch = snapshot.committed_epoch;
         let queries = match self.epoch_to_query_ids.get_mut(&committed_epoch) {
             None => {
@@ -278,11 +281,25 @@ impl HummockSnapshotManagerCore {
         // Check the min epoch which still exists running query. If there is no running query,
         // we shall unpin snapshot with the last committed epoch.
         let min_epoch = match self.epoch_to_query_ids.first_key_value() {
-            Some((epoch, _)) => *epoch,
+            Some((epoch, query_ids)) => {
+                assert!(
+                    !query_ids.is_empty(),
+                    "No query is associated with epoch {}",
+                    epoch
+                );
+                *epoch
+            }
             None => last_committed_epoch,
         };
 
-        if min_epoch <= self.last_unpin_snapshot.load(Ordering::Acquire) {
+        let last_unpin_snapshot = self.last_unpin_snapshot.load(Ordering::Acquire);
+        tracing::trace!(
+            "Try unpin snapshot: min_epoch {}, last_unpin_snapshot: {}",
+            min_epoch,
+            last_unpin_snapshot
+        );
+
+        if min_epoch <= last_unpin_snapshot {
             return;
         }
 
