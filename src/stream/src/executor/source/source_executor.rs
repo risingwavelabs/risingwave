@@ -526,7 +526,6 @@ mod tests {
         let state_table = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
-            None,
         );
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
@@ -654,7 +653,6 @@ mod tests {
         let state_table = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
-            None,
         );
 
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
@@ -782,7 +780,6 @@ mod tests {
         let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             mem_state_store.clone(),
-            Some(Arc::from(vnodes.clone())),
         );
 
         let source_exec = SourceExecutor::new(

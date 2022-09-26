@@ -146,7 +146,6 @@ async fn test_table_materialize() -> StreamResult<()> {
     let state_table = SourceStateTableHandler::from_table_catalog(
         &default_source_internal_table(0x2333),
         MemoryStateStore::new(),
-        Some(vnodes.clone().into()),
     );
     let stream_source = SourceExecutor::new(
         ActorContext::create(0x3f3f3f),

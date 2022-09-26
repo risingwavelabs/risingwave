@@ -13,12 +13,10 @@
 // limitations under the License.
 
 use std::ops::Deref;
-use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::types::ScalarImpl;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
@@ -38,13 +36,9 @@ pub struct SourceStateTableHandler<S: StateStore> {
 }
 
 impl<S: StateStore> SourceStateTableHandler<S> {
-    pub fn from_table_catalog(
-        table_catalog: &ProstTable,
-        store: S,
-        vnodes: Option<Arc<Bitmap>>,
-    ) -> Self {
+    pub fn from_table_catalog(table_catalog: &ProstTable, store: S) -> Self {
         Self {
-            state_store: StateTable::from_table_catalog(table_catalog, store, vnodes),
+            state_store: StateTable::from_table_catalog(table_catalog, store, None),
         }
     }
 
@@ -155,6 +149,8 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::sync::Arc;
+
     use risingwave_common::array::Row;
     use risingwave_common::types::{Datum, ScalarImpl};
     use risingwave_connector::source::kafka::KafkaSplit;
@@ -187,7 +183,6 @@ pub(crate) mod tests {
         let mut state_table_handler = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             store,
-            None,
         );
         let split_impl = SplitImpl::Kafka(KafkaSplit::new(0, Some(0), None, "test".into()));
         let serialized = split_impl.encode_to_bytes();
