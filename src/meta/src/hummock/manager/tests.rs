@@ -1021,7 +1021,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     compact_task.set_task_status(TaskStatus::ExecuteFailed);
 
     assert!(hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .report_compact_task(context_id, &mut compact_task)
         .await
         .unwrap());
 
@@ -1049,7 +1049,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Cancel the task after heartbeat has triggered and fail.
     compact_task.set_task_status(TaskStatus::ExecuteFailed);
     assert!(!hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .report_compact_task(context_id, &mut compact_task)
         .await
         .unwrap());
     shutdown_tx.send(()).unwrap();
