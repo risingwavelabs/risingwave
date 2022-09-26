@@ -286,7 +286,7 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
 pub struct LookupJoinExecutor<K> {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
-    build_child: Option<BoxedExecutor>,
+    build_child: BoxedExecutor,
     build_side_data_types: Vec<DataType>, // Data types of all columns of build side table
     build_side_key_idxs: Vec<usize>,
     probe_side_source: Box<dyn ProbeSideSourceBuilder>,
@@ -321,7 +321,7 @@ impl<K> LookupJoinExecutor<K> {
     pub fn new(
         join_type: JoinType,
         condition: Option<BoxedExpression>,
-        build_child: Option<BoxedExecutor>,
+        build_child: BoxedExecutor,
         build_side_data_types: Vec<DataType>,
         build_side_key_idxs: Vec<usize>,
         probe_side_source: Box<dyn ProbeSideSourceBuilder>,
@@ -355,12 +355,9 @@ impl<K> LookupJoinExecutor<K> {
 impl<K: HashKey> LookupJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let lookup_join_build_side_schema = self.build_child.as_ref().unwrap().schema().clone();
+        let lookup_join_build_side_schema = self.build_child.schema().clone();
         let mut lookup_join_build_side_batch_read_stream: BoxedDataChunkListStream =
-            utils::batch_read(
-                self.build_child.take().unwrap().execute(),
-                AT_LEAST_BUILD_SIDE_ROWS,
-            );
+            utils::batch_read(self.build_child.execute(), AT_LEAST_BUILD_SIDE_ROWS);
 
         while let Some(chunk_list) = lookup_join_build_side_batch_read_stream.next().await {
             let chunk_list = chunk_list?;
@@ -467,22 +464,10 @@ impl<K: HashKey> LookupJoinExecutor<K> {
                     JoinType::LeftAnti => {
                         HashJoinExecutor::do_left_anti_join_with_non_equi_condition(params, cond)
                     }
-                    JoinType::RightOuter => {
-                        HashJoinExecutor::do_right_outer_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::RightSemi => {
-                        HashJoinExecutor::do_right_semi_anti_join_with_non_equi_condition::<false>(
-                            params, cond,
-                        )
-                    }
-                    JoinType::RightAnti => {
-                        HashJoinExecutor::do_right_semi_anti_join_with_non_equi_condition::<true>(
-                            params, cond,
-                        )
-                    }
-                    JoinType::FullOuter => {
-                        HashJoinExecutor::do_full_outer_join_with_non_equi_condition(params, cond)
-                    }
+                    JoinType::RightOuter
+                    | JoinType::RightSemi
+                    | JoinType::RightAnti
+                    | JoinType::FullOuter => unimplemented!(),
                 };
                 // For non-equi join, we need an output chunk builder to align the output chunks.
                 let mut output_chunk_builder =
@@ -505,14 +490,10 @@ impl<K: HashKey> LookupJoinExecutor<K> {
                     JoinType::LeftOuter => HashJoinExecutor::do_left_outer_join(params),
                     JoinType::LeftSemi => HashJoinExecutor::do_left_semi_anti_join::<false>(params),
                     JoinType::LeftAnti => HashJoinExecutor::do_left_semi_anti_join::<true>(params),
-                    JoinType::RightOuter => HashJoinExecutor::do_right_outer_join(params),
-                    JoinType::RightSemi => {
-                        HashJoinExecutor::do_right_semi_anti_join::<false>(params)
-                    }
-                    JoinType::RightAnti => {
-                        HashJoinExecutor::do_right_semi_anti_join::<true>(params)
-                    }
-                    JoinType::FullOuter => HashJoinExecutor::do_full_outer_join(params),
+                    JoinType::RightOuter
+                    | JoinType::RightSemi
+                    | JoinType::RightAnti
+                    | JoinType::FullOuter => unimplemented!(),
                 };
                 #[for_await]
                 for chunk in stream {
@@ -637,7 +618,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             LookupJoinExecutor::new(
                 join_type,
                 condition,
-                Some(build_child),
+                build_child,
                 build_side_data_types,
                 build_side_key_idxs,
                 Box::new(probe_side_source),
@@ -757,7 +738,7 @@ mod tests {
             LookupJoinExecutor::new(
                 join_type,
                 condition,
-                Some(build_child),
+                build_child,
                 build_side_data_types,
                 vec![0],
                 Box::new(FakeProbeSideSourceBuilder::new(probe_side_schema)),
