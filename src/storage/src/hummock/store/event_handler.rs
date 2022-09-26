@@ -19,8 +19,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::memtable::Memtable;
 use super::version::OrderIdx;
-use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::HummockResult;
+use crate::store::SyncResult;
 
 // TODO: may use a different type
 pub type StateStoreId = u64;

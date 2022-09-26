@@ -18,13 +18,20 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::StorageResult;
-use crate::hummock::local_version_manager::SyncResult;
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
+
+#[derive(Default, Debug)]
+pub struct SyncResult {
+    /// The size of all synced shared buffers.
+    pub sync_size: usize,
+    /// The sst_info of sync.
+    pub uncommitted_ssts: Vec<LocalSstableInfo>,
+}
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
 pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
