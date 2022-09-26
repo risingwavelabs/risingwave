@@ -28,12 +28,6 @@ pub enum AggKind {
     Count,
     Avg,
     StringAgg,
-    // This is an internal Agg operation.
-    // It was introduced by our legacy java frontend to handle
-    // scalar subqueries which may return more than one row.
-    // FIXME: This is currently unused by our codebase.
-    // Tracked: <https://github.com/risingwavelabs/risingwave/issues/4866>
-    SingleValue,
     ApproxCountDistinct,
     ArrayAgg,
 }
@@ -47,7 +41,6 @@ impl std::fmt::Display for AggKind {
             AggKind::Count => write!(f, "count"),
             AggKind::Avg => write!(f, "avg"),
             AggKind::StringAgg => write!(f, "string_agg"),
-            AggKind::SingleValue => write!(f, "single_value"),
             AggKind::ApproxCountDistinct => write!(f, "approx_count_distinct"),
             AggKind::ArrayAgg => write!(f, "array_agg"),
         }
@@ -65,7 +58,6 @@ impl TryFrom<Type> for AggKind {
             Type::Avg => Ok(AggKind::Avg),
             Type::Count => Ok(AggKind::Count),
             Type::StringAgg => Ok(AggKind::StringAgg),
-            Type::SingleValue => Ok(AggKind::SingleValue),
             Type::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
             Type::ArrayAgg => Ok(AggKind::ArrayAgg),
             Type::Unspecified => bail!("Unrecognized agg."),
@@ -82,7 +74,6 @@ impl AggKind {
             Self::Avg => Type::Avg,
             Self::Count => Type::Count,
             Self::StringAgg => Type::StringAgg,
-            Self::SingleValue => Type::SingleValue,
             Self::ApproxCountDistinct => Type::ApproxCountDistinct,
             Self::ArrayAgg => Type::ArrayAgg,
         }

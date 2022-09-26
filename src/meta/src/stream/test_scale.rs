@@ -75,8 +75,8 @@ mod tests {
         let prev_bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
 
         for idx in 0..VIRTUAL_NODE_COUNT {
-            if prev_bitmap.is_set(idx).unwrap() {
-                assert!(bitmap.is_set(idx).unwrap());
+            if prev_bitmap.is_set(idx) {
+                assert!(bitmap.is_set(idx));
             }
         }
     }
@@ -86,7 +86,7 @@ mod tests {
 
         for bitmap in bitmaps.values() {
             for (idx, pos) in target.iter_mut().enumerate() {
-                if bitmap.is_set(idx).unwrap() {
+                if bitmap.is_set(idx) {
                     // *pos should be false
                     assert!(!*pos);
                     *pos = true;
@@ -209,7 +209,7 @@ mod tests {
 
             for (actor_id, bitmap) in &bitmaps {
                 for (idx, value) in raw.iter().enumerate() {
-                    if bitmap.is_set(idx).unwrap() {
+                    if bitmap.is_set(idx) {
                         assert_eq!(*value, *actor_id);
                     }
                 }

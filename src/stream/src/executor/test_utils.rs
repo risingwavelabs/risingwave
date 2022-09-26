@@ -219,7 +219,6 @@ pub mod agg_executor {
             | AggKind::Sum
             | AggKind::Count
             | AggKind::Avg
-            | AggKind::SingleValue
             | AggKind::ApproxCountDistinct => {
                 add_column_desc(agg_call.return_type.clone());
             }

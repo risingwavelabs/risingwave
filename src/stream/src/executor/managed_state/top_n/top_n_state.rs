@@ -14,6 +14,7 @@
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::Row;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -219,7 +220,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         Ok(())
     }
 
-    pub async fn flush(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.state_table.commit(epoch).await?;
         Ok(())
     }
@@ -245,7 +246,7 @@ mod tests {
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
             );
-            tb.init_epoch(0);
+            tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };
         let mut managed_state = ManagedTopNState::new(
@@ -314,7 +315,7 @@ mod tests {
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
             );
-            tb.init_epoch(0);
+            tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };
         let mut managed_state = ManagedTopNState::new(
