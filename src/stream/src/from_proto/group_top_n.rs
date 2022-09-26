@@ -38,18 +38,14 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes);
-        let order_pairs = table
-            .get_order_key()
-            .iter()
-            .map(OrderPair::from_prost)
-            .collect();
+        let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
         let key_indices = table
             .get_distribution_key()
             .iter()
             .map(|idx| *idx as usize)
             .collect();
 
-        Ok(GroupTopNExecutor::new(
+        Ok(GroupTopNExecutor::new_without_ties(
             params.input.remove(0),
             order_pairs,
             (node.offset as usize, node.limit as usize),

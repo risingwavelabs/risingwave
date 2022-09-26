@@ -92,11 +92,35 @@ impl From<u64> for Epoch {
 }
 
 impl fmt::Display for Epoch {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EpochPair {
+    pub curr: u64,
+    pub prev: u64,
+}
+
+impl EpochPair {
+    pub fn new(curr: u64, prev: u64) -> Self {
+        assert!(curr > prev);
+        Self { curr, prev }
+    }
+
+    pub fn inc(&self) -> Self {
+        Self {
+            curr: self.curr + 1,
+            prev: self.prev + 1,
+        }
+    }
+
+    pub fn new_test_epoch(curr: u64) -> Self {
+        assert!(curr > 0);
+        Self::new(curr, curr - 1)
+    }
+}
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone, Utc};

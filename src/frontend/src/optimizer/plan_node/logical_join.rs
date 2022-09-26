@@ -51,7 +51,7 @@ pub struct LogicalJoin {
 }
 
 impl fmt::Display for LogicalJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("LogicalJoin");
         builder.field("type", &format_args!("{:?}", self.join_type()));
@@ -592,6 +592,14 @@ impl LogicalJoin {
             return None;
         }
 
+        match logical_join.join_type() {
+            JoinType::RightOuter
+            | JoinType::RightSemi
+            | JoinType::RightAnti
+            | JoinType::FullOuter => return None,
+            _ => {}
+        };
+
         let logical_scan = self.right.as_logical_scan().unwrap();
         let table_desc = logical_scan.table_desc().clone();
         let output_column_ids = logical_scan.output_column_ids();
@@ -863,6 +871,9 @@ impl PredicatePushdown for LogicalJoin {
             new_on,
             self.output_indices.clone(),
         );
+
+        let mut mapping = self.i2o_col_mapping();
+        predicate = predicate.rewrite_expr(&mut mapping);
         LogicalFilter::create(new_join.into(), predicate)
     }
 }

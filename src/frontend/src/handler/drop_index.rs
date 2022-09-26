@@ -48,8 +48,6 @@ pub async fn handle_drop_index(
                     )));
                 }
 
-                // If is index on is `None`, then it is a actually a materialized view.
-                assert!(table.is_index_on.is_none());
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
                 )));

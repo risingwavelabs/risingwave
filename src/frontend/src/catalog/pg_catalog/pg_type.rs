@@ -23,7 +23,7 @@ use crate::catalog::pg_catalog::PgCatalogColumnsDef;
 /// The catalog `pg_type` stores information about data types.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-type.html`]
 pub const PG_TYPE_TABLE_NAME: &str = "pg_type";
-pub const PG_TYPE_COLUMNS: &[PgCatalogColumnsDef] =
+pub const PG_TYPE_COLUMNS: &[PgCatalogColumnsDef<'_>] =
     &[(DataType::Int32, "oid"), (DataType::Varchar, "typname")];
 
 // TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.

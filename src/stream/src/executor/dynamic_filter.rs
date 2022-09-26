@@ -83,7 +83,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
-            range_cache: RangeCache::new(state_table_l, 0, usize::MAX),
+            range_cache: RangeCache::new(state_table_l, usize::MAX),
             right_table: state_table_r,
             is_right_table_writer,
             metrics,
@@ -261,7 +261,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pin_mut!(aligned_stream);
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
-        self.right_table.init_epoch(barrier.epoch.prev);
+        self.right_table.init_epoch(barrier.epoch);
         self.range_cache.init(barrier.epoch);
 
         // The first barrier message should be propagated.
@@ -344,15 +344,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     if self.is_right_table_writer {
                         if let Some(row) = current_epoch_row.take() {
                             self.right_table.insert(row);
-                            self.right_table.commit(barrier.epoch.prev).await?;
+                            self.right_table.commit(barrier.epoch).await?;
+                        } else {
+                            self.right_table.commit_no_data_expected(barrier.epoch);
                         }
                     }
 
-                    self.range_cache.flush().await?;
-
-                    // We have flushed all the state for the prev epoch. We can now update the
-                    // epochs.
-                    self.range_cache.update_epoch(barrier.epoch.curr);
+                    self.range_cache.flush(barrier.epoch).await?;
 
                     prev_epoch_value = Some(curr);
 
@@ -379,7 +377,7 @@ impl<S: StateStore> Executor for DynamicFilterExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 

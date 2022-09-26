@@ -14,6 +14,7 @@
 
 use anyhow::{anyhow, Result};
 use futures::{pin_mut, StreamExt};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_frontend::TableCatalog;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
@@ -57,11 +58,7 @@ pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> Stat
             .iter()
             .map(|x| x.column_desc.clone())
             .collect(),
-        table
-            .order_key()
-            .iter()
-            .map(|x| x.direct.to_order())
-            .collect(),
+        table.pk().iter().map(|x| x.direct.to_order()).collect(),
         table.stream_key.clone(), // FIXME: should use order keys
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
         table.value_indices.clone(),
@@ -92,7 +89,7 @@ async fn do_scan(
     // We use state table here instead of cell-based table to support iterating with u64::MAX epoch.
     let state_table = {
         let mut tb = make_state_table(hummock.clone(), &table);
-        tb.init_epoch(u64::MAX);
+        tb.init_epoch(EpochPair::new_test_epoch(u64::MAX));
         tb
     };
     let stream = state_table.iter().await?;

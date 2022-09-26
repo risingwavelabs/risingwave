@@ -42,6 +42,7 @@ impl MetricsManager {
         });
     }
 
+    #[expect(clippy::unused_async, reason = "required by service_fn")]
     async fn metrics_service(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
         let registry = req.extensions().get::<Arc<Registry>>().unwrap();
         let encoder = TextEncoder::new();

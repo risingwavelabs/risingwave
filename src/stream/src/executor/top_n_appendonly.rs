@@ -15,6 +15,7 @@
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -84,7 +85,8 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
-    cache: TopNCache,
+    /// TODO: support WITH TIES
+    cache: TopNCache<false>,
 
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -124,7 +126,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit),
+            cache: TopNCache::new(num_offset, num_limit, order_pairs.len()),
             key_indices,
         })
     }
@@ -199,7 +201,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         generate_output(res_rows, res_ops, &self.schema)
     }
 
-    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
@@ -207,7 +209,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -215,7 +217,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         &self.info.identity
     }
 
-    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
             .init_topn_cache(None, &mut self.cache)
@@ -237,7 +239,7 @@ mod tests {
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
     use crate::executor::top_n_appendonly::AppendOnlyTopNExecutor;
-    use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices};
+    use crate::executor::{Barrier, Executor, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -289,20 +291,11 @@ mod tests {
             schema,
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(1),
-                    ..Barrier::default()
-                }),
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(2),
-                    ..Barrier::default()
-                }),
+                Message::Barrier(Barrier::new_test_barrier(2)),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(3),
-                    ..Barrier::default()
-                }),
+                Message::Barrier(Barrier::new_test_barrier(3)),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
             ],
         ))

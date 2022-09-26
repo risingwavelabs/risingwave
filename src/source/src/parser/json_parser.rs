@@ -14,22 +14,57 @@
 
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use serde_json::Value;
 
-use crate::parser::common::json_parse_value;
 use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
 #[derive(Debug)]
 pub struct JsonParser;
 
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
 impl SourceParser for JsonParser {
     fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+        use serde_json::Value;
+
+        use crate::parser::common::json_parse_value;
         let value: Value = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {
             json_parse_value(&desc.into(), value.get(&desc.name)).map_err(|e| {
+                tracing::error!(
+                    "failed to process value ({}): {}",
+                    String::from_utf8_lossy(payload),
+                    e
+                );
+                e.into()
+            })
+        })
+    }
+}
+
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
+impl SourceParser for JsonParser {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+        use simd_json::{BorrowedValue, ValueAccess};
+
+        use crate::parser::common::simd_json_parse_value;
+        let mut payload_mut = payload.to_vec();
+        let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+        writer.insert(|desc| {
+            simd_json_parse_value(&desc.into(), value.get(desc.name.as_str())).map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
                     String::from_utf8_lossy(payload),
@@ -101,9 +136,17 @@ mod tests {
                 row.value_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(1.23.into())))
             );
+            // Usage of avx2 or neon(used by M1) results in a floating point error. Since it is
+            // very small (close to precision of f64) we ignore it.
+            #[cfg(any(target_feature = "avx2", target_feature = "neon"))]
             assert_eq!(
                 row.value_at(5).to_owned_datum(),
-                Some(ScalarImpl::Float64(1.2345.into()))
+                (Some(ScalarImpl::Float64(1.2345000000000002.into())))
+            );
+            #[cfg(not(any(target_feature = "avx2", target_feature = "neon")))]
+            assert_eq!(
+                row.value_at(5).to_owned_datum(),
+                (Some(ScalarImpl::Float64(1.2345.into())))
             );
             assert_eq!(
                 row.value_at(6).to_owned_datum(),

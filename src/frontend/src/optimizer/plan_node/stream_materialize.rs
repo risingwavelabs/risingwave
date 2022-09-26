@@ -79,12 +79,12 @@ impl StreamMaterialize {
         user_order_by: Order,
         user_cols: FixedBitSet,
         out_names: Vec<String>,
-        is_index_on: Option<TableId>,
+        is_index: bool,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
             _ => {
-                if is_index_on.is_some() {
+                if is_index {
                     RequiredDist::PhysicalDist(Distribution::HashShard(
                         user_order_by.field_order.iter().map(|x| x.index).collect(),
                     ))
@@ -139,11 +139,11 @@ impl StreamMaterialize {
             .collect_vec();
         let value_indices = (0..columns.len()).collect_vec();
         let mut in_order = FixedBitSet::with_capacity(schema.len());
-        let mut order_keys = vec![];
+        let mut pk_list = vec![];
 
         for field in &user_order_by.field_order {
             let idx = field.index;
-            order_keys.push(field.clone());
+            pk_list.push(field.clone());
             in_order.insert(idx);
         }
 
@@ -151,7 +151,7 @@ impl StreamMaterialize {
             if in_order.contains(idx) {
                 continue;
             }
-            order_keys.push(FieldOrder {
+            pk_list.push(FieldOrder {
                 index: idx,
                 direct: Direction::Asc,
             });
@@ -166,10 +166,10 @@ impl StreamMaterialize {
             associated_source_id: None,
             name: mv_name,
             columns,
-            order_key: order_keys,
+            pk: pk_list,
             stream_key: pk_indices.clone(),
-            is_index_on,
             distribution_key: base.dist.dist_column_indices().to_vec(),
+            is_index,
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
@@ -194,7 +194,7 @@ impl StreamMaterialize {
 }
 
 impl fmt::Display for StreamMaterialize {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let table = self.table();
 
         let column_names = table
@@ -210,7 +210,7 @@ impl fmt::Display for StreamMaterialize {
             .join(", ");
 
         let order_descs = table
-            .order_key
+            .pk
             .iter()
             .map(|order| table.columns()[order.index].column_desc.name.clone())
             .join(", ");
@@ -252,7 +252,7 @@ impl StreamNode for StreamMaterialize {
             table_id: 0,
             column_orders: self
                 .table()
-                .order_key()
+                .pk()
                 .iter()
                 .map(FieldOrder::to_protobuf)
                 .collect(),
