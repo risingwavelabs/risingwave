@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::swap;
 use std::ops::{Deref, RangeBounds};
 use std::sync::atomic::AtomicUsize;
@@ -28,11 +28,12 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo, INVALID_VERSION_ID,
 };
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level};
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, LevelType};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
-use crate::hummock::shared_buffer::{to_order_sorted, OrderSortedUncommittedData, UncommittedData};
+use crate::hummock::shared_buffer::{to_order_sorted, OrderSortedUncommittedData, UncommittedData, InMemorySstableData};
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchInner;
 use crate::hummock::utils::{check_subset_preserve_order, filter_single_sst, range_overlap};
 
 #[derive(Clone)]
@@ -46,6 +47,7 @@ pub struct LocalVersion {
     /// because we will traverse `sync_uncommitted_data` in the forward direction and return the
     /// key when we find it
     pub sync_uncommitted_data: BTreeMap<HummockEpoch, SyncUncommittedData>,
+    committed_cache: Vec<Arc<InMemorySstableData>>,
     max_sync_epoch: HummockEpoch,
     /// The max readable epoch, and epochs smaller than it will not be written again.
     sealed_epoch: HummockEpoch,
@@ -195,6 +197,7 @@ impl LocalVersion {
             pinned_version,
             local_related_version,
             sync_uncommitted_data: Default::default(),
+            committed_cache: vec![],
             max_sync_epoch: 0,
             sealed_epoch: 0,
         }
@@ -219,6 +222,9 @@ impl LocalVersion {
 
     pub fn pinned_version(&self) -> &PinnedVersion {
         &self.pinned_version
+    }
+    pub fn local_version(&self) -> Arc<HummockVersion> {
+        self.local_related_version.version_ref()
     }
 
     /// Advance the `max_sync_epoch` to at least `new_epoch`.
@@ -347,6 +353,56 @@ impl LocalVersion {
             .or_insert_with(|| SharedBuffer::new(global_upload_task_size))
     }
 
+    pub fn need_cache(&self) -> bool {
+        for (_, levels) in &self.local_related_version.version.levels {
+            let mut overlapping_count = 0;
+            for sub_level in levels.l0.as_ref().unwrap().sub_levels.iter().rev() {
+                if sub_level.level_type != LevelType::Overlapping && sub_level.table_infos.len() > 1 {
+                    break;
+                }
+                overlapping_count += sub_level.table_infos.len();
+            }
+        }
+        false
+    }
+
+    pub fn set_cache_data_for_l0(
+        &mut self,
+        data: Vec<InMemorySstableData>,
+    ) {
+        for group in data {
+            let ssts = group.get_ssts();
+            let group_id = group.compaction_group_id();
+            let levels = self.local_related_version.version.get_compaction_group_levels_mut(group_id);
+            let mut exist_ssts = HashSet::with_capacity(ssts.len());
+            let mut cache_valid = true;
+            for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
+                if sub_level.level_type != LevelType::Overlapping && sub_level.table_infos.len() > 1 {
+                    continue;
+                }
+                for table in &sub_level.table_infos {
+                    exist_ssts.insert(table.id);
+                }
+            }
+            for sst in ssts {
+                if !exist_ssts.contains(&sst) {
+                    cache_valid = false;
+                    break;
+                }
+            }
+
+            if cache_valid {
+                self.committed_cache.push(Arc::new(group));
+                for sub_level in &mut levels.l0.as_mut().unwrap().sub_levels {
+                    if sub_level.level_type != LevelType::Overlapping && sub_level.table_infos.len() > 1 {
+                        continue;
+                    }
+                    sub_level.table_infos.retain(|table| !ssts.contains(&table.id));
+                }
+            }
+        }
+    }
+
     /// Returns epochs cleaned from shared buffer.
     pub fn set_pinned_version(
         &mut self,
@@ -372,6 +428,7 @@ impl LocalVersion {
                         assert_eq!(new_local_related_version.id, delta.prev_id);
                         clean_epochs.extend(self.apply_version_delta_local_related(
                             &mut new_local_related_version,
+                            self.pinned_version.version.as_ref(),
                             &delta,
                         ));
                     }
@@ -414,10 +471,11 @@ impl LocalVersion {
         B: AsRef<[u8]>,
     {
         use parking_lot::RwLockReadGuard;
-        let (pinned_version, (shared_buffer_data, sync_uncommitted_data)) = {
+        let (pinned_version, (shared_buffer_data, sync_uncommitted_data, committed_l0_cache)) = {
             let guard = this.read();
             let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
             let pinned_version = guard.pinned_version.clone();
+            let committed_l0_cache = guard.committed_cache.clone();
             (
                 pinned_version,
                 if read_epoch >= smallest_uncommitted_epoch {
@@ -441,10 +499,10 @@ impl LocalVersion {
                         .map(|(_, value)| value.get_overlap_data(key_range, read_epoch))
                         .collect();
                     RwLockReadGuard::unlock_fair(guard);
-                    (shared_buffer_data, sync_data)
+                    (shared_buffer_data, sync_data, committed_l0_cache)
                 } else {
                     RwLockReadGuard::unlock_fair(guard);
-                    (Vec::new(), Vec::new())
+                    (Vec::new(), Vec::new(), committed_l0_cache)
                 },
             )
         };
@@ -453,6 +511,7 @@ impl LocalVersion {
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
+            committed_l0_cache,
         }
     }
 
@@ -518,6 +577,7 @@ impl LocalVersion {
     fn apply_version_delta_local_related(
         &mut self,
         version: &mut HummockVersion,
+        origin_version: &HummockVersion,
         version_delta: &HummockVersionDelta,
     ) -> Vec<HummockEpoch> {
         assert!(version.max_committed_epoch <= version_delta.max_committed_epoch);
@@ -546,6 +606,48 @@ impl LocalVersion {
             } else {
                 (Vec::new(), None)
             };
+        assert!(compaction_group_synced_ssts.is_none());
+        for (group, levels) in &version_delta.level_deltas {
+            let mut changed_group = false;
+            let mut ids = HashSet::default();
+            for data in &self.committed_cache {
+                if data.compaction_group_id() == *group {
+                    for level_delta in &levels.level_deltas {
+                        if level_delta.level_idx != 0 {
+                            continue;
+                        }
+                        for sst_id in level_delta.removed_table_ids {
+                            if data.contains_sst(sst_id) {
+                                changed_group = true;
+                                break;
+                            }
+                        }
+                    }
+                    if changed_group {
+                        ids.extend(data.get_ssts());
+                    }
+                }
+            }
+
+            if !changed_group {
+                continue;
+            }
+
+            if let Some(local_levels) = version.levels.get_mut(group) {
+                for sub_level in &local_levels.l0.as_ref().unwrap().sub_levels {
+                    for table in &sub_level.table_infos {
+                        ids.insert(table.id);
+                    }
+                }
+                if let Some(origin_levels) = origin_version.levels.get(group) {
+                    local_levels.l0 = origin_levels.l0.clone();
+                    for sub_level in &mut local_levels.l0.as_mut().unwrap().sub_levels {
+                        sub_level.table_infos.retain(| table | ids.contains(&table.id));
+                    }
+                }
+            }
+            self.committed_cache.retain(|data| data.compaction_group_id() != *group);
+        }
 
         for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
             let levels = version
@@ -725,6 +827,11 @@ impl PinnedVersion {
     pub fn version(&self) -> HummockVersion {
         self.version.deref().clone()
     }
+
+    /// ret value can't be used as `HummockVersion`. it must be modified with delta
+    pub fn version_ref(&self) -> Arc<HummockVersion> {
+        self.version.clone()
+    }
 }
 
 pub struct ReadVersion {
@@ -732,4 +839,5 @@ pub struct ReadVersion {
     pub shared_buffer_data: Vec<OrderSortedUncommittedData>,
     pub pinned_version: PinnedVersion,
     pub sync_uncommitted_data: Vec<OrderSortedUncommittedData>,
+    pub committed_l0_cache: Vec<Arc<InMemorySstableData>>,
 }

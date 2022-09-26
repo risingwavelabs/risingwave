@@ -15,6 +15,8 @@
 pub mod shared_buffer_batch;
 #[expect(dead_code)]
 pub mod shared_buffer_uploader;
+mod cache_l0;
+pub use cache_l0::InMemorySstableData;
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Bound, RangeBounds};

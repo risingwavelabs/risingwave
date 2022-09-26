@@ -36,7 +36,26 @@ pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     size: usize,
-    buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
+    buffer_release_notifier: Option<mpsc::UnboundedSender<SharedBufferEvent>>,
+}
+
+impl SharedBufferBatchInner {
+    pub fn new(payload: Vec<SharedBufferItem>,
+               size: usize,
+               buffer_release_notifier: Option<mpsc::UnboundedSender<SharedBufferEvent>>) -> Self {
+        Self {
+            payload,
+            size,
+            buffer_release_notifier,
+        }
+    }
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    pub fn key_count(&self) -> usize {
+        self.payload.len()
+    }
 }
 
 impl Deref for SharedBufferBatchInner {
@@ -49,12 +68,13 @@ impl Deref for SharedBufferBatchInner {
 
 impl Drop for SharedBufferBatchInner {
     fn drop(&mut self) {
-        let _ = self
-            .buffer_release_notifier
-            .send(BufferRelease(self.size))
-            .inspect_err(|e| {
-                error!("unable to notify buffer size change: {:?}", e);
-            });
+        if let Some(notifier) = self.buffer_release_notifier.take() {
+            let _ = notifier
+                .send(BufferRelease(self.size))
+                .inspect_err(|e| {
+                    error!("unable to notify buffer size change: {:?}", e);
+                });
+        }
     }
 }
 
@@ -84,6 +104,15 @@ pub struct SharedBufferBatch {
 }
 
 impl SharedBufferBatch {
+    pub fn from_inner(inner: Arc<SharedBufferBatchInner>, epoch: HummockEpoch, compaction_group_id: CompactionGroupId) -> {
+        Self {
+            inner,
+            epoch,
+            compaction_group_id,
+            table_id: 0,
+        }
+    }
+
     pub fn new(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
@@ -99,11 +128,11 @@ impl SharedBufferBatch {
         }
 
         Self {
-            inner: Arc::new(SharedBufferBatchInner {
-                payload: sorted_items,
+            inner: Arc::new(SharedBufferBatchInner::new(
+                sorted_items,
                 size,
-                buffer_release_notifier,
-            }),
+                Some(buffer_release_notifier),
+            )),
             epoch,
             compaction_group_id,
             table_id,
@@ -213,13 +242,21 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
         }
     }
 
-    fn current_item(&self) -> &SharedBufferItem {
+    pub fn current_item(&self) -> &SharedBufferItem {
         assert!(self.is_valid());
         let idx = match D::direction() {
             DirectionEnum::Forward => self.current_idx,
             DirectionEnum::Backward => self.inner.len() - self.current_idx - 1,
         };
         self.inner.get(idx).unwrap()
+    }
+
+    pub fn next_inner(&mut self) {
+        self.current_idx += 1;
+    }
+
+    pub fn rewind_inner(&mut self)  {
+        self.current_idx = 0;
     }
 }
 

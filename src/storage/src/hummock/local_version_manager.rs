@@ -180,7 +180,7 @@ pub type LocalVersionManagerRef = Arc<LocalVersionManagerExternalHolder>;
 /// during the lifetime of `ScopedLocalVersion`. Internally `LocalVersionManager` will pin/unpin the
 /// versions in storage service.
 pub struct LocalVersionManager {
-    local_version: RwLock<LocalVersion>,
+    local_version: Arc<RwLock<LocalVersion>>,
     worker_context: WorkerContext,
     buffer_tracker: BufferTracker,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
@@ -214,10 +214,10 @@ impl LocalVersionManager {
         let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
 
         let local_version_manager = Arc::new(LocalVersionManager {
-            local_version: RwLock::new(LocalVersion::new(
+            local_version: Arc::new(RwLock::new(LocalVersion::new(
                 pinned_version,
                 pinned_version_manager_tx,
-            )),
+            ))),
             worker_context: WorkerContext {
                 version_update_notifier_tx,
             },
@@ -332,6 +332,8 @@ impl LocalVersionManager {
         }
 
         let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version, version_deltas);
+        let need_cache = new_version.need_cache();
+        let version = new_version.local_version();
         RwLockWriteGuard::unlock_fair(new_version);
         for cleaned_epoch in cleaned_epochs {
             self.sstable_id_manager
@@ -341,6 +343,20 @@ impl LocalVersionManager {
             .version_update_notifier_tx
             .send(new_version_id)
             .ok();
+        if need_cache {
+            let local_version = self.local_version.clone();
+            let shared_buffer_uploader = self.shared_buffer_uploader.clone();
+            tokio::spawn(async move {
+                match shared_buffer_uploader.compact_l0_to_cache(version).await {
+                    Ok(ret) => {
+                        local_version.write().set_cache_data_for_l0(ret);
+                    },
+                    Err(e) => {
+                        tracing::error!("failed to preload L0 data, error: {:?}", e);
+                    }
+                }
+            });
+        }
         true
     }
 

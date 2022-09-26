@@ -17,12 +17,15 @@ use std::sync::Arc;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_pb::hummock::{HummockVersion, LevelType};
 use risingwave_rpc_client::HummockMetaClient;
 
-use crate::hummock::compactor::{compact, CompactionExecutor, Context};
+use crate::hummock::compactor::{compact, CompactionExecutor, ConcatSstableIterator, Context};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::shared_buffer::OrderSortedUncommittedData;
-use crate::hummock::{HummockResult, MemoryLimiter, SstableIdManagerRef, SstableStoreRef};
+use crate::hummock::shared_buffer::{InMemorySstableData, OrderSortedUncommittedData};
+use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, SstableStoreRef};
+use crate::hummock::iterator::{ConcatIterator, UnorderedMergeIteratorInner};
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::monitor::StateStoreMetrics;
 
 pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
@@ -119,5 +122,51 @@ impl SharedBufferUploader {
         // }
 
         Ok(uploaded_sst_info)
+    }
+
+    pub async fn compact_l0_to_cache(&self, version: Arc<HummockVersion>) -> HummockResult<Vec<InMemorySstableData>> {
+        const MIN_CACHE_DATA_NUMBER: usize = 4;
+        let sstable_store = self.sstable_store.clone();
+        let max_cache_size = (self.compactor_context.options.shared_buffer_capacity_mb as u64 / 4) << 20;
+        let max_sstable_size = (self.compactor_context.options.sstable_size_mb as u64 / 4) << 20;
+        let ret = self.compaction_executor.spawn(async move {
+            let mut ret = vec![];
+            for (group, levels) in &version.levels {
+                let mut cache_size = 0;
+                let mut iters = vec![];
+                let mut sst_ids = vec![];
+                for level in levels.l0.as_ref().unwrap().sub_levels.iter().rev() {
+                    if cache_size + level.total_file_size > max_sstable_size {
+                        break;
+                    }
+                    if level.level_type != (LevelType::Overlapping as u32) {
+                        if level.table_infos.len() > 1 {
+                            break;
+                        }
+                        iters.push(ConcatIterator::new(
+                            level.table_infos.clone(),
+                            sstable_store.clone(),
+                            Arc::new(SstableIteratorReadOptions::default()),
+                        ));
+                        sst_ids.extend(level.table_infos.iter().map(|table|table.id));
+                    } else {
+                        for table in &level.table_infos {
+                            iters.push(ConcatIterator::new(
+                                vec![table.clone()],
+                                sstable_store.clone(),
+                                Arc::new(SstableIteratorReadOptions::default()),
+                            ));
+                        }
+                    }
+                }
+                if iters.len() > MIN_CACHE_DATA_NUMBER {
+                    let iter = UnorderedMergeIteratorInner::new(iters);
+                    let data = InMemorySstableData::build(iter, key_count, *group, sst_ids).await?;
+                    ret.push(data);
+                }
+            }
+            Ok(ret)
+        }).await.map_err(|_| HummockError::compaction_executor("failed to schedule in memory compact"))?;
+        ret
     }
 }

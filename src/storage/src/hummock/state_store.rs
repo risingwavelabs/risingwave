@@ -113,6 +113,7 @@ impl HummockStorage {
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
+            committed_l0_cache,
         } = self.read_filter(&read_options, &key_range)?;
 
         let mut local_stats = StoreLocalStatistic::default();
@@ -145,6 +146,11 @@ impl HummockStorage {
                 ))
                 .await?,
             ))
+        }
+        for data in committed_l0_cache {
+            if compaction_group_id.as_ref().map_or(true, |id| *id == data.compaction_group_id()) {
+                overlapped_iters.push(HummockIteratorUnion::First(data.iter::<T::Direction>()));
+            }
         }
         self.stats
             .iter_merge_sstable_counts
