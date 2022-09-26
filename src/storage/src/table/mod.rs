@@ -146,7 +146,7 @@ fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) ->
 
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
 fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
-    let is_set = vnodes.is_set(vnode as usize).unwrap();
+    let is_set = vnodes.is_set(vnode as usize);
     assert!(
         is_set,
         "vnode {} should not be accessed by this table",

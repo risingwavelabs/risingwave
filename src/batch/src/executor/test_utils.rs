@@ -334,7 +334,7 @@ impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
                 if datum[0] == probe_row.value_at(0).to_owned_datum() {
                     let owned_row = probe_row.to_owned_row();
                     let chunk =
-                        DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32])?;
+                        DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32]);
                     mock_executor.add(chunk);
                     break;
                 }
