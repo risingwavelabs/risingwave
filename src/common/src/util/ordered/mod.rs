@@ -112,12 +112,17 @@ impl OrderedRow {
     }
 
     pub fn prefix(&self, n: usize) -> Self {
-        debug_assert!(n <= self.0.len());
+        assert!(n <= self.0.len());
         OrderedRow(self.0[..n].to_vec())
     }
 
     pub fn starts_with(&self, other: &Self) -> bool {
         self.0.starts_with(&other.0)
+    }
+
+    pub fn skip(&self, n: usize) -> Self {
+        assert!(n < self.0.len());
+        OrderedRow(self.0[n..].to_vec())
     }
 }
 
