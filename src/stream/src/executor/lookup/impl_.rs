@@ -334,11 +334,11 @@ impl<S: StateStore> LookupExecutor<S> {
                 ..barrier
             });
             if self.arrangement.use_current_epoch {
-                self.arrangement.state_table.init_epoch(barrier.epoch);
+                self.arrangement.state_table.init_epoch(barrier.epoch.inc());
             } else {
                 self.arrangement
                     .state_table
-                    .init_epoch(EpochPair::new_test_epoch(barrier.epoch.prev));
+                    .init_epoch(barrier.epoch);
             };
             return Ok(());
         } else {
@@ -349,7 +349,7 @@ impl<S: StateStore> LookupExecutor<S> {
             if self.arrangement.use_current_epoch {
                 self.arrangement
                     .state_table
-                    .commit_no_data_expected(barrier.epoch.curr);
+                    .commit_no_data_expected(barrier.epoch.curr+1);
             } else {
                 self.arrangement
                     .state_table
