@@ -54,9 +54,7 @@ const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
 const NUM_BUCKET_PREFIXES: u32 = 256;
 /// Stop multipart uploads that don't complete within a specified number of days after being
 /// initiated. (Day is the smallest granularity)
-///
-/// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
-const INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
+const S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
 
 /// S3 multipart upload handle. The multipart upload is not initiated until the first part is
 /// available for upload.
@@ -552,9 +550,7 @@ impl S3ObjectStore {
             ));
         let config = builder.build();
         let client = Client::from_conf(config);
-        Self::configure_bucket_lifecycle(&client, bucket)
-            .await
-            .unwrap();
+
         Self {
             client,
             bucket: bucket.to_string(),
@@ -604,7 +600,16 @@ impl S3ObjectStore {
     // charged for part storage. Therefore, we need to configure the bucket to purge stale
     // parts.
     //
-    // Reference: <https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html>
+    /// Note: This configuration only works for S3. MinIO automatically enables this feature, and it
+    /// is not configurable with S3 sdk. To verify that this feature is enabled, use `mc admin
+    /// config get <alias> api`.
+    ///
+    /// Reference:
+    /// - S3
+    ///   - <https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html>
+    ///   - <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
+    /// - MinIO
+    ///   - <https://github.com/minio/minio/issues/15681#issuecomment-1245126561>
     async fn configure_bucket_lifecycle(client: &Client, bucket: &str) -> ObjectResult<()> {
         let bucket_lifecycle_rule = LifecycleRule::builder()
             .id("abort-incomplete-multipart-upload")
@@ -612,7 +617,7 @@ impl S3ObjectStore {
             .filter(LifecycleRuleFilter::Prefix(String::new()))
             .abort_incomplete_multipart_upload(
                 AbortIncompleteMultipartUpload::builder()
-                    .days_after_initiation(INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS)
+                    .days_after_initiation(S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS)
                     .build(),
             )
             .build();
@@ -628,7 +633,7 @@ impl S3ObjectStore {
         tracing::info!(
             "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
             bucket,
-            INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
+            S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
         );
         Ok(())
     }
