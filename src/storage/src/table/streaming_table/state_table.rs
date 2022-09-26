@@ -670,26 +670,43 @@ impl<S: StateStore> StateTable<S> {
 impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table.
     pub async fn iter(&self) -> StorageResult<RowStream<'_, S>> {
-        self.iter_with_pk_prefix(Row::empty(), false).await
+        self.iter_with_pk_prefix(Row::empty()).await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix<'a>(
         &'a self,
         pk_prefix: &'a Row,
-        use_curr_epoch: bool,
     ) -> StorageResult<RowStream<'a, S>> {
-        let (mem_table_iter, storage_iter_stream) = match use_curr_epoch {
-            true => self.iter_inner(pk_prefix, self.epoch()).await?,
-            false => self.iter_inner(pk_prefix, self.prev_epoch()).await?,
-        };
+        let (mem_table_iter, storage_iter_stream) =
+            self.iter_inner(pk_prefix, self.epoch()).await?;
 
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
                 .into_stream()
-                .map(|pk_row| pk_row.map(|(_, row)| row)),
+                .map(Self::get_second),
         )
+    }
+
+    /// This function scans rows from the relational table with specific `pk_prefix`.
+    pub async fn iter_prev_epoch_with_pk_prefix<'a>(
+        &'a self,
+        pk_prefix: &'a Row,
+    ) -> StorageResult<RowStream<'a, S>> {
+        let (mem_table_iter, storage_iter_stream) =
+            self.iter_inner(pk_prefix, self.prev_epoch()).await?;
+
+        let storage_iter = storage_iter_stream.into_stream();
+        Ok(
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
+                .into_stream()
+                .map(Self::get_second),
+        )
+    }
+
+    fn get_second<T, U>(arg: StorageResult<(T, U)>) -> StorageResult<U> {
+        arg.map(|x| x.1)
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`, return both

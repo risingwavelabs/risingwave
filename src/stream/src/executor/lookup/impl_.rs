@@ -334,13 +334,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 ..barrier
             });
 
-            if self.arrangement.use_current_epoch {
-                self.arrangement.state_table.init_epoch(barrier.epoch);
-            } else {
-                self.arrangement
-                    .state_table
-                    .init_epoch(EpochPair::new_test_epoch(1));
-            };
+            self.arrangement.state_table.init_epoch(barrier.epoch);
             return Ok(());
         } else {
             // there is no write operation on the arrangement table by the lookup executor, so here
@@ -381,13 +375,13 @@ impl<S: StateStore> LookupExecutor<S> {
                 true => {
                     self.arrangement
                         .state_table
-                        .iter_with_pk_prefix(&lookup_row, true)
+                        .iter_with_pk_prefix(&lookup_row)
                         .await?
                 }
                 false => {
                     self.arrangement
                         .state_table
-                        .iter_with_pk_prefix(&lookup_row, false)
+                        .iter_prev_epoch_with_pk_prefix(&lookup_row)
                         .await?
                 }
             };

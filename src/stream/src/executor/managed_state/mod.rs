@@ -28,7 +28,7 @@ pub async fn iter_state_table<'a, S: StateStore>(
     prefix: Option<&'a Row>,
 ) -> StreamExecutorResult<RowStream<'a, S>> {
     Ok(if let Some(group_key) = prefix {
-        state_table.iter_with_pk_prefix(group_key, true).await?
+        state_table.iter_with_pk_prefix(group_key).await?
     } else {
         state_table.iter().await?
     })
