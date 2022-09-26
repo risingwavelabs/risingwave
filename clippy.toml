@@ -10,3 +10,4 @@ doc-valid-idents = [
     "PostgreSQL",
     "MySQL",
 ]
+avoid-breaking-exported-api = false
