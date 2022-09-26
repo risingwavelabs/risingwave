@@ -35,7 +35,7 @@ pub enum StaticCompactionGroupId {
     /// All MVs goes to here.
     MaterializedView = 3,
     /// Larger than any `StaticCompactionGroupId`.
-    END = 4,
+    End = 4,
 }
 
 impl From<StaticCompactionGroupId> for CompactionGroupId {
@@ -51,7 +51,7 @@ impl Display for StaticCompactionGroupId {
             StaticCompactionGroupId::SharedBuffer => write!(f, "SharedBufferGroup"),
             StaticCompactionGroupId::StateDefault => write!(f, "StateGroup"),
             StaticCompactionGroupId::MaterializedView => write!(f, "MVGroup"),
-            StaticCompactionGroupId::END => write!(f, "END"),
+            StaticCompactionGroupId::End => write!(f, "END"),
         }
     }
 }

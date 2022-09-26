@@ -436,7 +436,7 @@ impl<'a> StructRef<'a> {
         iter_fields_ref!(self, it, { it.collect() })
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         let fields = iter_fields!(self, it, {
             it.map(|f| match f {
                 None => {
