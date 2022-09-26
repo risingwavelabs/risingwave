@@ -128,7 +128,7 @@ impl<S: StateStore> ManagedArrayAggState<S> {
         for (i, op) in ops
             .iter()
             .enumerate()
-            .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true))
         {
             let state_row = Row::new(
                 self.state_table_col_mapping

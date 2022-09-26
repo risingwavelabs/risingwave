@@ -443,7 +443,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                                 }
 
                                 let append_result =
-                                    self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?;
+                                    self.append_chunk(SlicedDataChunk::new_checked(return_chunk));
                                 if let Some(inner_chunk) = append_result {
                                     yield inner_chunk.reorder_columns(&self.output_indices);
                                 }
@@ -455,7 +455,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                         while self.last_chunk.is_some() {
                             let temp_chunk: Option<SlicedDataChunk> =
                                 std::mem::take(&mut self.last_chunk);
-                            if let Some(inner_chunk) = self.append_chunk(temp_chunk.unwrap())? {
+                            if let Some(inner_chunk) = self.append_chunk(temp_chunk.unwrap()) {
                                 yield inner_chunk.reorder_columns(&self.output_indices);
                             }
                         }
@@ -465,7 +465,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         }
 
         // Consume and yield all the remaining chunks in the chunk builder
-        if let Some(data_chunk) = self.chunk_builder.consume_all()? {
+        if let Some(data_chunk) = self.chunk_builder.consume_all() {
             yield data_chunk.reorder_columns(&self.output_indices);
         }
     }
@@ -561,10 +561,10 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
 
     /// Appends `input_chunk` to `self.chunk_builder`. If there is a leftover chunk, assign it
     /// to `self.last_chunk`. Note that `self.last_chunk` is always None before this is called.
-    fn append_chunk(&mut self, input_chunk: SlicedDataChunk) -> Result<Option<DataChunk>> {
-        let (mut left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(input_chunk)?;
+    fn append_chunk(&mut self, input_chunk: SlicedDataChunk) -> Option<DataChunk> {
+        let (mut left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(input_chunk);
         std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
-        Ok(return_chunk)
+        return_chunk
     }
 }
 

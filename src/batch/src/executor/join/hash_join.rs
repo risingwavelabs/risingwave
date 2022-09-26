@@ -266,10 +266,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 for output_chunk in output_chunk_builder
                     .trunc_data_chunk(chunk?.reorder_columns(&self.output_indices))
                 {
-                    yield output_chunk?
+                    yield output_chunk
                 }
             }
-            if let Some(output_chunk) = output_chunk_builder.consume_all()? {
+            if let Some(output_chunk) = output_chunk_builder.consume_all() {
                 yield output_chunk
             }
         } else {
@@ -318,13 +318,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_row_id,
                         build_chunk,
                         build_row_id.row_id(),
-                    )? {
+                    ) {
                         yield spilled
                     }
                 }
             }
         }
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield spilled
         }
     }
@@ -372,7 +372,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             probe_row_id,
                             build_chunk,
                             build_row_id.row_id(),
-                        )? {
+                        ) {
                             yield spilled
                         }
                     }
@@ -382,13 +382,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         &mut chunk_builder,
                         probe_row,
                         build_data_types.len(),
-                    )? {
+                    ) {
                         yield spilled
                     }
                 }
             }
         }
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield spilled
         }
     }
@@ -435,7 +435,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             probe_row_id,
                             build_chunk,
                             build_row_id.row_id(),
-                        )? {
+                        ) {
                             non_equi_state.has_more_output_rows =
                                 build_row_id_iter.peek().is_some();
                             yield Self::process_left_outer_join_non_equi_condition(
@@ -451,14 +451,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         &mut chunk_builder,
                         probe_row,
                         build_data_types.len(),
-                    )? {
+                    ) {
                         yield spilled
                     }
                 }
             }
         }
         non_equi_state.has_more_output_rows = false;
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_left_outer_join_non_equi_condition(
                 spilled,
                 cond.as_ref(),
@@ -489,20 +489,20 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             &mut chunk_builder,
                             &probe_chunk,
                             probe_row_id,
-                        )? {
+                        ) {
                             yield spilled
                         }
                     }
                 } else if hash_map.get(probe_key).is_none() {
                     if let Some(spilled) =
-                        Self::append_one_probe_row(&mut chunk_builder, &probe_chunk, probe_row_id)?
+                        Self::append_one_probe_row(&mut chunk_builder, &probe_chunk, probe_row_id)
                     {
                         yield spilled
                     }
                 }
             }
         }
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield spilled
         }
     }
@@ -543,7 +543,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             probe_row_id,
                             build_chunk,
                             build_row_id.row_id(),
-                        )? {
+                        ) {
                             yield Self::process_left_semi_anti_join_non_equi_condition::<false>(
                                 spilled,
                                 cond.as_ref(),
@@ -554,7 +554,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 }
             }
         }
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_left_semi_anti_join_non_equi_condition::<false>(
                 spilled,
                 cond.as_ref(),
@@ -602,7 +602,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             probe_row_id,
                             build_chunk,
                             build_row_id.row_id(),
-                        )? {
+                        ) {
                             non_equi_state.has_more_output_rows =
                                 build_row_id_iter.peek().is_some();
                             yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
@@ -616,20 +616,20 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     &mut remaining_chunk_builder,
                     &probe_chunk,
                     probe_row_id,
-                )? {
+                ) {
                     yield spilled
                 }
             }
         }
         non_equi_state.has_more_output_rows = false;
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
             )?
         }
-        if let Some(spilled) = remaining_chunk_builder.consume_all()? {
+        if let Some(spilled) = remaining_chunk_builder.consume_all() {
             yield spilled
         }
     }
@@ -667,7 +667,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_row_id,
                         build_chunk,
                         build_row_id.row_id(),
-                    )? {
+                    ) {
                         yield spilled
                     }
                 }
@@ -722,7 +722,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_row_id,
                         build_chunk,
                         build_row_id.row_id(),
-                    )? {
+                    ) {
                         yield Self::process_right_outer_join_non_equi_condition(
                             spilled,
                             cond.as_ref(),
@@ -732,7 +732,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 }
             }
         }
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_right_outer_join_non_equi_condition(
                 spilled,
                 cond.as_ref(),
@@ -827,7 +827,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_row_id,
                         build_chunk,
                         build_row_id.row_id(),
-                    )? {
+                    ) {
                         Self::process_right_semi_anti_join_non_equi_condition(
                             spilled,
                             cond.as_ref(),
@@ -837,7 +837,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 }
             }
         }
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             Self::process_right_semi_anti_join_non_equi_condition(
                 spilled,
                 cond.as_ref(),
@@ -889,7 +889,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             probe_row_id,
                             build_chunk,
                             build_row_id.row_id(),
-                        )? {
+                        ) {
                             yield spilled
                         }
                     }
@@ -899,7 +899,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         &mut chunk_builder,
                         probe_row,
                         build_data_types.len(),
-                    )? {
+                    ) {
                         yield spilled
                     }
                 }
@@ -966,7 +966,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             probe_row_id,
                             build_chunk,
                             build_row_id.row_id(),
-                        )? {
+                        ) {
                             left_non_equi_state.has_more_output_rows =
                                 build_row_id_iter.peek().is_some();
                             yield Self::process_full_outer_join_non_equi_condition(
@@ -983,14 +983,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         &mut remaining_chunk_builder,
                         probe_row,
                         build_data_types.len(),
-                    )? {
+                    ) {
                         yield spilled
                     }
                 }
             }
         }
         left_non_equi_state.has_more_output_rows = false;
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_full_outer_join_non_equi_condition(
                 spilled,
                 cond.as_ref(),
@@ -1256,11 +1256,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 chunk_builder,
                 build_row,
                 probe_column_count,
-            )? {
+            ) {
                 yield spilled
             }
         }
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield spilled
         }
     }
@@ -1282,11 +1282,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 chunk_builder,
                 &build_side[build_row_id.chunk_id()],
                 build_row_id.row_id(),
-            )? {
+            ) {
                 yield spilled
             }
         }
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield spilled
         }
     }
@@ -1297,61 +1297,61 @@ impl<K: HashKey> HashJoinExecutor<K> {
         probe_row_id: usize,
         build_chunk: &DataChunk,
         build_row_id: usize,
-    ) -> Result<Option<DataChunk>> {
-        Ok(chunk_builder.append_one_row_from_array_elements(
+    ) -> Option<DataChunk> {
+        chunk_builder.append_one_row_from_array_elements(
             probe_chunk.columns().iter().map(|c| c.array_ref()),
             probe_row_id,
             build_chunk.columns().iter().map(|c| c.array_ref()),
             build_row_id,
-        )?)
+        )
     }
 
     fn append_one_probe_row(
         chunk_builder: &mut DataChunkBuilder,
         probe_chunk: &DataChunk,
         probe_row_id: usize,
-    ) -> Result<Option<DataChunk>> {
-        Ok(chunk_builder.append_one_row_from_array_elements(
+    ) -> Option<DataChunk> {
+        chunk_builder.append_one_row_from_array_elements(
             probe_chunk.columns().iter().map(|c| c.array_ref()),
             probe_row_id,
             empty(),
             0,
-        )?)
+        )
     }
 
     fn append_one_build_row(
         chunk_builder: &mut DataChunkBuilder,
         build_chunk: &DataChunk,
         build_row_id: usize,
-    ) -> Result<Option<DataChunk>> {
-        Ok(chunk_builder.append_one_row_from_array_elements(
+    ) -> Option<DataChunk> {
+        chunk_builder.append_one_row_from_array_elements(
             empty(),
             0,
             build_chunk.columns().iter().map(|c| c.array_ref()),
             build_row_id,
-        )?)
+        )
     }
 
     fn append_one_row_with_null_build_side(
         chunk_builder: &mut DataChunkBuilder,
         probe_row_ref: RowRef<'_>,
         build_column_count: usize,
-    ) -> Result<Option<DataChunk>> {
-        Ok(chunk_builder.append_one_row_from_datum_refs(
+    ) -> Option<DataChunk> {
+        chunk_builder.append_one_row_from_datum_refs(
             probe_row_ref
                 .values()
                 .chain(repeat_n(None, build_column_count)),
-        )?)
+        )
     }
 
     fn append_one_row_with_null_probe_side(
         chunk_builder: &mut DataChunkBuilder,
         build_row_ref: RowRef<'_>,
         probe_column_count: usize,
-    ) -> Result<Option<DataChunk>> {
-        Ok(chunk_builder.append_one_row_from_datum_refs(
+    ) -> Option<DataChunk> {
+        chunk_builder.append_one_row_from_datum_refs(
             repeat_n(None, probe_column_count).chain(build_row_ref.values()),
-        )?)
+        )
     }
 }
 
@@ -1392,7 +1392,7 @@ impl DataChunkMutator {
             .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
         {
             for row_id in start_row_id..end_row_id {
-                if filter.is_set(row_id).unwrap() {
+                if filter.is_set(row_id) {
                     *found_non_null = true;
                     new_visibility.set(row_id, true);
                 }
@@ -1405,7 +1405,7 @@ impl DataChunkMutator {
 
         let start_row_id = first_output_row_ids.last().copied().unwrap_or_default();
         for row_id in start_row_id..filter.len() {
-            if filter.is_set(row_id).unwrap() {
+            if filter.is_set(row_id) {
                 *found_non_null = true;
                 new_visibility.set(row_id, true);
             }
@@ -1435,7 +1435,7 @@ impl DataChunkMutator {
             .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
         {
             for row_id in start_row_id..end_row_id {
-                if filter.is_set(row_id).unwrap() {
+                if filter.is_set(row_id) {
                     if !ANTI_JOIN && !*found_matched {
                         new_visibility.set(row_id, true);
                     }
@@ -1451,7 +1451,7 @@ impl DataChunkMutator {
 
         let start_row_id = first_output_row_ids.last().copied().unwrap_or_default();
         for row_id in start_row_id..filter.len() {
-            if filter.is_set(row_id).unwrap() {
+            if filter.is_set(row_id) {
                 if !ANTI_JOIN && !*found_matched {
                     new_visibility.set(row_id, true);
                 }
@@ -1528,7 +1528,7 @@ impl DataChunkMutator {
             .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
         {
             for row_id in start_row_id..end_row_id {
-                if filter.is_set(row_id).unwrap() {
+                if filter.is_set(row_id) {
                     *found_matched = true;
                     new_visibility.set(row_id, true);
                 }
@@ -1541,7 +1541,7 @@ impl DataChunkMutator {
 
         let start_row_id = first_output_row_id.last().copied().unwrap_or_default();
         for row_id in start_row_id..filter.len() {
-            if filter.is_set(row_id).unwrap() {
+            if filter.is_set(row_id) {
                 *found_matched = true;
                 new_visibility.set(row_id, true);
             }

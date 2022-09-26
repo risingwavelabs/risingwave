@@ -178,13 +178,8 @@ impl<S: StateStore> GenericExtremeState<S> {
         for (i, op) in ops
             .iter()
             .enumerate()
-            .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
-            .filter(|(i, _)| {
-                columns[self.upstream_agg_col_idx]
-                    .null_bitmap()
-                    .is_set(*i)
-                    .unwrap()
-            })
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true))
+            .filter(|(i, _)| columns[self.upstream_agg_col_idx].null_bitmap().is_set(*i))
         {
             let state_row = Row::new(
                 self.state_table_col_mapping

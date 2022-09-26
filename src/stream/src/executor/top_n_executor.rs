@@ -120,11 +120,11 @@ pub(crate) fn generate_output(
     if !new_rows.is_empty() {
         let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
         for row in &new_rows {
-            let res = data_chunk_builder.append_one_row_from_datums(row.0.iter())?;
+            let res = data_chunk_builder.append_one_row_from_datums(row.0.iter());
             debug_assert!(res.is_none());
         }
         // since `new_rows` is not empty, we unwrap directly
-        let new_data_chunk = data_chunk_builder.consume_all()?.unwrap();
+        let new_data_chunk = data_chunk_builder.consume_all().unwrap();
         let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
         Ok(new_stream_chunk)
     } else {
