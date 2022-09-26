@@ -314,12 +314,9 @@ mod tests {
             "i I
              3 .
              . 7",
-        ))
-        .expect("Failed to create sliced data chunk");
+        ));
 
-        let (returned_input, output) = builder
-            .append_chunk(input)
-            .expect("Failed to append chunk!");
+        let (returned_input, output) = builder.append_chunk(input);
         assert!(returned_input.is_none());
         assert!(output.is_none());
 
@@ -330,20 +327,15 @@ mod tests {
              . 7
              4 8
              . 9",
-        ))
-        .expect("Failed to create sliced data chunk");
-        let (returned_input, output) = builder
-            .append_chunk(input)
-            .expect("Failed to append chunk!");
+        ));
+        let (returned_input, output) = builder.append_chunk(input);
         assert_eq!(Some(1), returned_input.as_ref().map(|c| c.offset));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
         assert!(output.unwrap().visibility().is_none());
 
         // Append last input
-        let (returned_input, output) = builder
-            .append_chunk(returned_input.unwrap())
-            .expect("Failed to append chunk!");
+        let (returned_input, output) = builder.append_chunk(returned_input.unwrap());
         assert!(returned_input.is_none());
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
@@ -359,12 +351,9 @@ mod tests {
             "i I
              3 .
              . 7 D",
-        ))
-        .expect("Failed to create sliced data chunk");
+        ));
 
-        let (returned_input, output) = builder
-            .append_chunk(input)
-            .expect("Failed to append chunk!");
+        let (returned_input, output) = builder.append_chunk(input);
         assert!(returned_input.is_none());
         assert!(output.is_none());
         assert_eq!(1, builder.buffered_count());
@@ -376,11 +365,8 @@ mod tests {
              . 7
              4 8
              . 9 D",
-        ))
-        .expect("Failed to create sliced data chunk");
-        let (returned_input, output) = builder
-            .append_chunk(input)
-            .expect("Failed to append chunk!");
+        ));
+        let (returned_input, output) = builder.append_chunk(input);
         assert_eq!(Some(3), returned_input.as_ref().map(|c| c.offset));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
@@ -388,9 +374,7 @@ mod tests {
         assert_eq!(0, builder.buffered_count());
 
         // Append last input
-        let (returned_input, output) = builder
-            .append_chunk(returned_input.unwrap())
-            .expect("Failed to append chunk!");
+        let (returned_input, output) = builder.append_chunk(returned_input.unwrap());
         assert!(returned_input.is_none());
         assert!(output.is_none());
         assert_eq!(0, builder.buffered_count());
@@ -401,34 +385,30 @@ mod tests {
         let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
 
         // It should return `None` when builder is empty
-        assert!(builder.consume_all().unwrap().is_none());
+        assert!(builder.consume_all().is_none());
 
         // Append a chunk with 2 rows
         let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
             "i I
              3 .
              . 7",
-        ))
-        .expect("Failed to create sliced data chunk");
+        ));
 
-        let (returned_input, output) = builder
-            .append_chunk(input)
-            .expect("Failed to append chunk!");
+        let (returned_input, output) = builder.append_chunk(input);
         assert!(returned_input.is_none());
         assert!(output.is_none());
 
         let output = builder.consume_all().expect("Failed to consume all!");
-        assert!(output.is_some());
-        assert_eq!(Some(2), output.as_ref().map(DataChunk::cardinality));
-        assert_eq!(Some(2), output.as_ref().map(DataChunk::capacity));
-        assert!(output.unwrap().visibility().is_none());
+        assert_eq!(2, output.cardinality());
+        assert_eq!(2, output.capacity());
+        assert!(output.visibility().is_none());
     }
 
     #[test]
     fn test_append_one_row_from_array_elements() {
         let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
 
-        assert!(builder.consume_all().unwrap().is_none());
+        assert!(builder.consume_all().is_none());
 
         let mut left_array_builder = DataType::Int32.create_array_builder(5);
         for v in [1, 2, 3, 4, 5] {
@@ -445,15 +425,17 @@ mod tests {
         let mut output_chunks = Vec::new();
 
         for i in 0..5 {
-            if let Some(chunk) = builder
-                .append_one_row_from_array_elements(left_arrays.iter(), i, right_arrays.iter(), i)
-                .unwrap()
-            {
+            if let Some(chunk) = builder.append_one_row_from_array_elements(
+                left_arrays.iter(),
+                i,
+                right_arrays.iter(),
+                i,
+            ) {
                 output_chunks.push(chunk)
             }
         }
 
-        if let Some(chunk) = builder.consume_all().unwrap() {
+        if let Some(chunk) = builder.consume_all() {
             output_chunks.push(chunk)
         }
 

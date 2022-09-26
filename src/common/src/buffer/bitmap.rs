@@ -438,7 +438,7 @@ mod tests {
         assert_eq!(bitmap.len(), num_bits);
         assert!(bitmap.is_all_set());
         for i in 0..num_bits {
-            assert!(bitmap.is_set(i).unwrap());
+            assert!(bitmap.is_set(i));
         }
         // Test to and from protobuf is OK.
         assert_eq!(bitmap, Bitmap::from(&bitmap.to_protobuf()));
@@ -467,14 +467,14 @@ mod tests {
     #[test]
     fn test_bitmap_is_set() {
         let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b01001010]));
-        assert!(!bitmap.is_set(0).unwrap());
-        assert!(bitmap.is_set(1).unwrap());
-        assert!(!bitmap.is_set(2).unwrap());
-        assert!(bitmap.is_set(3).unwrap());
-        assert!(!bitmap.is_set(4).unwrap());
-        assert!(!bitmap.is_set(5).unwrap());
-        assert!(bitmap.is_set(6).unwrap());
-        assert!(!bitmap.is_set(7).unwrap());
+        assert!(!bitmap.is_set(0));
+        assert!(bitmap.is_set(1));
+        assert!(!bitmap.is_set(2));
+        assert!(bitmap.is_set(3));
+        assert!(!bitmap.is_set(4));
+        assert!(!bitmap.is_set(5));
+        assert!(bitmap.is_set(6));
+        assert!(!bitmap.is_set(7));
     }
 
     #[test]

@@ -891,7 +891,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         keys.into_iter()
-            .for_each(|k| k.deserialize_to_builders(&mut array_builders[..]));
+            .for_each(|k| k.deserialize_to_builders(&mut array_builders[..]).unwrap());
 
         let array = array_builders.pop().unwrap().finish();
         let i32_vec = array
