@@ -99,10 +99,10 @@ pub type LocalVersionManagerRef = Arc<LocalVersionManagerExternalHolder>;
 pub struct LocalVersionManager {
     pub(crate) local_version: RwLock<LocalVersion>,
     worker_context: WorkerContext,
-    pub(crate) buffer_tracker: BufferTracker,
+    buffer_tracker: Arc<BufferTracker>,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
-    pub(crate) sstable_id_manager: SstableIdManagerRef,
+    sstable_id_manager: SstableIdManagerRef,
 }
 
 impl LocalVersionManager {
@@ -130,6 +130,14 @@ impl LocalVersionManager {
 
         let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
 
+        let buffer_tracker = Arc::new(BufferTracker::new(
+            // 0.8 * capacity
+            // TODO: enable setting the ratio with config
+            capacity * 4 / 5,
+            capacity,
+            buffer_event_sender.clone(),
+        ));
+
         let local_version_manager = Arc::new(LocalVersionManager {
             local_version: RwLock::new(LocalVersion::new(
                 pinned_version,
@@ -138,13 +146,7 @@ impl LocalVersionManager {
             worker_context: WorkerContext {
                 version_update_notifier_tx,
             },
-            buffer_tracker: BufferTracker::new(
-                // 0.8 * capacity
-                // TODO: enable setting the ratio with config
-                capacity * 4 / 5,
-                capacity,
-                buffer_event_sender.clone(),
-            ),
+            buffer_tracker: buffer_tracker.clone(),
             write_conflict_detector: write_conflict_detector.clone(),
 
             shared_buffer_uploader: Arc::new(SharedBufferUploader::new(
@@ -156,7 +158,7 @@ impl LocalVersionManager {
                 sstable_id_manager.clone(),
                 filter_key_extractor_manager,
             )),
-            sstable_id_manager,
+            sstable_id_manager: sstable_id_manager.clone(),
         });
 
         // Unpin unused version.
@@ -168,6 +170,8 @@ impl LocalVersionManager {
         // Buffer size manager.
         tokio::spawn(start_flush_controller_worker(
             local_version_manager.clone(),
+            buffer_tracker,
+            sstable_id_manager,
             buffer_event_receiver,
         ));
 

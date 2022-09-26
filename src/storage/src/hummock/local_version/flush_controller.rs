@@ -29,7 +29,7 @@ use crate::hummock::local_version::local_version_manager::LocalVersionManager;
 use crate::hummock::local_version::upload_handle_manager::UploadHandleManager;
 use crate::hummock::local_version::SyncUncommittedDataStage;
 use crate::hummock::shared_buffer::{SharedBufferEvent, WriteRequest};
-use crate::hummock::{HummockError, HummockResult, TrackerId};
+use crate::hummock::{HummockError, HummockResult, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
 pub(crate) struct BufferTracker {
@@ -105,14 +105,16 @@ impl BufferTracker {
     }
 }
 
-pub async fn start_flush_controller_worker(
+pub(crate) async fn start_flush_controller_worker(
     local_version_manager: Arc<LocalVersionManager>,
+    buffer_tracker: Arc<BufferTracker>,
+    sstable_id_manager: SstableIdManagerRef,
     mut shared_buffer_event_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
 ) {
     let try_flush_shared_buffer = |upload_handle_manager: &mut UploadHandleManager| {
         // Keep issuing new flush task until flush is not needed or we can issue
         // no more task
-        while local_version_manager.buffer_tracker.need_more_flush() {
+        while buffer_tracker.need_more_flush() {
             if let Some((epoch, join_handle)) = local_version_manager.clone().flush_shared_buffer()
             {
                 upload_handle_manager.add_epoch_handle(epoch, once(join_handle));
@@ -130,10 +132,7 @@ pub async fn start_flush_controller_worker(
         } = request;
         let size = batch.size();
         local_version_manager.write_shared_buffer_inner(epoch, batch);
-        local_version_manager
-            .buffer_tracker
-            .global_buffer_size
-            .fetch_add(size, Relaxed);
+        buffer_tracker.global_buffer_size.fetch_add(size, Relaxed);
         let _ = sender.send(()).inspect_err(|err| {
             error!("unable to send write request response: {:?}", err);
         });
@@ -228,7 +227,7 @@ pub async fn start_flush_controller_worker(
         if let Some(event) = event {
             match event {
                 SharedBufferEvent::WriteRequest(request) => {
-                    if local_version_manager.buffer_tracker.can_write() {
+                    if buffer_tracker.can_write() {
                         grant_write_request(request);
                         try_flush_shared_buffer(&mut upload_handle_manager);
                     } else {
@@ -246,14 +245,9 @@ pub async fn start_flush_controller_worker(
                     try_flush_shared_buffer(&mut upload_handle_manager);
                 }
                 SharedBufferEvent::BufferRelease(size) => {
-                    local_version_manager
-                        .buffer_tracker
-                        .global_buffer_size
-                        .fetch_sub(size, Relaxed);
+                    buffer_tracker.global_buffer_size.fetch_sub(size, Relaxed);
                     let mut has_granted = false;
-                    while !pending_write_requests.is_empty()
-                        && local_version_manager.buffer_tracker.can_write()
-                    {
+                    while !pending_write_requests.is_empty() && buffer_tracker.can_write() {
                         let request = pending_write_requests.pop_front().unwrap();
                         info!(
                             "write request is granted: epoch {}, size: {}",
@@ -355,9 +349,7 @@ pub async fn start_flush_controller_worker(
                         .write()
                         .clear_shared_buffer();
                     for cleaned_epoch in cleaned_epochs {
-                        local_version_manager
-                            .sstable_id_manager
-                            .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
+                        sstable_id_manager.remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
                     }
 
                     // Notify completion of the Clear event.
