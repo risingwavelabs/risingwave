@@ -84,7 +84,7 @@ impl BatchSortAgg {
 }
 
 impl fmt::Display for BatchSortAgg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchSortAgg")
     }
 }

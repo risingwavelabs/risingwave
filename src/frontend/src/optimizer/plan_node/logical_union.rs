@@ -52,7 +52,7 @@ impl LogicalUnion {
         LogicalUnion::new(all, inputs).into()
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(f, "{} {{ all: {} }}", name, self.all)
     }
 
@@ -74,7 +74,7 @@ impl PlanTreeNode for LogicalUnion {
 }
 
 impl fmt::Display for LogicalUnion {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalUnion")
     }
 }

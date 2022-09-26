@@ -18,7 +18,7 @@ use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::types::Row;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[expect(non_camel_case_types)]
+#[expect(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum StatementType {
     INSERT,
     DELETE,

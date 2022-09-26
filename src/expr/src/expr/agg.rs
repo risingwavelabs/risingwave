@@ -74,7 +74,7 @@ impl TryFrom<Type> for AggKind {
 }
 
 impl AggKind {
-    pub fn to_prost(&self) -> Type {
+    pub fn to_prost(self) -> Type {
         match self {
             Self::Min => Type::Min,
             Self::Max => Type::Max,

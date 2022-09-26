@@ -5,16 +5,16 @@
     insert into t values (22, 33), (44, 55);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchInsert { table: t }
-        BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
+    └─BatchInsert { table: t }
+      └─BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
 - sql: |
     /* insert values on assign-castable types */
     create table t (v1 real, v2 int);
     insert into t values (22.33, '33'), (44, 55.0);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchInsert { table: t }
-        BatchValues { rows: [[22.33:Decimal::Float32, '33':Varchar::Int32], [44:Int32::Float32, 55.0:Decimal::Int32]] }
+    └─BatchInsert { table: t }
+      └─BatchValues { rows: [[22.33:Decimal::Float32, '33':Varchar::Int32], [44:Int32::Float32, 55.0:Decimal::Int32]] }
 - sql: |
     /* insert values on non-assign-castable types */
     create table t (v1 real, v2 int);
@@ -31,16 +31,16 @@
     insert into t values(NULL);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchInsert { table: t }
-        BatchValues { rows: [[null:Int32]] }
+    └─BatchInsert { table: t }
+      └─BatchValues { rows: [[null:Int32]] }
 - sql: |
     /* insert values cast each expr rather than whole `VALUES` (compare with below) */
     create table t (v1 time);
     insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchInsert { table: t }
-        BatchValues { rows: [['2020-01-01 01:02:03':Varchar::Timestamp::Time], ['03:04:05':Varchar::Time]] }
+    └─BatchInsert { table: t }
+      └─BatchValues { rows: [['2020-01-01 01:02:03':Varchar::Timestamp::Time], ['03:04:05':Varchar::Time]] }
 - sql: |
     /* a `VALUES` without insert context may be invalid on its own (compare with above) */
     create table t (v1 time);
@@ -71,19 +71,19 @@
     insert into t select v1 from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchInsert { table: t }
-        BatchExchange { order: [], dist: Single }
-          BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    └─BatchInsert { table: t }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     /* insert into select with cast */
     create table t (v1 time, v2 int, v3 real);
     insert into t select timestamp '2020-01-01 01:02:03', 11, 4.5 from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchInsert { table: t }
-        BatchExchange { order: [], dist: Single }
-          BatchProject { exprs: ['2020-01-01 01:02:03':Varchar::Timestamp::Time, 11:Int32, 4.5:Decimal::Float32] }
-            BatchScan { table: t, columns: [], distribution: SomeShard }
+    └─BatchInsert { table: t }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: ['2020-01-01 01:02:03':Varchar::Timestamp::Time, 11:Int32, 4.5:Decimal::Float32] }
+          └─BatchScan { table: t, columns: [], distribution: SomeShard }
 - sql: |
     /* insert into select with cast error */
     create table t (v1 timestamp, v2 real);
@@ -103,10 +103,10 @@
     insert into t1 select c, e from t2 join t3 on t2.d = t3.f
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchInsert { table: t1 }
-        BatchExchange { order: [], dist: Single }
-          BatchHashJoin { type: Inner, predicate: t2.d = t3.f, output: [t2.c, t3.e] }
-            BatchExchange { order: [], dist: HashShard(t2.d) }
-              BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
-            BatchExchange { order: [], dist: HashShard(t3.f) }
-              BatchScan { table: t3, columns: [t3.e, t3.f], distribution: SomeShard }
+    └─BatchInsert { table: t1 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchHashJoin { type: Inner, predicate: t2.d = t3.f, output: [t2.c, t3.e] }
+          ├─BatchExchange { order: [], dist: HashShard(t2.d) }
+          | └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(t3.f) }
+            └─BatchScan { table: t3, columns: [t3.e, t3.f], distribution: SomeShard }

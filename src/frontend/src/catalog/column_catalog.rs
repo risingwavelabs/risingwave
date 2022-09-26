@@ -74,7 +74,7 @@ impl From<ProstColumnCatalog> for ColumnCatalog {
 }
 
 impl ColumnCatalog {
-    pub fn name_with_hidden(&self) -> Cow<str> {
+    pub fn name_with_hidden(&self) -> Cow<'_, str> {
         if self.is_hidden {
             Cow::Owned(format!("{}(hidden)", self.column_desc.name))
         } else {

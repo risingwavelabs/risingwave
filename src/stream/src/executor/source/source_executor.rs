@@ -406,7 +406,7 @@ impl<S: StateStore> Executor for SourceExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -436,6 +436,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, StreamSourceInfo};
@@ -546,7 +547,10 @@ mod tests {
         barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
 
         let msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(msg.into_barrier().unwrap().epoch, Epoch::new_test_epoch(1));
+        assert_eq!(
+            msg.into_barrier().unwrap().epoch,
+            EpochPair::new_test_epoch(1)
+        );
 
         // Write 1st chunk
         write_chunk(chunk1);

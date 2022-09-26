@@ -436,7 +436,7 @@ impl<'a> StructRef<'a> {
         iter_fields_ref!(self, it, { it.collect() })
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         let fields = iter_fields!(self, it, {
             it.map(|f| match f {
                 None => {
@@ -498,7 +498,7 @@ impl PartialOrd for StructRef<'_> {
     }
 }
 
-fn cmp_struct_field(l: &Option<ScalarRefImpl>, r: &Option<ScalarRefImpl>) -> Ordering {
+fn cmp_struct_field(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>) -> Ordering {
     match (l, r) {
         // Comparability check was performed by frontend beforehand.
         (Some(sl), Some(sr)) => sl.partial_cmp(sr).unwrap(),

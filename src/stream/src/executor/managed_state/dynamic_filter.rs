@@ -20,11 +20,12 @@ use std::ops::RangeBounds;
 use anyhow::anyhow;
 use risingwave_common::array::Row;
 use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{Epoch, StreamExecutorResult};
+use crate::executor::StreamExecutorResult;
 
 /// The `RangeCache` caches a given range of `ScalarImpl` keys and corresponding rows.
 /// It will evict keys from memory if it is above capacity and shrink its range.
@@ -65,7 +66,7 @@ impl<S: StateStore> RangeCache<S> {
         }
     }
 
-    pub fn init(&mut self, epoch: Epoch) {
+    pub fn init(&mut self, epoch: EpochPair) {
         self.state_table.init_epoch(epoch.prev);
         self.current_epoch = epoch.curr;
     }
@@ -109,7 +110,7 @@ impl<S: StateStore> RangeCache<S> {
         &self,
         range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
         _latest_is_lower: bool,
-    ) -> Range<ScalarImpl, HashSet<Row>> {
+    ) -> Range<'_, ScalarImpl, HashSet<Row>> {
         // TODO (cache behaviour):
         // What we want: At the end of every epoch we will try to read
         // ranges based on the new value. The values in the range may not all be cached.

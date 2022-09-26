@@ -150,7 +150,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates functions with variable arity:
-    /// CASE, COALESCE, CONCAT, CONCAT_WS
+    /// `CASE`, `COALESCE`, `CONCAT`, `CONCAT_WS`
     fn gen_variadic_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         use DataTypeName as T;
         match ret {
