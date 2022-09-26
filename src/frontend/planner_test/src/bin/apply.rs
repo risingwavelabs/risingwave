@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
                             case.id.clone().unwrap_or_else(|| "<none>".to_string())
                         );
                         let result = case.run(false).await.context(case_desc.clone())?;
-                        let updated_case = result.as_test_case(&case).context(case_desc)?;
+                        let updated_case = result.into_test_case(&case).context(case_desc)?;
                         updated_cases.push(updated_case);
                     }
 

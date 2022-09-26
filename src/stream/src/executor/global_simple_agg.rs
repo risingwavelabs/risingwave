@@ -203,7 +203,13 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         let states = match states.as_mut() {
             Some(states) if states.is_dirty() => states,
-            _ => return Ok(None), // Nothing to flush.
+            _ => {
+                // Call commit on state table to increment the epoch.
+                for state_table in state_tables.iter_mut() {
+                    state_table.commit_no_data_expected(epoch);
+                }
+                return Ok(None);
+            } // Nothing to flush.
         };
 
         for (state, state_table) in states
