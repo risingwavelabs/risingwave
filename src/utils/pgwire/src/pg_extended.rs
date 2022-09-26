@@ -66,22 +66,8 @@ impl PgStatement {
         self.row_description.clone()
     }
 
-    async fn infer_row_description<SM: SessionManager>(
-        session: Arc<SM::Session>,
-        sql: &str,
-    ) -> PsqlResult<Vec<PgFieldDescriptor>> {
-        if sql.len() > 6 && sql[0..6].eq_ignore_ascii_case("select") {
-            return session
-                .infer_return_type(sql)
-                .await
-                .map_err(|err| PsqlError::BindError(err));
-        }
-        Ok(vec![])
-    }
-
-    pub async fn instance<SM: SessionManager>(
+    pub fn instance(
         &self,
-        session: Arc<SM::Session>,
         portal_name: String,
         params: &[Bytes],
         result_format: bool,
@@ -89,16 +75,12 @@ impl PgStatement {
     ) -> PsqlResult<PgPortal> {
         let instance_query_string = self.prepared_statement.instance(params, param_format)?;
 
-        // Get row_description and return portal.
-        let row_description =
-            Self::infer_row_description::<SM>(session, instance_query_string.as_str()).await?;
-
         Ok(PgPortal {
             name: portal_name,
             query_string: instance_query_string,
-            row_description,
             result_format,
             is_query: self.is_query,
+            row_description: self.row_description.clone(),
             result: None,
         })
     }
@@ -115,8 +97,8 @@ pub struct PgPortal {
     name: String,
     query_string: String,
     result_format: bool,
-    row_description: Vec<PgFieldDescriptor>,
     is_query: bool,
+    row_description: Vec<PgFieldDescriptor>,
     result: Option<PgResponse>,
 }
 
@@ -133,12 +115,15 @@ impl PgPortal {
         self.row_description.clone()
     }
 
+    /// When exeute a query sql, execute will re-use the result if result will not be consumed
+    /// completely. Detail can refer:https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended.
     pub async fn execute<SM: SessionManager, S: AsyncWrite + AsyncRead + Unpin>(
         &mut self,
         session: Arc<SM::Session>,
         row_limit: usize,
         msg_stream: &mut PgStream<S>,
     ) -> PsqlResult<()> {
+        // Check if there is a result cache
         let result = if let Some(result) = &mut self.result {
             result
         } else {
@@ -155,7 +140,10 @@ impl PgPortal {
         if result.is_empty() {
             msg_stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if result.is_query() {
-            let stream = result.values_stream().as_mut().unwrap();
+            // fetch row data
+            // if row_limit is 0, fetch all rows
+            // if row_limit > 0, fetch row_limit rows
+            let stream = result.values_stream();
             while row_limit == 0 || query_row_count < row_limit {
                 if let Some(row) = stream
                     .try_next()
@@ -169,6 +157,8 @@ impl PgPortal {
                     break;
                 }
             }
+            // Check if the result is consumed completely.
+            // If not, cache the result.
             if stream.peekable().is_terminated() {
                 query_end = true;
             }
@@ -191,6 +181,7 @@ impl PgPortal {
             }))?;
         }
 
+        // If the result is consumed completely or is not a query result, clear the cache.
         if query_end || !self.result.as_ref().unwrap().is_query() {
             self.result.take();
         }

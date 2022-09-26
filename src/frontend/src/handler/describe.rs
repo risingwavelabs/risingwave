@@ -22,7 +22,6 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
-use super::util::mock_stream;
 use crate::binder::Binder;
 use crate::catalog::IndexCatalog;
 use crate::handler::util::col_descs_to_rows;
@@ -116,7 +115,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     Ok(PgResponse::new(
         StatementType::DESCRIBE_TABLE,
         rows.len() as i32,
-        Some(Box::pin(mock_stream(rows))),
+        rows,
         vec![
             PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
             PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
@@ -151,7 +150,7 @@ mod tests {
 
         let mut columns = HashMap::new();
         #[for_await]
-        for row in pg_response.values_stream().as_mut().unwrap() {
+        for row in pg_response.values_stream() {
             let row = row.unwrap();
             columns.insert(
                 std::str::from_utf8(row.index(0).as_ref().unwrap())

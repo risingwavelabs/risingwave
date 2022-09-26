@@ -18,7 +18,6 @@ use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
-use super::util::mock_stream;
 use crate::session::OptimizerContext;
 
 pub fn handle_set(
@@ -54,7 +53,7 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
         1,
-        Some(Box::pin(mock_stream(vec![row]))),
+        vec![row],
         vec![PgFieldDescriptor::new(
             name.to_ascii_lowercase(),
             TypeOid::Varchar,
@@ -81,7 +80,7 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> 
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
         all_variables.len() as i32,
-        Some(Box::pin(mock_stream(rows))),
+        rows,
         vec![
             PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
             PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),

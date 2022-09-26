@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::{str, vec};
 
 use bytes::{Bytes, BytesMut};
-use futures_async_stream::for_await;
+use futures::stream::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::log::trace;
 
@@ -172,7 +172,7 @@ where
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => self.process_parse_msg(m).await?,
-            FeMessage::Bind(m) => self.process_bind_msg(m).await?,
+            FeMessage::Bind(m) => self.process_bind_msg(m)?,
             FeMessage::Execute(m) => self.process_execute_msg(m).await?,
             FeMessage::Describe(m) => self.process_describe_msg(m)?,
             FeMessage::Sync => self.stream.write_no_flush(&BeMessage::ReadyForQuery)?,
@@ -296,9 +296,7 @@ where
 
             let mut rows_cnt = 0;
 
-            let stream = res.values_stream().as_mut().unwrap();
-            #[for_await]
-            for row in stream {
+            while let Some(row) = res.values_stream().next().await {
                 self.stream.write_no_flush(&BeMessage::DataRow(
                     &row.map_err(|err| PsqlError::QueryError(err))?,
                 ))?;
@@ -382,7 +380,7 @@ where
         Ok(())
     }
 
-    async fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
+    fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         // 1. Get statement.
         trace!(
@@ -401,15 +399,12 @@ where
 
         // 2. Instance the statement to get the portal.
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
-        let portal = statement
-            .instance::<SM>(
-                self.session.clone().unwrap(),
-                portal_name.clone(),
-                &msg.params,
-                msg.result_format_code,
-                msg.param_format_code,
-            )
-            .await?;
+        let portal = statement.instance(
+            portal_name.clone(),
+            &msg.params,
+            msg.result_format_code,
+            msg.param_format_code,
+        )?;
 
         // 3. Insert the Portal.
         if portal_name.is_empty() {

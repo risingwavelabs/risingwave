@@ -10,7 +10,6 @@ byteorder = "1.4"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
 itertools = "0.10"
 postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
 regex = "1.5"

@@ -3557,7 +3557,6 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
- "futures-async-stream",
  "itertools",
  "madsim-tokio",
  "postgres-types",

@@ -20,7 +20,6 @@ use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowObject};
 
-use super::util::mock_stream;
 use crate::binder::Binder;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -97,7 +96,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
             return Ok(PgResponse::new(
                 StatementType::SHOW_COMMAND,
                 rows.len() as i32,
-                Some(Box::pin(mock_stream(rows))),
+                rows,
                 vec![
                     PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
                     PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
@@ -114,7 +113,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
         rows.len() as i32,
-        Some(Box::pin(mock_stream(rows))),
+        rows,
         vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
     ))
 }
@@ -175,7 +174,7 @@ mod tests {
 
         let mut columns = HashMap::new();
         #[for_await]
-        for row in pg_response.values_stream().as_mut().unwrap() {
+        for row in pg_response.values_stream() {
             let row = row.unwrap();
             columns.insert(
                 std::str::from_utf8(row.index(0).as_ref().unwrap())

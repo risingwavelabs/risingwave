@@ -25,7 +25,6 @@ use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
 use super::create_table::gen_create_table_plan;
-use super::util::mock_stream;
 use crate::binder::Binder;
 use crate::handler::util::force_local_mode;
 use crate::optimizer::plan_node::Convention;
@@ -159,7 +158,7 @@ pub(super) fn handle_explain(
     Ok(PgResponse::new(
         StatementType::EXPLAIN,
         rows.len() as i32,
-        Some(Box::pin(mock_stream(rows))),
+        rows,
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
             TypeOid::Varchar,

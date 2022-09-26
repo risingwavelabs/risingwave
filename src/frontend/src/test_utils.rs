@@ -108,17 +108,12 @@ impl LocalFrontend {
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
         let mut rsp = self.run_sql(sql).await.unwrap();
-        let stream = rsp.values_stream();
-        if let Some(stream) = stream {
-            let mut res = vec![];
-            #[for_await]
-            for row in stream {
-                res.push(format!("{:?}", row.unwrap()));
-            }
-            res
-        } else {
-            vec![]
+        let mut res = vec![];
+        #[for_await]
+        for row in rsp.values_stream() {
+            res.push(format!("{:?}", row.unwrap()));
         }
+        res
     }
 
     /// Convert a sql (must be an `Query`) into an unoptimized batch plan.

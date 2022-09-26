@@ -15,6 +15,7 @@
 use std::fmt::Formatter;
 
 use futures::stream::BoxStream;
+use futures::{stream, StreamExt};
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_server::BoxedError;
@@ -80,7 +81,7 @@ pub struct PgResponse {
     // don't return rows.
     row_cnt: i32,
     notice: Option<String>,
-    values_stream: Option<BoxStream<'static, Result<Row, BoxedError>>>,
+    values_stream: BoxStream<'static, Result<Row, BoxedError>>,
     row_desc: Vec<PgFieldDescriptor>,
 }
 
@@ -121,7 +122,22 @@ impl PgResponse {
     pub fn new(
         stmt_type: StatementType,
         row_cnt: i32,
-        values_stream: Option<BoxStream<'static, Result<Row, BoxedError>>>,
+        values: Vec<Row>,
+        row_desc: Vec<PgFieldDescriptor>,
+    ) -> Self {
+        Self {
+            stmt_type,
+            row_cnt,
+            notice: None,
+            values_stream: futures::stream::iter(values.into_iter().map(Ok)).boxed(),
+            row_desc,
+        }
+    }
+
+    pub fn new_for_stream(
+        stmt_type: StatementType,
+        row_cnt: i32,
+        values_stream: BoxStream<'static, Result<Row, BoxedError>>,
         row_desc: Vec<PgFieldDescriptor>,
     ) -> Self {
         Self {
@@ -134,14 +150,14 @@ impl PgResponse {
     }
 
     pub fn empty_result(stmt_type: StatementType) -> Self {
-        Self::new(stmt_type, 0, None, vec![])
+        Self::new_for_stream(stmt_type, 0, stream::empty().boxed(), vec![])
     }
 
     pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
         Self {
             stmt_type,
             row_cnt: 0,
-            values_stream: None,
+            values_stream: stream::empty().boxed(),
             row_desc: vec![],
             notice: Some(notice),
         }
@@ -177,7 +193,7 @@ impl PgResponse {
         self.row_desc.clone()
     }
 
-    pub fn values_stream(&mut self) -> &mut Option<BoxStream<'static, Result<Row, BoxedError>>> {
+    pub fn values_stream(&mut self) -> &mut BoxStream<'static, Result<Row, BoxedError>> {
         &mut self.values_stream
     }
 }

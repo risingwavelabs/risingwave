@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![feature(lint_reasons)]
-#![feature(generators, proc_macro_hygiene, stmt_expr_attributes)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;
