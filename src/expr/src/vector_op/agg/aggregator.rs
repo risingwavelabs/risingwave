@@ -242,16 +242,6 @@ pub fn create_agg_state_unary(
         (Max, max_list, list, list, None),
         // Global Agg
         (Sum, sum, int64, int64, None),
-        // We remark that SingleValue does not produce a runtime error when it receives zero row.
-        // Therefore, we do NOT need to change the logic in GeneralAgg::output_concrete.
-        (SingleValue, SingleValue::new(), int16, int16, None),
-        (SingleValue, SingleValue::new(), int32, int32, None),
-        (SingleValue, SingleValue::new(), int64, int64, None),
-        (SingleValue, SingleValue::new(), float32, float32, None),
-        (SingleValue, SingleValue::new(), float64, float64, None),
-        (SingleValue, SingleValue::new(), decimal, decimal, None),
-        (SingleValue, SingleValue::new(), boolean, boolean, None),
-        (SingleValue, SingleValue::new(), varchar, varchar, None),
     ];
     Ok(state)
 }
@@ -303,10 +293,5 @@ mod tests {
         test_create! { decimal_type, Min, decimal_type, is_ok }
         test_create! { bool_type, Min, bool_type, is_ok } // TODO(#359): revert to is_err
         test_create! { char_type, Min, char_type, is_ok }
-
-        test_create! { int64_type, SingleValue, int64_type, is_ok }
-        test_create! { decimal_type, SingleValue, decimal_type, is_ok }
-        test_create! { bool_type, SingleValue, bool_type, is_ok }
-        test_create! { char_type, SingleValue, char_type, is_ok }
     }
 }
