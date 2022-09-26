@@ -28,6 +28,7 @@ use risingwave_common::util::prost::is_stream_source;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
+use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -69,6 +70,8 @@ pub(crate) struct RescheduleContext {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     /// Index of all `Actor` upstreams, specific to `Dispatcher`
     upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, ActorId, DispatcherId)>>,
+    /// Fragments with stream source
+    stream_source_fragment_ids: HashSet<FragmentId>,
 }
 
 impl RescheduleContext {
@@ -375,6 +378,8 @@ where
             }
         }
 
+        let mut stream_source_fragment_ids = HashSet::new();
+
         for (
             fragment_id,
             ParallelUnitReschedule {
@@ -397,7 +402,7 @@ where
                     let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
                     let source_node = TableFragments::find_source_node(stream_node).unwrap();
                     if is_stream_source(source_node) {
-                        bail!("rescheduling StreamSource is not supported")
+                        stream_source_fragment_ids.insert(*fragment_id);
                     }
                 }
                 FragmentType::Sink => {
@@ -453,6 +458,7 @@ where
             downstream_fragment_id_map,
             worker_nodes,
             upstream_dispatchers,
+            stream_source_fragment_ids,
         })
     }
 
@@ -686,9 +692,38 @@ where
         }
         let fragment_actors_after_reschedule = fragment_actors_after_reschedule;
 
+        let mut fragment_stream_source_actor_splits = HashMap::new();
+        for fragment_id in reschedule.keys() {
+            let actors_after_reschedule =
+                fragment_actors_after_reschedule.get(fragment_id).unwrap();
+
+            if ctx.stream_source_fragment_ids.contains(fragment_id) {
+                let actor_ids = actors_after_reschedule.keys().cloned();
+                let actor_splits = self
+                    .source_manager
+                    .reallocate_splits(fragment_id, actor_ids)
+                    .await?;
+
+                fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
+            }
+        }
+
+        let mut stream_source_actor_splits = HashMap::new();
+        let mut stream_source_dropped_actors = HashSet::new();
+
+        for fragment_id in reschedule.keys() {
+            if let Some(splits) = fragment_stream_source_actor_splits.get(fragment_id) {
+                stream_source_actor_splits.extend(splits.clone());
+                if let Some(actors_to_remove) = fragment_actors_to_remove.get(fragment_id) {
+                    stream_source_dropped_actors.extend(actors_to_remove.keys().cloned())
+                }
+            }
+        }
+
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
             HashMap::with_capacity(reschedule.len());
+
         for (fragment_id, _) in reschedule {
             let actors_to_create = fragment_actors_to_create
                 .get(&fragment_id)
@@ -782,6 +817,21 @@ where
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();
 
+            let actor_splits = fragment_stream_source_actor_splits
+                .get(&fragment_id)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(actor_id, splits)| {
+                    (
+                        actor_id,
+                        ConnectorSplits {
+                            splits: splits.iter().map(ConnectorSplit::from).collect(),
+                        },
+                    )
+                })
+                .collect();
+
             reschedule_fragment.insert(
                 fragment_id,
                 Reschedule {
@@ -791,6 +841,7 @@ where
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
                     downstream_fragment_id,
+                    actor_splits,
                 },
             );
         }
@@ -835,17 +886,42 @@ where
                 .await;
         }));
 
+        self.source_manager.pause_tick().await;
+
+        let source_manager_ref = self.source_manager.clone();
+
+        // Note: If no error occurs, we need to manually resume the tick
+        revert_funcs.push(Box::pin(async move {
+            tracing::warn!("source manager tick resumed due to error");
+            source_manager_ref.resume_tick().await;
+        }));
+
         tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
 
-        self.barrier_scheduler
+        let result = self
+            .barrier_scheduler
             .run_multiple_commands(vec![
                 Command::Plain(Some(Mutation::Pause(PauseMutation {}))),
                 Command::RescheduleFragment(reschedule_fragment),
                 Command::Plain(Some(Mutation::Resume(ResumeMutation {}))),
             ])
-            .await?;
+            .await;
 
-        Ok(())
+        if result.is_ok() {
+            if !stream_source_actor_splits.is_empty() {
+                self.source_manager
+                    .patch_update(
+                        None,
+                        Some(stream_source_actor_splits),
+                        Some(stream_source_dropped_actors),
+                    )
+                    .await?;
+            }
+
+            self.source_manager.resume_tick().await;
+        }
+
+        result
     }
 
     async fn create_actors_on_compute_node(

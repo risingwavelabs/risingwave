@@ -99,7 +99,7 @@ pub struct GlobalStreamManager<S: MetaStore> {
     pub(crate) cluster_manager: ClusterManagerRef<S>,
 
     /// Maintains streaming sources from external system like kafka
-    source_manager: SourceManagerRef<S>,
+    pub(crate) source_manager: SourceManagerRef<S>,
 
     /// Client Pool to stream service on compute nodes
     pub(crate) client_pool: StreamClientPoolRef,
@@ -698,7 +698,7 @@ where
         }
 
         self.source_manager
-            .patch_update(Some(source_fragments), Some(init_split_assignment))
+            .patch_update(Some(source_fragments), Some(init_split_assignment), None)
             .await?;
         Ok(())
     }

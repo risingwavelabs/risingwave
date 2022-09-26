@@ -59,6 +59,9 @@ pub struct Reschedule {
 
     /// The downstream fragments of this fragment.
     pub downstream_fragment_id: Option<FragmentId>,
+
+    /// Reassigned splits for source actors
+    pub actor_splits: HashMap<ActorId, ConnectorSplits>,
 }
 
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -349,11 +352,17 @@ where
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
 
+                let actor_splits = reschedules
+                    .values()
+                    .flat_map(|r| r.actor_splits.clone())
+                    .collect();
+
                 let mutation = Mutation::Update(UpdateMutation {
                     dispatcher_update,
                     merge_update,
                     actor_vnode_bitmap_update,
                     dropped_actors,
+                    actor_splits,
                 });
                 tracing::trace!("update mutation: {mutation:#?}");
                 Some(mutation)

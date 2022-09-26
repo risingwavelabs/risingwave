@@ -583,6 +583,7 @@ where
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
                     downstream_fragment_id,
+                    actor_splits: _,
                 } = reschedule;
 
                 // Add actors to this fragment: set the state to `Running`.
