@@ -16,10 +16,13 @@ pub mod my_stats;
 pub mod process_linux;
 pub mod rwlock;
 
+use futures::Future;
 use prometheus::core::{
     AtomicI64, AtomicU64, Collector, GenericCounter, GenericCounterVec, GenericGauge, Metric,
 };
 use prometheus::{Histogram, HistogramVec};
+use tokio::task::futures::TaskLocalFuture;
+use tokio::task_local;
 
 use crate::monitor::my_stats::MyHistogram;
 
@@ -72,4 +75,21 @@ impl Print for GenericCounterVec<AtomicU64> {
         let desc = &self.desc()[0].fq_name;
         println!("{desc} {:?}", self);
     }
+}
+
+pub type TraceConcurrentID = u64;
+
+task_local! {
+    pub static CONCURRENT_ID: TraceConcurrentID;
+}
+
+pub fn task_local_scope<F: Future>(
+    actor_id: TraceConcurrentID,
+    f: F,
+) -> TaskLocalFuture<TraceConcurrentID, F> {
+    return CONCURRENT_ID.scope(actor_id, f);
+}
+
+pub fn task_local_get() -> TraceConcurrentID {
+    return CONCURRENT_ID.get();
 }

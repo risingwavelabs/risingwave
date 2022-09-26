@@ -24,6 +24,7 @@ use parking_lot::Mutex;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
+use risingwave_common::monitor::{task_local_scope, TraceConcurrentID};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
@@ -31,6 +32,7 @@ use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
+use tokio::task_local;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
 use crate::error::StreamResult;
@@ -589,10 +591,13 @@ impl LocalStreamManagerCore {
                 .map(|m| m.register(actor_id));
 
             let handle = {
-                let actor = async move {
-                    // unwrap the actor result to panic on error
+                let actor = task_local_scope(actor_id as TraceConcurrentID, async move {
                     actor.run().await.expect("actor failed");
-                };
+                });
+                // let actor = async move {
+                //     // unwrap the actor result to panic on error
+                //     actor.run().await.expect("actor failed");
+                // };
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {
                     Some(trace_reporter) => trace_reporter.trace(

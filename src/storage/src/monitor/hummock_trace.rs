@@ -188,6 +188,8 @@ mod tests {
     use std::sync::Arc;
 
     use parking_lot::Mutex;
+    use risingwave_common::monitor::task_local_scope;
+    use tokio::task_local;
 
     use super::{next_record_id, HummockTrace, Operation};
     use crate::monitor::hummock_trace_log::TraceMemWriter;
@@ -274,17 +276,17 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
     async fn span_concurrent_in_file() {
-        let count = 100;
+        let count: u8 = 100;
         let tracer = Arc::new(HummockTrace::new());
 
         let mut handles = Vec::new();
-
         for i in 0..count {
             let t = tracer.clone();
-            handles.push(tokio::spawn(async move {
+            let f = task_local_scope(i as u64, async move {
                 t.new_trace_span(Operation::Get(vec![i]));
                 t.new_trace_span(Operation::Sync(i as u64));
-            }));
+            });
+            handles.push(tokio::spawn(f));
         }
 
         for handle in handles {
