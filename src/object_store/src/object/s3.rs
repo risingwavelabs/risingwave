@@ -18,7 +18,7 @@ use std::sync::Arc;
 use aws_sdk_s3::client::fluent_builders::GetObject;
 use aws_sdk_s3::model::{
     AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, CompletedMultipartUpload,
-    CompletedPart, Delete, LifecycleRule, ObjectIdentifier,
+    CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
@@ -56,7 +56,7 @@ const NUM_BUCKET_PREFIXES: u32 = 256;
 /// initiated. (Day is the smallest granularity)
 ///
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
-const INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
+const INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 7;
 
 /// S3 multipart upload handle. The multipart upload is not initiated until the first part is
 /// available for upload.
@@ -600,19 +600,23 @@ impl S3ObjectStore {
     //
     // Reference: <https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html>
     async fn configure_bucket_lifecycle(client: &Client, bucket: &str) -> ObjectResult<()> {
-        let bucket_lifecycle_rules = vec![LifecycleRule::builder()
-            .set_abort_incomplete_multipart_upload(Some(
+        let bucket_lifecycle_rule = LifecycleRule::builder()
+            .id("abort-incomplete-multipart-upload")
+            .status(ExpirationStatus::Enabled)
+            .filter(LifecycleRuleFilter::Prefix(String::new()))
+            .abort_incomplete_multipart_upload(
                 AbortIncompleteMultipartUpload::builder()
-                    .set_days_after_initiation(Some(INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS))
+                    .days_after_initiation(INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS)
                     .build(),
-            ))
-            .build()];
+            )
+            .build();
         let bucket_lifecycle_config = BucketLifecycleConfiguration::builder()
-            .set_rules(Some(bucket_lifecycle_rules))
+            .rules(bucket_lifecycle_rule)
             .build();
         client
             .put_bucket_lifecycle_configuration()
-            .set_lifecycle_configuration(Some(bucket_lifecycle_config))
+            .bucket(bucket)
+            .lifecycle_configuration(bucket_lifecycle_config)
             .send()
             .await?;
         tracing::info!(
