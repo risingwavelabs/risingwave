@@ -59,6 +59,8 @@ pub fn create_relational_schema(source_format: SourceFormat) -> Vec<SourceColumn
         .collect()
 }
 
+// TODO: This function has many duplicates with `field_generator`.
+// Maybe we can merge them into the same function.
 fn gen_datum<R: Rng>(rng: &mut R, dt: &DataType) -> Datum {
     use DataType as T;
     if rng.gen_range(1..=10) == 1 {
@@ -95,7 +97,7 @@ fn gen_datum<R: Rng>(rng: &mut R, dt: &DataType) -> Datum {
         .into(),
         T::Timestamp | T::Timestampz => NaiveDateTimeWrapper(NaiveDateTime::from_timestamp(
             rng.gen_range(1000000000..=1662346644),
-            rng.gen_range(0..1_000_000_000),
+            0,
         ))
         .into(),
         T::Interval => IntervalUnit::from_minutes(rng.gen_range(0..=60 * 24 * 365)).into(),
