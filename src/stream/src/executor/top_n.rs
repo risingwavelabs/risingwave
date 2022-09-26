@@ -455,14 +455,14 @@ impl TopNCacheTrait for TopNCache<true> {
                 let num_ties = self.middle.range(middle_last_order_by.clone()..).count();
                 // We evict the last row and its ties only if the number of remaining rows still is
                 // still larger than limit.
-                if self.middle.len() - num_ties >= self.limit {
+                if self.middle.len() - num_ties + 1 >= self.limit {
                     while let Some(middle_last) = self.middle.last_entry()
                     && middle_last.key().starts_with(&middle_last_order_by) {
-                    let middle_last = middle_last.remove_entry();
-                    res_ops.push(Op::Delete);
-                    res_rows.push(middle_last.1.clone());
-                    self.high.insert(middle_last.0, middle_last.1);
-                }
+                        let middle_last = middle_last.remove_entry();
+                        res_ops.push(Op::Delete);
+                        res_rows.push(middle_last.1.clone());
+                        self.high.insert(middle_last.0, middle_last.1);
+                    }
                 }
                 if self.high.len() >= self.high_capacity {
                     let high_last = self.high.pop_last().unwrap();
