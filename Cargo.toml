@@ -85,6 +85,3 @@ getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
-madsim = { git = "https://github.com/madsim-rs/madsim.git", rev = "5a00c29" }
-# madsim = { path = "../madsim/madsim" }
-# madsim-tonic = { path = "../madsim/madsim-tonic" }

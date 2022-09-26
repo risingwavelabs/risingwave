@@ -7,12 +7,12 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1"
 clap = "3"
-etcd-client = { version = "0.2.6", package = "madsim-etcd-client" }
+etcd-client = { version = "0.2.8", package = "madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 madsim = "0.2.7"
 rand = "0.8"
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "5a00c29", features = ["cmake-build"] }
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.8-alpha", features = ["cmake-build"] }
 risingwave_compactor = { path = "../../storage/compactor" }
 risingwave_compute = { path = "../../compute" }
 risingwave_frontend = { path = "../../frontend" }
