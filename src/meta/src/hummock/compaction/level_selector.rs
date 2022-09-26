@@ -391,6 +391,7 @@ pub mod tests {
             table_ids: vec![],
             meta_offset: 0,
             stale_key_count: 0,
+            total_key_count: 0,
         }
     }
 

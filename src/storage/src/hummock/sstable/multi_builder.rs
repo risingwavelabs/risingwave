@@ -356,7 +356,9 @@ mod tests {
 
         builder
             .add_full_key(
-                FullKey::from_user_key_slice(b"k", 233).as_slice(),
+                FullKey::from_user_key_slice(b"k", 233)
+                    .as_slice()
+                    .into_inner(),
                 HummockValue::put(b"v"),
                 false,
             )
