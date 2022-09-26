@@ -420,7 +420,7 @@ async fn test_row_seq_scan() -> Result<()> {
         Some(5_i32.into()),
         Some(8_i64.into()),
     ]));
-    state.commit(epoch).await.unwrap();
+    state.commit(epoch.inc()).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),

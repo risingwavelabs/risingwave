@@ -385,7 +385,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 true => {
                     self.arrangement
                         .state_table
-                        .iter_with_pk_prefix(&lookup_row, false)
+                        .iter_with_pk_prefix(&lookup_row, true)
                         .await?
                 }
                 false => {

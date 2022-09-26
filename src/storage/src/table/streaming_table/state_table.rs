@@ -668,11 +668,11 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter_with_pk_prefix<'a>(
         &'a self,
         pk_prefix: &'a Row,
-        use_prev_epoch: bool,
+        use_curr_epoch: bool,
     ) -> StorageResult<RowStream<'a, S>> {
-        let (mem_table_iter, storage_iter_stream) = match use_prev_epoch {
-            true => self.iter_inner(pk_prefix, self.prev_epoch()).await?,
-            false => self.iter_inner(pk_prefix, self.epoch()).await?,
+        let (mem_table_iter, storage_iter_stream) = match use_curr_epoch {
+            true => self.iter_inner(pk_prefix, self.epoch()).await?,
+            false => self.iter_inner(pk_prefix, self.prev_epoch()).await?,
         };
 
         let storage_iter = storage_iter_stream.into_stream();
