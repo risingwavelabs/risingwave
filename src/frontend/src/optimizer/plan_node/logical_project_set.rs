@@ -231,7 +231,7 @@ impl LogicalProjectSet {
         &self.select_list
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let _verbose = self.base.ctx.is_explain_verbose();
         // TODO: add verbose display like Project
 

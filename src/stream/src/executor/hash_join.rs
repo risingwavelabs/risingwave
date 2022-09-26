@@ -265,7 +265,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor for HashJoi
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -281,7 +281,7 @@ struct HashJoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrim
 impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBuilder<T, SIDE> {
     fn with_match_on_insert(
         &mut self,
-        row: &RowRef,
+        row: &RowRef<'_>,
         matched_row: &JoinRow,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // Left/Right Anti sides
@@ -327,7 +327,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
 
     fn with_match_on_delete(
         &mut self,
-        row: &RowRef,
+        row: &RowRef<'_>,
         matched_row: &JoinRow,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         Ok(
@@ -377,7 +377,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn forward_exactly_once_if_matched(
         &mut self,
         op: Op,
-        row: &RowRef,
+        row: &RowRef<'_>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // if it's a semi join and the side needs to be maintained.
         Ok(if is_semi(T) && forward_exactly_once(T, SIDE) {
@@ -391,7 +391,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn forward_if_not_matched(
         &mut self,
         op: Op,
-        row: &RowRef,
+        row: &RowRef<'_>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // if it's outer join or anti join and the side needs to be maintained.
         Ok(

@@ -136,7 +136,7 @@ impl ArrayBuilder for ListArrayBuilder {
 }
 
 impl ListArrayBuilder {
-    pub fn append_row_ref(&mut self, row: RowRef) {
+    pub fn append_row_ref(&mut self, row: RowRef<'_>) {
         self.bitmap.append(true);
         let last = *self.offsets.last().unwrap();
         self.offsets.push(last + row.size());
@@ -375,7 +375,7 @@ impl ListValue {
         impl<'a> serde::de::Visitor<'a> for Visitor<'a> {
             type Value = Vec<u8>;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(formatter, "a list of {}", self.0)
             }
 
@@ -422,7 +422,7 @@ macro_rules! iter_elems {
     ($self:ident, $it:ident, { $($body:tt)* }) => {
         match $self {
             ListRef::Indexed { arr, idx } => {
-                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o).to_owned_datum());
+                let $it = (arr.offsets[idx]..arr.offsets[idx + 1]).map(|o| arr.value.value_at(o).to_owned_datum());
                 $($body)*
             }
             ListRef::ValueRef { val } => {
@@ -471,7 +471,7 @@ impl<'a> ListRef<'a> {
         }
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         let elems = iter_elems!(self, it, {
             it.map(|f| match f {
                 None => {
@@ -533,7 +533,7 @@ impl PartialOrd for ListRef<'_> {
     }
 }
 
-fn cmp_list_value(l: &Option<ScalarRefImpl>, r: &Option<ScalarRefImpl>) -> Ordering {
+fn cmp_list_value(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>) -> Ordering {
     match (l, r) {
         // Comparability check was performed by frontend beforehand.
         (Some(sl), Some(sr)) => sl.partial_cmp(sr).unwrap(),

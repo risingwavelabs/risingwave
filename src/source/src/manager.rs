@@ -282,7 +282,7 @@ impl MemSourceManager {
         }
     }
 
-    fn get_sources(&self) -> Result<MutexGuard<HashMap<TableId, SourceDesc>>> {
+    fn get_sources(&self) -> Result<MutexGuard<'_, HashMap<TableId, SourceDesc>>> {
         Ok(self.sources.lock())
     }
 }

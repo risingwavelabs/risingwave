@@ -41,7 +41,7 @@ pub trait TopNExecutorBase: Send + 'static {
     fn schema(&self) -> &Schema;
 
     /// See [`Executor::pk_indices`].
-    fn pk_indices(&self) -> PkIndicesRef;
+    fn pk_indices(&self) -> PkIndicesRef<'_>;
 
     /// See [`Executor::identity`].
     fn identity(&self) -> &str;
@@ -71,7 +71,7 @@ where
         self.inner.schema()
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         self.inner.pk_indices()
     }
 
