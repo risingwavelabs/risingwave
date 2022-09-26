@@ -32,7 +32,7 @@ pub async fn list_pinned_versions() -> anyhow::Result<()> {
         mut pinned_versions,
         workers,
     } = meta_client
-        .get_pinned_versions_summary()
+        .risectl_get_pinned_versions_summary()
         .await?
         .summary
         .unwrap();
@@ -63,7 +63,7 @@ pub async fn list_pinned_snapshots() -> anyhow::Result<()> {
         mut pinned_snapshots,
         workers,
     } = meta_client
-        .get_pinned_snapshots_summary()
+        .risectl_get_pinned_snapshots_summary()
         .await?
         .summary
         .unwrap();

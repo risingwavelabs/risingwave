@@ -399,15 +399,15 @@ message PinnedSnapshotsSummary {
   map<uint32, common.WorkerNode> workers = 2;
 }
 
-message GetPinnedVersionsSummaryRequest {}
+message RiseCtlGetPinnedVersionsSummaryRequest {}
 
-message GetPinnedVersionsSummaryResponse {
+message RiseCtlGetPinnedVersionsSummaryResponse {
   PinnedVersionsSummary summary = 1;
 }
 
-message GetPinnedSnapshotsSummaryRequest {}
+message RiseCtlGetPinnedSnapshotsSummaryRequest {}
 
-message GetPinnedSnapshotsSummaryResponse {
+message RiseCtlGetPinnedSnapshotsSummaryResponse {
   PinnedSnapshotsSummary summary = 1;
 }
 
@@ -428,8 +428,8 @@ service HummockManagerService {
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
-  rpc GetPinnedVersionsSummary(GetPinnedVersionsSummaryRequest) returns (GetPinnedVersionsSummaryResponse);
-  rpc GetPinnedSnapshotsSummary(GetPinnedSnapshotsSummaryRequest) returns (GetPinnedSnapshotsSummaryResponse);
+  rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
+  rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
 }
 
 service CompactorService {}

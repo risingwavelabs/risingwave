@@ -339,16 +339,16 @@ where
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
-    async fn get_pinned_versions_summary(
+    async fn rise_ctl_get_pinned_versions_summary(
         &self,
-        _request: Request<GetPinnedVersionsSummaryRequest>,
-    ) -> Result<Response<GetPinnedVersionsSummaryResponse>, Status> {
+        _request: Request<RiseCtlGetPinnedVersionsSummaryRequest>,
+    ) -> Result<Response<RiseCtlGetPinnedVersionsSummaryResponse>, Status> {
         let pinned_versions = self.hummock_manager.list_pinned_version().await;
         let workers = self
             .hummock_manager
             .list_workers(&pinned_versions.iter().map(|v| v.context_id).collect_vec())
             .await;
-        Ok(Response::new(GetPinnedVersionsSummaryResponse {
+        Ok(Response::new(RiseCtlGetPinnedVersionsSummaryResponse {
             summary: Some(PinnedVersionsSummary {
                 pinned_versions,
                 workers,
@@ -356,16 +356,16 @@ where
         }))
     }
 
-    async fn get_pinned_snapshots_summary(
+    async fn rise_ctl_get_pinned_snapshots_summary(
         &self,
-        _request: Request<GetPinnedSnapshotsSummaryRequest>,
-    ) -> Result<Response<GetPinnedSnapshotsSummaryResponse>, Status> {
+        _request: Request<RiseCtlGetPinnedSnapshotsSummaryRequest>,
+    ) -> Result<Response<RiseCtlGetPinnedSnapshotsSummaryResponse>, Status> {
         let pinned_snapshots = self.hummock_manager.list_pinned_snapshot().await;
         let workers = self
             .hummock_manager
             .list_workers(&pinned_snapshots.iter().map(|p| p.context_id).collect_vec())
             .await;
-        Ok(Response::new(GetPinnedSnapshotsSummaryResponse {
+        Ok(Response::new(RiseCtlGetPinnedSnapshotsSummaryResponse {
             summary: Some(PinnedSnapshotsSummary {
                 pinned_snapshots,
                 workers,

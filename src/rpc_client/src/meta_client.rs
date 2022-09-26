@@ -455,14 +455,22 @@ impl MetaClient {
         Ok(resp.success)
     }
 
-    pub async fn get_pinned_versions_summary(&self) -> Result<GetPinnedVersionsSummaryResponse> {
-        let request = GetPinnedVersionsSummaryRequest {};
-        self.inner.get_pinned_versions_summary(request).await
+    pub async fn risectl_get_pinned_versions_summary(
+        &self,
+    ) -> Result<RiseCtlGetPinnedVersionsSummaryResponse> {
+        let request = RiseCtlGetPinnedVersionsSummaryRequest {};
+        self.inner
+            .rise_ctl_get_pinned_versions_summary(request)
+            .await
     }
 
-    pub async fn get_pinned_snapshots_summary(&self) -> Result<GetPinnedSnapshotsSummaryResponse> {
-        let request = GetPinnedSnapshotsSummaryRequest {};
-        self.inner.get_pinned_snapshots_summary(request).await
+    pub async fn risectl_get_pinned_snapshots_summary(
+        &self,
+    ) -> Result<RiseCtlGetPinnedSnapshotsSummaryResponse> {
+        let request = RiseCtlGetPinnedSnapshotsSummaryRequest {};
+        self.inner
+            .rise_ctl_get_pinned_snapshots_summary(request)
+            .await
     }
 }
 
@@ -749,8 +757,8 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
-            ,{ hummock_client, get_pinned_versions_summary, GetPinnedVersionsSummaryRequest, GetPinnedVersionsSummaryResponse }
-            ,{ hummock_client, get_pinned_snapshots_summary, GetPinnedSnapshotsSummaryRequest, GetPinnedSnapshotsSummaryResponse }
+            ,{ hummock_client, rise_ctl_get_pinned_versions_summary, RiseCtlGetPinnedVersionsSummaryRequest, RiseCtlGetPinnedVersionsSummaryResponse }
+            ,{ hummock_client, rise_ctl_get_pinned_snapshots_summary, RiseCtlGetPinnedSnapshotsSummaryRequest, RiseCtlGetPinnedSnapshotsSummaryResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
