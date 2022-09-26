@@ -317,12 +317,31 @@ where
             let upstream_table_id = chain_fragment_upstream_table_map
                 .get(&fragment.fragment_id)
                 .unwrap();
-            fragment.vnode_mapping = env
+
+            let upstream_fragment_vnode_info = env
                 .upstream_fragment_vnode_info
                 .get(upstream_table_id)
-                .unwrap()
+                .unwrap();
+
+            let upstream_fragment_id = upstream_fragment_vnode_info
                 .vnode_mapping
-                .clone();
+                .as_ref()
+                .unwrap()
+                .fragment_id;
+
+            assert!(fragment.upstream_fragment_ids.is_empty());
+            fragment
+                .upstream_fragment_ids
+                .push(upstream_fragment_id as FragmentId);
+
+            let mut vnode_mapping = upstream_fragment_vnode_info.vnode_mapping.clone();
+            // The upstream vnode_mapping is cloned here,
+            // so the fragment id in the mapping needs to be changed to the id of this fragment
+            if let Some(mapping) = vnode_mapping.as_mut() {
+                assert_ne!(mapping.fragment_id, fragment.fragment_id);
+                mapping.fragment_id = fragment.fragment_id;
+            }
+            fragment.vnode_mapping = vnode_mapping;
         }
         Ok(())
     }
@@ -418,7 +437,6 @@ where
             chain_fragment_upstream_table_map,
         )
         .await?;
-
         let dispatchers = &*dispatchers;
         let upstream_worker_actors = &*upstream_worker_actors;
 
@@ -769,7 +787,9 @@ mod tests {
     use crate::barrier::GlobalBarrierManager;
     use crate::hummock::compaction_group::manager::CompactionGroupManager;
     use crate::hummock::{CompactorManager, HummockManager};
-    use crate::manager::{CatalogManager, ClusterManager, FragmentManager, MetaSrvEnv};
+    use crate::manager::{
+        CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
+    };
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -887,6 +907,7 @@ mod tests {
 
     struct MockServices {
         global_stream_manager: GlobalStreamManager<MemStore>,
+        catalog_manager: CatalogManagerRef<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
         join_handle_shutdown_txs: Vec<(JoinHandle<()>, Sender<()>)>,
@@ -994,6 +1015,7 @@ mod tests {
 
             Ok(Self {
                 global_stream_manager: stream_manager,
+                catalog_manager,
                 fragment_manager,
                 state,
                 join_handle_shutdown_txs: vec![
@@ -1001,6 +1023,37 @@ mod tests {
                     (join_handle, shutdown_tx),
                 ],
             })
+        }
+
+        async fn create_materialized_view(
+            &self,
+            table_fragments: &mut TableFragments,
+        ) -> MetaResult<()> {
+            let mut ctx = CreateMaterializedViewContext::default();
+            let table = Table {
+                id: table_fragments.table_id().table_id(),
+                ..Default::default()
+            };
+            self.catalog_manager
+                .start_create_table_procedure(&table)
+                .await?;
+            self.global_stream_manager
+                .create_materialized_view(table_fragments, &mut ctx)
+                .await?;
+            self.catalog_manager
+                .finish_create_table_procedure(vec![], &table)
+                .await?;
+            Ok(())
+        }
+
+        async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<()> {
+            self.catalog_manager
+                .drop_table(table_id.table_id, vec![])
+                .await?;
+            self.global_stream_manager
+                .drop_materialized_view(table_id)
+                .await?;
+            Ok(())
         }
 
         async fn stop(self) {
@@ -1030,81 +1083,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_materialized_view() -> MetaResult<()> {
-        let services = MockServices::start("127.0.0.1", 12333).await?;
-
-        let table_id = TableId::new(0);
-        let actors = make_mview_stream_actors(&table_id, 4);
-
-        let mut fragments = BTreeMap::default();
-        fragments.insert(
-            0,
-            Fragment {
-                fragment_id: 0,
-                fragment_type: FragmentType::Sink as i32,
-                distribution_type: FragmentDistributionType::Hash as i32,
-                actors: actors.clone(),
-                ..Default::default()
-            },
-        );
-        let mut table_fragments = TableFragments::new(table_id, fragments);
-        let mut ctx = CreateMaterializedViewContext::default();
-
-        services
-            .global_stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
-            .await?;
-
-        for actor in actors {
-            let mut scheduled_actor = services
-                .state
-                .actor_streams
-                .lock()
-                .unwrap()
-                .get(&actor.get_actor_id())
-                .cloned()
-                .unwrap()
-                .clone();
-            scheduled_actor.vnode_bitmap.take().unwrap();
-            assert_eq!(scheduled_actor, actor);
-            assert!(services
-                .state
-                .actor_ids
-                .lock()
-                .unwrap()
-                .contains(&actor.get_actor_id()));
-            assert_eq!(
-                services
-                    .state
-                    .actor_infos
-                    .lock()
-                    .unwrap()
-                    .get(&actor.get_actor_id())
-                    .cloned()
-                    .unwrap(),
-                HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 12333,
-                }
-            );
-        }
-
-        let sink_actor_ids = services
-            .fragment_manager
-            .get_table_sink_actor_ids(&table_id)
-            .await?;
-        let actor_ids = services
-            .fragment_manager
-            .get_table_actor_ids(&table_id)
-            .await?;
-        assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
-        assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
-
-        services.stop().await;
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_drop_materialized_view() -> MetaResult<()> {
         let services = MockServices::start("127.0.0.1", 12334).await?;
 
@@ -1123,11 +1101,8 @@ mod tests {
             },
         );
         let mut table_fragments = TableFragments::new(table_id, fragments);
-        let mut ctx = CreateMaterializedViewContext::default();
-
         services
-            .global_stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
+            .create_materialized_view(&mut table_fragments)
             .await?;
 
         for actor in actors {
@@ -1175,12 +1150,7 @@ mod tests {
         assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
 
         // test drop materialized_view
-        // the table_fragments will be deleted when barrier_manager run_command DropMaterializedView
-        // via drop_table_fragments
-        services
-            .global_stream_manager
-            .drop_materialized_view(&table_fragments.table_id())
-            .await?;
+        services.drop_materialized_view(&table_id).await?;
 
         // test get table_fragment;
         let select_err_1 = services
@@ -1220,11 +1190,8 @@ mod tests {
         );
 
         let mut table_fragments = TableFragments::new(table_id, fragments);
-        let mut ctx = CreateMaterializedViewContext::default();
-
         services
-            .global_stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
+            .create_materialized_view(&mut table_fragments)
             .await
             .unwrap();
 
@@ -1297,11 +1264,7 @@ mod tests {
         assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
-        services
-            .global_stream_manager
-            .drop_materialized_view(&table_fragments.table_id())
-            .await
-            .unwrap();
+        services.drop_materialized_view(&table_id).await.unwrap();
 
         // test get table_fragment;
         let select_err_1 = services

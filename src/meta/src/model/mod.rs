@@ -370,7 +370,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
 
     /// Start a `BTreeMapEntryTransaction` when the `key` exists
     #[allow(dead_code)]
-    pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<K, V>> {
+    pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<'_, K, V>> {
         BTreeMapEntryTransaction::new(self.tree_ref, key, None)
     }
 
@@ -381,13 +381,13 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
         &mut self,
         key: K,
         default_val: V,
-    ) -> BTreeMapEntryTransaction<K, V> {
+    ) -> BTreeMapEntryTransaction<'_, K, V> {
         BTreeMapEntryTransaction::new(self.tree_ref, key, Some(default_val))
             .expect("default value is provided and should return `Some`")
     }
 
     /// Start a `BTreeMapEntryTransaction` that inserts the `val` into `key`.
-    pub fn new_entry_insert_txn(&mut self, key: K, val: V) -> BTreeMapEntryTransaction<K, V> {
+    pub fn new_entry_insert_txn(&mut self, key: K, val: V) -> BTreeMapEntryTransaction<'_, K, V> {
         BTreeMapEntryTransaction::new_insert(self.tree_ref, key, val)
     }
 

@@ -75,6 +75,7 @@ mod receiver;
 mod simple;
 mod sink;
 mod source;
+pub mod subtask;
 mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
@@ -87,6 +88,7 @@ mod integration_tests;
 mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
+use anyhow::Context;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
@@ -120,8 +122,8 @@ pub use wrapper::WrapperExecutor;
 use self::barrier_align::AlignedMessageStream;
 
 pub type BoxedExecutor = Box<dyn Executor>;
-pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
+pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
@@ -151,7 +153,7 @@ pub trait Executor: Send + 'static {
     /// Return the primary key indices of the OUTPUT of the executor.
     /// Schema is used by both OLAP and streaming, therefore
     /// pk indices are maintained independently.
-    fn pk_indices(&self) -> PkIndicesRef;
+    fn pk_indices(&self) -> PkIndicesRef<'_>;
 
     /// Identity of the executor.
     fn identity(&self) -> &str;
@@ -579,7 +581,7 @@ pub async fn expect_first_barrier(
         .next()
         .stack_trace("expect_first_barrier")
         .await
-        .expect("failed to extract the first message: stream closed unexpectedly")?;
+        .context("failed to extract the first message: stream closed unexpectedly")??;
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");
@@ -595,7 +597,7 @@ pub async fn expect_first_barrier_from_aligned_stream(
         .next()
         .stack_trace("expect_first_barrier")
         .await
-        .expect("failed to extract the first message: stream closed unexpectedly")?;
+        .context("failed to extract the first message: stream closed unexpectedly")??;
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");

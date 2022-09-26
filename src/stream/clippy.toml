@@ -16,3 +16,5 @@ disallowed-types = [
     { path = "risingwave_common::error::ToErrorStr", reason = "Please use per-crate error type instead." },
 
 ]
+
+avoid-breaking-exported-api = false

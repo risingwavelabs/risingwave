@@ -232,11 +232,11 @@ impl UserIterator {
                     // Deleted kv and the previous versions (if any) of the key should not be
                     // returned to user.
                     HummockValue::Delete => {
-                        self.stats.skip_key_count += 1;
+                        self.stats.skip_delete_key_count += 1;
                     }
                 }
             } else {
-                self.stats.skip_key_count += 1;
+                self.stats.skip_multi_version_key_count += 1;
             }
 
             self.iterator.next().await?;

@@ -693,7 +693,7 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<(MemTableIter, StorageIterInner<S>)> {
+    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
         let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);

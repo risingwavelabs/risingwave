@@ -60,7 +60,7 @@ impl SourceParser for JsonParser {
 
         use crate::parser::common::simd_json_parse_value;
         let mut payload_mut = payload.to_vec();
-        let value: BorrowedValue = simd_json::to_borrowed_value(&mut payload_mut)
+        let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {

@@ -74,7 +74,7 @@ impl TableFunctionExecutorBuilder {}
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(

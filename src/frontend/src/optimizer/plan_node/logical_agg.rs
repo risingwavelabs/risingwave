@@ -1085,7 +1085,7 @@ impl LogicalAgg {
         self.agg_calls.as_ref()
     }
 
-    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay> {
+    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
         self.agg_calls()
             .iter()
             .map(|plan_agg_call| PlanAggCallDisplay {
@@ -1095,7 +1095,7 @@ impl LogicalAgg {
             .collect_vec()
     }
 
-    pub fn group_key_display(&self) -> Vec<FieldDisplay> {
+    pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
         self.group_key()
             .iter()
             .copied()
@@ -1143,7 +1143,7 @@ impl LogicalAgg {
         Self::new(agg_calls, group_key, input)
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         if !self.group_key.is_empty() {
             builder.field("group_key", &self.group_key_display());
@@ -1178,7 +1178,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
 impl_plan_tree_node_for_unary! {LogicalAgg}
 
 impl fmt::Display for LogicalAgg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalAgg")
     }
 }

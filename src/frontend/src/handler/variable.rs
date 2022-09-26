@@ -58,7 +58,6 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
             name.to_ascii_lowercase(),
             TypeOid::Varchar,
         )],
-        true,
     ))
 }
 
@@ -87,7 +86,6 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> 
             PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
             PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
         ],
-        true,
     ))
 }
 

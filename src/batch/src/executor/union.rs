@@ -66,7 +66,7 @@ impl UnionExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for UnionExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let _union_node =

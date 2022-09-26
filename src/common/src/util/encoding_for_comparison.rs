@@ -34,7 +34,7 @@ pub fn is_type_encodable(t: DataType) -> bool {
     )
 }
 
-fn encode_value(value: Option<ScalarRefImpl>, order: &OrderType) -> Result<Vec<u8>> {
+fn encode_value(value: Option<ScalarRefImpl<'_>>, order: &OrderType) -> Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
     serializer.set_reverse(order == &OrderType::Descending);
     serialize_datum_ref_into(&value, &mut serializer)?;
