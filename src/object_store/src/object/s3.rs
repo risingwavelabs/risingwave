@@ -559,7 +559,6 @@ impl S3ObjectStore {
         }
     }
 
-    ///
     fn get_object_prefix(obj_id: u64) -> String {
         let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % NUM_BUCKET_PREFIXES;
         let mut obj_prefix = prefix.to_string();
@@ -611,30 +610,54 @@ impl S3ObjectStore {
     /// - MinIO
     ///   - <https://github.com/minio/minio/issues/15681#issuecomment-1245126561>
     async fn configure_bucket_lifecycle(client: &Client, bucket: &str) -> ObjectResult<()> {
-        let bucket_lifecycle_rule = LifecycleRule::builder()
-            .id("abort-incomplete-multipart-upload")
-            .status(ExpirationStatus::Enabled)
-            .filter(LifecycleRuleFilter::Prefix(String::new()))
-            .abort_incomplete_multipart_upload(
-                AbortIncompleteMultipartUpload::builder()
-                    .days_after_initiation(S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS)
-                    .build(),
-            )
-            .build();
-        let bucket_lifecycle_config = BucketLifecycleConfiguration::builder()
-            .rules(bucket_lifecycle_rule)
-            .build();
-        client
-            .put_bucket_lifecycle_configuration()
+        // Check if lifecycle is already configured to avoid overriding existing configuration.
+        let mut lifecycle_configured = false;
+        let resp = client
+            .get_bucket_lifecycle_configuration()
             .bucket(bucket)
-            .lifecycle_configuration(bucket_lifecycle_config)
             .send()
-            .await?;
-        tracing::info!(
-            "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
-            bucket,
-            S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
-        );
+            .await
+            .unwrap();
+        for rule in resp.rules().unwrap_or_default().iter() {
+            if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
+                && rule.abort_incomplete_multipart_upload().is_some()
+            {
+                lifecycle_configured = true;
+                break;
+            }
+        }
+
+        if lifecycle_configured {
+            tracing::info!(
+                "S3 bucket {} has already configured AbortIncompleteMultipartUpload",
+                bucket,
+            );
+        } else {
+            let bucket_lifecycle_rule = LifecycleRule::builder()
+                .id("abort-incomplete-multipart-upload")
+                .status(ExpirationStatus::Enabled)
+                .filter(LifecycleRuleFilter::Prefix(String::new()))
+                .abort_incomplete_multipart_upload(
+                    AbortIncompleteMultipartUpload::builder()
+                        .days_after_initiation(S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS)
+                        .build(),
+                )
+                .build();
+            let bucket_lifecycle_config = BucketLifecycleConfiguration::builder()
+                .rules(bucket_lifecycle_rule)
+                .build();
+            client
+                .put_bucket_lifecycle_configuration()
+                .bucket(bucket)
+                .lifecycle_configuration(bucket_lifecycle_config)
+                .send()
+                .await?;
+            tracing::info!(
+                "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
+                bucket,
+                S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
+            );
+        }
         Ok(())
     }
 }
