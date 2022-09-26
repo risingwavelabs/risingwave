@@ -39,7 +39,7 @@ impl OrderType {
         }
     }
 
-    pub fn to_prost(&self) -> ProstOrderType {
+    pub fn to_prost(self) -> ProstOrderType {
         match self {
             OrderType::Ascending => ProstOrderType::Ascending,
             OrderType::Descending => ProstOrderType::Descending,

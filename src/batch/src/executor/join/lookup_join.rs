@@ -51,7 +51,8 @@ use crate::executor::join::{
     concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
 };
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    utils, BoxedDataChunkListStream, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
+    Executor, ExecutorBuilder,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
@@ -300,6 +301,8 @@ pub struct LookupJoinExecutor<P> {
     identity: String,
 }
 
+const AT_LEAST_BUILD_SIDE_ROWS: usize = 512;
+
 impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
     fn schema(&self) -> &Schema {
         &self.schema
@@ -317,18 +320,24 @@ impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
 impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let mut build_side_stream = self.build_child.take().unwrap().execute();
+        let mut build_side_batch_read_stream: BoxedDataChunkListStream = utils::batch_read(
+            self.build_child.take().unwrap().execute(),
+            AT_LEAST_BUILD_SIDE_ROWS,
+        );
 
-        while let Some(build_chunk) = build_side_stream.next().await {
-            let build_chunk = build_chunk?.compact()?;
+        while let Some(chunk_list) = build_side_batch_read_stream.next().await {
+            let chunk_list = chunk_list?;
 
             // Group rows with the same key datums together
-            let groups = build_chunk.rows().into_group_map_by(|row| {
-                self.build_side_key_idxs
-                    .iter()
-                    .map(|&idx| row.value_at(idx).to_owned_datum())
-                    .collect_vec()
-            });
+            let groups = chunk_list
+                .iter()
+                .flat_map(|chunk| chunk.rows())
+                .into_group_map_by(|row| {
+                    self.build_side_key_idxs
+                        .iter()
+                        .map(|&idx| row.value_at(idx).to_owned_datum())
+                        .collect_vec()
+                });
 
             let mut row_keys = vec![];
             let mut all_row_refs = vec![];

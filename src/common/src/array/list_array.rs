@@ -422,7 +422,7 @@ macro_rules! iter_elems {
     ($self:ident, $it:ident, { $($body:tt)* }) => {
         match $self {
             ListRef::Indexed { arr, idx } => {
-                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o).to_owned_datum());
+                let $it = (arr.offsets[idx]..arr.offsets[idx + 1]).map(|o| arr.value.value_at(o).to_owned_datum());
                 $($body)*
             }
             ListRef::ValueRef { val } => {
@@ -471,7 +471,7 @@ impl<'a> ListRef<'a> {
         }
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         let elems = iter_elems!(self, it, {
             it.map(|f| match f {
                 None => {

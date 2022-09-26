@@ -392,6 +392,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         if dirty_cnt == 0 {
             // Nothing to flush.
+            // Call commit on state table to increment the epoch.
+            for state_table in state_tables.iter_mut() {
+                state_table.commit_no_data_expected(epoch);
+            }
             return Ok(());
         } else {
             // Batch commit data.

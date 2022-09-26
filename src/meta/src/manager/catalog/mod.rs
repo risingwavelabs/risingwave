@@ -283,13 +283,13 @@ where
             catalog_deleted_ids.extend(
                 valid_tables
                     .into_iter()
-                    .map(|table| StreamingJobId::TableId(table.id.into())),
+                    .map(|table| StreamingJobId::Table(table.id.into())),
             );
-            catalog_deleted_ids.extend(source_ids.into_iter().map(StreamingJobId::SourceId));
+            catalog_deleted_ids.extend(source_ids.into_iter().map(StreamingJobId::Source));
             catalog_deleted_ids.extend(
                 sinks
                     .into_iter()
-                    .map(|sink| StreamingJobId::SinkId(sink.id.into())),
+                    .map(|sink| StreamingJobId::Sink(sink.id.into())),
             );
 
             Ok((version, catalog_deleted_ids))

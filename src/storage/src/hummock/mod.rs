@@ -50,6 +50,7 @@ pub mod utils;
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
 pub mod store;
+mod upload_handle_manager;
 pub mod vacuum;
 mod validator;
 pub mod value;
