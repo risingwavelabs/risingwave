@@ -349,7 +349,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             epoch,
             mutation: None,
             ..
-        }) if epoch.curr == curr_epoch +1
+        }) if epoch.curr == curr_epoch + 1
     ));
 
     // Scan the table again, we are able to see the deletion now!
