@@ -24,7 +24,8 @@ use serde_json::Value;
 pub use timestamp::*;
 pub use varchar::*;
 
-use crate::types::{DataType, Datum};
+use crate::array::StructValue;
+use crate::types::{DataType, Datum, ScalarImpl};
 
 pub const DEFAULT_MIN: i16 = i16::MIN;
 pub const DEFAULT_MAX: i16 = i16::MAX;
@@ -84,6 +85,7 @@ pub enum FieldGeneratorImpl {
     F64Random(F64RandomField),
     Varchar(VarcharField),
     Timestamp(TimestampField),
+    Struct(Vec<(String, FieldGeneratorImpl)>),
 }
 
 impl FieldGeneratorImpl {
@@ -163,6 +165,10 @@ impl FieldGeneratorImpl {
         }
     }
 
+    pub fn with_struct_fields(fields: Vec<(String, FieldGeneratorImpl)>) -> Result<Self> {
+        Ok(FieldGeneratorImpl::Struct(fields))
+    }
+
     pub fn generate(&mut self, offset: u64) -> Value {
         match self {
             FieldGeneratorImpl::I16Sequence(f) => f.generate(),
@@ -177,6 +183,13 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::F64Random(f) => f.generate(offset),
             FieldGeneratorImpl::Varchar(f) => f.generate(offset),
             FieldGeneratorImpl::Timestamp(f) => f.generate(offset),
+            FieldGeneratorImpl::Struct(fields) => {
+                let map = fields
+                    .iter_mut()
+                    .map(|(name, gen)| (name.clone(), gen.generate(offset)))
+                    .collect();
+                Value::Object(map)
+            }
         }
     }
 
@@ -194,6 +207,13 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::F64Random(f) => f.generate_datum(offset),
             FieldGeneratorImpl::Varchar(f) => f.generate_datum(offset),
             FieldGeneratorImpl::Timestamp(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::Struct(fields) => {
+                let data = fields
+                    .iter_mut()
+                    .map(|(_, gen)| gen.generate_datum(offset))
+                    .collect();
+                Some(ScalarImpl::Struct(StructValue::new(data)))
+            }
         }
     }
 }

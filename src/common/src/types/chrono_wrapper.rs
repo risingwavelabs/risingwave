@@ -117,7 +117,7 @@ impl NaiveDateWrapper {
             .map_err(Into::into)
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         self.0.num_days_from_ce().to_be_bytes().to_vec()
     }
 
@@ -149,7 +149,7 @@ impl NaiveTimeWrapper {
         ))
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         let buf = BytesMut::with_capacity(8);
         let mut writer = buf.writer();
         self.to_protobuf(&mut writer).unwrap();
@@ -206,7 +206,7 @@ impl NaiveDateTimeWrapper {
             .map_err(Into::into)
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         self.0.timestamp_nanos().to_be_bytes().to_vec()
     }
 

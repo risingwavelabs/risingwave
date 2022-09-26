@@ -298,7 +298,7 @@ impl CompactionGroupManagerInner {
         pairs: &mut [(StateTableId, CompactionGroupId, TableOption)],
         meta_store: &S,
     ) -> Result<Vec<StateTableId>> {
-        let mut current_max_id = StaticCompactionGroupId::END as CompactionGroupId;
+        let mut current_max_id = StaticCompactionGroupId::End as CompactionGroupId;
         if let Some((&k, _)) = self.compaction_groups.last_key_value() {
             if k > current_max_id {
                 current_max_id = k;
@@ -357,7 +357,7 @@ impl CompactionGroupManagerInner {
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
             compaction_group.member_table_ids.remove(table_id);
             compaction_group.table_id_to_options.remove(table_id);
-            if compaction_group_id > StaticCompactionGroupId::END as CompactionGroupId
+            if compaction_group_id > StaticCompactionGroupId::End as CompactionGroupId
                 && compaction_group.member_table_ids.is_empty()
             {
                 // remove staging
@@ -385,7 +385,7 @@ impl CompactionGroupManagerInner {
             let compaction_group = compaction_groups
                 .get_mut(compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
-            if compaction_group_id > StaticCompactionGroupId::END as CompactionGroupId
+            if compaction_group_id > StaticCompactionGroupId::End as CompactionGroupId
                 && compaction_group.member_table_ids.is_empty()
             {
                 compaction_groups.remove(compaction_group_id);

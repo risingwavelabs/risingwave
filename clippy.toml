@@ -9,4 +9,6 @@ doc-valid-idents = [
     "gRPC",
     "PostgreSQL",
     "MySQL",
+    "TopN",
 ]
+avoid-breaking-exported-api = false

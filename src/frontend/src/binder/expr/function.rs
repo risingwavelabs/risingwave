@@ -61,7 +61,6 @@ impl Binder {
             "max" => Some(AggKind::Max),
             "avg" => Some(AggKind::Avg),
             "string_agg" => Some(AggKind::StringAgg),
-            "single_value" => Some(AggKind::SingleValue),
             "approx_count_distinct" => Some(AggKind::ApproxCountDistinct),
             "array_agg" => Some(AggKind::ArrayAgg),
             _ => None,
@@ -230,16 +229,9 @@ impl Binder {
         if f.distinct {
             match &kind {
                 AggKind::Count if inputs.is_empty() => {
-                    // single_value(distinct ..) and count(distinct *) are disallowed
-                    // because their semantic is unclear.
+                    // count(distinct *) is disallowed because of unclear semantics.
                     return Err(ErrorCode::InvalidInputSyntax(
                         "count(distinct *) is disallowed".to_string(),
-                    )
-                    .into());
-                }
-                AggKind::SingleValue => {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "single_value(distinct) is disallowed".to_string(),
                     )
                     .into());
                 }
