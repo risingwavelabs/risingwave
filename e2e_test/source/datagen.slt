@@ -61,3 +61,33 @@ select v1 from s1 order by v1 limit 10;
 
 statement ok
 drop source s1;
+
+statement ok
+create materialized source s1 (v1 struct<v2 int>)  with (
+    connector = 'datagen',
+    fields.v1.v2.kind = 'sequence',
+    fields.v1.v2.start = '1',
+    fields.v1.v2.end = '100',
+    datagen.rows.per.second = '10',
+    datagen.split.num = '5'
+) row format json;
+
+# Wait enough time to ensure Datagen connector generate data
+sleep 2s
+
+query I
+select (v1).v2 from s1 order by v1 limit 10;
+----
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+statement ok
+drop source s1;
