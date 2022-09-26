@@ -136,6 +136,7 @@ mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::streaming_table::state_table::StateTable;
 
@@ -162,9 +163,9 @@ mod tests {
             vec![],
             vec![],
         );
-        let mut epoch: u64 = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
 
         let mut managed_state =
             ManagedValueState::new(create_test_count_state(), Some(0), None, &state_table)
@@ -184,7 +185,7 @@ mod tests {
 
         // write to state store
         managed_state.flush(&mut state_table).unwrap();
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
 
         // get output
         assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(3)));
@@ -218,9 +219,9 @@ mod tests {
             vec![],
             pk_index,
         );
-        let mut epoch: u64 = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
 
         let mut managed_state = ManagedValueState::new(
             create_test_max_agg_append_only(),
@@ -244,7 +245,7 @@ mod tests {
 
         // write to state store
         managed_state.flush(&mut state_table).unwrap();
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
 
         // get output
         assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(2)));

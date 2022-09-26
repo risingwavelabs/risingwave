@@ -220,7 +220,16 @@ impl<S: StateStore> StorageTable<S> {
     }
 
     /// Get a single row by point get
-    pub async fn get_row(&mut self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
+    pub async fn get_row(
+        &mut self,
+        pk: &Row,
+        wait_epoch: HummockReadEpoch,
+    ) -> StorageResult<Option<Row>> {
+        let epoch = wait_epoch.get_epoch();
+        self.keyspace
+            .state_store()
+            .try_wait_epoch(wait_epoch)
+            .await?;
         let serialized_pk =
             serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
         let read_options = self.get_read_option(epoch);
@@ -496,9 +505,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        if !matches!(epoch, HummockReadEpoch::NoWait(_)) {
-            keyspace.state_store().try_wait_epoch(epoch).await?;
-        }
+        keyspace.state_store().try_wait_epoch(epoch).await?;
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;

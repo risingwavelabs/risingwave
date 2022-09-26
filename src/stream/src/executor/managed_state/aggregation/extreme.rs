@@ -290,6 +290,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::ScalarImpl;
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -342,9 +343,9 @@ mod tests {
             usize::MAX,
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -361,8 +362,8 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            state_table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -386,7 +387,7 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
+            state_table.commit_for_test(epoch).await.unwrap();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -455,9 +456,9 @@ mod tests {
             usize::MAX,
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -474,8 +475,8 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            state_table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -499,7 +500,7 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
+            state_table.commit_for_test(epoch).await.unwrap();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -576,10 +577,10 @@ mod tests {
             vec![0, 1], // [b, _row_id]
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table_1.init_epoch(epoch);
         state_table_2.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
 
         let mut managed_state_1 = GenericExtremeState::new(
             agg_call_1.clone(),
@@ -620,8 +621,8 @@ mod tests {
 
             managed_state_1.flush(&mut state_table_1)?;
             managed_state_2.flush(&mut state_table_2)?;
-            state_table_1.commit(epoch).await.unwrap();
-            state_table_2.commit(epoch).await.unwrap();
+            state_table_1.commit_for_test(epoch).await.unwrap();
+            state_table_2.commit_for_test(epoch).await.unwrap();
 
             match managed_state_1.get_output(&state_table_1).await? {
                 Some(ScalarImpl::Utf8(s)) => {
@@ -677,9 +678,9 @@ mod tests {
             usize::MAX,
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -695,8 +696,8 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            state_table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -720,7 +721,7 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
+            state_table.commit_for_test(epoch).await.unwrap();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -779,9 +780,9 @@ mod tests {
             ],
             vec![0, 1], // [a, _row_id]
         );
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
         let mut managed_state = GenericExtremeState::new(
             agg_call.clone(),
             None,
@@ -825,8 +826,8 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            state_table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -862,7 +863,7 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
+            state_table.commit_for_test(epoch).await.unwrap();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -911,9 +912,9 @@ mod tests {
             3, // cache capacity = 3 for easy testing
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
-        epoch += 1;
+        epoch.inc();
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -929,8 +930,8 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            state_table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -957,8 +958,8 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            state_table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -987,7 +988,7 @@ mod tests {
                 .await?;
 
             managed_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
+            state_table.commit_for_test(epoch).await.unwrap();
 
             let res = managed_state.get_output(&state_table).await?;
             match res {
