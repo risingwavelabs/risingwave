@@ -67,14 +67,20 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         writeln!(
             s,
             "SstableInfo: id={:?}, KeyRange={:?}, size={:?}KB, delete_ratio={:?}%",
-            sstable_info.id, key_range_str, sstable_info.file_size/1024, ratio,
-        ).unwrap();
+            sstable_info.id,
+            key_range_str,
+            sstable_info.file_size / 1024,
+            ratio,
+        )
+        .unwrap();
     } else {
         writeln!(
             s,
             "SstableInfo: id={:?}, KeyRange={:?}, size={:?}KB",
-            sstable_info.id, key_range_str, sstable_info.file_size/1024,
-        ).unwrap();
+            sstable_info.id,
+            key_range_str,
+            sstable_info.file_size / 1024,
+        )
+        .unwrap();
     }
-
 }

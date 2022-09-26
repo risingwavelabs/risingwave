@@ -152,7 +152,12 @@ impl<W: SstableWriter> SstableBuilder<W> {
     }
 
     /// Add kv pair to sstable.
-    pub async fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>, is_new_user_key: bool) -> HummockResult<()> {
+    pub async fn add(
+        &mut self,
+        full_key: &[u8],
+        value: HummockValue<&[u8]>,
+        is_new_user_key: bool,
+    ) -> HummockResult<()> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {

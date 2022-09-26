@@ -549,7 +549,7 @@ impl Compactor {
                 last_key.extend_from_slice(iter_key);
                 watermark_can_see_last_key = false;
             } else {
-                local_stats.skip_key_count += 1;
+                local_stats.skip_delete_key_count += 1;
             }
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest

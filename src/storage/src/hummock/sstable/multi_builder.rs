@@ -115,7 +115,8 @@ where
     ) -> HummockResult<()> {
         assert!(!user_key.is_empty());
         let full_key = FullKey::from_user_key(user_key, epoch);
-        self.add_full_key(full_key.as_slice().into_inner(), value, true).await?;
+        self.add_full_key(full_key.as_slice().into_inner(), value, true)
+            .await?;
         Ok(())
     }
 

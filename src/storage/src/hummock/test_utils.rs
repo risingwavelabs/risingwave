@@ -172,7 +172,7 @@ pub async fn put_sst(
         table_ids: vec![],
         meta_offset: meta.meta_offset,
         stale_key_count: 0,
-        total_key_count: 0
+        total_key_count: 0,
     };
     let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;
