@@ -1516,7 +1516,7 @@ where
             )))
         };
 
-        // 2. Select a compactor and assign the task.
+        // 2. Assign the task to the previously picked compactor.
         if let Err(err) = self
             .assign_compaction_task(&compact_task, compactor.context_id())
             .await
