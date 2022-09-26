@@ -24,16 +24,37 @@ use crate::array::Row;
 use crate::types::{serialize_datum_into, Datum};
 use crate::util::sort_util::OrderType;
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum OrderedDatum {
     NormalOrder(Datum),
     ReversedOrder(Reverse<Datum>),
 }
 
+impl std::fmt::Debug for OrderedDatum {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NormalOrder(d) => match d {
+                Some(s) => write!(f, "{:?}", s),
+                None => write!(f, "NULL"),
+            },
+            ReversedOrder(d) => match &d.0 {
+                Some(s) => write!(f, "{:?}", s),
+                None => write!(f, "NULL"),
+            },
+        }
+    }
+}
+
 /// `OrderedRow` is used for the pk in those states whose primary key contains several columns and
 /// requires comparison.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct OrderedRow(Vec<OrderedDatum>);
+
+impl std::fmt::Debug for OrderedRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 impl OrderedRow {
     pub fn new(row: Row, order_types: &[OrderType]) -> Self {

@@ -203,36 +203,26 @@ where
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             let pk_prefix = Row::new(group_key.clone());
-            let entry = self.caches.entry(group_key);
-            match entry {
-                Occupied(_) => {}
-                Vacant(entry) => {
-                    let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
-                    self.managed_state
-                        .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
-                        .await?;
-                    entry.insert(topn_cache);
-                }
+            if let Vacant(entry) = self.caches.entry(group_key) {
+                let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
+                self.managed_state
+                    .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
+                    .await?;
+                entry.insert(topn_cache);
             }
+            let cache = self.caches.get_mut(&pk_prefix.0).unwrap();
 
             // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     self.managed_state
                         .insert(ordered_pk_row.clone(), row.clone());
-                    self.caches.get_mut(&pk_prefix.0).unwrap().insert(
-                        ordered_pk_row,
-                        row,
-                        &mut res_ops,
-                        &mut res_rows,
-                    );
+                    cache.insert(ordered_pk_row, row, &mut res_ops, &mut res_rows);
                 }
 
                 Op::Delete | Op::UpdateDelete => {
                     self.managed_state.delete(&ordered_pk_row, row.clone());
-                    self.caches
-                        .get_mut(&pk_prefix.0)
-                        .unwrap()
+                    cache
                         .delete(
                             Some(&pk_prefix),
                             &mut self.managed_state,
