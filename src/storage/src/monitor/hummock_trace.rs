@@ -1,14 +1,13 @@
-use std::{sync::atomic::AtomicU64};
+use std::{sync::{atomic::AtomicU64}, fs::File};
 
 use bytes::Bytes;
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use tokio::{fs::File, io::AsyncWriteExt};
 use crate::storage_value::StorageValue;
+use std::io::prelude::{Write};
 
 // HummockTrace traces operations from Hummock
-pub(crate) struct HummockTrace {
-  records_tx: Sender<RecordRequest>,
-  writer_tx: Sender<WriteRequest>,
+pub struct HummockTrace {
+  records_tx: Sender<RecordRequest>
 }
 
 impl HummockTrace{
@@ -18,12 +17,12 @@ impl HummockTrace{
     let (writer_tx, writer_rx) = unbounded::<WriteRequest>();
 
     // start a worker to receive hummock records
-    tokio::spawn(Self::start_collector_worker(records_rx, writer_tx.clone() ,100));
+    tokio::spawn(Self::start_collector_worker(records_rx, writer_tx ,100));
 
     // start a worker to receive write requests
     tokio::spawn(Self::start_writer_worker(writer_rx));
 
-    Self { records_tx, writer_tx}
+    Self { records_tx}
   }
 
   pub fn new_trace_span(&self, op: Operation)->TraceSpan{
@@ -34,7 +33,6 @@ impl HummockTrace{
   }
 
   async fn start_collector_worker(records_rx: Receiver<RecordRequest>, writer_tx:Sender<WriteRequest> ,records_capacity: usize){
-
     let mut records = Vec::with_capacity(records_capacity); // sorted records?
 
     loop{
@@ -48,7 +46,9 @@ impl HummockTrace{
             }
           }
           RecordRequest::Fin() => {
-            break;
+            writer_tx.send(WriteRequest::Write(records)).unwrap();
+            writer_tx.send(WriteRequest::Fin()).unwrap();
+            return;
           }
         }
       }
@@ -57,21 +57,20 @@ impl HummockTrace{
   }
 
   async fn start_writer_worker(writer_rx: Receiver<WriteRequest>){
-    let mut log_file = File::create("hummock_trace.log").await.unwrap();
-
+    let mut log_file = File::create("hummock_trace.trace").unwrap();
     loop{
       if let Ok(request) = writer_rx.recv(){
         match request{
           WriteRequest::Write(records)=>{
-            let mut buf = Vec::with_capacity(records.len());
-            for (id, op) in records{
-              let content = format!("{},{}" ,id, op.serialize());
-              buf.push(content);
-            }
-            log_file.write_all(buf.join("\n").as_bytes()).await.unwrap();
+            let buf:String = records.iter()
+                            .map(|(id,op)|format!("{},{}" ,id, op.serialize()))
+                            .fold(String::new(), |a,b| a + &b + "\n");
+
+            log_file.write_all(buf.as_bytes()).unwrap();
           }
           WriteRequest::Fin() => {
-            break;
+            log_file.sync_all().unwrap();
+            return;
           }
         }
       }
@@ -84,7 +83,6 @@ impl Drop for HummockTrace{
   fn drop(&mut self){
     // close the workers
     self.records_tx.send(RecordRequest::Fin()).unwrap();
-    self.writer_tx.send(WriteRequest::Fin()).unwrap();
   }
 }
 
@@ -96,12 +94,12 @@ pub fn next_record_id() -> RecordID {
   NEXT_RECORD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-pub(crate) enum RecordRequest {
+pub enum RecordRequest {
   Record(Record),
   Fin()
 }
 
-pub(crate) enum WriteRequest {
+pub enum WriteRequest {
   Write(Vec<Record>),
   Fin()
 }
@@ -109,7 +107,7 @@ pub(crate) enum WriteRequest {
 pub(crate) type Record = (RecordID, Operation);
 
 pub trait TraceRecord {
-  fn serialize(self)->String;
+  fn serialize(&self)->String;
 }
 
 pub enum Operation{
@@ -122,7 +120,7 @@ pub enum Operation{
 }
 
 impl TraceRecord for Operation{
-    fn serialize(self)->String {
+    fn serialize(&self)->String {
       match self {
         Operation::Get(key) => {
           format!("GET {:?}", key)
@@ -130,8 +128,8 @@ impl TraceRecord for Operation{
         Operation::Ingest(kvs) => {
           format!("INGEST {:?}", kvs)
         }
-        Operation::Iter(prefix) => {
-         format!("ITER {}", String::from_utf8(prefix).unwrap())
+        Operation::Iter(value) => {
+         format!("ITER {:?}", value)
         }
         Operation::Sync(epoch) => {
           format!("SYNC {}", epoch)
@@ -147,7 +145,7 @@ impl TraceRecord for Operation{
 }
 
 #[derive(Clone)]
-pub(crate) struct TraceSpan {
+pub struct TraceSpan {
   tx: Sender<RecordRequest>,
   id: RecordID
 }
@@ -169,5 +167,64 @@ impl TraceSpan{
 impl Drop for TraceSpan{
   fn drop(&mut self) {
     self.finish();
+  }
+}
+
+mod tests{
+  use std::{sync::Arc, collections::HashSet};
+  use parking_lot::{Mutex};
+  use super::{HummockTrace, Operation, next_record_id};
+  // test atomic id
+  #[tokio::test()]
+  async fn atomic_span_id() {
+    let mut handles = Vec::new();
+    let ids_lock = Arc::new(Mutex::new(HashSet::new()));
+    let count:u64 = 100;
+
+    for _ in 0..count{
+      let ids = ids_lock.clone();
+      handles.push(tokio::spawn(async move{
+        let id = next_record_id();
+        ids.lock().insert(id);
+      }));
+    }
+
+    for handle in handles{
+      handle.await.unwrap();
+    }
+
+    let ids = ids_lock.lock();
+
+    for i in 0..count{
+      assert_eq!(ids.contains(&i), true);
+    }
+  }
+  #[tokio::test]
+  async fn span_sequential(){
+    let tracer = HummockTrace::new();
+    {
+      tracer.new_trace_span(Operation::Get(vec![0]));
+    }
+    {
+      tracer.new_trace_span(Operation::Sync(0));
+    }
+  }
+
+  #[tokio::test(flavor="multi_thread", worker_threads=50)]
+  async fn span_concurrent(){
+    let tracer = Arc::new(HummockTrace::new());
+    let mut handles = Vec::new();
+
+    for i in 0..100{
+      let t = tracer.clone();
+      handles.push(tokio::spawn(async move{
+        t.new_trace_span(Operation::Get(vec![i]));
+        t.new_trace_span(Operation::Sync(i as u64));
+      }));
+    }
+
+    for handle in handles{
+      handle.await.unwrap();
+    }
   }
 }

@@ -57,3 +57,6 @@ src/tests/regress/output/*
 src/tests/sync_point/slt/e2e_test
 # generated e2e tests
 e2e_test/generated
+
+# humock trace
+**/*.trace
