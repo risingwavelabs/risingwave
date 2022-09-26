@@ -23,7 +23,6 @@ use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tokio::sync::RwLock;
@@ -195,7 +194,7 @@ where
 
         // 2. Drop source in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::SourceId(source_id)]);
+            .delete(vec![StreamingJobId::Source(source_id)]);
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -237,7 +236,7 @@ where
 
         // 2. drop sink in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::SinkId(sink_id.into())]);
+            .delete(vec![StreamingJobId::Sink(sink_id.into())]);
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -290,7 +289,7 @@ where
 
         // 2. drop mv in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::TableId(table_id.into())]);
+            .delete(vec![StreamingJobId::Table(table_id.into())]);
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -346,7 +345,7 @@ where
 
         // 2. drop mv(index) in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::TableId(index_table_id.into())]);
+            .delete(vec![StreamingJobId::Table(index_table_id.into())]);
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -422,10 +421,7 @@ where
             .create_materialized_view(&mut table_fragments, &mut ctx)
             .await
         {
-            Ok(_) => {
-                self.finish_stream_job(stream_job, &table_fragments, &ctx)
-                    .await
-            }
+            Ok(_) => self.finish_stream_job(stream_job, &ctx).await,
             Err(err) => {
                 self.cancel_stream_job(stream_job, &ctx).await?;
                 Err(err)
@@ -579,15 +575,9 @@ where
     async fn finish_stream_job(
         &self,
         stream_job: &StreamingJob,
-        table_fragments: &TableFragments,
         ctx: &CreateMaterializedViewContext,
     ) -> MetaResult<u64> {
-        // 1. notify vnode mapping.
-        self.fragment_manager
-            .notify_fragment_mapping(table_fragments, Operation::Add)
-            .await;
-
-        // 2. finish procedure.
+        // 1. finish procedure.
         let mut creating_internal_table_ids = ctx.internal_table_ids();
         let version = match stream_job {
             StreamingJob::MaterializedView(table) => {
@@ -619,7 +609,7 @@ where
             }
         };
 
-        // 3. unmark creating tables.
+        // 2. unmark creating tables.
         self.catalog_manager
             .unmark_creating_tables(&creating_internal_table_ids, false)
             .await;
@@ -683,9 +673,7 @@ where
             .await
         {
             Ok(_) => {
-                let version = self
-                    .finish_stream_job(&stream_job, &table_fragments, &ctx)
-                    .await?;
+                let version = self.finish_stream_job(&stream_job, &ctx).await?;
                 Ok((source_id, stream_job.id(), version))
             }
             Err(err) => {
@@ -711,8 +699,8 @@ where
         // Note: we need to drop the materialized view to unmap the source_id to fragment_ids before
         // we can drop the source.
         self.table_background_deleter.delete(vec![
-            StreamingJobId::TableId(table_id.into()),
-            StreamingJobId::SourceId(source_id),
+            StreamingJobId::Table(table_id.into()),
+            StreamingJobId::Source(source_id),
         ]);
 
         Ok(version)

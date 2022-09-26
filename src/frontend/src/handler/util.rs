@@ -23,7 +23,7 @@ use risingwave_common::types::{DataType, ScalarRefImpl};
 use crate::binder::{BoundSetExpr, BoundStatement};
 
 /// Format scalars according to postgres convention.
-fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
+fn pg_value_format(d: ScalarRefImpl<'_>, format: bool) -> Bytes {
     // format == false means TEXT format
     // format == true means BINARY format
     if !format {

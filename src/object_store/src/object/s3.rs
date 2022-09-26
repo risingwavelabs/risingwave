@@ -19,6 +19,7 @@ use aws_sdk_s3::client::fluent_builders::GetObject;
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
+use aws_smithy_http::body::SdkBody;
 use aws_smithy_types::retry::RetryConfig;
 use fail::fail_point;
 use futures::future::try_join_all;
@@ -280,11 +281,14 @@ impl StreamingUploader for S3StreamingUploader {
 }
 
 fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
-    Body::wrap_stream(stream::iter(data.into_iter().map(ObjectResult::Ok))).into()
+    SdkBody::retryable(move || {
+        Body::wrap_stream(stream::iter(data.clone().into_iter().map(ObjectResult::Ok))).into()
+    })
+    .into()
 }
 
 /// Object store with S3 backend
-/// The full path to a file on S3 would be s3://bucket/<data_directory>/prefix/file
+/// The full path to a file on S3 would be `s3://bucket/<data_directory>/prefix/file`
 pub struct S3ObjectStore {
     client: Client,
     bucket: String,
@@ -516,7 +520,7 @@ impl S3ObjectStore {
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
         let sdk_config = aws_config::from_env()
-            .retry_config(RetryConfig::new().with_max_attempts(4))
+            .retry_config(RetryConfig::standard().with_max_attempts(4))
             .load()
             .await;
         let client = Client::new(&sdk_config);

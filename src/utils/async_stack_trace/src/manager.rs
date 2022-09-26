@@ -147,7 +147,7 @@ where
     /// Note that the reports might not be updated if the traced task is doing some computation
     /// heavy work and never yields, one may check how long the captured time has elapsed to confirm
     /// this.
-    pub fn get_all(&mut self) -> impl Iterator<Item = (&K, watch::Ref<StackTraceReport>)> {
+    pub fn get_all(&mut self) -> impl Iterator<Item = (&K, watch::Ref<'_, StackTraceReport>)> {
         self.rxs.retain(|_, rx| rx.has_changed().is_ok());
         self.rxs.iter_mut().map(|(k, v)| (k, v.borrow_and_update()))
     }

@@ -80,7 +80,7 @@ impl PlanTreeNodeUnary for LogicalLimit {
 }
 impl_plan_tree_node_for_unary! {LogicalLimit}
 impl fmt::Display for LogicalLimit {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "LogicalLimit {{ limit: {}, offset: {} }}",

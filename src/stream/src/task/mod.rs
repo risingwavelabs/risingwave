@@ -127,11 +127,11 @@ impl SharedContext {
     }
 
     #[inline]
-    fn lock_channel_map(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
+    fn lock_channel_map(&self) -> MutexGuard<'_, HashMap<UpDownActorIds, ConsumableChannelPair>> {
         self.channel_map.lock()
     }
 
-    pub fn lock_barrier_manager(&self) -> MutexGuard<LocalBarrierManager> {
+    pub fn lock_barrier_manager(&self) -> MutexGuard<'_, LocalBarrierManager> {
         self.barrier_manager.lock()
     }
 
@@ -170,6 +170,10 @@ impl SharedContext {
     {
         self.lock_channel_map()
             .retain(|up_down_ids, _| f(up_down_ids));
+    }
+
+    pub fn clear_channels(&self) {
+        self.lock_channel_map().clear();
     }
 
     pub fn get_actor_info(&self, actor_id: &ActorId) -> StreamResult<ActorInfo> {

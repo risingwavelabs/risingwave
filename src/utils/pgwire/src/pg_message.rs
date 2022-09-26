@@ -17,7 +17,7 @@ use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
 use byteorder::{BigEndian, ByteOrder};
-/// Part of code learned from https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs.
+/// Part of code learned from <https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs>.
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -40,6 +40,7 @@ pub enum FeMessage {
     Sync,
     CancelQuery(FeCancelMessage),
     Terminate,
+    Flush,
 }
 
 pub struct FeStartupMessage {
@@ -144,7 +145,7 @@ impl FeDescribeMessage {
         let kind = buf.get_u8();
         let name = read_null_terminated(&mut buf)?;
 
-        Ok(FeMessage::Describe(FeDescribeMessage { name, kind }))
+        Ok(FeMessage::Describe(FeDescribeMessage { kind, name }))
     }
 }
 
@@ -207,8 +208,8 @@ impl FeBindMessage {
 
         Ok(FeMessage::Bind(FeBindMessage {
             param_format_code,
-            params,
             result_format_code,
+            params,
             portal_name,
             statement_name,
         }))
@@ -298,6 +299,7 @@ impl FeMessage {
             b'X' => Ok(FeMessage::Terminate),
             b'C' => FeCloseMessage::parse(sql_bytes),
             b'p' => FePasswordMessage::parse(sql_bytes),
+            b'H' => Ok(FeMessage::Flush),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!("Unsupported tag of regular message: {}", val),
@@ -356,7 +358,7 @@ fn read_null_terminated(buf: &mut Bytes) -> Result<Bytes> {
 
 /// Message sent from server to psql client. Implement `write` (how to serialize it into psql
 /// buffer).
-/// Ref: https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// Ref: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
 #[derive(Debug)]
 pub enum BeMessage<'a> {
     AuthenticationOk,

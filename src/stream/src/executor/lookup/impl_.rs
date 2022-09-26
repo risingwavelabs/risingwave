@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -27,8 +28,9 @@ use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::executor::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 use crate::task::LruManagerRef;
+
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
@@ -334,7 +336,7 @@ impl<S: StateStore> LookupExecutor<S> {
             // data. Therefore, it is also okay to simply set prev epoch to 0.
 
             self.last_barrier = Some(Barrier {
-                epoch: Epoch {
+                epoch: EpochPair {
                     prev: 0,
                     curr: barrier.epoch.curr,
                 },

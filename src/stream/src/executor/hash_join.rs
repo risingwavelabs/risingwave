@@ -25,6 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -35,8 +36,7 @@ use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Epoch, Executor, Message, PkIndices,
-    PkIndicesRef,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::JoinType::LeftAnti;
@@ -197,7 +197,7 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         // self.ht.clear();
     }
 
-    pub fn init(&mut self, epoch: Epoch) {
+    pub fn init(&mut self, epoch: EpochPair) {
         self.ht.init(epoch);
     }
 }
@@ -266,7 +266,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor for HashJoi
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -282,7 +282,7 @@ struct HashJoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrim
 impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBuilder<T, SIDE> {
     fn with_match_on_insert(
         &mut self,
-        row: &RowRef,
+        row: &RowRef<'_>,
         matched_row: &JoinRow,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // Left/Right Anti sides
@@ -328,7 +328,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
 
     fn with_match_on_delete(
         &mut self,
-        row: &RowRef,
+        row: &RowRef<'_>,
         matched_row: &JoinRow,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         Ok(
@@ -378,7 +378,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn forward_exactly_once_if_matched(
         &mut self,
         op: Op,
-        row: &RowRef,
+        row: &RowRef<'_>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // if it's a semi join and the side needs to be maintained.
         Ok(if is_semi(T) && forward_exactly_once(T, SIDE) {
@@ -392,7 +392,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn forward_if_not_matched(
         &mut self,
         op: Op,
-        row: &RowRef,
+        row: &RowRef<'_>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // if it's outer join or anti join and the side needs to be maintained.
         Ok(
@@ -940,7 +940,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::{ActorContext, Barrier, Epoch, Message};
+    use crate::executor::{ActorContext, Barrier, EpochPair, Message};
 
     fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
@@ -2170,7 +2170,7 @@ mod tests {
         tx_r.push_barrier(2, false);
 
         // get the aligned barrier here
-        let expected_epoch = Epoch::new_test_epoch(2);
+        let expected_epoch = EpochPair::new_test_epoch(2);
         assert!(matches!(
             hash_join.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier {
@@ -2267,7 +2267,7 @@ mod tests {
         tx_r.push_barrier(2, false);
 
         // get the aligned barrier here
-        let expected_epoch = Epoch::new_test_epoch(2);
+        let expected_epoch = EpochPair::new_test_epoch(2);
         assert!(matches!(
             hash_join.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier {
