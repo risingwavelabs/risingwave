@@ -661,16 +661,20 @@ impl<S: StateStore> StateTable<S> {
 impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table.
     pub async fn iter(&self) -> StorageResult<RowStream<'_, S>> {
-        self.iter_with_pk_prefix(Row::empty()).await
+        self.iter_with_pk_prefix(Row::empty(), false).await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix<'a>(
         &'a self,
         pk_prefix: &'a Row,
+        use_prev_epoch: bool,
     ) -> StorageResult<RowStream<'a, S>> {
-        let (mem_table_iter, storage_iter_stream) =
-            self.iter_inner(pk_prefix, self.epoch()).await?;
+        let (mem_table_iter, storage_iter_stream) = match use_prev_epoch{
+            true => self.iter_inner(pk_prefix, self.prev_epoch()).await?,
+            false => self.iter_inner(pk_prefix, self.epoch()).await?,
+        };
+            
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
@@ -678,6 +682,7 @@ impl<S: StateStore> StateTable<S> {
                 .map(|pk_row| pk_row.map(|(_, row)| row)),
         )
     }
+
 
     /// This function scans rows from the relational table with specific `pk_prefix`, return both
     /// key and value.

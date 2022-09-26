@@ -605,7 +605,7 @@ async fn test_state_table_iter_with_prefix() {
     ]));
 
     let pk_prefix = Row(vec![Some(1_i32.into())]);
-    let iter = state.iter_with_pk_prefix(&pk_prefix).await.unwrap();
+    let iter = state.iter_with_pk_prefix(&pk_prefix, false).await.unwrap();
     pin_mut!(iter);
 
     // this row exists in both mem_table and cell_based_table

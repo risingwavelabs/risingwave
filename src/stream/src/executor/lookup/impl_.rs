@@ -333,12 +333,11 @@ impl<S: StateStore> LookupExecutor<S> {
                 },
                 ..barrier
             });
+
             if self.arrangement.use_current_epoch {
-                self.arrangement.state_table.init_epoch(barrier.epoch.inc());
+                self.arrangement.state_table.init_epoch(barrier.epoch);
             } else {
-                self.arrangement
-                    .state_table
-                    .init_epoch(barrier.epoch);
+                self.arrangement.state_table.init_epoch(barrier.epoch);
             };
             return Ok(());
         } else {
@@ -349,7 +348,7 @@ impl<S: StateStore> LookupExecutor<S> {
             if self.arrangement.use_current_epoch {
                 self.arrangement
                     .state_table
-                    .commit_no_data_expected(barrier.epoch.curr+1);
+                    .commit_no_data_expected(barrier.epoch.prev);
             } else {
                 self.arrangement
                     .state_table
@@ -364,7 +363,7 @@ impl<S: StateStore> LookupExecutor<S> {
     /// Lookup all rows corresponding to a join key in shared buffer.
     async fn lookup_one_row(&mut self, stream_row: &RowRef<'_>) -> StreamExecutorResult<Vec<Row>> {
         // fast-path for empty look-ups.
-        if self.arrangement.state_table.prev_epoch() == 0 {
+        if self.arrangement.state_table.epoch() == 0 {
             return Ok(vec![]);
         }
 
@@ -383,7 +382,7 @@ impl<S: StateStore> LookupExecutor<S> {
             let all_data_iter = self
                 .arrangement
                 .state_table
-                .iter_with_pk_prefix(&lookup_row)
+                .iter_with_pk_prefix(&lookup_row, true)
                 .await?;
             pin_mut!(all_data_iter);
             while let Some(inner) = all_data_iter.next().await {
