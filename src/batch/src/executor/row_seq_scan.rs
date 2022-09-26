@@ -32,7 +32,7 @@ use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
 use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
-use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
+use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 
 use super::BatchTaskMetrics;
 use crate::executor::{
@@ -131,7 +131,7 @@ fn get_scan_bound(
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
@@ -215,7 +215,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 table_option,
                 value_indices,
             );
-            let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 
             if seq_scan_node.scan_ranges.is_empty() {
                 let iter = table
@@ -235,7 +234,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 let scan_type = async {
                     let pk_types = pk_types.clone();
                     let mut table = table.clone();
-                    let keyspace = keyspace.clone();
 
                     let (pk_prefix_value, next_col_bounds) =
                         get_scan_bound(scan_range.clone(), pk_types.into_iter());
@@ -245,11 +243,12 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             unreachable!()
                         } else if pk_prefix_value.size() == pk_len {
                             let row = {
-                                keyspace
-                                    .state_store()
-                                    .try_wait_epoch(HummockReadEpoch::Committed(source.epoch))
-                                    .await?;
-                                table.get_row(&pk_prefix_value, source.epoch).await?
+                                table
+                                    .get_row(
+                                        &pk_prefix_value,
+                                        HummockReadEpoch::Committed(source.epoch),
+                                    )
+                                    .await?
                             };
                             ScanType::PointGet(row)
                         } else {

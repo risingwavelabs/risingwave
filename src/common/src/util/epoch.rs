@@ -92,7 +92,7 @@ impl From<u64> for Epoch {
 }
 
 impl fmt::Display for Epoch {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
     }
 }
@@ -109,7 +109,6 @@ impl EpochPair {
         Self { curr, prev }
     }
 
-    #[cfg(test)]
     pub fn inc(&self) -> Self {
         Self {
             curr: self.curr + 1,

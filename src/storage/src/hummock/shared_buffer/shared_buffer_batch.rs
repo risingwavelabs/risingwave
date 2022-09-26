@@ -16,7 +16,9 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -32,11 +34,13 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
 
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
+pub type SharedBufferBatchId = u64;
 
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     size: usize,
     buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
+    batch_id: SharedBufferBatchId,
 }
 
 impl Deref for SharedBufferBatchInner {
@@ -83,6 +87,8 @@ pub struct SharedBufferBatch {
     pub table_id: u32,
 }
 
+static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
+
 impl SharedBufferBatch {
     pub fn new(
         sorted_items: Vec<SharedBufferItem>,
@@ -103,11 +109,16 @@ impl SharedBufferBatch {
                 payload: sorted_items,
                 size,
                 buffer_release_notifier,
+                batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
             }),
             epoch,
             compaction_group_id,
             table_id,
         }
+    }
+
+    pub fn get_batch_id(&self) -> SharedBufferBatchId {
+        self.inner.batch_id
     }
 
     pub fn measure_batch_size(batches: &[SharedBufferItem]) -> usize {

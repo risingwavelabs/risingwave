@@ -3562,6 +3562,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "futures",
  "itertools",
  "madsim-tokio",
  "postgres-types",

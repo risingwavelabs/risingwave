@@ -1,3 +1,13 @@
 disallowed-methods = [
-    { path = "std::iter::Iterator::zip", reason = "Please use Itertools::zip_eq instead." }
+    { path = "std::iter::Iterator::zip", reason = "Please use Itertools::zip_eq instead." },
 ]
+doc-valid-idents = [
+    "RisingWave",
+    "MinIO",
+    "ProtoBuf",
+    "BloomFilter",
+    "gRPC",
+    "PostgreSQL",
+    "MySQL",
+]
+avoid-breaking-exported-api = false

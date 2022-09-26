@@ -211,6 +211,7 @@ pub fn create_agg_state_unary(
         (Sum, sum, float32, float32, None),
         (Sum, sum, float64, float64, None),
         (Sum, sum, decimal, decimal, None),
+        (Sum, sum, interval, interval, None),
         (Min, min, int16, int16, None),
         (Min, min, int32, int32, None),
         (Min, min, int64, int64, None),

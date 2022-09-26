@@ -55,13 +55,13 @@ impl StreamGlobalSimpleAgg {
         self.logical.agg_calls()
     }
 
-    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallDisplay> {
+    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
         self.logical.agg_calls_display()
     }
 }
 
 impl fmt::Display for StreamGlobalSimpleAgg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.input().append_only() {
             self.logical
                 .fmt_with_name(f, "StreamAppendOnlyGlobalSimpleAgg")

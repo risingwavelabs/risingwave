@@ -153,7 +153,7 @@ pub trait Executor: Send + 'static {
     /// Return the primary key indices of the OUTPUT of the executor.
     /// Schema is used by both OLAP and streaming, therefore
     /// pk indices are maintained independently.
-    fn pk_indices(&self) -> PkIndicesRef;
+    fn pk_indices(&self) -> PkIndicesRef<'_>;
 
     /// Identity of the executor.
     fn identity(&self) -> &str;
