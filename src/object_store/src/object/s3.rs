@@ -16,7 +16,10 @@ use std::cmp;
 use std::sync::Arc;
 
 use aws_sdk_s3::client::fluent_builders::GetObject;
-use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
+use aws_sdk_s3::model::{
+    AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, CompletedMultipartUpload,
+    CompletedPart, Delete, LifecycleRule, ObjectIdentifier,
+};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
@@ -47,8 +50,13 @@ const MIN_PART_ID: PartId = 1;
 const S3_PART_SIZE: usize = 16 * 1024 * 1024;
 // TODO: we should do some benchmark to determine the proper part size for MinIO
 const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
-/// The number of S3 bucket prefixes
-const S3_NUM_PREFIXES: u32 = 256;
+/// The number of S3/MinIO bucket prefixes
+const NUM_BUCKET_PREFIXES: u32 = 256;
+/// Stop multipart uploads that don't complete within a specified number of days after being
+/// initiated. (Day is the smallest granularity)
+///
+/// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
+const INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
 
 /// S3 multipart upload handle. The multipart upload is not initiated until the first part is
 /// available for upload.
@@ -203,16 +211,7 @@ impl S3StreamingUploader {
         Ok(())
     }
 
-    async fn abort(&self) -> ObjectResult<()> {
-        // If any part uploads are currently in progress, those part uploads might or might
-        // not succeed. As a result, it might be necessary to abort a given multipart upload
-        // multiple times in order to completely free all storage consumed by all parts.
-        //
-        // To verify that all parts have been removed, so you don't get charged for the
-        // part storage, you should call the ListParts action and ensure that the parts list is
-        // empty.
-        //
-        // Reference: <https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html>
+    async fn abort_multipart_upload(&self) -> ObjectResult<()> {
         self.client
             .abort_multipart_upload()
             .bucket(&self.bucket)
@@ -268,7 +267,7 @@ impl StreamingUploader for S3StreamingUploader {
             }
         } else if let Err(e) = self.flush_multipart_and_complete().await {
             tracing::warn!("Failed to upload object {}: {:?}", self.key, e);
-            self.abort().await?;
+            self.abort_multipart_upload().await?;
             Err(e)
         } else {
             Ok(())
@@ -300,7 +299,7 @@ pub struct S3ObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
     fn get_object_prefix(&self, obj_id: u64) -> String {
-        let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % S3_NUM_PREFIXES;
+        let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % NUM_BUCKET_PREFIXES;
         let mut obj_prefix = prefix.to_string();
         obj_prefix.push('/');
         obj_prefix
@@ -524,7 +523,9 @@ impl S3ObjectStore {
             .load()
             .await;
         let client = Client::new(&sdk_config);
-
+        Self::configure_bucket_lifecycle(&client, &bucket)
+            .await
+            .unwrap();
         Self {
             client,
             bucket,
@@ -553,6 +554,9 @@ impl S3ObjectStore {
             ));
         let config = builder.build();
         let client = Client::from_conf(config);
+        Self::configure_bucket_lifecycle(&client, bucket)
+            .await
+            .unwrap();
         Self {
             client,
             bucket: bucket.to_string(),
@@ -588,6 +592,36 @@ impl S3ObjectStore {
             }
         }
     }
+
+    // When multipart upload is aborted, if any part uploads are in progress, those part uploads
+    // might or might not succeed. As a result, these parts will remain in the bucket and be
+    // charged for part storage. Therefore, we need to configure the bucket to purge stale
+    // parts.
+    //
+    // Reference: <https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html>
+    async fn configure_bucket_lifecycle(client: &Client, bucket: &str) -> ObjectResult<()> {
+        let bucket_lifecycle_rules = vec![LifecycleRule::builder()
+            .set_abort_incomplete_multipart_upload(Some(
+                AbortIncompleteMultipartUpload::builder()
+                    .set_days_after_initiation(Some(INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS))
+                    .build(),
+            ))
+            .build()];
+        let bucket_lifecycle_config = BucketLifecycleConfiguration::builder()
+            .set_rules(Some(bucket_lifecycle_rules))
+            .build();
+        client
+            .put_bucket_lifecycle_configuration()
+            .set_lifecycle_configuration(Some(bucket_lifecycle_config))
+            .send()
+            .await?;
+        tracing::info!(
+            "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
+            bucket,
+            INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
+        );
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -596,12 +630,12 @@ mod tests {
     use std::sync::Arc;
 
     use crate::object::object_metrics::ObjectStoreMetrics;
-    use crate::object::s3::S3_NUM_PREFIXES;
+    use crate::object::s3::NUM_BUCKET_PREFIXES;
     use crate::object::{ObjectStore, S3ObjectStore};
 
     fn get_hash_of_object(obj_id: u64) -> u32 {
         let crc_hash = crc32fast::hash(&obj_id.to_be_bytes());
-        crc_hash % S3_NUM_PREFIXES
+        crc_hash % NUM_BUCKET_PREFIXES
     }
 
     #[tokio::test]
