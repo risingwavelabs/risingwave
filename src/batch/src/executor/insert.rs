@@ -213,10 +213,8 @@ mod tests {
                 array! { I32Array, [Some(3),None,None,None,None] }.into(),
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
-        )
-        .map(|x| Arc::new(x.into()))
-        .unwrap();
-        let col3 = Column::new(array);
+        );
+        let col3 = Column::new(Arc::new(array.into()));
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
 
@@ -292,7 +290,6 @@ mod tests {
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
-        .unwrap()
         .into();
         assert_eq!(*chunk.columns()[2].array(), array);
 
