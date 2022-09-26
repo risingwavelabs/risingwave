@@ -56,7 +56,7 @@ const NUM_BUCKET_PREFIXES: u32 = 256;
 /// initiated. (Day is the smallest granularity)
 ///
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
-const INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 7;
+const INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
 
 /// S3 multipart upload handle. The multipart upload is not initiated until the first part is
 /// available for upload.
