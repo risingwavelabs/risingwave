@@ -1150,8 +1150,6 @@ where
                 {
                     // if downstream scale in/out
                     *mapping = actor_mapping_from_bitmaps(downstream_updated_bitmap)
-                } else {
-                    unreachable!()
                 }
             }
         }
