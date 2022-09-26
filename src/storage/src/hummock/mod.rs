@@ -59,6 +59,7 @@ pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
+use risingwave_hummock_sdk::key::FullKey;
 pub use validator::*;
 use value::*;
 
@@ -73,11 +74,12 @@ use crate::hummock::compaction_group_client::{
 };
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferItem};
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
+use crate::storage_value::StorageValue;
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -293,4 +295,19 @@ pub fn get_from_batch(
         local_stats.get_shared_buffer_hit_counts += 1;
         v
     })
+}
+
+pub fn build_shared_buffer_item_batches(
+    kv_pairs: Vec<(Bytes, StorageValue)>,
+    epoch: HummockEpoch,
+) -> Vec<SharedBufferItem> {
+    kv_pairs
+        .into_iter()
+        .map(|(key, value)| {
+            (
+                Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
+                value.into(),
+            )
+        })
+        .collect()
 }

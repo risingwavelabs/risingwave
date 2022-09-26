@@ -182,6 +182,12 @@ static CACEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     .collect()
 });
 
+static NO_RESCHEDULE_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
+    [TaskStatus::NoAvailCanceled, TaskStatus::SendFailCanceled]
+        .into_iter()
+        .collect()
+});
+
 impl<S> HummockManager<S>
 where
     S: MetaStore,
@@ -1049,7 +1055,9 @@ where
             compact_task.compaction_group_id,
         );
 
-        self.try_send_compaction_request(compact_task.compaction_group_id)?;
+        if !NO_RESCHEDULE_STATUS_SET.contains(&compact_task.task_status()) {
+            self.try_send_compaction_request(compact_task.compaction_group_id)?;
+        }
 
         #[cfg(test)]
         {

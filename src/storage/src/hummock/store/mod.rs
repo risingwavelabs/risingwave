@@ -21,17 +21,27 @@ use std::ops::RangeBounds;
 
 use bytes::Bytes;
 use futures::Future;
+use risingwave_common::catalog::TableId;
 
 use crate::error::StorageResult;
+use crate::storage_value::StorageValue;
 use crate::StateStoreIter;
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
 pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B> =
     Future<Output = StorageResult<I>> + Send;
+pub trait IngestKVBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
+
+#[derive(Default, Clone)]
+pub struct WriteOptions {
+    pub epoch: u64,
+    pub table_id: TableId,
+}
 
 #[macro_export]
 macro_rules! define_local_state_store_associated_type {
     () => {
+        type IngestKVBatchFuture<'a> = impl IngestKVBatchFutureTrait<'a>;
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type IterFuture<'a, R, B>  = impl IterFutureTrait<'a, Self::Iter, R, B>
                                                             where
@@ -53,9 +63,16 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: 'static + Send + RangeBounds<B>,
         B: 'static + Send + AsRef<[u8]>;
 
+    type IngestKVBatchFuture<'a>: IngestKVBatchFutureTrait<'a>;
+
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get(&self, key: &[u8], epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_>;
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_>;
 
     /// Opens and returns an iterator for a given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to
@@ -79,6 +96,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Triggers a flush to persistent storage for the in-memory states.
     fn flush(&self) -> StorageResult<usize>;
+
+    fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        write_options: WriteOptions,
+    ) -> Self::IngestKVBatchFuture<'_>;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,

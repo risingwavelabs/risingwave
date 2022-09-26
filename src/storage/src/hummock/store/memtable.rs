@@ -39,26 +39,26 @@ pub enum Memtable {
 #[allow(unused)]
 impl Memtable {
     /// Inserts a key-value entry associated with a given `epoch` into memtable.
-    fn insert(&mut self, key: Bytes, val: Bytes, epoch: u64) {
+    pub fn insert(&mut self, key: Bytes, val: Bytes, epoch: u64) {
         memtable_impl_method_body!(self, insert, key, val, epoch)
     }
 
     /// Deletes a key-value entry from memtable. Only the key-value entry with epoch smaller
     /// than the given `epoch` will be deleted.
-    fn delete(&mut self, key: Bytes, epoch: u64) {
+    pub fn delete(&mut self, key: Bytes, epoch: u64) {
         memtable_impl_method_body!(self, delete, key, epoch)
     }
 
     /// Point gets a value from memtable.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get(&self, key: &[u8], epoch: u64) -> Option<Bytes> {
+    pub fn get(&self, key: &[u8], epoch: u64) -> Option<Bytes> {
         memtable_impl_method_body!(self, get, key, epoch)
     }
 
     /// Opens and returns an iterator for a given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to
     /// the given `epoch`.
-    fn iter<R, B>(&self, key_range: R) -> MemtableIter
+    pub fn iter<R, B>(&self, key_range: R) -> MemtableIter
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -68,6 +68,7 @@ impl Memtable {
 }
 
 #[allow(unused)]
+#[derive(Default)]
 pub struct BTreeMapMemtable {
     mem: BTreeMap<Bytes, Bytes>,
 }
@@ -75,15 +76,18 @@ pub struct BTreeMapMemtable {
 #[allow(unused)]
 impl BTreeMapMemtable {
     fn insert(&mut self, key: Bytes, val: Bytes, epoch: u64) {
-        unimplemented!()
+        // unimplemented!()
+
+        self.mem.insert(key, val);
     }
 
     fn delete(&mut self, key: Bytes, epoch: u64) {
-        unimplemented!()
+        // unimplemented!()
+        self.mem.remove(&key);
     }
 
     fn get(&self, key: &[u8], epoch: u64) -> Option<Bytes> {
-        unimplemented!()
+        self.mem.get(key).map(|v| Bytes::copy_from_slice(v))
     }
 
     fn iter<R, B>(&self, key_range: R) -> MemtableIter

@@ -643,14 +643,14 @@ impl LocalVersion {
     }
 }
 
-struct PinnedVersionGuard {
+pub struct PinnedVersionGuard {
     version_id: HummockVersionId,
     pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
 }
 
 impl PinnedVersionGuard {
     /// Creates a new `PinnedVersionGuard` and send a pin request to `pinned_version_worker`.
-    fn new(
+    pub fn new(
         version_id: HummockVersionId,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
