@@ -452,3 +452,9 @@ message CompactionConfig {
   uint32 compaction_filter_mask = 11;
   uint32 max_sub_compaction = 12;
 }
+
+message WriteLimiterThreshold {
+  uint64 max_sub_level_number = 1;
+  uint64 max_delay_sec = 2;
+  float per_file_delay_sec = 3;
+}

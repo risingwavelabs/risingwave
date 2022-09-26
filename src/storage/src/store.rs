@@ -14,6 +14,7 @@
 use std::future::Future;
 use std::ops::RangeBounds;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
@@ -202,6 +203,11 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         todo!()
     }
+
+    /// Gets a `WriteDelay` that indicates the duration to delay before write.
+    ///
+    /// Gets None if no need to delay.
+    fn get_write_delay(&self) -> Option<WriteDelay>;
 }
 
 pub trait StateStoreIter: Send + 'static {
@@ -234,4 +240,10 @@ impl ReadOptions {
             None => 0,
         }
     }
+}
+
+pub struct WriteDelay {
+    pub duration: Duration,
+    /// Ends the delay immediately
+    pub breaker: tokio::sync::oneshot::Receiver<()>,
 }

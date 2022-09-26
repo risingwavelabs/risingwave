@@ -344,6 +344,10 @@ impl StateStore for MemoryStateStore {
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move { Ok(()) }
     }
+
+    fn get_write_delay(&self) -> Option<WriteDelay> {
+        None
+    }
 }
 
 pub struct MemoryStateStoreIter {

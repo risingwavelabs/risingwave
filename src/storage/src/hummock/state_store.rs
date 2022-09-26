@@ -641,6 +641,10 @@ impl StateStore for HummockStorage {
             Ok(())
         }
     }
+
+    fn get_write_delay(&self) -> Option<WriteDelay> {
+        self.get_write_delay()
+    }
 }
 
 impl HummockStorage {

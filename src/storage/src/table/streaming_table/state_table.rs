@@ -41,7 +41,7 @@ use crate::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
 };
 use crate::storage_value::StorageValue;
-use crate::store::{ReadOptions, WriteOptions};
+use crate::store::{ReadOptions, WriteDelay, WriteOptions};
 use crate::table::streaming_table::mem_table::MemTableError;
 use crate::table::{compute_chunk_vnode, compute_vnode, DataTypes, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
@@ -554,6 +554,18 @@ impl<S: StateStore> StateTable<S> {
     }
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
+        if let Some(WriteDelay {
+            duration,
+            mut breaker,
+        }) = self.keyspace.state_store().get_write_delay()
+        {
+            let sleep = tokio::time::sleep(duration);
+            tokio::pin!(sleep);
+            tokio::select! {
+                _ = &mut sleep => {}
+                _ = &mut breaker => {}
+            }
+        }
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.batch_write_rows(mem_table, new_epoch).await?;
         self.update_epoch(new_epoch);

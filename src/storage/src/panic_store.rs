@@ -134,6 +134,10 @@ impl StateStore for PanicStateStore {
             panic!("should not clear shared buffer from the panic state store!");
         }
     }
+
+    fn get_write_delay(&self) -> Option<WriteDelay> {
+        panic!("should not get write delay from the panic state store!");
+    }
 }
 
 pub struct PanicStateStoreIter {}

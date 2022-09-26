@@ -70,8 +70,8 @@ impl ObserverNodeImpl for FrontendObserverNode {
             Info::HummockSnapshot(_) => {
                 self.handle_hummock_snapshot_notification(resp);
             }
-            Info::HummockVersionDeltas(_) => {
-                panic!("frontend node should not receive HummockVersionDeltas");
+            _ => {
+                panic!("unknown info for frontend node");
             }
         }
     }

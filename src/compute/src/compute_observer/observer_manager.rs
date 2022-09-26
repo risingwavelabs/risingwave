@@ -25,12 +25,12 @@ use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::HummockVersionDeltas;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
-use risingwave_storage::hummock::local_version_manager::LocalVersionManagerRef;
+use risingwave_storage::StateStoreImpl;
 
 pub struct ComputeObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
-    local_version_manager: LocalVersionManagerRef,
+    store: StateStoreImpl,
 
     version: u64,
 }
@@ -54,11 +54,13 @@ impl ObserverNodeImpl for ComputeObserverNode {
             }
 
             Info::HummockVersionDeltas(hummock_version_deltas) => {
-                self.local_version_manager.try_update_pinned_version(
-                    pin_version_response::Payload::VersionDeltas(HummockVersionDeltas {
-                        delta: hummock_version_deltas.version_deltas,
-                    }),
-                );
+                if let StateStoreImpl::HummockStateStore(storage) = &self.store {
+                    storage.as_hummock_storage_ref().try_update_pinned_version(
+                        pin_version_response::Payload::VersionDeltas(HummockVersionDeltas {
+                            delta: hummock_version_deltas.version_deltas,
+                        }),
+                    );
+                }
             }
 
             _ => {
@@ -74,9 +76,13 @@ impl ObserverNodeImpl for ComputeObserverNode {
             Some(Info::Snapshot(snapshot)) => {
                 self.handle_catalog_snapshot(snapshot.tables);
 
-                self.local_version_manager.try_update_pinned_version(
-                    pin_version_response::Payload::PinnedVersion(snapshot.hummock_version.unwrap()),
-                );
+                if let StateStoreImpl::HummockStateStore(storage) = &self.store {
+                    storage.as_hummock_storage_ref().try_update_pinned_version(
+                        pin_version_response::Payload::PinnedVersion(
+                            snapshot.hummock_version.unwrap(),
+                        ),
+                    );
+                }
 
                 self.version = resp.version;
             }
@@ -96,11 +102,11 @@ impl ObserverNodeImpl for ComputeObserverNode {
 impl ComputeObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-        local_version_manager: LocalVersionManagerRef,
+        store: StateStoreImpl,
     ) -> Self {
         Self {
             filter_key_extractor_manager,
-            local_version_manager,
+            store,
             version: 0,
         }
     }

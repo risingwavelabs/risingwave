@@ -57,7 +57,7 @@ async fn test_failpoints_state_store_read_upload() {
         env,
         hummock_manager_ref,
         filter_key_extractor_manager,
-        hummock_storage.local_version_manager().clone(),
+        hummock_storage.clone(),
         worker_node,
     )
     .await;

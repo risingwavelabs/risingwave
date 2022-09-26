@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::hummock::WriteLimiterThreshold;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
@@ -137,8 +138,8 @@ where
                 indexes,
                 users,
                 parallel_unit_mappings,
-                hummock_version: None,
                 hummock_snapshot,
+                ..Default::default()
             },
 
             WorkerType::Compactor => MetaSnapshot {
@@ -149,6 +150,12 @@ where
             WorkerType::ComputeNode => MetaSnapshot {
                 tables,
                 hummock_version: Some(hummock_manager_guard.current_version.clone()),
+                // TODO #5457: read from persistent store
+                hummock_write_limiter_threshold: Some(WriteLimiterThreshold {
+                    max_sub_level_number: 1000,
+                    max_delay_sec: 60,
+                    per_file_delay_sec: 0.1,
+                }),
                 ..Default::default()
             },
 

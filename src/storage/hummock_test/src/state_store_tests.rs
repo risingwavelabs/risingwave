@@ -51,7 +51,7 @@ async fn test_basic() {
         env,
         hummock_manager_ref,
         filter_key_extractor_manager,
-        hummock_storage.local_version_manager().clone(),
+        hummock_storage.clone(),
         worker_node,
     )
     .await;
@@ -924,7 +924,7 @@ async fn test_delete_get() {
         env,
         hummock_manager_ref,
         filter_key_extractor_manager,
-        hummock_storage.local_version_manager().clone(),
+        hummock_storage.clone(),
         worker_node,
     )
     .await;
@@ -1014,7 +1014,7 @@ async fn test_multiple_epoch_sync() {
         env,
         hummock_manager_ref,
         filter_key_extractor_manager,
-        hummock_storage.local_version_manager().clone(),
+        hummock_storage.clone(),
         worker_node,
     )
     .await;

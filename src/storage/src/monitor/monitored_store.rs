@@ -280,9 +280,17 @@ where
                 .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
         }
     }
+
+    fn get_write_delay(&self) -> Option<WriteDelay> {
+        self.inner.get_write_delay()
+    }
 }
 
 impl MonitoredStateStore<HummockStorage> {
+    pub fn as_hummock_storage_ref(&self) -> &HummockStorage {
+        &self.inner
+    }
+
     pub fn sstable_store(&self) -> SstableStoreRef {
         self.inner.sstable_store()
     }
