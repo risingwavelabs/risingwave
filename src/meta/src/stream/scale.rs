@@ -513,30 +513,16 @@ where
                 .get(fragment_id)
                 .cloned()
                 .unwrap_or_default();
-            let actors_to_remove = fragment_actors_to_remove
-                .get(fragment_id)
-                .cloned()
-                .unwrap_or_default();
 
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
             assert!(!fragment.actors.is_empty());
 
-            let sample_actors: Vec<_> = if actors_to_create.len() == actors_to_remove.len() {
-                actors_to_remove
-                    .keys()
-                    .map(|actor_id| ctx.actor_map.get(actor_id).unwrap())
-                    .collect()
-            } else {
-                repeat(fragment.actors.first().unwrap())
-                    .take(actors_to_create.len())
-                    .collect()
-            };
-
             let updated_bitmap = fragment_updated_bitmap.get(fragment_id).unwrap();
 
-            for (actor_to_create, sample_actor) in
-                actors_to_create.iter().zip_eq(sample_actors.into_iter())
+            for (actor_to_create, sample_actor) in actors_to_create
+                .iter()
+                .zip_eq(repeat(fragment.actors.first().unwrap()).take(actors_to_create.len()))
             {
                 let new_actor_id = actor_to_create.0;
                 let new_parallel_unit_id = actor_to_create.1;
