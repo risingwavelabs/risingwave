@@ -16,8 +16,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures_async_stream::{for_await, try_stream};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
+use pgwire::pg_server::BoxedError;
+use pgwire::types::Row;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
@@ -99,15 +101,19 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    pub async fn collect_rows(self, format: bool) -> SchedulerResult<QueryResultSet> {
-        let data_stream = self.run();
-        let mut rows = vec![];
+    #[try_stream(ok = Row, error = BoxedError)]
+    async fn stream_row_inner(data_stream: BoxedDataChunkStream, format: bool) {
         #[for_await]
         for chunk in data_stream {
-            rows.extend(to_pg_rows(chunk?, format));
+            let rows = to_pg_rows(chunk?, format);
+            for row in rows {
+                yield row;
+            }
         }
+    }
 
-        Ok(rows)
+    pub fn stream_rows(self, format: bool) -> QueryResultSet {
+        Box::pin(Self::stream_row_inner(self.run(), format))
     }
 
     /// Convert query to plan fragment.
