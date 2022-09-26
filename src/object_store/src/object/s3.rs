@@ -299,10 +299,8 @@ pub struct S3ObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
     fn get_object_prefix(&self, obj_id: u64) -> String {
-        let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % NUM_BUCKET_PREFIXES;
-        let mut obj_prefix = prefix.to_string();
-        obj_prefix.push('/');
-        obj_prefix
+        // Delegate to static method to avoid creating an `S3ObjectStore` in unit test.
+        Self::get_object_prefix(obj_id)
     }
 
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
@@ -565,6 +563,14 @@ impl S3ObjectStore {
         }
     }
 
+    ///
+    fn get_object_prefix(obj_id: u64) -> String {
+        let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % NUM_BUCKET_PREFIXES;
+        let mut obj_prefix = prefix.to_string();
+        obj_prefix.push('/');
+        obj_prefix
+    }
+
     /// Generates an HTTP GET request to download the object specified in `path`. If given,
     /// `start_pos` and `end_pos` specify the first and last byte to download, respectively. Both
     /// are inclusive and 0-based. For example, set `start_pos = 0` and `end_pos = 7` to download
@@ -631,11 +637,8 @@ impl S3ObjectStore {
 #[cfg(test)]
 #[cfg(not(madsim))]
 mod tests {
-    use std::sync::Arc;
-
-    use crate::object::object_metrics::ObjectStoreMetrics;
     use crate::object::s3::NUM_BUCKET_PREFIXES;
-    use crate::object::{ObjectStore, S3ObjectStore};
+    use crate::object::S3ObjectStore;
 
     fn get_hash_of_object(obj_id: u64) -> u32 {
         let crc_hash = crc32fast::hash(&obj_id.to_be_bytes());
@@ -644,15 +647,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_object_prefix() {
-        let store = S3ObjectStore::new(
-            "mybucket".to_string(),
-            Arc::new(ObjectStoreMetrics::unused()),
-        )
-        .await;
-
         for obj_id in 0..99999 {
             let hash = get_hash_of_object(obj_id);
-            let prefix = store.get_object_prefix(obj_id);
+            let prefix = S3ObjectStore::get_object_prefix(obj_id);
             assert_eq!(format!("{}/", hash), prefix);
         }
 
