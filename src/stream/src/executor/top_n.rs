@@ -173,7 +173,7 @@ pub struct TopNCache<const WITH_TIES: bool> {
     /// Assumption: `limit != 0`
     pub limit: usize,
 
-    /// The length of the ORDER BY clause. Only used when `WITH_TIES` is true.
+    /// The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is true.
     pub order_by_len: usize,
 }
 
@@ -586,7 +586,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
     /// `order_pairs` -- the storage pk. It's composed of the ORDER BY columns and the missing
     /// columns of pk.
     ///
-    /// `order_by_len` -- The length of the ORDER BY clause. Only used when `WITH_TIES` is true.
+    /// `order_by_len` -- The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is true.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,

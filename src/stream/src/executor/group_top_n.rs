@@ -130,7 +130,7 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     /// group key -> cache for this group
     caches: HashMap<Vec<Datum>, TopNCache<WITH_TIES>>,
 
-    /// The length of the ORDER BY clause. Only used when `WITH_TIES` is true.
+    /// The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is true.
     order_by_len: usize,
 }
 
