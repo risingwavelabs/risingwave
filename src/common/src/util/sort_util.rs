@@ -304,8 +304,7 @@ mod tests {
         let chunk = DataChunk::from_rows(
             &[row1, row2],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
-        )
-        .unwrap();
+        );
         let order_pairs = vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Descending),
@@ -400,8 +399,7 @@ mod tests {
                     datatype: Box::new(DataType::Int32),
                 },
             ],
-        )
-        .unwrap();
+        );
         assert_eq!(
             Ordering::Equal,
             compare_rows_in_chunk(&chunk, 0, &chunk, 0, &order_pairs).unwrap()

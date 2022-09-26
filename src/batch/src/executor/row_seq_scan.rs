@@ -371,7 +371,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             }
             ScanType::PointGet(row) => {
                 if let Some(row) = row {
-                    yield DataChunk::from_rows(&[row], &schema.data_types())?;
+                    yield DataChunk::from_rows(&[row], &schema.data_types());
                 }
             }
         }

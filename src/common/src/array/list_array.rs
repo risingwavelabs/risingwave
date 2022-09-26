@@ -223,14 +223,14 @@ impl Array for ListArray {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<super::ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = ListArrayBuilder::with_meta(
             capacity,
             ArrayMeta::List {
                 datatype: Box::new(self.value_type.clone()),
             },
         );
-        Ok(ArrayBuilderImpl::List(array_builder))
+        ArrayBuilderImpl::List(array_builder)
     }
 
     fn array_meta(&self) -> ArrayMeta {
@@ -270,7 +270,7 @@ impl ListArray {
         let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let mut offsets = vec![0];
         let mut values = values.into_iter().peekable();
-        let mut builder = values.peek().unwrap().as_ref().unwrap().create_builder(0)?;
+        let mut builder = values.peek().unwrap().as_ref().unwrap().create_builder(0);
         for i in values {
             match i {
                 Some(a) => {
@@ -675,7 +675,7 @@ mod tests {
             DataType::Float32,
         )
         .unwrap();
-        let builder = arr.create_builder(0).unwrap();
+        let builder = arr.create_builder(0);
         let arr2 = try_match_expand!(builder.finish(), ArrayImpl::List).unwrap();
         assert_eq!(arr.array_meta(), arr2.array_meta());
     }

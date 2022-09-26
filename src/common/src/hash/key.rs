@@ -778,12 +778,7 @@ mod tests {
 
         let mut array_builders = column_indexes
             .iter()
-            .map(|idx| {
-                data.columns()[*idx]
-                    .array_ref()
-                    .create_builder(1024)
-                    .unwrap()
-            })
+            .map(|idx| data.columns()[*idx].array_ref().create_builder(1024))
             .collect::<Vec<ArrayBuilderImpl>>();
 
         keys.into_iter()

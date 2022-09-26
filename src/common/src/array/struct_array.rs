@@ -221,14 +221,14 @@ impl Array for StructArray {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<super::ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = StructArrayBuilder::with_meta(
             capacity,
             ArrayMeta::Struct {
                 children: self.children_type.clone(),
             },
         );
-        Ok(ArrayBuilderImpl::Struct(array_builder))
+        ArrayBuilderImpl::Struct(array_builder)
     }
 
     fn array_meta(&self) -> ArrayMeta {
@@ -613,7 +613,7 @@ mod tests {
             vec![DataType::Int32, DataType::Float32],
         )
         .unwrap();
-        let builder = arr.create_builder(4).unwrap();
+        let builder = arr.create_builder(4);
         let arr2 = try_match_expand!(builder.finish(), ArrayImpl::Struct).unwrap();
         assert_eq!(arr.array_meta(), arr2.array_meta());
     }

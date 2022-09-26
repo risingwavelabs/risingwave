@@ -210,7 +210,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
         self.len() == 0
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl>;
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl;
 
     fn array_meta(&self) -> ArrayMeta {
         ArrayMeta::Simple
@@ -580,7 +580,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+            pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
                 match self {
                     $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
                 }
