@@ -29,3 +29,6 @@ cache_meta_fallocate_unit_mb = 16
 [streaming.developer]
 enable_executor_row_count = false
 connector_message_buffer_size = 16
+unsafe_hash_agg_cache_size = 65536
+unsafe_join_cache_size = 65536
+unsafe_extreme_cache_size = 1024

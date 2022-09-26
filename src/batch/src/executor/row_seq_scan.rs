@@ -131,7 +131,7 @@ fn get_scan_bound(
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
@@ -160,24 +160,20 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .collect();
 
         let pk_types = table_desc
-            .order_key
+            .pk
             .iter()
             .map(|order| column_descs[order.index as usize].clone().data_type)
             .collect_vec();
-        let pk_len = table_desc.order_key.len();
+        let pk_len = table_desc.pk.len();
         let order_types: Vec<OrderType> = table_desc
-            .order_key
+            .pk
             .iter()
             .map(|order| {
                 OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
             })
             .collect();
 
-        let pk_indices = table_desc
-            .order_key
-            .iter()
-            .map(|k| k.index as usize)
-            .collect_vec();
+        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices

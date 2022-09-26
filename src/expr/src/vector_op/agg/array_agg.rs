@@ -106,7 +106,7 @@ impl ArrayAggOrdered {
         }
     }
 
-    fn push_row(&mut self, row: RowRef) {
+    fn push_row(&mut self, row: RowRef<'_>) {
         let key = OrderedRow::new(
             row.row_by_indices(&self.order_col_indices),
             &self.order_types,

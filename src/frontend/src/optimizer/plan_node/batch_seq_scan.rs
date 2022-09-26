@@ -115,7 +115,7 @@ impl BatchSeqScan {
 impl_plan_tree_node_for_leaf! { BatchSeqScan }
 
 impl fmt::Display for BatchSeqScan {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
             let (op, v) = match lb {
                 Bound::Included(v) => (">=", v),

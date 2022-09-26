@@ -98,7 +98,7 @@ where
         Ok(())
     }
 
-    pub async fn get_catalog_core_guard(&self) -> MutexGuard<CatalogManagerCore<S>> {
+    pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore<S>> {
         self.core.lock().await
     }
 }
@@ -283,13 +283,13 @@ where
             catalog_deleted_ids.extend(
                 valid_tables
                     .into_iter()
-                    .map(|table| StreamingJobId::TableId(table.id.into())),
+                    .map(|table| StreamingJobId::Table(table.id.into())),
             );
-            catalog_deleted_ids.extend(source_ids.into_iter().map(StreamingJobId::SourceId));
+            catalog_deleted_ids.extend(source_ids.into_iter().map(StreamingJobId::Source));
             catalog_deleted_ids.extend(
                 sinks
                     .into_iter()
-                    .map(|sink| StreamingJobId::SinkId(sink.id.into())),
+                    .map(|sink| StreamingJobId::Sink(sink.id.into())),
             );
 
             Ok((version, catalog_deleted_ids))
@@ -738,7 +738,7 @@ where
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
         } else {
-            bail!("source or table already exist");
+            bail!("source or table already exists");
         }
     }
 
@@ -1063,6 +1063,16 @@ where
             .database
             .list_source_ids(schema_id)
             .await
+    }
+
+    pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<RelationId>> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_stream_job_ids()
+            .await
+            .map(|iter| iter.collect())
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {

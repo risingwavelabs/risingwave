@@ -476,7 +476,7 @@ where
             state.in_flight_prev_epoch = new_epoch;
 
             let (new_epoch, actors_to_track, create_mview_progress) =
-                self.recovery(state.in_flight_prev_epoch).await;
+                self.recovery(state.in_flight_prev_epoch, true).await;
             tracker.add(new_epoch, actors_to_track, vec![]);
             for progress in &create_mview_progress {
                 tracker.update(progress);
@@ -756,7 +756,7 @@ where
         if self.enable_recovery {
             // If failed, enter recovery mode.
             let (new_epoch, actors_to_track, create_mview_progress) =
-                self.recovery(state.in_flight_prev_epoch).await;
+                self.recovery(state.in_flight_prev_epoch, false).await;
             *tracker = CreateMviewProgressTracker::default();
             tracker.add(new_epoch, actors_to_track, vec![]);
             for progress in &create_mview_progress {

@@ -183,9 +183,25 @@ async fn local_execute(
 
     let front_env = session.env();
 
-    // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(query, front_env.clone(), "", session.auth_context());
-    let rsp = Ok((execution.collect_rows(format).await?, pg_descs));
+    let rsp = {
+        // Acquire hummock snapshot for local execution.
+        let hummock_snapshot_manager = front_env.hummock_snapshot_manager();
+        let query_id = query.query_id().clone();
+        let epoch = hummock_snapshot_manager
+            .acquire(&query_id)
+            .await?
+            .committed_epoch;
+
+        // TODO: Passing sql here
+        let execution =
+            LocalQueryExecution::new(query, front_env.clone(), "", epoch, session.auth_context());
+        let rsp = Ok((execution.collect_rows(format).await?, pg_descs));
+
+        // Release hummock snapshot for local execution.
+        hummock_snapshot_manager.release(epoch, &query_id).await;
+
+        rsp
+    };
 
     // Collect metrics
     timer.observe_duration();

@@ -145,8 +145,7 @@ impl StateStoreImpl {
                     let local_object_store = parse_local_object_store(
                         config.local_object_store.as_str(),
                         object_store_metrics.clone(),
-                    )
-                    .await;
+                    );
                     ObjectStoreImpl::hybrid(local_object_store, remote_object_store)
                 } else {
                     remote_object_store

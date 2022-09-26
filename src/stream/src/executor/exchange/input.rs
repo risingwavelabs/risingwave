@@ -196,7 +196,12 @@ impl RemoteInput {
                         Err(e) => bail!("RemoteInput decode message error: {}", e),
                     }
                 }
-                Err(e) => bail!("RemoteInput tonic error: {}", e),
+                Err(e) => {
+                    return Err(StreamExecutorError::channel_closed(format!(
+                        "RemoteInput tonic error: {}",
+                        e
+                    )))
+                }
             }
         }
     }

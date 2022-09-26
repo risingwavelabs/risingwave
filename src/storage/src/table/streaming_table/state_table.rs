@@ -117,7 +117,7 @@ impl<S: StateStore> StateTable<S> {
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
         let order_types: Vec<OrderType> = table_catalog
-            .order_key
+            .pk
             .iter()
             .map(|col_order| {
                 OrderType::from_prost(
@@ -132,7 +132,7 @@ impl<S: StateStore> StateTable<S> {
             .collect();
 
         let pk_indices = table_catalog
-            .order_key
+            .pk
             .iter()
             .map(|col_order| col_order.index as usize)
             .collect_vec();
@@ -693,7 +693,7 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<(MemTableIter, StorageIterInner<S>)> {
+    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
         let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);

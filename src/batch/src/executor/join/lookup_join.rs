@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, Row, RowRef};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
+use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_common::types::{
     DataType, Datum, ParallelUnitId, ToOwnedDatum, VirtualNode, VnodeMapping,
 };
@@ -51,7 +51,8 @@ use crate::executor::join::{
     concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
 };
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    utils, BoxedDataChunkListStream, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
+    Executor, ExecutorBuilder,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
@@ -117,7 +118,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             .collect_vec();
         let pk_indices = self
             .table_desc
-            .order_key
+            .pk
             .iter()
             .map(|col| col.index as _)
             .collect_vec();
@@ -300,6 +301,8 @@ pub struct LookupJoinExecutor<P> {
     identity: String,
 }
 
+const AT_LEAST_BUILD_SIDE_ROWS: usize = 512;
+
 impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
     fn schema(&self) -> &Schema {
         &self.schema
@@ -317,26 +320,24 @@ impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
 impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let mut build_side_stream = self.build_child.take().unwrap().execute();
+        let mut build_side_batch_read_stream: BoxedDataChunkListStream = utils::batch_read(
+            self.build_child.take().unwrap().execute(),
+            AT_LEAST_BUILD_SIDE_ROWS,
+        );
 
-        let invalid_join_error = RwError::from(ErrorCode::NotImplemented(
-            format!(
-                "Lookup Join does not support join type {:?}",
-                self.join_type
-            ),
-            None.into(),
-        ));
-
-        while let Some(build_chunk) = build_side_stream.next().await {
-            let build_chunk = build_chunk?.compact()?;
+        while let Some(chunk_list) = build_side_batch_read_stream.next().await {
+            let chunk_list = chunk_list?;
 
             // Group rows with the same key datums together
-            let groups = build_chunk.rows().into_group_map_by(|row| {
-                self.build_side_key_idxs
-                    .iter()
-                    .map(|&idx| row.value_at(idx).to_owned_datum())
-                    .collect_vec()
-            });
+            let groups = chunk_list
+                .iter()
+                .flat_map(|chunk| chunk.rows())
+                .into_group_map_by(|row| {
+                    self.build_side_key_idxs
+                        .iter()
+                        .map(|&idx| row.value_at(idx).to_owned_datum())
+                        .collect_vec()
+                });
 
             let mut row_keys = vec![];
             let mut all_row_refs = vec![];
@@ -415,7 +416,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                                 | JoinType::LeftOuter
                                 | JoinType::LeftSemi
                                 | JoinType::LeftAnti => self.do_inner_join(cur_row, chunk),
-                                _ => Err(invalid_join_error.clone()),
+                                _ => unimplemented!(),
                             }
                         } else {
                             match self.join_type {
@@ -432,7 +433,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                                 JoinType::LeftAnti if !has_match[i][j] => {
                                     self.convert_row_for_builder(cur_row)
                                 }
-                                _ => Err(invalid_join_error.clone()),
+                                _ => unimplemented!(),
                             }
                         }?;
 
@@ -521,7 +522,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     /// evaluated to hide the rows in the join result that don't match the condition.
     fn do_inner_join(
         &self,
-        cur_row: &RowRef,
+        cur_row: &RowRef<'_>,
         probe_side_chunk: DataChunk,
     ) -> Result<Option<DataChunk>> {
         let build_side_chunk = convert_row_to_chunk(
@@ -543,7 +544,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     }
 
     /// Pad the row out with NULLs and return it.
-    fn do_left_outer_join(&self, cur_row: &RowRef) -> Result<Option<DataChunk>> {
+    fn do_left_outer_join(&self, cur_row: &RowRef<'_>) -> Result<Option<DataChunk>> {
         let mut build_datum_refs = cur_row.values().collect_vec();
 
         let builder_data_types = self.chunk_builder.data_types();
@@ -559,7 +560,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     }
 
     /// Converts row to a data chunk
-    fn convert_row_for_builder(&self, cur_row: &RowRef) -> Result<Option<DataChunk>> {
+    fn convert_row_for_builder(&self, cur_row: &RowRef<'_>) -> Result<Option<DataChunk>> {
         Ok(Some(convert_row_to_chunk(
             cur_row,
             1,
@@ -581,7 +582,7 @@ pub struct LookupJoinExecutorBuilder {}
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [build_child]: [_; 1] = inputs.try_into().unwrap();
@@ -649,10 +650,10 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .collect_vec();
 
         let mut probe_side_key_idxs = vec![];
-        for order_key in &table_desc.order_key {
+        for pk in &table_desc.pk {
             let key_idx = probe_side_column_ids
                 .iter()
-                .position(|&i| table_desc.columns[order_key.index as usize].column_id == i)
+                .position(|&i| table_desc.columns[pk.index as usize].column_id == i)
                 .ok_or_else(|| {
                     internal_error("Probe side key is not part of its output columns")
                 })?;

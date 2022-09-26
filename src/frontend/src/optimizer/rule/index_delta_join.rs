@@ -81,7 +81,7 @@ impl Rule for IndexDeltaJoinRule {
                 // 2. Check join key is prefix of index order key
                 let index_order_key_prefix = index
                     .index_table
-                    .order_key
+                    .pk
                     .iter()
                     .map(|x| x.index)
                     .take(index.index_table.distribution_key.len())

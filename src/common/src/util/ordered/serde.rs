@@ -68,7 +68,7 @@ impl OrderedRowSerializer {
     }
 
     #[must_use]
-    pub fn prefix(&self, len: usize) -> Cow<Self> {
+    pub fn prefix(&self, len: usize) -> Cow<'_, Self> {
         if len == self.order_types.len() {
             Cow::Borrowed(self)
         } else {

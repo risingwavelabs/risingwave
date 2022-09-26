@@ -111,7 +111,7 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
         database_id: DatabaseId::placeholder() as u32,
         name: String::new(),
         columns,
-        order_key: vec![ColumnOrder {
+        pk: vec![ColumnOrder {
             index: 0,
             order_type: 2,
         }],
@@ -370,6 +370,16 @@ async fn test_fragmenter() -> MetaResult<()> {
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(4, internal_table_ids.len());
+
+    let fragment_upstreams: HashMap<_, _> = table_fragments
+        .fragments
+        .iter()
+        .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))
+        .collect();
+
+    assert_eq!(fragment_upstreams.get(&1).unwrap(), &vec![2]);
+    assert_eq!(fragment_upstreams.get(&2).unwrap(), &vec![3]);
+    assert!(fragment_upstreams.get(&3).unwrap().is_empty());
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);

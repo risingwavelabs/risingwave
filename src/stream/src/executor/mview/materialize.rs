@@ -26,8 +26,8 @@ use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
-    PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    ExecutorInfo, Message, PkIndicesRef,
 };
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
@@ -38,6 +38,8 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
+
+    actor_context: ActorContextRef,
 
     info: ExecutorInfo,
 }
@@ -51,6 +53,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         store: S,
         key: Vec<OrderPair>,
         executor_id: u64,
+        actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
     ) -> Self {
@@ -64,6 +67,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             input,
             state_table,
             arrange_columns: arrange_columns.clone(),
+            actor_context,
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,
@@ -101,6 +105,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             input,
             state_table,
             arrange_columns: arrange_columns.clone(),
+            actor_context: Default::default(),
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,
@@ -129,6 +134,12 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 Message::Barrier(b) => {
                     // FIXME(ZBW): use a better error type
                     self.state_table.commit(b.epoch.prev).await?;
+
+                    // Update the vnode bitmap for the state table if asked.
+                    if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
+                        self.state_table.update_vnode_bitmap(vnode_bitmap);
+                    }
+
                     Message::Barrier(b)
                 }
             }
@@ -145,7 +156,7 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 

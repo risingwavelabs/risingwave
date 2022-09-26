@@ -24,9 +24,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::update_mutation::{
-    DispatcherUpdate as ProstDispatcherUpdate, MergeUpdate as ProstMergeUpdate,
-};
+use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     ActorMapping, AddMutation, Dispatcher, PauseMutation, ResumeMutation, StopMutation,
     UpdateMutation,
@@ -252,7 +250,7 @@ where
             }
 
             Command::RescheduleFragment(reschedules) => {
-                let mut actor_dispatcher_update = HashMap::new();
+                let mut dispatcher_update = HashMap::new();
                 for (_fragment_id, reschedule) in reschedules.iter() {
                     for &(upstream_fragment_id, dispatcher_id) in
                         &reschedule.upstream_fragment_dispatcher_ids
@@ -265,10 +263,12 @@ where
 
                         // Record updates for all actors.
                         for actor_id in upstream_actor_ids {
-                            actor_dispatcher_update
+                            // Index with the dispatcher id to check duplicates.
+                            dispatcher_update
                                 .try_insert(
-                                    actor_id,
-                                    ProstDispatcherUpdate {
+                                    (actor_id, dispatcher_id),
+                                    DispatcherUpdate {
+                                        actor_id,
                                         dispatcher_id,
                                         hash_mapping: reschedule
                                             .upstream_dispatcher_mapping
@@ -283,9 +283,10 @@ where
                         }
                     }
                 }
+                let dispatcher_update = dispatcher_update.into_values().collect();
 
-                let mut actor_merge_update = HashMap::new();
-                for (_fragment_id, reschedule) in reschedules.iter() {
+                let mut merge_update = HashMap::new();
+                for (&fragment_id, reschedule) in reschedules.iter() {
                     if let Some(downstream_fragment_id) = reschedule.downstream_fragment_id {
                         // Find the actors of the downstream fragment.
                         let downstream_actor_ids = self
@@ -313,10 +314,13 @@ where
                                 continue;
                             }
 
-                            actor_merge_update
+                            // Index with the fragment id to check duplicates.
+                            merge_update
                                 .try_insert(
-                                    actor_id,
-                                    ProstMergeUpdate {
+                                    (actor_id, fragment_id),
+                                    MergeUpdate {
+                                        actor_id,
+                                        upstream_fragment_id: fragment_id,
                                         added_upstream_actor_id: reschedule.added_actors.clone(),
                                         removed_upstream_actor_id: reschedule
                                             .removed_actors
@@ -327,6 +331,7 @@ where
                         }
                     }
                 }
+                let merge_update = merge_update.into_values().collect();
 
                 let mut actor_vnode_bitmap_update = HashMap::new();
                 for (_fragment_id, reschedule) in reschedules.iter() {
@@ -345,8 +350,8 @@ where
                     .collect();
 
                 let mutation = Mutation::Update(UpdateMutation {
-                    actor_dispatcher_update,
-                    actor_merge_update,
+                    dispatcher_update,
+                    merge_update,
                     actor_vnode_bitmap_update,
                     dropped_actors,
                 });
