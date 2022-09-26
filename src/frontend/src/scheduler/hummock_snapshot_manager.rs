@@ -293,7 +293,7 @@ impl HummockSnapshotManagerCore {
         };
 
         let last_unpin_snapshot = self.last_unpin_snapshot.load(Ordering::Acquire);
-        tracing::info!(
+        tracing::trace!(
             "Try unpin snapshot: min_epoch {}, last_unpin_snapshot: {}",
             min_epoch,
             last_unpin_snapshot
