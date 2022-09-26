@@ -2729,7 +2729,7 @@ dependencies = [
 [[package]]
 name = "lru"
 version = "0.7.6"
-source = "git+https://github.com/risingwavelabs/lru-rs.git?branch=evict_by_timestamp#8a604750301d122ba595680aa53924cddd2807fd"
+source = "git+https://github.com/risingwavelabs/lru-rs.git?branch=evict_by_timestamp#b972b4e486311c0eb3e4e48a849003bcc440224d"
 dependencies = [
  "hashbrown",
 ]

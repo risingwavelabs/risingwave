@@ -535,6 +535,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Cached rows for this hash table.
+    #[expect(dead_code)]
     pub fn cached_rows(&self) -> usize {
         self.values().map(|e| e.len()).sum()
     }
@@ -545,6 +546,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Estimated memory usage for this hash table.
+    #[expect(dead_code)]
     pub fn estimated_size(&self) -> usize {
         self.iter()
             .map(|(k, v)| k.estimated_size() + v.estimated_size())

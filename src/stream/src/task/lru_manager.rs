@@ -256,7 +256,6 @@ impl LruManager {
     }
 
     fn set_watermark_time(&self, time: u64) {
-        dbg!{format!("watermark time: {}", time)};
         let epoch = Epoch::from_physical_time(time).0;
         let watermark_epoch = self.watermark_epoch.as_ref();
         watermark_epoch.store(epoch, Ordering::Relaxed);
@@ -266,7 +265,7 @@ impl LruManager {
         let mem_threshold_graceful = (self.total_memory_available_bytes as f64 * 0.7) as usize;
         let mem_threshold_aggressive = (self.total_memory_available_bytes as f64 * 0.9) as usize;
 
-        let mut watermark_time = 0u64;
+        let mut watermark_time = Epoch::physical_now();
         let mut last_total_bytes_used = 0;
         let mut step = 0;
 
@@ -282,7 +281,11 @@ impl LruManager {
                 0
             } else if cur_total_bytes_used < mem_threshold_aggressive {
                 // Gracefully evict
-                1
+                if last_total_bytes_used < cur_total_bytes_used {
+                    1
+                } else {
+                    step + 1
+                }
             } else if last_total_bytes_used < cur_total_bytes_used {
                 // Aggressively evict
                 if step == 0 {
