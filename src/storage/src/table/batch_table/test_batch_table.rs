@@ -67,7 +67,7 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
     state.insert(Row(vec![Some(3_i32.into()), None, None]));
 
     state.delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     let epoch = EpochPair::new_test_epoch(2);
 
@@ -151,7 +151,7 @@ async fn test_storage_get_row_for_string() {
         Some("44".to_string().into()),
         Some("444".to_string().into()),
     ]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     let get_row1_res = table
         .get_row(
@@ -221,7 +221,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     state.insert(Row(vec![Some(3_i32.into()), None, None]));
 
     state.delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     let get_row1_res = table
         .get_row(&Row(vec![Some(1_i32.into()), None]), epoch.curr)
@@ -298,7 +298,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
     state.insert(Row(vec![Some(3_i32.into()), None, None]));
 
     state.delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     let get_row1_res = table
         .get_row(&Row(vec![Some(1_i32.into()), None]), epoch.curr)
@@ -380,7 +380,7 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         Some(22_i32.into()),
         Some(222_i32.into()),
     ]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     let iter = table
         .batch_iter(HummockReadEpoch::Committed(epoch.curr))

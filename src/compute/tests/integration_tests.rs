@@ -266,7 +266,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     }
 
     // Send a barrier and poll again, should write changes to storage
-    let curr_epoch = 1919;
+    let curr_epoch = 1920;
     barrier_tx
         .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
@@ -349,7 +349,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             epoch,
             mutation: None,
             ..
-        }) if epoch.curr == curr_epoch + 1
+        }) if epoch.curr == curr_epoch +1
     ));
 
     // Scan the table again, we are able to see the deletion now!
@@ -420,7 +420,7 @@ async fn test_row_seq_scan() -> Result<()> {
         Some(5_i32.into()),
         Some(8_i64.into()),
     ]));
-    state.commit(epoch.inc()).await.unwrap();
+    state.commit_for_test(epoch.inc()).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),

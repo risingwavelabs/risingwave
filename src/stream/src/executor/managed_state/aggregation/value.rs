@@ -185,7 +185,7 @@ mod tests {
 
         // write to state store
         managed_state.flush(&mut state_table).unwrap();
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
 
         // get output
         assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(3)));
@@ -245,7 +245,7 @@ mod tests {
 
         // write to state store
         managed_state.flush(&mut state_table).unwrap();
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
 
         // get output
         assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(2)));

@@ -320,7 +320,7 @@ mod tests {
 
         epoch.inc();
         agg_state.flush(&mut state_table)?;
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
 
         let res = agg_state.get_output(&state_table).await?;
         match res {
@@ -396,7 +396,7 @@ mod tests {
 
         epoch.inc();
         agg_state.flush(&mut state_table)?;
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
 
         let res = agg_state.get_output(&state_table).await?;
         match res {
@@ -481,7 +481,7 @@ mod tests {
                 .await?;
 
             agg_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
+            state_table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
             let res = agg_state.get_output(&state_table).await?;
@@ -506,7 +506,7 @@ mod tests {
                 .await?;
 
             agg_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
+            state_table.commit_for_test(epoch).await.unwrap();
 
             let res = agg_state.get_output(&state_table).await?;
             match res {
@@ -584,7 +584,7 @@ mod tests {
                 .await?;
 
             agg_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
+            state_table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
             let res = agg_state.get_output(&state_table).await?;
@@ -609,7 +609,7 @@ mod tests {
                 .await?;
 
             agg_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
+            state_table.commit_for_test(epoch).await.unwrap();
 
             let res = agg_state.get_output(&state_table).await?;
             match res {

@@ -347,15 +347,11 @@ impl<S: StateStore> LookupExecutor<S> {
             // the `state_table::commit(epoch)` just means the data in the epoch will be visible by
             // the lookup executor
             // TODO(st1page): maybe we should not use state table here.
-            if self.arrangement.use_current_epoch {
-                self.arrangement
-                    .state_table
-                    .commit_no_data_expected(barrier.epoch.curr);
-            } else {
-                self.arrangement
-                    .state_table
-                    .commit_no_data_expected(barrier.epoch.prev);
-            };
+
+            self.arrangement
+                .state_table
+                .commit_no_data_expected(barrier.epoch);
+
             self.last_barrier = Some(barrier)
         }
 

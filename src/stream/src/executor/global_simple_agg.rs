@@ -206,7 +206,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             _ => {
                 // Call commit on state table to increment the epoch.
                 for state_table in state_tables.iter_mut() {
-                    state_table.commit_no_data_expected(epoch.curr);
+                    state_table.commit_no_data_expected(epoch);
                 }
                 return Ok(None);
             } // Nothing to flush.

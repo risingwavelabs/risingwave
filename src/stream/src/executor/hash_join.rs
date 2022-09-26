@@ -1152,8 +1152,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1228,8 +1228,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1313,8 +1313,8 @@ mod tests {
         assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1424,8 +1424,8 @@ mod tests {
         assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1527,8 +1527,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1606,8 +1606,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1685,8 +1685,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1772,8 +1772,8 @@ mod tests {
         assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd right chunk
@@ -1893,8 +1893,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -2022,8 +2022,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_r.push_barrier(1, false);
-        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd right chunk

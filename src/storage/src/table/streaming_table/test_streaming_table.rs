@@ -101,7 +101,7 @@ async fn test_state_table() -> StorageResult<()> {
     assert_eq!(row2_delete, None);
 
     epoch.inc();
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     let row2_delete_commit = state_table
         .get_row(&Row(vec![Some(2_i32.into())]))
@@ -131,7 +131,7 @@ async fn test_state_table() -> StorageResult<()> {
     state_table.delete(Row(vec![Some(4_i32.into()), None, None]));
 
     epoch.inc();
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     let row3_delete = state_table
         .get_row(&Row(vec![Some(3_i32.into())]))
@@ -185,7 +185,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     ]));
 
     epoch.inc();
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     state_table.delete(Row(vec![
         Some(6_i32.into()),
@@ -241,7 +241,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     );
 
     epoch.inc();
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     let row6_commit = state_table
         .get_row(&Row(vec![Some(6_i32.into())]))
@@ -278,7 +278,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     ]));
 
     epoch.inc();
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     // one epoch: delete (1, 2, 3, 4), insert (5, 6, 7, None), delete(5, 6, 7, None)
     state_table.delete(Row(vec![
@@ -307,7 +307,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     assert_eq!(row1, None);
 
     epoch.inc();
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     let row1_commit = state_table
         .get_row(&Row(vec![Some(1_i32.into())]))
@@ -409,7 +409,7 @@ async fn test_state_table_iter() {
         );
     }
     epoch.inc();
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
     // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
@@ -586,7 +586,7 @@ async fn test_state_table_iter_with_prefix() {
     ]));
 
     epoch.inc();
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     state.insert(Row(vec![
         Some(1_i32.into()),
@@ -760,7 +760,7 @@ async fn test_state_table_iter_with_value_indices() {
     }
 
     epoch.inc();
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
     // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
