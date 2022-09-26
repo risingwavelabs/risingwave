@@ -103,6 +103,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         filter_key_extractor_manager,
         hummock_storage.local_version_manager().clone(),
         worker_node,
+        Some(hummock_storage.compaction_group_client().clone()),
     )
     .await;
     observer_manager.start().await.unwrap();
@@ -233,6 +234,7 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         filter_key_extractor_manager,
         hummock_storage.local_version_manager().clone(),
         worker_node,
+        Some(hummock_storage.compaction_group_client().clone()),
     )
     .await;
     observer_manager.start().await.unwrap();
@@ -309,6 +311,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         filter_key_extractor_manager,
         hummock_storage.local_version_manager().clone(),
         worker_node,
+        Some(hummock_storage.compaction_group_client().clone()),
     )
     .await;
     observer_manager.start().await.unwrap();

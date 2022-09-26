@@ -347,11 +347,20 @@ message ReportVacuumTaskResponse {
   common.Status status = 1;
 }
 
+message GroupVersionRefId {
+  uint64 version = 1;
+}
+
+message CompactionGroups {
+  repeated CompactionGroup compaction_groups = 1;
+  uint64 version = 2;
+}
+
 message GetCompactionGroupsRequest {}
 
 message GetCompactionGroupsResponse {
   common.Status status = 1;
-  repeated CompactionGroup compaction_groups = 2;
+  CompactionGroups compaction_groups = 2;
 }
 
 message TriggerManualCompactionRequest {

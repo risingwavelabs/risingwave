@@ -41,6 +41,13 @@ impl CompactionGroupClientImpl {
             CompactionGroupClientImpl::Dummy(c) => Ok(c.get_compaction_group_id()),
         }
     }
+
+    pub async fn update_by(&self, compaction_groups: Vec<CompactionGroup>) -> HummockResult<()> {
+        match self {
+            CompactionGroupClientImpl::Meta(c) => c.update_by(compaction_groups).await,
+            CompactionGroupClientImpl::Dummy(_) => Ok(()),
+        }
+    }
 }
 
 /// `CompactionGroupClientImpl` maintains compaction group metadata cache.
@@ -49,6 +56,7 @@ pub struct MetaCompactionGroupClient {
     wait_queue: Mutex<Option<Vec<oneshot::Sender<bool>>>>,
     cache: RwLock<CompactionGroupClientInner>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    update_mutex: tokio::sync::Mutex<()>,
 }
 
 impl MetaCompactionGroupClient {
@@ -119,15 +127,24 @@ impl MetaCompactionGroupClient {
             wait_queue: Default::default(),
             cache: Default::default(),
             hummock_meta_client,
+            update_mutex: Default::default(),
         }
     }
 
     async fn update(&self) -> HummockResult<()> {
+        let _update_guard = self.update_mutex.lock().await;
         let compaction_groups = self
             .hummock_meta_client
             .get_compaction_groups()
             .await
             .map_err(HummockError::meta_error)?;
+        let mut guard = self.cache.write();
+        guard.set_index(compaction_groups.compaction_groups);
+        Ok(())
+    }
+
+    async fn update_by(&self, compaction_groups: Vec<CompactionGroup>) -> HummockResult<()> {
+        let _update_guard = self.update_mutex.lock().await;
         let mut guard = self.cache.write();
         guard.set_index(compaction_groups);
         Ok(())

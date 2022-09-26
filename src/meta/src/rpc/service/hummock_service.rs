@@ -241,13 +241,7 @@ where
     ) -> Result<Response<GetCompactionGroupsResponse>, Status> {
         let resp = GetCompactionGroupsResponse {
             status: None,
-            compaction_groups: self
-                .compaction_group_manager
-                .compaction_groups()
-                .await
-                .iter()
-                .map(|cg| cg.into())
-                .collect(),
+            compaction_groups: Some(self.compaction_group_manager.compactiongroups().await),
         };
         Ok(Response::new(resp))
     }

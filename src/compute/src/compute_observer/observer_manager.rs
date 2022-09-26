@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_hummock_sdk::filter_key_extractor::{
@@ -26,17 +27,21 @@ use risingwave_pb::hummock::pin_version_response::HummockVersionDeltas;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManagerRef;
+use risingwave_storage::hummock::compaction_group_client::CompactionGroupClientImpl;
 
 pub struct ComputeObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
     local_version_manager: LocalVersionManagerRef,
 
+    compaction_group_client: Arc<CompactionGroupClientImpl>,
+
     version: u64,
 }
 
+#[async_trait]
 impl ObserverNodeImpl for ComputeObserverNode {
-    fn handle_notification(&mut self, resp: SubscribeResponse) {
+    async fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
@@ -59,6 +64,13 @@ impl ObserverNodeImpl for ComputeObserverNode {
                         delta: hummock_version_deltas.version_deltas,
                     }),
                 );
+            }
+
+            Info::CompactionGroups(compaction_groups) => {
+                self.compaction_group_client
+                    .update_by(compaction_groups.compaction_groups)
+                    .await
+                    .ok();
             }
 
             _ => {
@@ -97,10 +109,12 @@ impl ComputeObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
         local_version_manager: LocalVersionManagerRef,
+        compaction_group_client: Arc<CompactionGroupClientImpl>,
     ) -> Self {
         Self {
             filter_key_extractor_manager,
             local_version_manager,
+            compaction_group_client,
             version: 0,
         }
     }

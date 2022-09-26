@@ -610,10 +610,10 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+    async fn get_compaction_groups(&self) -> Result<CompactionGroups> {
         let req = GetCompactionGroupsRequest {};
         let resp = self.inner.get_compaction_groups(req).await?;
-        Ok(resp.compaction_groups)
+        Ok(resp.compaction_groups.unwrap())
     }
 
     async fn trigger_manual_compaction(

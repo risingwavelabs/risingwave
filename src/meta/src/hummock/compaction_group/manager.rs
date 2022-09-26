@@ -19,14 +19,18 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::{CompactionConfig, CompactionGroups};
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::RwLock;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
-use crate::manager::{MetaSrvEnv, SourceId};
-use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
+use crate::hummock::model::CurrentGroupVersionId;
+use crate::manager::{MetaSrvEnv, NotificationManagerRef, SourceId};
+use crate::model::{
+    BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction, VarTransaction,
+};
 use crate::storage::{MetaStore, Transaction};
 
 pub type CompactionGroupManagerRef<S> = Arc<CompactionGroupManager<S>>;
@@ -49,9 +53,13 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     }
 
     pub async fn with_config(env: MetaSrvEnv<S>, config: CompactionConfig) -> Result<Self> {
+        let notification_manager = env.notification_manager_ref();
         let instance = Self {
             env,
-            inner: RwLock::new(Default::default()),
+            inner: RwLock::new(CompactionGroupManagerInner {
+                notification_manager,
+                ..Default::default()
+            }),
         };
         instance
             .inner
@@ -60,6 +68,18 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .init(&config, instance.env.meta_store())
             .await?;
         Ok(instance)
+    }
+
+    pub async fn compactiongroups(&self) -> CompactionGroups {
+        let inner = self.inner.read().await;
+        CompactionGroups {
+            compaction_groups: inner
+                .compaction_groups
+                .values()
+                .map(|group| group.into())
+                .collect_vec(),
+            version: inner.version.version(),
+        }
     }
 
     pub async fn compaction_groups(&self) -> Vec<CompactionGroup> {
@@ -245,6 +265,8 @@ impl<S: MetaStore> CompactionGroupManager<S> {
 
 #[derive(Default)]
 struct CompactionGroupManagerInner {
+    notification_manager: NotificationManagerRef,
+    version: CurrentGroupVersionId,
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
     index: BTreeMap<StateTableId, CompactionGroupId>,
 }
@@ -263,7 +285,11 @@ impl CompactionGroupManagerInner {
                 .collect();
         if !loaded_compaction_groups.is_empty() {
             self.compaction_groups = loaded_compaction_groups;
+            self.version = CurrentGroupVersionId::get(meta_store).await?.unwrap();
         } else {
+            let version = &mut self.version;
+            let mut first_version = VarTransaction::new(version);
+            first_version.increase();
             let compaction_groups = &mut self.compaction_groups;
             let mut new_compaction_groups = BTreeMapTransaction::new(compaction_groups);
             let static_compaction_groups = vec![
@@ -279,9 +305,23 @@ impl CompactionGroupManagerInner {
             }
             let mut trx = Transaction::default();
             new_compaction_groups.apply_to_txn(&mut trx)?;
+            first_version.apply_to_txn(&mut trx)?;
             meta_store.txn(trx).await?;
             new_compaction_groups.commit();
+            first_version.commit();
         }
+
+        self.notification_manager.notify_compute_asynchronously(
+            Operation::Add,
+            Info::CompactionGroups(CompactionGroups {
+                version: self.version.version(),
+                compaction_groups: self
+                    .compaction_groups
+                    .values()
+                    .map(|group| group.into())
+                    .collect_vec(),
+            }),
+        );
 
         // Build in-memory index
         for (id, compaction_group) in &self.compaction_groups {
@@ -304,6 +344,9 @@ impl CompactionGroupManagerInner {
                 current_max_id = k;
             }
         };
+        let version = &mut self.version;
+        let mut current_version = VarTransaction::new(version);
+        current_version.increase();
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for (table_id, compaction_group_id, table_option) in pairs.iter_mut() {
             let mut compaction_group =
@@ -330,8 +373,22 @@ impl CompactionGroupManagerInner {
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
+        current_version.apply_to_txn(&mut trx)?;
         meta_store.txn(trx).await?;
         compaction_groups.commit();
+        current_version.commit();
+
+        self.notification_manager.notify_compute_asynchronously(
+            Operation::Add,
+            Info::CompactionGroups(CompactionGroups {
+                version: self.version.version(),
+                compaction_groups: self
+                    .compaction_groups
+                    .values()
+                    .map(|group| group.into())
+                    .collect_vec(),
+            }),
+        );
 
         // Update in-memory index
         for (table_id, compaction_group_id, _) in pairs.iter() {
@@ -345,6 +402,9 @@ impl CompactionGroupManagerInner {
         table_ids: &[StateTableId],
         meta_store: &S,
     ) -> Result<()> {
+        let version = &mut self.version;
+        let mut current_version = VarTransaction::new(version);
+        current_version.increase();
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for table_id in table_ids {
             let compaction_group_id = self
@@ -368,8 +428,22 @@ impl CompactionGroupManagerInner {
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
+        current_version.apply_to_txn(&mut trx)?;
         meta_store.txn(trx).await?;
         compaction_groups.commit();
+        current_version.commit();
+
+        self.notification_manager.notify_compute_asynchronously(
+            Operation::Add,
+            Info::CompactionGroups(CompactionGroups {
+                version: self.version.version(),
+                compaction_groups: self
+                    .compaction_groups
+                    .values()
+                    .map(|group| group.into())
+                    .collect_vec(),
+            }),
+        );
 
         // Update in-memory index
         for table_id in table_ids {

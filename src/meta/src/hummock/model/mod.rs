@@ -13,11 +13,13 @@
 // limitations under the License.
 
 mod compact_task_assignment;
+mod current_group_version_id;
 mod pinned_snapshot;
 mod pinned_version;
 mod version;
 mod version_delta;
 
+pub use current_group_version_id::*;
 pub use pinned_snapshot::*;
 pub use pinned_version::*;
 pub use version::*;

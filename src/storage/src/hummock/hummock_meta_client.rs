@@ -17,7 +17,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
+    CompactTask, CompactTaskProgress, CompactionGroups, HummockSnapshot, HummockVersion,
     HummockVersionDeltas, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
@@ -140,7 +140,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.report_vacuum_task(vacuum_task).await
     }
 
-    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+    async fn get_compaction_groups(&self) -> Result<CompactionGroups> {
         self.meta_client.get_compaction_groups().await
     }
 

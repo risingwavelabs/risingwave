@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{ErrorCode, Result};
@@ -39,8 +40,9 @@ pub(crate) struct FrontendObserverNode {
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
+#[async_trait]
 impl ObserverNodeImpl for FrontendObserverNode {
-    fn handle_notification(&mut self, resp: SubscribeResponse) {
+    async fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
@@ -72,6 +74,9 @@ impl ObserverNodeImpl for FrontendObserverNode {
             }
             Info::HummockVersionDeltas(_) => {
                 panic!("frontend node should not receive HummockVersionDeltas");
+            }
+            Info::CompactionGroups(_) => {
+                panic!("frontend node should not receive CompactionGroups");
             }
         }
     }

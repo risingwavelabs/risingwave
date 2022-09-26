@@ -26,6 +26,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_pb::hummock::pin_version_response;
@@ -37,8 +38,9 @@ pub struct RiseCtlObserverNode {
     local_version_manager: LocalVersionManagerRef,
 }
 
+#[async_trait]
 impl ObserverNodeImpl for RiseCtlObserverNode {
-    fn handle_notification(&mut self, _resp: SubscribeResponse) {
+    async fn handle_notification(&mut self, _resp: SubscribeResponse) {
         // We don't care about any update so far.
     }
 

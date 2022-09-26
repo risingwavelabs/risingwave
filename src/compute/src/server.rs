@@ -128,8 +128,11 @@ pub async fn compute_node_serve(
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
         let local_version_manager = storage.local_version_manager();
-        let compute_observer_node =
-            ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
+        let compute_observer_node = ComputeObserverNode::new(
+            filter_key_extractor_manager.clone(),
+            local_version_manager,
+            storage.compaction_group_client(),
+        );
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
             client_addr.clone(),

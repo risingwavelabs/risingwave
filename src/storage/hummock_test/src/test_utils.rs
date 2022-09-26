@@ -28,6 +28,9 @@ use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse};
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManagerRef;
+use risingwave_storage::hummock::compaction_group_client::{
+    CompactionGroupClientImpl, DummyCompactionGroupClient,
+};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct TestNotificationClient<S: MetaStore> {
@@ -101,10 +104,18 @@ pub async fn get_observer_manager(
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
     local_version_manager: LocalVersionManagerRef,
     worker_node: WorkerNode,
+    compaction_group_client: Option<Arc<CompactionGroupClientImpl>>,
 ) -> ObserverManager<TestNotificationClient<MemStore>> {
     let client = TestNotificationClient::new(env.notification_manager_ref(), hummock_manager_ref);
-    let compute_observer_node =
-        ComputeObserverNode::new(filter_key_extractor_manager, local_version_manager);
+    let compute_observer_node = ComputeObserverNode::new(
+        filter_key_extractor_manager,
+        local_version_manager,
+        compaction_group_client.unwrap_or_else(|| {
+            Arc::new(CompactionGroupClientImpl::Dummy(
+                DummyCompactionGroupClient::new(0),
+            ))
+        }),
+    );
     get_test_observer_manager(
         client,
         worker_node.get_host().unwrap().into(),

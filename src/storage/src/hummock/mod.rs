@@ -177,6 +177,10 @@ impl HummockStorage {
         &self.local_version_manager
     }
 
+    pub fn compaction_group_client(&self) -> &Arc<CompactionGroupClientImpl> {
+        &self.compaction_group_client
+    }
+
     async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
         self.compaction_group_client
             .get_compaction_group_id(table_id.table_id)

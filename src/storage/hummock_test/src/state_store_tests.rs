@@ -53,6 +53,7 @@ async fn test_basic() {
         filter_key_extractor_manager,
         hummock_storage.local_version_manager().clone(),
         worker_node,
+        Some(hummock_storage.compaction_group_client().clone()),
     )
     .await;
     observer_manager.start().await.unwrap();
@@ -926,6 +927,7 @@ async fn test_delete_get() {
         filter_key_extractor_manager,
         hummock_storage.local_version_manager().clone(),
         worker_node,
+        Some(hummock_storage.compaction_group_client().clone()),
     )
     .await;
     observer_manager.start().await.unwrap();
@@ -1016,6 +1018,7 @@ async fn test_multiple_epoch_sync() {
         filter_key_extractor_manager,
         hummock_storage.local_version_manager().clone(),
         worker_node,
+        Some(hummock_storage.compaction_group_client().clone()),
     )
     .await;
     observer_manager.start().await.unwrap();

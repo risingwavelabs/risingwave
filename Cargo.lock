@@ -4539,6 +4539,7 @@ dependencies = [
 name = "risingwave_compactor"
 version = "0.1.11"
 dependencies = [
+ "async-trait",
  "clap 3.2.17",
  "madsim-tokio",
  "madsim-tonic",
@@ -4687,6 +4688,7 @@ name = "risingwave_ctl"
 version = "0.1.11"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes",
  "chrono",
  "clap 3.2.17",
