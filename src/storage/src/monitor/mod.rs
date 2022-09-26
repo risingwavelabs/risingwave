@@ -25,3 +25,5 @@ pub use local_metrics::StoreLocalStatistic;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 
 mod hummock_trace;
+
+mod hummock_trace_log;
