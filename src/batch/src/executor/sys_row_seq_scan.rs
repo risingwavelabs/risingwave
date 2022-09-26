@@ -118,8 +118,7 @@ impl SysRowSeqScanExecutor {
             })
             .collect_vec();
 
-        let chunk = DataChunk::from_rows(&filtered_rows, &self.schema.data_types())
-            .map_err(RwError::from)?;
+        let chunk = DataChunk::from_rows(&filtered_rows, &self.schema.data_types());
         yield chunk
     }
 }

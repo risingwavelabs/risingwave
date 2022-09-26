@@ -289,7 +289,7 @@ mod tests {
                 Some(array! { I32Array, [Some(2)] }.into()),
             ],
             DataType::Int32,
-        )?;
+        );
         let agg_type = AggKind::Min;
         let input_type = DataType::List {
             datatype: Box::new(DataType::Int32),

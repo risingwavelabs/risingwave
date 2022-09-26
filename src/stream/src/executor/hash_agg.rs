@@ -201,7 +201,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for (row_idx, (key, hash_code)) in keys.iter().zip_eq(key_hash_codes.iter()).enumerate() {
             // if the visibility map has already shadowed this row,
             // then we pass
-            if let Some(vis_map) = visibility && !vis_map.is_set(row_idx)? {
+            if let Some(vis_map) = visibility && !vis_map.is_set(row_idx) {
                 continue;
             }
             let vis_map = key_to_vis_maps.entry(key).or_insert_with(|| {
