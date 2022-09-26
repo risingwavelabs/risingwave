@@ -688,7 +688,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
                         // TODO(yuhao): Those two metric calculation cost too much time (>250ms).
                         // Those will result in that barrier is always ready
-                        // in source. Since select barrier is prefered,
+                        // in source. Since select barrier is preferred,
                         // chunk would never be selected.
                         // self.metrics
                         //     .join_cached_rows
