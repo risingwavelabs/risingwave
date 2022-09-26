@@ -22,6 +22,11 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::top_n::TopNCache;
 
+/// * For TopN, the storage key is: `[ order_by + remaining columns of pk ]`
+/// * For group TopN, the storage key is: `[ group_key + order_by + remaining columns of pk ]`
+///
+/// The key in [`TopNCache`] is `[ order_by + remaining columns of pk ]`. `group_key` is not
+/// included.
 pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
     pub(crate) state_table: StateTable<S>,
@@ -60,31 +65,31 @@ impl<S: StateStore> ManagedTopNState<S> {
         self.state_table.delete(value);
     }
 
-    fn get_topn_row(&self, row: Row, pk_prefix_len: usize) -> TopNStateRow {
+    fn get_topn_row(&self, row: Row, group_key_len: usize) -> TopNStateRow {
         let mut datums = Vec::with_capacity(self.state_table.pk_indices().len());
-        for pk_index in self.state_table.pk_indices().iter().skip(pk_prefix_len) {
+        for pk_index in self.state_table.pk_indices().iter().skip(group_key_len) {
             datums.push(row[*pk_index].clone());
         }
         let pk = Row::new(datums);
         let pk_ordered = OrderedRow::new(
             pk,
-            &self.ordered_row_deserializer.get_order_types()[pk_prefix_len..],
+            &self.ordered_row_deserializer.get_order_types()[group_key_len..],
         );
         TopNStateRow::new(pk_ordered, row)
     }
 
     /// This function will return the rows in the range of [`offset`, `offset` + `limit`).
     ///
-    /// If `pk_prefix` is None, it will scan rows from the very beginning.
-    /// Otherwise it will scan rows with prefix `pk_prefix`.
+    /// If `group_key` is None, it will scan rows from the very beginning.
+    /// Otherwise it will scan rows with prefix `group_key`.
     #[cfg(test)]
     pub async fn find_range(
         &self,
-        pk_prefix: Option<&Row>,
+        group_key: Option<&Row>,
         offset: usize,
         limit: Option<usize>,
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
-        let state_table_iter = iter_state_table(&self.state_table, pk_prefix).await?;
+        let state_table_iter = iter_state_table(&self.state_table, group_key).await?;
         pin_mut!(state_table_iter);
 
         // here we don't expect users to have large OFFSET.
@@ -101,29 +106,31 @@ impl<S: StateStore> ManagedTopNState<S> {
         };
         while let Some(item) = stream.next().await {
             rows.push(
-                self.get_topn_row(item?.into_owned(), pk_prefix.map(|p| p.size()).unwrap_or(0)),
+                self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0)),
             );
         }
         Ok(rows)
     }
 
     /// # Arguments
-    /// 
-    /// * `pk_prefix` -- The prefix of the 
+    ///
+    /// * `group_key` - Used as the prefix of the key to scan. Only for group TopN.
+    /// * `start_key` - The start point of the key to scan. It should be the last key of the middle
+    ///   cache. It doesn't contain the group key.
     pub async fn fill_high_cache<const WITH_TIES: bool>(
         &self,
-        pk_prefix: Option<&Row>,
+        group_key: Option<&Row>,
         topn_cache: &mut TopNCache<WITH_TIES>,
         start_key: &OrderedRow,
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
         let cache = &mut topn_cache.high;
-        let state_table_iter = iter_state_table(&self.state_table, pk_prefix).await?;
+        let state_table_iter = iter_state_table(&self.state_table, group_key).await?;
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
             let topn_row =
-                self.get_topn_row(item?.into_owned(), pk_prefix.map(|p| p.size()).unwrap_or(0));
+                self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
             if topn_row.ordered_key <= *start_key {
                 continue;
             }
@@ -141,7 +148,7 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .prefix(topn_cache.order_by_len);
             while let Some(item) = state_table_iter.next().await {
                 let topn_row =
-                    self.get_topn_row(item?.into_owned(), pk_prefix.map(|p| p.size()).unwrap_or(0));
+                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
                 if topn_row.ordered_key.prefix(topn_cache.order_by_len) == high_last_sort_key {
                     topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
                 } else {
@@ -155,19 +162,19 @@ impl<S: StateStore> ManagedTopNState<S> {
 
     pub async fn init_topn_cache<const WITH_TIES: bool>(
         &self,
-        pk_prefix: Option<&Row>,
+        group_key: Option<&Row>,
         topn_cache: &mut TopNCache<WITH_TIES>,
     ) -> StreamExecutorResult<()> {
         assert!(topn_cache.low.is_empty());
         assert!(topn_cache.middle.is_empty());
         assert!(topn_cache.high.is_empty());
 
-        let state_table_iter = iter_state_table(&self.state_table, pk_prefix).await?;
+        let state_table_iter = iter_state_table(&self.state_table, group_key).await?;
         pin_mut!(state_table_iter);
         if topn_cache.offset > 0 {
             while let Some(item) = state_table_iter.next().await {
                 let topn_row =
-                    self.get_topn_row(item?.into_owned(), pk_prefix.map(|p| p.size()).unwrap_or(0));
+                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
                 topn_cache.low.insert(topn_row.ordered_key, topn_row.row);
                 if topn_cache.low.len() == topn_cache.offset {
                     break;
@@ -178,7 +185,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         assert!(topn_cache.limit > 0, "topn cache limit should always > 0");
         while let Some(item) = state_table_iter.next().await {
             let topn_row =
-                self.get_topn_row(item?.into_owned(), pk_prefix.map(|p| p.size()).unwrap_or(0));
+                self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
             topn_cache.middle.insert(topn_row.ordered_key, topn_row.row);
             if topn_cache.middle.len() == topn_cache.limit {
                 break;
@@ -193,7 +200,7 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .prefix(topn_cache.order_by_len);
             while let Some(item) = state_table_iter.next().await {
                 let topn_row =
-                    self.get_topn_row(item?.into_owned(), pk_prefix.map(|p| p.size()).unwrap_or(0));
+                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
                 if topn_row.ordered_key.prefix(topn_cache.order_by_len) == middle_last_sort_key {
                     topn_cache.middle.insert(topn_row.ordered_key, topn_row.row);
                 } else {
@@ -208,7 +215,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             "topn cache high_capacity should always > 0"
         );
         while !topn_cache.is_high_cache_full() && let Some(item) = state_table_iter.next().await {
-            let topn_row = self.get_topn_row(item?.into_owned(), pk_prefix.map(|p|p.size()).unwrap_or(0));
+            let topn_row = self.get_topn_row(item?.into_owned(), group_key.map(|p|p.size()).unwrap_or(0));
             topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
         }
         if WITH_TIES && topn_cache.is_high_cache_full() {
@@ -220,7 +227,7 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .prefix(topn_cache.order_by_len);
             while let Some(item) = state_table_iter.next().await {
                 let topn_row =
-                    self.get_topn_row(item?.into_owned(), pk_prefix.map(|p| p.size()).unwrap_or(0));
+                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
                 if topn_row.ordered_key.prefix(topn_cache.order_by_len) == high_last_sort_key {
                     topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
                 } else {

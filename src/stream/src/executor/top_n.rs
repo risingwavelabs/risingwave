@@ -151,6 +151,13 @@ pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
+/// Cache for [`ManagedTopNState`].
+///
+/// The key in the maps is `[ order_by + remaining columns of pk ]`. `group_key` is not
+/// included.
+///
+/// # `WITH_TIES`
+///
 /// `WITH_TIES` supports the semantic of `FETCH FIRST n ROWS WITH TIES` and `RANK() <= n`.
 ///
 /// `OFFSET m FETCH FIRST n ROWS WITH TIES` and `m <= RANK() <= n` are not supported now,
