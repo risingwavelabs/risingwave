@@ -14,7 +14,7 @@
 
 use risingwave_common::array::{Array, ListRef, StructRef};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// Essentially `RTFn` is an alias of the specific Fn. It was aliased not to
 /// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
