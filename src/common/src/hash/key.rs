@@ -33,6 +33,7 @@ use crate::types::{
     VIRTUAL_NODE_COUNT,
 };
 use crate::util::hash_util::Crc32FastBuilder;
+use crate::util::value_encoding::serialize_datum;
 
 /// This file contains implementation for hash key serialization for
 /// hash-agg, hash-join, and perhaps other hash-based operators.
@@ -76,6 +77,11 @@ pub trait HashKeyDeserializer {
     fn deserialize<'a, D: HashKeySerDe<'a>>(&'a mut self) -> ArrayResult<Option<D>>;
 }
 
+/// Trait for value types that can be serialized to or deserialized from hash keys.
+///
+/// Note that this trait is more like a marker suggesting that types that implment it can be encoded
+/// into the hash key. The actual encoding method is not limited to [`HashKeySerDe`]'s
+/// implementation.
 pub trait HashKeySerDe<'a>: ScalarRef<'a> {
     type S: AsRef<[u8]>;
     fn serialize(self) -> Self::S;
@@ -158,17 +164,18 @@ pub trait HashKey:
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
 pub struct FixedSizeKey<const N: usize> {
-    hash_code: u64,
     key: [u8; N],
+    hash_code: u64,
     null_bitmap: FixedBitSet,
 }
 
-/// Designed for hash keys which can't be represented by [`FixedSizeKey`].
+/// Designed for hash keys which can't be represented by [`FixedSizeKey`]. It uses value encoding
+/// under the hood because ordering is not needed.
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
 pub struct SerializedKey {
-    key: Row,
+    key: Vec<u8>,
     hash_code: u64,
     null_bitmap: FixedBitSet,
 }
@@ -549,7 +556,7 @@ impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
 }
 
 pub struct SerializedKeySerializer {
-    buffer: Vec<Datum>,
+    buffer: Vec<u8>,
     hash_code: u64,
     null_bitmap: FixedBitSet,
 }
@@ -570,10 +577,10 @@ impl HashKeySerializer for SerializedKeySerializer {
         self.null_bitmap.grow(len_bitmap + 1);
         match data {
             Some(v) => {
-                self.buffer.push(Some(v.to_owned_scalar().into()));
+                serialize_datum(&Some(v.to_owned_scalar().into()), self.buffer);
             }
             None => {
-                self.buffer.push(None);
+                serialize_datum(&None, self.buffer);
                 self.null_bitmap.insert(len_bitmap);
             }
         }
@@ -581,9 +588,39 @@ impl HashKeySerializer for SerializedKeySerializer {
 
     fn into_hash_key(self) -> SerializedKey {
         SerializedKey {
-            key: Row(self.buffer),
+            key: self.buffer,
             hash_code: self.hash_code,
             null_bitmap: self.null_bitmap,
+        }
+    }
+}
+
+pub struct SerializedKeyDeserializer<const N: usize> {
+    cursor: Cursor<[u8; N]>,
+    null_bitmap: FixedBitSet,
+    null_bitmap_idx: usize,
+}
+
+impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
+    type K = FixedSizeKey<N>;
+
+    fn from_hash_key(hash_key: Self::K) -> Self {
+        Self {
+            cursor: Cursor::new(hash_key.key),
+            null_bitmap: hash_key.null_bitmap,
+            null_bitmap_idx: 0,
+        }
+    }
+
+    fn deserialize<'a, D: HashKeySerDe<'a>>(&mut self) -> ArrayResult<Option<D>> {
+        ensure!(self.null_bitmap_idx < 8);
+        let is_null = self.null_bitmap.contains(self.null_bitmap_idx);
+        self.null_bitmap_idx += 1;
+        if is_null {
+            Ok(None)
+        } else {
+            let value = D::deserialize(&mut self.cursor);
+            Ok(Some(value))
         }
     }
 }
@@ -661,7 +698,8 @@ impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
-        for (array_builder, key) in array_builders.iter_mut().zip_eq(self.key.0) {
+        let keys = ;
+        for (array_builder, key) in array_builders.iter_mut().zip_eq(keys) {
             array_builder.append_datum(&key);
         }
         Ok(())
