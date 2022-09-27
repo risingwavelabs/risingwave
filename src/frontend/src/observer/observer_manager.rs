@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{ErrorCode, Result};
@@ -40,9 +39,8 @@ pub(crate) struct FrontendObserverNode {
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
-#[async_trait]
 impl ObserverNodeImpl for FrontendObserverNode {
-    async fn handle_notification(&mut self, resp: SubscribeResponse) {
+    fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
         };

@@ -14,7 +14,6 @@
 
 use std::time::Duration;
 
-use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
@@ -35,10 +34,9 @@ pub struct ObserverManager<T: NotificationClient> {
     observer_states: Box<dyn ObserverNodeImpl + Send>,
 }
 
-#[async_trait]
 pub trait ObserverNodeImpl {
     /// modify data after receiving notification from meta
-    async fn handle_notification(&mut self, resp: SubscribeResponse);
+    fn handle_notification(&mut self, resp: SubscribeResponse);
 
     /// Initialize data from the meta. It will be called at start or resubscribe
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()>;
@@ -98,9 +96,7 @@ where
                             self.re_subscribe().await;
                             continue;
                         }
-                        self.observer_states
-                            .handle_notification(resp.unwrap())
-                            .await;
+                        self.observer_states.handle_notification(resp.unwrap());
                     }
                     Err(e) => {
                         tracing::error!("Receives meta's notification err {:?}", e);

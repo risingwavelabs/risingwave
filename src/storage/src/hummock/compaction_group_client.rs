@@ -20,7 +20,7 @@ use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::CompactionGroup;
+use risingwave_pb::hummock::{CompactionGroup, CompactionGroups};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot;
 
@@ -42,9 +42,9 @@ impl CompactionGroupClientImpl {
         }
     }
 
-    pub async fn update_by(&self, compaction_groups: Vec<CompactionGroup>) -> HummockResult<()> {
+    pub fn update_by(&self, compactiongroups: CompactionGroups) -> HummockResult<()> {
         match self {
-            CompactionGroupClientImpl::Meta(c) => c.update_by(compaction_groups).await,
+            CompactionGroupClientImpl::Meta(c) => c.update_by(compactiongroups),
             CompactionGroupClientImpl::Dummy(_) => Ok(()),
         }
     }
@@ -56,7 +56,6 @@ pub struct MetaCompactionGroupClient {
     wait_queue: Mutex<Option<Vec<oneshot::Sender<bool>>>>,
     cache: RwLock<CompactionGroupClientInner>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    update_mutex: tokio::sync::Mutex<()>,
 }
 
 impl MetaCompactionGroupClient {
@@ -127,32 +126,34 @@ impl MetaCompactionGroupClient {
             wait_queue: Default::default(),
             cache: Default::default(),
             hummock_meta_client,
-            update_mutex: Default::default(),
         }
     }
 
     async fn update(&self) -> HummockResult<()> {
-        let _update_guard = self.update_mutex.lock().await;
         let compaction_groups = self
             .hummock_meta_client
             .get_compaction_groups()
             .await
             .map_err(HummockError::meta_error)?;
         let mut guard = self.cache.write();
-        guard.set_index(compaction_groups.compaction_groups);
+        if compaction_groups.get_version() > guard.version {
+            guard.set_index(compaction_groups.compaction_groups);
+        }
         Ok(())
     }
 
-    async fn update_by(&self, compaction_groups: Vec<CompactionGroup>) -> HummockResult<()> {
-        let _update_guard = self.update_mutex.lock().await;
+    fn update_by(&self, compactiongroups: CompactionGroups) -> HummockResult<()> {
         let mut guard = self.cache.write();
-        guard.set_index(compaction_groups);
+        if compactiongroups.get_version() > guard.version {
+            guard.set_index(compactiongroups.compaction_groups);
+        }
         Ok(())
     }
 }
 
 #[derive(Default)]
 struct CompactionGroupClientInner {
+    version: u64,
     index: HashMap<StateTableId, CompactionGroupId>,
 }
 

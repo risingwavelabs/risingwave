@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_hummock_sdk::filter_key_extractor::{
@@ -30,9 +29,8 @@ pub struct CompactorObserverNode {
     version: u64,
 }
 
-#[async_trait]
 impl ObserverNodeImpl for CompactorObserverNode {
-    async fn handle_notification(&mut self, resp: SubscribeResponse) {
+    fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
