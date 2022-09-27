@@ -105,7 +105,7 @@ impl SharedContext {
         let create_lru_manager = || {
             let mgr = LruManager::new(
                 config.total_memory_available_bytes,
-                config.checkpoint_interval_ms,
+                config.barrier_interval_ms,
             );
             // Run a background memory monitor
             tokio::spawn(mgr.clone().run());
