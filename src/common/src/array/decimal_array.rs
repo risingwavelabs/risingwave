@@ -20,7 +20,7 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::array::{ArrayBuilderImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::Decimal;
@@ -127,9 +127,9 @@ impl Array for DecimalArray {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = DecimalArrayBuilder::new(capacity);
-        Ok(ArrayBuilderImpl::Decimal(array_builder))
+        ArrayBuilderImpl::Decimal(array_builder)
     }
 }
 

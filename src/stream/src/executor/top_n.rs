@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -41,9 +42,9 @@ impl<S: StateStore> TopNExecutor<S, false> {
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
@@ -56,9 +57,9 @@ impl<S: StateStore> TopNExecutor<S, false> {
                 schema,
                 order_pairs,
                 offset_and_limit,
+                order_by_len,
                 pk_indices,
                 executor_id,
-                key_indices,
                 state_table,
             )?,
         })
@@ -71,9 +72,9 @@ impl<S: StateStore> TopNExecutor<S, true> {
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
@@ -86,9 +87,9 @@ impl<S: StateStore> TopNExecutor<S, true> {
                 schema,
                 order_pairs,
                 offset_and_limit,
+                order_by_len,
                 pk_indices,
                 executor_id,
-                key_indices,
                 state_table,
             )?,
         })
@@ -102,9 +103,9 @@ impl<S: StateStore> TopNExecutor<S, true> {
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
@@ -115,9 +116,9 @@ impl<S: StateStore> TopNExecutor<S, true> {
             schema,
             order_pairs,
             offset_and_limit,
+            order_by_len,
             pk_indices,
             executor_id,
-            key_indices,
             state_table,
         )?;
 
@@ -147,10 +148,6 @@ pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     cache: TopNCache<WITH_TIES>,
-
-    #[expect(dead_code)]
-    /// Indices of the columns on which key distribution depends.
-    key_indices: Vec<usize>,
 }
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
@@ -177,7 +174,8 @@ pub struct TopNCache<const WITH_TIES: bool> {
     /// Assumption: `limit != 0`
     pub limit: usize,
 
-    pub sort_key_len: usize,
+    /// The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is true.
+    pub order_by_len: usize,
 }
 
 /// This trait is used as a bound. It is needed since
@@ -218,7 +216,7 @@ pub(super) trait TopNCacheTrait {
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
-    pub fn new(offset: usize, limit: usize, sort_key_len: usize) -> Self {
+    pub fn new(offset: usize, limit: usize, order_by_len: usize) -> Self {
         assert!(limit != 0);
         if WITH_TIES {
             // It's trickier to support.
@@ -232,7 +230,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             high_capacity: (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR,
             offset,
             limit,
-            sort_key_len,
+            order_by_len,
         }
     }
 
@@ -440,9 +438,9 @@ impl TopNCacheTrait for TopNCache<true> {
             return;
         }
 
-        let sort_key = elem_to_compare_with_middle.0.prefix(self.sort_key_len);
+        let sort_key = elem_to_compare_with_middle.0.prefix(self.order_by_len);
         let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_sort_key = middle_last.0.prefix(self.sort_key_len);
+        let middle_last_sort_key = middle_last.0.prefix(self.order_by_len);
 
         match sort_key.cmp(&middle_last_sort_key) {
             Ordering::Less => {
@@ -456,7 +454,7 @@ impl TopNCacheTrait for TopNCache<true> {
                 }
                 if self.high.len() >= self.high_capacity {
                     let high_last = self.high.pop_last().unwrap();
-                    let high_last_sort_key = high_last.0.prefix(self.sort_key_len);
+                    let high_last_sort_key = high_last.0.prefix(self.order_by_len);
                     self.high
                         .drain_filter(|k, _| k.starts_with(&high_last_sort_key));
                 }
@@ -504,9 +502,9 @@ impl TopNCacheTrait for TopNCache<true> {
         // Since low cache is always empty for WITH_TIES, this unwrap is safe.
 
         let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_sort_key = middle_last.0.prefix(self.sort_key_len);
+        let middle_last_sort_key = middle_last.0.prefix(self.order_by_len);
 
-        let sort_key = ordered_pk_row.prefix(self.sort_key_len);
+        let sort_key = ordered_pk_row.prefix(self.order_by_len);
         if sort_key > middle_last_sort_key {
             // The row is in high.
             self.high.remove(&ordered_pk_row);
@@ -535,7 +533,7 @@ impl TopNCacheTrait for TopNCache<true> {
             // Bring elements with the same sort key, if any, from high cache to middle cache.
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
-                let high_first_sort_key = high_first.0.prefix(self.sort_key_len);
+                let high_first_sort_key = high_first.0.prefix(self.order_by_len);
                 assert!(high_first_sort_key > middle_last_sort_key);
 
                 res_ops.push(Op::Insert);
@@ -564,7 +562,6 @@ impl TopNCacheTrait for TopNCache<true> {
 
 pub fn generate_executor_pk_indices_info(
     order_pairs: &[OrderPair],
-    pk_indices: PkIndicesRef<'_>,
     schema: &Schema,
 ) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
     let mut internal_key_indices = vec![];
@@ -572,12 +569,6 @@ pub fn generate_executor_pk_indices_info(
     for order_pair in order_pairs {
         internal_key_indices.push(order_pair.column_idx);
         internal_order_types.push(order_pair.order_type);
-    }
-    for pk_index in pk_indices {
-        if !internal_key_indices.contains(pk_index) {
-            internal_key_indices.push(*pk_index);
-            internal_order_types.push(OrderType::Ascending);
-        }
     }
     let internal_data_types = internal_key_indices
         .iter()
@@ -591,20 +582,32 @@ pub fn generate_executor_pk_indices_info(
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
+    /// # Arguments
+    ///
+    /// `order_pairs` -- the storage pk. It's composed of the ORDER BY columns and the missing
+    /// columns of pk.
+    ///
+    /// `order_by_len` -- The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is
+    /// true.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
         schema: Schema,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
+        // order_pairs is superset of pk
+        assert!(order_pairs
+            .iter()
+            .map(|x| x.column_idx)
+            .collect::<HashSet<_>>()
+            .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
-
+            generate_executor_pk_indices_info(&order_pairs, &schema);
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
 
@@ -623,8 +626,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit, order_pairs.len()),
-            key_indices,
+            cache: TopNCache::new(num_offset, num_limit, order_by_len),
         })
     }
 }
@@ -672,7 +674,7 @@ where
         generate_output(res_rows, res_ops, &self.schema)
     }
 
-    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
@@ -688,7 +690,7 @@ where
         &self.info.identity
     }
 
-    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
             .init_topn_cache(None, &mut self.cache)
@@ -797,9 +799,9 @@ mod tests {
                     source as Box<dyn Executor>,
                     order_types,
                     (3, 1000),
+                    2,
                     vec![0, 1],
                     1,
-                    vec![],
                     state_table,
                 )
                 .unwrap(),
@@ -893,9 +895,9 @@ mod tests {
                     source as Box<dyn Executor>,
                     order_types,
                     (0, 4),
+                    2,
                     vec![0, 1],
                     1,
-                    vec![],
                     state_table,
                 )
                 .unwrap(),
@@ -1001,9 +1003,9 @@ mod tests {
                     source as Box<dyn Executor>,
                     order_types,
                     (0, 4),
+                    2,
                     vec![0, 1],
                     1,
-                    vec![],
                     state_table,
                 )
                 .unwrap(),
@@ -1108,9 +1110,9 @@ mod tests {
                     source as Box<dyn Executor>,
                     order_types,
                     (3, 4),
+                    2,
                     vec![0, 1],
                     1,
-                    vec![],
                     state_table,
                 )
                 .unwrap(),
@@ -1298,7 +1300,10 @@ mod tests {
 
         #[tokio::test]
         async fn test_top_n_executor_with_offset_and_limit_new() {
-            let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+            let order_types = vec![
+                OrderPair::new(0, OrderType::Ascending),
+                OrderPair::new(3, OrderType::Ascending),
+            ];
 
             let source = create_source_new();
             let state_table = create_in_memory_state_table(
@@ -1316,9 +1321,9 @@ mod tests {
                     source as Box<dyn Executor>,
                     order_types,
                     (1, 3),
+                    2,
                     vec![0, 3],
                     1,
-                    vec![],
                     state_table,
                 )
                 .unwrap(),
@@ -1376,7 +1381,10 @@ mod tests {
 
         #[tokio::test]
         async fn test_top_n_executor_with_offset_and_limit_new_after_recovery() {
-            let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+            let order_types = vec![
+                OrderPair::new(0, OrderType::Ascending),
+                OrderPair::new(3, OrderType::Ascending),
+            ];
             let state_table = create_in_memory_state_table(
                 &[
                     DataType::Int64,
@@ -1392,9 +1400,9 @@ mod tests {
                     create_source_new_before_recovery() as Box<dyn Executor>,
                     order_types.clone(),
                     (1, 3),
+                    2,
                     vec![0, 3],
                     1,
-                    vec![],
                     state_table.clone(),
                 )
                 .unwrap(),
@@ -1433,9 +1441,9 @@ mod tests {
                     create_source_new_after_recovery() as Box<dyn Executor>,
                     order_types.clone(),
                     (1, 3),
+                    2,
                     vec![3],
                     1,
-                    vec![],
                     state_table,
                 )
                 .unwrap(),
@@ -1530,7 +1538,10 @@ mod tests {
 
         #[tokio::test]
         async fn test_with_ties() {
-            let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+            let order_types = vec![
+                OrderPair::new(0, OrderType::Ascending),
+                OrderPair::new(1, OrderType::Ascending),
+            ];
 
             let source = create_source();
             let state_table = create_in_memory_state_table(
@@ -1543,9 +1554,9 @@ mod tests {
                     source as Box<dyn Executor>,
                     order_types,
                     (0, 3),
+                    1,
                     vec![0, 1],
                     1,
-                    vec![],
                     state_table,
                 )
                 .unwrap(),
@@ -1676,7 +1687,10 @@ mod tests {
 
         #[tokio::test]
         async fn test_with_ties_recovery() {
-            let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+            let order_types = vec![
+                OrderPair::new(0, OrderType::Ascending),
+                OrderPair::new(1, OrderType::Ascending),
+            ];
 
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
@@ -1688,9 +1702,9 @@ mod tests {
                     create_source_before_recovery() as Box<dyn Executor>,
                     order_types.clone(),
                     (0, 3),
+                    1,
                     vec![0, 1],
                     1,
-                    vec![],
                     state_table.clone(),
                 )
                 .unwrap(),
@@ -1735,9 +1749,9 @@ mod tests {
                     create_source_after_recovery() as Box<dyn Executor>,
                     order_types.clone(),
                     (0, 3),
+                    1,
                     vec![0, 1],
                     1,
-                    vec![],
                     state_table,
                 )
                 .unwrap(),

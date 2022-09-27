@@ -119,7 +119,7 @@ impl DataTypeName {
         }
     }
 
-    pub fn to_type(&self) -> Option<DataType> {
+    pub fn to_type(self) -> Option<DataType> {
         let t = match self {
             DataTypeName::Boolean => DataType::Boolean,
             DataTypeName::Int16 => DataType::Int16,

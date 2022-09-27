@@ -27,6 +27,7 @@ pub struct StoreLocalStatistic {
     pub cache_meta_block_total: u64,
 
     // include multiple versions of one key.
+    pub total_key_count: u64,
     pub skip_multi_version_key_count: u64,
     pub skip_delete_key_count: u64,
     pub processed_key_count: u64,
@@ -58,6 +59,7 @@ impl StoreLocalStatistic {
             Ordering::Relaxed,
         );
         self.bloom_filter_check_counts += other.bloom_filter_check_counts;
+        self.total_key_count += other.total_key_count;
         self.get_shared_buffer_hit_counts += other.get_shared_buffer_hit_counts;
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
@@ -136,6 +138,13 @@ impl StoreLocalStatistic {
             metrics
                 .get_shared_buffer_hit_counts
                 .inc_by(self.get_shared_buffer_hit_counts);
+        }
+
+        if self.total_key_count > 0 {
+            metrics
+                .iter_scan_key_counts
+                .with_label_values(&["total"])
+                .inc_by(self.total_key_count);
         }
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]

@@ -104,7 +104,7 @@ impl SortMergeJoinExecutor {
         }
 
         // Handle remaining chunk
-        if let Some(chunk) = chunk_builder.consume_all()? {
+        if let Some(chunk) = chunk_builder.consume_all() {
             yield chunk.reorder_columns(&self.output_indices)
         }
     }
@@ -133,7 +133,7 @@ impl SortMergeJoinExecutor {
                 if let Some(last_probe_key) = &last_probe_key && *last_probe_key == probe_key {
                     for (chunk, row_idx) in &last_matched_build_rows {
                         let build_row = chunk.row_at_unchecked_vis(*row_idx);
-                        if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values()))? {
+                        if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values())) {
                             yield spilled
                         }
                     }
@@ -150,7 +150,7 @@ impl SortMergeJoinExecutor {
                             // [`ScalarPartialOrd`].
                             if probe_key == build_key {
                                 last_matched_build_rows.push((build_chunk.clone(), next_build_row_idx));
-                                if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values()))? {
+                                if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values())) {
                                     yield spilled
                                 }
                             } else if ASCENDING && probe_key < build_key || !ASCENDING && probe_key > build_key {

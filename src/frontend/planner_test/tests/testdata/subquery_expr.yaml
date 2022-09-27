@@ -3,76 +3,76 @@
     select (select 1);
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-        LogicalProject { exprs: [1:Int32] }
-          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalProject { exprs: [1:Int32] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan: |
     LogicalJoin { type: LeftOuter, on: true, output: all }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      LogicalProject { exprs: [1:Int32] }
-        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalProject { exprs: [1:Int32] }
+      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t(x int);
     select (select x from t), 1 from t;
   logical_plan: |
     LogicalProject { exprs: [t.x, 1:Int32] }
-      LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        LogicalScan { table: t, columns: [t.x, t._row_id] }
-        LogicalProject { exprs: [t.x] }
-          LogicalScan { table: t, columns: [t.x, t._row_id] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
+      └─LogicalProject { exprs: [t.x] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     create table t(x int);
     select (select x from t limit 1), 1 from t;
   logical_plan: |
     LogicalProject { exprs: [t.x, 1:Int32] }
-      LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        LogicalScan { table: t, columns: [t.x, t._row_id] }
-        LogicalLimit { limit: 1, offset: 0 }
-          LogicalProject { exprs: [t.x] }
-            LogicalScan { table: t, columns: [t.x, t._row_id] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
+      └─LogicalLimit { limit: 1, offset: 0 }
+        └─LogicalProject { exprs: [t.x] }
+          └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [t.x, 1:Int32] }
-      LogicalJoin { type: LeftOuter, on: true, output: all }
-        LogicalScan { table: t, columns: [] }
-        LogicalLimit { limit: 1, offset: 0 }
-          LogicalScan { table: t, columns: [t.x] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalScan { table: t, columns: [] }
+      └─LogicalLimit { limit: 1, offset: 0 }
+        └─LogicalScan { table: t, columns: [t.x] }
 - sql: |
     create table t(x int);
     select (select x from t) + 1 from t;
   logical_plan: |
     LogicalProject { exprs: [(t.x + 1:Int32)] }
-      LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        LogicalScan { table: t, columns: [t.x, t._row_id] }
-        LogicalProject { exprs: [t.x] }
-          LogicalScan { table: t, columns: [t.x, t._row_id] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
+      └─LogicalProject { exprs: [t.x] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     create table t(x int);
     select (select x from t), (select 1);
   logical_plan: |
     LogicalProject { exprs: [t.x, 1:Int32] }
-      LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-          LogicalProject { exprs: [t.x] }
-            LogicalScan { table: t, columns: [t.x, t._row_id] }
-        LogicalProject { exprs: [1:Int32] }
-          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      | ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      | └─LogicalProject { exprs: [t.x] }
+      |   └─LogicalScan { table: t, columns: [t.x, t._row_id] }
+      └─LogicalProject { exprs: [1:Int32] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     create table t(x int);
     select x + (select x + (select x as v1 from t) as v2 from t) as v3 from t;
   logical_plan: |
     LogicalProject { exprs: [(t.x + (t.x + t.x))] }
-      LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        LogicalScan { table: t, columns: [t.x, t._row_id] }
-        LogicalProject { exprs: [(t.x + t.x)] }
-          LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
-            LogicalScan { table: t, columns: [t.x, t._row_id] }
-            LogicalProject { exprs: [t.x] }
-              LogicalScan { table: t, columns: [t.x, t._row_id] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
+      └─LogicalProject { exprs: [(t.x + t.x)] }
+        └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
+          ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
+          └─LogicalProject { exprs: [t.x] }
+            └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     create table t1 (x int, y int);
@@ -80,10 +80,10 @@
     select t1.x, (select y from (select y from t2 order by y desc limit 1 offset 3) t2 limit 2) from t1;
   optimized_logical_plan: |
     LogicalJoin { type: LeftOuter, on: true, output: all }
-      LogicalScan { table: t1, columns: [t1.x] }
-      LogicalLimit { limit: 2, offset: 0 }
-        LogicalTopN { order: "[t2.y DESC]", limit: 1, offset: 3 }
-          LogicalScan { table: t2, columns: [t2.y] }
+    ├─LogicalScan { table: t1, columns: [t1.x] }
+    └─LogicalLimit { limit: 2, offset: 0 }
+      └─LogicalTopN { order: "[t2.y DESC]", limit: 1, offset: 3 }
+        └─LogicalScan { table: t2, columns: [t2.y] }
 - sql: |
     select (select 1, 2);
   binder_error: 'Bind error: Subquery must return only one column'
@@ -92,91 +92,91 @@
     select 1 where exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-        LogicalProject { exprs: [t.x] }
-          LogicalScan { table: t, columns: [t.x, t._row_id] }
+    └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalProject { exprs: [t.x] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalJoin { type: LeftSemi, on: true, output: all }
-        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-        LogicalScan { table: t, columns: [] }
+    └─LogicalJoin { type: LeftSemi, on: true, output: all }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalScan { table: t, columns: [] }
 - sql: |
     create table t(x int);
     select 1 where not exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
-        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-        LogicalProject { exprs: [t.x] }
-          LogicalScan { table: t, columns: [t.x, t._row_id] }
+    └─LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalProject { exprs: [t.x] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalJoin { type: LeftAnti, on: true, output: all }
-        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-        LogicalScan { table: t, columns: [] }
+    └─LogicalJoin { type: LeftAnti, on: true, output: all }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalScan { table: t, columns: [] }
 - sql: |
     create table t1(x int);
     create table t2(x int);
     select x from t1 where exists (select x from t2);
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
-      LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-        LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
-        LogicalProject { exprs: [t2.x] }
-          LogicalScan { table: t2, columns: [t2.x, t2._row_id] }
+    └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
+      └─LogicalProject { exprs: [t2.x] }
+        └─LogicalScan { table: t2, columns: [t2.x, t2._row_id] }
 - sql: |
     create table t(x int);
     select x from t where exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [t.x] }
-      LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-        LogicalScan { table: t, columns: [t.x, t._row_id] }
-        LogicalProject { exprs: [t.x] }
-          LogicalScan { table: t, columns: [t.x, t._row_id] }
+    └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
+      └─LogicalProject { exprs: [t.x] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t1(x int);
     create table t2(x int);
     select x from t1 where x > (select x from t2)
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
-      LogicalFilter { predicate: (t1.x > t2.x) }
-        LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-          LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
-          LogicalProject { exprs: [t2.x] }
-            LogicalScan { table: t2, columns: [t2.x, t2._row_id] }
+    └─LogicalFilter { predicate: (t1.x > t2.x) }
+      └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+        ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
+        └─LogicalProject { exprs: [t2.x] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2._row_id] }
 - sql: |
     select 1 where 1>0 and exists (values (1))
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalFilter { predicate: (1:Int32 > 0:Int32) }
-        LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-          LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
+    └─LogicalFilter { predicate: (1:Int32 > 0:Int32) }
+      └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
+        ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+        └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
 - sql: |
     select 1 where (not exists (values (1))) and (1>0 or exists (values (1)))
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalFilter { predicate: ((1:Int32 > 0:Int32) OR (count >= 1:Int32)) }
-        LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
-          LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
-            LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-            LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
-          LogicalProject { exprs: [(count >= 1:Int32)] }
-            LogicalAgg { aggs: [count] }
-              LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_1.column_0:Int32] } }
+    └─LogicalFilter { predicate: ((1:Int32 > 0:Int32) OR (count >= 1:Int32)) }
+      └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
+        ├─LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
+        | ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+        | └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
+        └─LogicalProject { exprs: [(count >= 1:Int32)] }
+          └─LogicalAgg { aggs: [count] }
+            └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_1.column_0:Int32] } }
 - sql: |
     select a + 1, b::varchar, c from (values (1, 2, 3), (4, 5, 6)) t(a, b, c);
   logical_plan: |
     LogicalProject { exprs: [(*VALUES*_0.column_0 + 1:Int32), *VALUES*_0.column_1::Varchar, *VALUES*_0.column_2] }
-      LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Int32] } }
+    └─LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Int32] } }
 - sql: |
     select sum(a), max(b + c + 10), string_agg(c::varchar || '~', ',') from (values (1, 2, 3), (4, 5, 6)) as t(a, b, c);
   logical_plan: |
     LogicalProject { exprs: [sum(*VALUES*_0.column_0), max(((*VALUES*_0.column_1 + *VALUES*_0.column_2) + 10:Int32)), string_agg(ConcatOp(*VALUES*_0.column_2::Varchar, '~':Varchar), ',':Varchar)] }
-      LogicalAgg { aggs: [sum(*VALUES*_0.column_0), max(((*VALUES*_0.column_1 + *VALUES*_0.column_2) + 10:Int32)), string_agg(ConcatOp(*VALUES*_0.column_2::Varchar, '~':Varchar), ',':Varchar)] }
-        LogicalProject { exprs: [*VALUES*_0.column_0, ((*VALUES*_0.column_1 + *VALUES*_0.column_2) + 10:Int32), ConcatOp(*VALUES*_0.column_2::Varchar, '~':Varchar), ',':Varchar] }
-          LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Int32] } }
+    └─LogicalAgg { aggs: [sum(*VALUES*_0.column_0), max(((*VALUES*_0.column_1 + *VALUES*_0.column_2) + 10:Int32)), string_agg(ConcatOp(*VALUES*_0.column_2::Varchar, '~':Varchar), ',':Varchar)] }
+      └─LogicalProject { exprs: [*VALUES*_0.column_0, ((*VALUES*_0.column_1 + *VALUES*_0.column_2) + 10:Int32), ConcatOp(*VALUES*_0.column_2::Varchar, '~':Varchar), ',':Varchar] }
+        └─LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Int32] } }
 - sql: |
     select 1 + (select 2 from t);
   binder_error: 'Catalog error: table or source not found: t'
@@ -186,17 +186,17 @@
     select x from t1 where y in (select y from t2);
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
-      LogicalApply { type: LeftSemi, on: (t1.y = t2.y), correlated_id: 1 }
-        LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-        LogicalProject { exprs: [t2.y] }
-          LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+    └─LogicalApply { type: LeftSemi, on: (t1.y = t2.y), correlated_id: 1 }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      └─LogicalProject { exprs: [t2.y] }
+        └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     select x from t1 where y not in (select y from t2);
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
-      LogicalApply { type: LeftAnti, on: (t1.y = t2.y), correlated_id: 1 }
-        LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-        LogicalProject { exprs: [t2.y] }
-          LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+    └─LogicalApply { type: LeftAnti, on: (t1.y = t2.y), correlated_id: 1 }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      └─LogicalProject { exprs: [t2.y] }
+        └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
