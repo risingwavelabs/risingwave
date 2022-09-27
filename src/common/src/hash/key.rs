@@ -28,12 +28,11 @@ use crate::array::{
 };
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{
-    DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode,
-    VIRTUAL_NODE_COUNT,
+    DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode, VIRTUAL_NODE_COUNT,
 };
 use crate::util::hash_util::Crc32FastBuilder;
-use crate::util::value_encoding::serialize_datum;
+use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 /// This file contains implementation for hash key serialization for
 /// hash-agg, hash-join, and perhaps other hash-based operators.
@@ -80,12 +79,12 @@ pub trait HashKeyDeserializer {
 /// Trait for value types that can be serialized to or deserialized from hash keys.
 ///
 /// Note that this trait is more like a marker suggesting that types that implment it can be encoded
-/// into the hash key. The actual encoding method is not limited to [`HashKeySerDe`]'s
-/// implementation.
+/// into the hash key. The actual encoding/decoding method is not limited to [`HashKeySerDe`]'s
+/// fixed-size implementation.
 pub trait HashKeySerDe<'a>: ScalarRef<'a> {
     type S: AsRef<[u8]>;
-    fn serialize(self) -> Self::S;
-    fn deserialize<R: Read>(source: &mut R) -> Self;
+    fn fixed_size_serialize(self) -> Self::S;
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self;
 
     fn read_fixed_size_bytes<R: Read, const N: usize>(source: &mut R) -> [u8; N] {
         let mut buffer: [u8; N] = [0u8; N];
@@ -139,10 +138,13 @@ pub trait HashKey:
     }
 
     #[inline(always)]
-    fn deserialize<'a>(self, data_types: impl Iterator<Item = &'a DataType>) -> ArrayResult<Row> {
-        let mut builders: Vec<_> = data_types.map(|dt| dt.create_array_builder(1)).collect();
+    fn deserialize(self, data_types: &[DataType]) -> ArrayResult<Row> {
+        let mut builders: Vec<_> = data_types
+            .iter()
+            .map(|dt| dt.create_array_builder(1))
+            .collect();
 
-        self.deserialize_to_builders(&mut builders)?;
+        self.deserialize_to_builders(&mut builders, data_types)?;
         builders
             .into_iter()
             .map(|builder| Ok::<_, ArrayError>(builder.finish().value_at(0).to_owned_datum()))
@@ -150,7 +152,11 @@ pub trait HashKey:
             .map(Row)
     }
 
-    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()>;
+    fn deserialize_to_builders(
+        self,
+        array_builders: &mut [ArrayBuilderImpl],
+        data_types: &[DataType],
+    ) -> ArrayResult<()>;
 
     fn has_null(&self) -> bool {
         !self.null_bitmap().is_clear()
@@ -262,7 +268,7 @@ pub type KeySerialized = SerializedKey;
 impl HashKeySerDe<'_> for bool {
     type S = [u8; 1];
 
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         if self {
             [1u8; 1]
         } else {
@@ -270,7 +276,7 @@ impl HashKeySerDe<'_> for bool {
         }
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 1>(source);
         value[0] == 1u8
     }
@@ -279,11 +285,11 @@ impl HashKeySerDe<'_> for bool {
 impl HashKeySerDe<'_> for i16 {
     type S = [u8; 2];
 
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         self.to_ne_bytes()
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 2>(source);
         Self::from_ne_bytes(value)
     }
@@ -292,11 +298,11 @@ impl HashKeySerDe<'_> for i16 {
 impl HashKeySerDe<'_> for i32 {
     type S = [u8; 4];
 
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         self.to_ne_bytes()
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 4>(source);
         Self::from_ne_bytes(value)
     }
@@ -305,11 +311,11 @@ impl HashKeySerDe<'_> for i32 {
 impl HashKeySerDe<'_> for i64 {
     type S = [u8; 8];
 
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         self.to_ne_bytes()
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 8>(source);
         Self::from_ne_bytes(value)
     }
@@ -318,11 +324,11 @@ impl HashKeySerDe<'_> for i64 {
 impl HashKeySerDe<'_> for OrderedF32 {
     type S = [u8; 4];
 
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         self.normalized().to_ne_bytes()
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 4>(source);
         f32::from_ne_bytes(value).into()
     }
@@ -331,11 +337,11 @@ impl HashKeySerDe<'_> for OrderedF32 {
 impl HashKeySerDe<'_> for OrderedF64 {
     type S = [u8; 8];
 
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         self.normalized().to_ne_bytes()
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 8>(source);
         f64::from_ne_bytes(value).into()
     }
@@ -344,11 +350,11 @@ impl HashKeySerDe<'_> for OrderedF64 {
 impl HashKeySerDe<'_> for Decimal {
     type S = [u8; 16];
 
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         Decimal::unordered_serialize(&self.normalize())
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 16>(source);
         Self::unordered_deserialize(value)
     }
@@ -357,7 +363,7 @@ impl HashKeySerDe<'_> for Decimal {
 impl HashKeySerDe<'_> for IntervalUnit {
     type S = [u8; 16];
 
-    fn serialize(mut self) -> Self::S {
+    fn fixed_size_serialize(mut self) -> Self::S {
         self.justify_interval();
         let mut ret = [0; 16];
         ret[0..4].copy_from_slice(&self.get_months().to_ne_bytes());
@@ -367,7 +373,7 @@ impl HashKeySerDe<'_> for IntervalUnit {
         ret
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 16>(source);
         IntervalUnit::new(
             i32::from_ne_bytes(value[0..4].try_into().unwrap()),
@@ -381,12 +387,12 @@ impl<'a> HashKeySerDe<'a> for &'a str {
     type S = Vec<u8>;
 
     /// This should never be called
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         panic!("Should not serialize str for hash!")
     }
 
     /// This should never be called
-    fn deserialize<R: Read>(_source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(_source: &mut R) -> Self {
         panic!("Should not serialize str for hash!")
     }
 }
@@ -394,14 +400,14 @@ impl<'a> HashKeySerDe<'a> for &'a str {
 impl HashKeySerDe<'_> for NaiveDateWrapper {
     type S = [u8; 4];
 
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         let mut ret = [0; 4];
         ret[0..4].copy_from_slice(&self.0.num_days_from_ce().to_ne_bytes());
 
         ret
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 4>(source);
         let days = i32::from_ne_bytes(value[0..4].try_into().unwrap());
         NaiveDateWrapper::with_days(days).unwrap()
@@ -411,7 +417,7 @@ impl HashKeySerDe<'_> for NaiveDateWrapper {
 impl HashKeySerDe<'_> for NaiveDateTimeWrapper {
     type S = [u8; 12];
 
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         let mut ret = [0; 12];
         ret[0..8].copy_from_slice(&self.0.timestamp().to_ne_bytes());
         ret[8..12].copy_from_slice(&self.0.timestamp_subsec_nanos().to_ne_bytes());
@@ -419,7 +425,7 @@ impl HashKeySerDe<'_> for NaiveDateTimeWrapper {
         ret
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 12>(source);
         let secs = i64::from_ne_bytes(value[0..8].try_into().unwrap());
         let nsecs = u32::from_ne_bytes(value[8..12].try_into().unwrap());
@@ -430,7 +436,7 @@ impl HashKeySerDe<'_> for NaiveDateTimeWrapper {
 impl HashKeySerDe<'_> for NaiveTimeWrapper {
     type S = [u8; 8];
 
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         let mut ret = [0; 8];
         ret[0..4].copy_from_slice(&self.0.num_seconds_from_midnight().to_ne_bytes());
         ret[4..8].copy_from_slice(&self.0.nanosecond().to_ne_bytes());
@@ -438,7 +444,7 @@ impl HashKeySerDe<'_> for NaiveTimeWrapper {
         ret
     }
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 8>(source);
         let secs = u32::from_ne_bytes(value[0..4].try_into().unwrap());
         let nano = u32::from_ne_bytes(value[4..8].try_into().unwrap());
@@ -450,12 +456,12 @@ impl<'a> HashKeySerDe<'a> for StructRef<'a> {
     type S = Vec<u8>;
 
     /// This should never be called
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         todo!()
     }
 
     /// This should never be called
-    fn deserialize<R: Read>(_source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(_source: &mut R) -> Self {
         todo!()
     }
 }
@@ -464,12 +470,12 @@ impl<'a> HashKeySerDe<'a> for ListRef<'a> {
     type S = Vec<u8>;
 
     /// This should never be called
-    fn serialize(self) -> Self::S {
+    fn fixed_size_serialize(self) -> Self::S {
         todo!()
     }
 
     /// This should never be called
-    fn deserialize<R: Read>(_source: &mut R) -> Self {
+    fn fixed_size_deserialize<R: Read>(_source: &mut R) -> Self {
         todo!()
     }
 }
@@ -505,7 +511,7 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
         assert!(self.null_bitmap_idx < 8);
         match data {
             Some(v) => {
-                let data = v.serialize();
+                let data = v.fixed_size_serialize();
                 let ret = data.as_ref();
                 assert!(self.left_size() >= ret.len());
                 self.buffer[self.data_len..(self.data_len + ret.len())].copy_from_slice(ret);
@@ -549,7 +555,7 @@ impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
         if is_null {
             Ok(None)
         } else {
-            let value = D::deserialize(&mut self.cursor);
+            let value = D::fixed_size_deserialize(&mut self.cursor);
             Ok(Some(value))
         }
     }
@@ -577,10 +583,10 @@ impl HashKeySerializer for SerializedKeySerializer {
         self.null_bitmap.grow(len_bitmap + 1);
         match data {
             Some(v) => {
-                serialize_datum(&Some(v.to_owned_scalar().into()), self.buffer);
+                serialize_datum(&Some(v.to_owned_scalar().into()), &mut self.buffer);
             }
             None => {
-                serialize_datum(&None, self.buffer);
+                serialize_datum(&None, &mut self.buffer);
                 self.null_bitmap.insert(len_bitmap);
             }
         }
@@ -591,36 +597,6 @@ impl HashKeySerializer for SerializedKeySerializer {
             key: self.buffer,
             hash_code: self.hash_code,
             null_bitmap: self.null_bitmap,
-        }
-    }
-}
-
-pub struct SerializedKeyDeserializer<const N: usize> {
-    cursor: Cursor<[u8; N]>,
-    null_bitmap: FixedBitSet,
-    null_bitmap_idx: usize,
-}
-
-impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
-    type K = FixedSizeKey<N>;
-
-    fn from_hash_key(hash_key: Self::K) -> Self {
-        Self {
-            cursor: Cursor::new(hash_key.key),
-            null_bitmap: hash_key.null_bitmap,
-            null_bitmap_idx: 0,
-        }
-    }
-
-    fn deserialize<'a, D: HashKeySerDe<'a>>(&mut self) -> ArrayResult<Option<D>> {
-        ensure!(self.null_bitmap_idx < 8);
-        let is_null = self.null_bitmap.contains(self.null_bitmap_idx);
-        self.null_bitmap_idx += 1;
-        if is_null {
-            Ok(None)
-        } else {
-            let value = D::deserialize(&mut self.cursor);
-            Ok(Some(value))
         }
     }
 }
@@ -681,7 +657,11 @@ impl ArrayBuilderImpl {
 impl<const N: usize> HashKey for FixedSizeKey<N> {
     type S = FixedSizeKeySerializer<N>;
 
-    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
+    fn deserialize_to_builders(
+        self,
+        array_builders: &mut [ArrayBuilderImpl],
+        _data_types: &[DataType],
+    ) -> ArrayResult<()> {
         let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self);
         for array_builder in array_builders.iter_mut() {
             array_builder.deserialize_from_hash_key(&mut deserializer)?;
@@ -697,9 +677,18 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
 impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
-    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
-        let keys = ;
-        for (array_builder, key) in array_builders.iter_mut().zip_eq(keys) {
+    fn deserialize_to_builders(
+        self,
+        array_builders: &mut [ArrayBuilderImpl],
+        data_types: &[DataType],
+    ) -> ArrayResult<()> {
+        let mut key_buffer = self.key.as_slice();
+        let keys = data_types
+            .iter()
+            .map(|ty| deserialize_datum(&mut key_buffer, ty))
+            .try_collect()
+            .map_err(ArrayError::internal)?;
+        for (array_builder, key) in array_builders.iter_mut().zip_eq::<Vec<_>>(keys) {
             array_builder.append_datum(&key);
         }
         Ok(())
@@ -733,7 +722,7 @@ mod tests {
     #[derive(Hash, PartialEq, Eq)]
     struct Row(Vec<Datum>);
 
-    fn generate_random_data_chunk() -> DataChunk {
+    fn generate_random_data_chunk() -> (DataChunk, Vec<DataType>) {
         let capacity = 128;
         let seed = 10244021u64;
         let columns = vec![
@@ -752,8 +741,21 @@ mod tests {
                 seed + 10,
             )),
         ];
+        let types = vec![
+            DataType::Boolean,
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Decimal,
+            DataType::Varchar,
+            DataType::Date,
+            DataType::Time,
+            DataType::Timestamp,
+        ];
 
-        DataChunk::new(columns, capacity)
+        (DataChunk::new(columns, capacity), types)
     }
 
     fn do_test_serialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
@@ -809,18 +811,22 @@ mod tests {
 
     fn do_test_deserialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
     where
-        F: FnOnce() -> DataChunk,
+        F: FnOnce() -> (DataChunk, Vec<DataType>),
     {
-        let data = data_gen();
+        let (data, types) = data_gen();
         let keys = K::build(column_indexes.as_slice(), &data).expect("Failed to build hash keys");
 
         let mut array_builders = column_indexes
             .iter()
             .map(|idx| data.columns()[*idx].array_ref().create_builder(1024))
             .collect::<Vec<ArrayBuilderImpl>>();
+        let key_types: Vec<_> = column_indexes
+            .iter()
+            .map(|idx| types[*idx].clone())
+            .collect();
 
         keys.into_iter()
-            .try_for_each(|k| K::deserialize_to_builders(k, &mut array_builders[..]))
+            .try_for_each(|k| k.deserialize_to_builders(&mut array_builders[..], &key_types))
             .expect("Failed to deserialize!");
 
         let result_arrays = array_builders
@@ -838,13 +844,13 @@ mod tests {
 
     fn do_test<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
     where
-        F: FnOnce() -> DataChunk,
+        F: FnOnce() -> (DataChunk, Vec<DataType>),
     {
-        let data = data_gen();
+        let (data, types) = data_gen();
 
         let data1 = data.clone();
         do_test_serialize::<K, _>(column_indexes.clone(), move || data1);
-        do_test_deserialize::<K, _>(column_indexes, move || data);
+        do_test_deserialize::<K, _>(column_indexes, move || (data, types));
     }
 
     #[test]
@@ -884,7 +890,7 @@ mod tests {
         do_test::<KeySerialized, _>(vec![0, 7], generate_random_data_chunk);
     }
 
-    fn generate_decimal_test_data() -> DataChunk {
+    fn generate_decimal_test_data() -> (DataChunk, Vec<DataType>) {
         let columns = vec![Column::new(Arc::new(
             array! { DecimalArray, [
                 Some(Decimal::from_str("1.2").unwrap()),
@@ -895,8 +901,9 @@ mod tests {
             ]}
             .into(),
         ) as ArrayRef)];
+        let types = vec![DataType::Decimal];
 
-        DataChunk::new(columns, 5)
+        (DataChunk::new(columns, 5), types)
     }
 
     #[test]
@@ -923,8 +930,10 @@ mod tests {
             .map(|_| ArrayBuilderImpl::Int32(I32ArrayBuilder::new(2)))
             .collect::<Vec<_>>();
 
-        keys.into_iter()
-            .for_each(|k| k.deserialize_to_builders(&mut array_builders[..]).unwrap());
+        keys.into_iter().for_each(|k| {
+            k.deserialize_to_builders(&mut array_builders[..], &[DataType::Int32, DataType::Int32])
+                .unwrap()
+        });
 
         let array = array_builders.pop().unwrap().finish();
         let i32_vec = array
