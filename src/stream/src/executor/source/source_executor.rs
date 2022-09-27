@@ -210,10 +210,7 @@ impl<S: StateStore> SourceExecutor<S> {
             self.split_state_store.take_snapshot(cache).await?
         }
         // commit anyway, even if no message saved
-        self.split_state_store
-            .state_store
-            .commit(epoch.curr)
-            .await?;
+        self.split_state_store.state_store.commit(epoch).await?;
 
         Ok(())
     }
@@ -263,8 +260,7 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        let epoch = barrier.epoch.prev;
-        self.split_state_store.init_epoch(epoch);
+        self.split_state_store.init_epoch(barrier.epoch);
 
         let mut boot_state = self.stream_source_splits.clone();
         for ele in &mut boot_state {
@@ -867,7 +863,7 @@ mod tests {
         let _ = materialize.next().await.unwrap(); // barrier
 
         // there must exist state for new add partition
-        source_state_handler.init_epoch(curr_epoch + 1);
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(curr_epoch + 1));
         source_state_handler
             .get(new_assignments[1].id())
             .await

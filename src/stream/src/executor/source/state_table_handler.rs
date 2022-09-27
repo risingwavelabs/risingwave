@@ -19,6 +19,7 @@ use risingwave_common::array::Row;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
@@ -42,7 +43,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         }
     }
 
-    pub fn init_epoch(&mut self, epoch: u64) {
+    pub fn init_epoch(&mut self, epoch: EpochPair) {
         self.state_store.init_epoch(epoch);
     }
 
@@ -153,6 +154,7 @@ pub(crate) mod tests {
 
     use risingwave_common::array::Row;
     use risingwave_common::types::{Datum, ScalarImpl};
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_connector::source::kafka::KafkaSplit;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -168,9 +170,13 @@ pub(crate) mod tests {
         let b: Arc<str> = String::from("b").into();
         let b: Datum = Some(ScalarImpl::Utf8(b.as_ref().into()));
 
-        state_table.init_epoch(100100);
+        let init_epoch_num = 100100;
+        let init_epoch = EpochPair::new_test_epoch(init_epoch_num);
+        let next_epoch = EpochPair::new_test_epoch(init_epoch_num + 1);
+
+        state_table.init_epoch(init_epoch);
         state_table.insert(Row::new(vec![a.clone(), b.clone()]));
-        state_table.commit(100100).await.unwrap();
+        state_table.commit(next_epoch).await.unwrap();
 
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
@@ -187,13 +193,17 @@ pub(crate) mod tests {
         let split_impl = SplitImpl::Kafka(KafkaSplit::new(0, Some(0), None, "test".into()));
         let serialized = split_impl.encode_to_bytes();
 
-        state_table_handler.init_epoch(1);
+        let epoch_1 = EpochPair::new_test_epoch(1);
+        let epoch_2 = EpochPair::new_test_epoch(2);
+        let epoch_3 = EpochPair::new_test_epoch(3);
+
+        state_table_handler.init_epoch(epoch_1);
         state_table_handler
             .take_snapshot(vec![split_impl.clone()])
             .await?;
-        state_table_handler.state_store.commit(2).await?;
+        state_table_handler.state_store.commit(epoch_2).await?;
 
-        state_table_handler.state_store.commit(3).await?;
+        state_table_handler.state_store.commit(epoch_3).await?;
 
         match state_table_handler
             .try_recover_from_state_store(&split_impl)
