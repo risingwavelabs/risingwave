@@ -537,6 +537,7 @@ impl Compactor {
 
             let mut drop = false;
             let epoch = get_epoch(iter_key);
+            let value = iter.value();
             if is_new_user_key {
                 if !task_config.key_range.right.is_empty()
                     && VersionedComparator::compare_key(iter_key, &task_config.key_range.right)
@@ -548,8 +549,11 @@ impl Compactor {
                 last_key.clear();
                 last_key.extend_from_slice(iter_key);
                 watermark_can_see_last_key = false;
+                if value.is_delete() {
+                    local_stats.skip_delete_key_count += 1;
+                }
             } else {
-                local_stats.skip_delete_key_count += 1;
+                local_stats.skip_multi_version_key_count += 1;
             }
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
@@ -557,9 +561,7 @@ impl Compactor {
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
-            if (epoch <= task_config.watermark
-                && task_config.gc_delete_keys
-                && iter.value().is_delete())
+            if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
                 || (epoch < task_config.watermark && watermark_can_see_last_key)
             {
                 drop = true;
@@ -580,7 +582,7 @@ impl Compactor {
 
             // Don't allow two SSTs to share same user key
             sst_builder
-                .add_full_key(iter_key, iter.value(), is_new_user_key)
+                .add_full_key(iter_key, value, is_new_user_key)
                 .await?;
 
             iter.next().await?;
