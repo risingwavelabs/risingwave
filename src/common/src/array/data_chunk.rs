@@ -239,9 +239,9 @@ impl DataChunk {
 
     /// `compact` will convert the chunk to compact format.
     /// Compact format means that `visibility == None`.
-    pub fn compact(self) -> ArrayResult<Self> {
+    pub fn compact(self) -> Self {
         match &self.vis2 {
-            Vis::Compact(_) => Ok(self),
+            Vis::Compact(_) => self,
             Vis::Bitmap(visibility) => {
                 let cardinality = visibility
                     .iter()
@@ -251,12 +251,10 @@ impl DataChunk {
                     .into_iter()
                     .map(|col| {
                         let array = col.array();
-                        array
-                            .compact(visibility, cardinality)
-                            .map(|array| Column::new(Arc::new(array)))
+                        Column::new(Arc::new(array.compact(visibility, cardinality)))
                     })
-                    .collect::<ArrayResult<Vec<_>>>()?;
-                Ok(Self::new(columns, cardinality))
+                    .collect::<Vec<_>>();
+                Self::new(columns, cardinality)
             }
         }
     }

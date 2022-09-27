@@ -196,7 +196,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         // consume all chunks to compute the agg result
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = chunk?.compact()?;
+            let chunk = chunk?.compact();
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
                 let states: &mut Vec<BoxedAggState> = groups.entry(key).or_insert_with(|| {

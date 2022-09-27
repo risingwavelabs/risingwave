@@ -115,7 +115,8 @@ where
     ) -> HummockResult<()> {
         assert!(!user_key.is_empty());
         let full_key = FullKey::from_user_key(user_key, epoch);
-        self.add_full_key(full_key.as_slice(), value, true).await?;
+        self.add_full_key(full_key.as_slice().into_inner(), value, true)
+            .await?;
         Ok(())
     }
 
@@ -128,12 +129,12 @@ where
     /// allowed, where `allow_split` should be `false`.
     pub async fn add_full_key(
         &mut self,
-        full_key: FullKey<&[u8]>,
+        full_key: &[u8],
         value: HummockValue<&[u8]>,
-        allow_split: bool,
+        is_new_user_key: bool,
     ) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.as_ref() {
-            if allow_split && builder.reach_capacity() {
+            if is_new_user_key && builder.reach_capacity() {
                 self.seal_current().await?;
             }
         }
@@ -144,7 +145,7 @@ where
         }
 
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key.into_inner(), value).await?;
+        builder.add(full_key, value, is_new_user_key).await?;
         Ok(())
     }
 
@@ -355,7 +356,9 @@ mod tests {
 
         builder
             .add_full_key(
-                FullKey::from_user_key_slice(b"k", 233).as_slice(),
+                FullKey::from_user_key_slice(b"k", 233)
+                    .as_slice()
+                    .into_inner(),
                 HummockValue::put(b"v"),
                 false,
             )

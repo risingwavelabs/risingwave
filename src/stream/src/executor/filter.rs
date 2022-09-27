@@ -89,7 +89,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
         &mut self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact()?;
+        let chunk = chunk.compact();
 
         let (data_chunk, ops) = chunk.into_parts();
 

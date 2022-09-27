@@ -2813,9 +2813,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.7"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1553e1ee8f12e9b4d04aa430b6e8e38380f89cec07cf3881d410f2d2690798ea"
+checksum = "98c6ebce9e84d0df01090c5e221e0b38091565d39335eba972b0d7a8589bf683"
 dependencies = [
  "ahash",
  "async-channel",
@@ -2840,11 +2840,12 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.6"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54cc5db0885f71b5e8eb71ec1002b94bf5b8f5b1011c4d709b23a1fd3b5c01d8"
+checksum = "0d6c5383c2297a0a3306fbcc0475a6ab1decb5b49c3cd20adae6fd8d149dbde0"
 dependencies = [
  "etcd-client",
+ "futures-util",
  "http",
  "madsim",
  "spin 0.9.4",
@@ -2862,6 +2863,30 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "madsim-rdkafka"
+version = "0.2.8-alpha"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ed71583c1f7ea964e5dd0c1ea4ae1133ff9092775772b22cc9c0fa0151a6441"
+dependencies = [
+ "async-channel",
+ "async-trait",
+ "futures",
+ "futures-util",
+ "libc",
+ "log",
+ "madsim",
+ "rdkafka-sys",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "slab",
+ "spin 0.9.4",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4145,23 +4170,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdkafka"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1de127f294f2dba488ed46760b129d5ecbeabbd337ccbf3739cb29d50db2161c"
-dependencies = [
- "futures",
- "libc",
- "log",
- "rdkafka-sys",
- "serde",
- "serde_derive",
- "serde_json",
- "slab",
- "tokio",
-]
-
-[[package]]
 name = "rdkafka-sys"
 version = "4.2.0+1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4326,7 +4334,6 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
@@ -4562,7 +4569,6 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_batch",
  "risingwave_common",
  "risingwave_common_service",
@@ -4619,6 +4625,7 @@ dependencies = [
  "humantime",
  "hyper",
  "itertools",
+ "madsim-rdkafka",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -4629,7 +4636,6 @@ dependencies = [
  "prost",
  "pulsar",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_common",
  "risingwave_pb",
  "risingwave_storage",
@@ -5002,6 +5008,7 @@ dependencies = [
  "glob",
  "madsim",
  "madsim-etcd-client",
+ "madsim-rdkafka",
  "madsim-tokio",
  "rand 0.8.5",
  "risingwave_compactor",
@@ -5010,6 +5017,7 @@ dependencies = [
  "risingwave_meta",
  "risingwave_sqlsmith",
  "sqllogictest",
+ "tempfile",
  "tokio-postgres",
  "tracing",
  "workspace-hack",
@@ -5047,7 +5055,6 @@ dependencies = [
  "protobuf",
  "protobuf-codegen-pure",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
@@ -5223,7 +5230,6 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
