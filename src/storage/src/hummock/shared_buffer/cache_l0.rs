@@ -1,13 +1,16 @@
 use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, HashSet};
 use std::sync::Arc;
+
 use bytes::Bytes;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, key, VersionedComparator};
-use risingwave_pb::hummock::SstableInfo;
-use crate::hummock::HummockResult;
+use risingwave_hummock_sdk::{key, CompactionGroupId, VersionedComparator};
+
 use crate::hummock::iterator::{Forward, HummockIterator, HummockIteratorDirection};
-use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchIterator};
+use crate::hummock::shared_buffer::shared_buffer_batch::{
+    SharedBufferBatchInner, SharedBufferBatchIterator,
+};
 use crate::hummock::value::HummockValue;
+use crate::hummock::HummockResult;
 
 const MIN_MERGE_BATCH_LIMIT: usize = 8 * 1024 * 1024;
 const MAX_MERGE_WRITE_AMPLIFICATION: usize = 8;
@@ -19,14 +22,18 @@ pub struct InMemorySstableData {
 }
 
 impl InMemorySstableData {
-    pub fn new(data: Arc<SharedBufferBatchInner>, compaction_group_id: CompactionGroupId, mut sst_ids: Vec<u64>) -> Self {
+    fn new(
+        data: Arc<SharedBufferBatchInner>,
+        compaction_group_id: CompactionGroupId,
+        mut sst_ids: Vec<u64>,
+    ) -> Self {
         sst_ids.sort();
         sst_ids.dedup();
-       Self {
-           data,
-           compaction_group_id,
-           ssts: sst_ids.into_iter().collect(),
-       }
+        Self {
+            data,
+            compaction_group_id,
+            ssts: sst_ids.into_iter().collect(),
+        }
     }
 
     pub fn iter<D: HummockIteratorDirection>(&self) -> SharedBufferBatchIterator<D> {
@@ -46,11 +53,14 @@ impl InMemorySstableData {
     }
 
     pub fn can_merge(&self, new_batch_size: usize) -> bool {
-        if self.data.size() > MIN_MERGE_BATCH_LIMIT && self.data.size() > new_batch_size * MAX_MERGE_WRITE_AMPLIFICATION {
+        if self.data.size() > MIN_MERGE_BATCH_LIMIT
+            && self.data.size() > new_batch_size * MAX_MERGE_WRITE_AMPLIFICATION
+        {
             return false;
         }
         true
     }
+
     pub fn start_key(&self) -> &[u8] {
         &self.data.first().unwrap().0
     }
@@ -67,12 +77,12 @@ impl InMemorySstableData {
         key::user_key(&self.data.last().unwrap().0)
     }
 
-    pub fn to_batch(&self) -> SharedBufferBatch {
-        SharedBufferBatch::from_inner(self.data.clone(), 0,
-            self.compaction_group_id)
-    }
-
-    pub async fn build<I: HummockIterator<Direction=Forward>>(mut iter: I, key_count: usize, compaction_group_id: u64, sst_ids: Vec<u64>) -> HummockResult<Self> {
+    pub async fn build<I: HummockIterator<Direction = Forward>>(
+        mut iter: I,
+        key_count: usize,
+        compaction_group_id: u64,
+        sst_ids: Vec<u64>,
+    ) -> HummockResult<Self> {
         let mut data = Vec::with_capacity(key_count);
         let mut data_size = 0;
         iter.rewind().await?;
@@ -86,10 +96,26 @@ impl InMemorySstableData {
             iter.next().await?;
         }
         Ok(InMemorySstableData::new(
-                Arc::new(SharedBufferBatchInner::new(data, data_size, None)),
-                compaction_group_id,
-                sst_ids
-            ))
+            Arc::new(SharedBufferBatchInner::new(data, data_size, None)),
+            compaction_group_id,
+            sst_ids,
+        ))
+    }
+
+    pub fn get(&self, internal_key: &[u8]) -> Option<HummockValue<Bytes>> {
+        // Perform binary search on user key because the items in SharedBufferBatch is ordered by
+        // user key.
+        let idx = match self
+            .data
+            .binary_search_by(|m| VersionedComparator::compare_key(&m.0, internal_key))
+        {
+            Ok(idx) => idx,
+            Err(idx) => idx,
+        };
+        if key::user_key(&self.data[idx].0).eq(key::user_key(internal_key)) {
+            return Some(self.data[idx].1.clone());
+        }
+        None
     }
 
     pub fn merge(batches: Vec<InMemorySstableData>) -> Self {
@@ -125,7 +151,7 @@ impl InMemorySstableData {
         InMemorySstableData::new(
             Arc::new(SharedBufferBatchInner::new(data, data_size, None)),
             compaction_group_id,
-            ssts
+            ssts,
         )
     }
 }
@@ -135,8 +161,8 @@ struct Node {
 }
 
 impl Ord for Node
-    where
-        Self: PartialOrd,
+where
+    Self: PartialOrd,
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.partial_cmp(other).unwrap()
@@ -144,12 +170,15 @@ impl Ord for Node
 }
 
 /// Implement `PartialOrd` for unordered iter node. Only compare the key.
-impl PartialOrd<Node> for Node  {
+impl PartialOrd<Node> for Node {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         // Note: to implement min-heap by using max-heap internally, the comparing
         // order should be reversed.
 
-        Some(VersionedComparator::compare_key(other.iter.key(), self.iter.key()))
+        Some(VersionedComparator::compare_key(
+            other.iter.key(),
+            self.iter.key(),
+        ))
     }
 }
 

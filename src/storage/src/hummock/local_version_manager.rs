@@ -355,7 +355,7 @@ impl LocalVersionManager {
                 match shared_buffer_uploader.compact_l0_to_cache(version).await {
                     Ok(ret) => {
                         local_version.write().set_cache_data_for_l0(ret);
-                    },
+                    }
                     Err(e) => {
                         tracing::error!("failed to preload L0 data, error: {:?}", e);
                     }

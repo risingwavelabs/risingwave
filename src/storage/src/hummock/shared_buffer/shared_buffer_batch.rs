@@ -44,9 +44,11 @@ pub(crate) struct SharedBufferBatchInner {
 }
 
 impl SharedBufferBatchInner {
-    pub fn new(payload: Vec<SharedBufferItem>,
-               size: usize,
-               buffer_release_notifier: Option<mpsc::UnboundedSender<SharedBufferEvent>>) -> Self {
+    pub fn new(
+        payload: Vec<SharedBufferItem>,
+        size: usize,
+        buffer_release_notifier: Option<mpsc::UnboundedSender<SharedBufferEvent>>,
+    ) -> Self {
         Self {
             payload,
             size,
@@ -54,6 +56,7 @@ impl SharedBufferBatchInner {
             batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
         }
     }
+
     pub fn size(&self) -> usize {
         self.size
     }
@@ -74,11 +77,9 @@ impl Deref for SharedBufferBatchInner {
 impl Drop for SharedBufferBatchInner {
     fn drop(&mut self) {
         if let Some(notifier) = self.buffer_release_notifier.take() {
-            let _ = notifier
-                .send(BufferRelease(self.size))
-                .inspect_err(|e| {
-                    error!("unable to notify buffer size change: {:?}", e);
-                });
+            let _ = notifier.send(BufferRelease(self.size)).inspect_err(|e| {
+                error!("unable to notify buffer size change: {:?}", e);
+            });
         }
     }
 }
@@ -111,16 +112,6 @@ pub struct SharedBufferBatch {
 static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
 
 impl SharedBufferBatch {
-    pub fn from_inner(inner: Arc<SharedBufferBatchInner>, epoch: HummockEpoch, compaction_group_id: CompactionGroupId) -> {
-        Self {
-            inner,
-            epoch,
-            compaction_group_id,
-            table_id: 0,
-            batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
-        }
-    }
-
     pub fn new(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
@@ -140,8 +131,7 @@ impl SharedBufferBatch {
                 sorted_items,
                 size,
                 Some(buffer_release_notifier),
-                batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
-            }),
+            )),
             epoch,
             compaction_group_id,
             table_id,
@@ -268,7 +258,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
         self.current_idx += 1;
     }
 
-    pub fn rewind_inner(&mut self)  {
+    pub fn rewind_inner(&mut self) {
         self.current_idx = 0;
     }
 }

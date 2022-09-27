@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod cache_l0;
 pub mod shared_buffer_batch;
 #[expect(dead_code)]
 pub mod shared_buffer_uploader;
-mod cache_l0;
-pub use cache_l0::InMemorySstableData;
-
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
+pub use cache_l0::InMemorySstableData;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -42,6 +41,8 @@ use crate::hummock::state_store::HummockIteratorType;
 use crate::hummock::utils::{filter_single_sst, range_overlap};
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+
+pub const MIN_CACHE_COMPACT_NUMBER: usize = 4;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UncommittedData {

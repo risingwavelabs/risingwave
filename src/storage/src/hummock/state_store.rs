@@ -148,7 +148,10 @@ impl HummockStorage {
             ))
         }
         for data in committed_l0_cache {
-            if compaction_group_id.as_ref().map_or(true, |id| *id == data.compaction_group_id()) {
+            if compaction_group_id
+                .as_ref()
+                .map_or(true, |id| *id == data.compaction_group_id())
+            {
                 overlapped_iters.push(HummockIteratorUnion::First(data.iter::<T::Direction>()));
             }
         }
@@ -303,6 +306,7 @@ impl HummockStorage {
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
+            committed_l0_cache,
         } = self.read_filter(&read_options, &(key..=key))?;
 
         let mut table_counts = 0;
@@ -341,6 +345,18 @@ impl HummockStorage {
                 return Ok(v.into_user_value());
             }
             table_counts += table_count;
+        }
+        for data in committed_l0_cache {
+            // iterate over uncommitted data in order index in descending order
+            if compaction_group_id
+                .as_ref()
+                .map_or(true, |id| *id == data.compaction_group_id())
+            {
+                if let Some(v) = data.get(&internal_key) {
+                    local_stats.report(self.stats.as_ref());
+                    return Ok(v.into_user_value());
+                }
+            }
         }
 
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in

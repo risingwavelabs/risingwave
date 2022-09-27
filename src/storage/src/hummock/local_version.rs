@@ -32,8 +32,10 @@ use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, LevelTy
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
-use crate::hummock::shared_buffer::{to_order_sorted, OrderSortedUncommittedData, UncommittedData, InMemorySstableData};
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchInner;
+use crate::hummock::shared_buffer::{
+    to_order_sorted, InMemorySstableData, OrderSortedUncommittedData, UncommittedData,
+    MIN_CACHE_COMPACT_NUMBER,
+};
 use crate::hummock::utils::{check_subset_preserve_order, filter_single_sst, range_overlap};
 
 #[derive(Clone)]
@@ -244,6 +246,7 @@ impl LocalVersion {
     pub fn pinned_version(&self) -> &PinnedVersion {
         &self.pinned_version
     }
+
     pub fn local_version(&self) -> Arc<HummockVersion> {
         self.local_related_version.version_ref()
     }
@@ -398,35 +401,42 @@ impl LocalVersion {
         for (_, levels) in &self.local_related_version.version.levels {
             let mut overlapping_count = 0;
             for sub_level in levels.l0.as_ref().unwrap().sub_levels.iter().rev() {
-                if sub_level.level_type != LevelType::Overlapping && sub_level.table_infos.len() > 1 {
+                if sub_level.level_type != LevelType::Overlapping as i32
+                    && sub_level.table_infos.len() > 1
+                {
                     break;
                 }
                 overlapping_count += sub_level.table_infos.len();
+            }
+            if overlapping_count > MIN_CACHE_COMPACT_NUMBER {
+                return true;
             }
         }
         false
     }
 
-    pub fn set_cache_data_for_l0(
-        &mut self,
-        data: Vec<InMemorySstableData>,
-    ) {
+    pub fn set_cache_data_for_l0(&mut self, data: Vec<InMemorySstableData>) {
         for group in data {
             let ssts = group.get_ssts();
             let group_id = group.compaction_group_id();
-            let levels = self.local_related_version.version.get_compaction_group_levels_mut(group_id);
+            let levels = self
+                .local_related_version
+                .version
+                .get_compaction_group_levels(group_id);
             let mut exist_ssts = HashSet::with_capacity(ssts.len());
             let mut cache_valid = true;
             for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
-                if sub_level.level_type != LevelType::Overlapping && sub_level.table_infos.len() > 1 {
+                if sub_level.level_type != LevelType::Overlapping as i32
+                    && sub_level.table_infos.len() > 1
+                {
                     continue;
                 }
                 for table in &sub_level.table_infos {
                     exist_ssts.insert(table.id);
                 }
             }
-            for sst in ssts {
-                if !exist_ssts.contains(&sst) {
+            for sst in &ssts {
+                if !exist_ssts.contains(sst) {
                     cache_valid = false;
                     break;
                 }
@@ -434,12 +444,19 @@ impl LocalVersion {
 
             if cache_valid {
                 self.committed_cache.push(Arc::new(group));
+                let mut new_version = self.local_related_version.version.as_ref().clone();
+                let levels = new_version.get_compaction_group_levels_mut(group_id);
                 for sub_level in &mut levels.l0.as_mut().unwrap().sub_levels {
-                    if sub_level.level_type != LevelType::Overlapping && sub_level.table_infos.len() > 1 {
+                    if sub_level.level_type != (LevelType::Overlapping as i32)
+                        && sub_level.table_infos.len() > 1
+                    {
                         continue;
                     }
-                    sub_level.table_infos.retain(|table| !ssts.contains(&table.id));
+                    sub_level
+                        .table_infos
+                        .retain(|table| !ssts.contains(&table.id));
                 }
+                self.local_related_version.version = Arc::new(new_version);
             }
         }
     }
@@ -469,7 +486,6 @@ impl LocalVersion {
                         assert_eq!(new_local_related_version.id, delta.prev_id);
                         clean_epochs.extend(self.apply_version_delta_local_related(
                             &mut new_local_related_version,
-                            self.pinned_version.version.as_ref(),
                             &delta,
                         ));
                     }
@@ -618,7 +634,6 @@ impl LocalVersion {
     fn apply_version_delta_local_related(
         &mut self,
         version: &mut HummockVersion,
-        origin_version: &HummockVersion,
         version_delta: &HummockVersionDelta,
     ) -> Vec<HummockEpoch> {
         assert!(version.max_committed_epoch <= version_delta.max_committed_epoch);
@@ -650,15 +665,15 @@ impl LocalVersion {
         assert!(compaction_group_synced_ssts.is_none());
         for (group, levels) in &version_delta.level_deltas {
             let mut changed_group = false;
-            let mut ids = HashSet::default();
+            let mut ids: HashSet<u64> = HashSet::default();
             for data in &self.committed_cache {
                 if data.compaction_group_id() == *group {
                     for level_delta in &levels.level_deltas {
                         if level_delta.level_idx != 0 {
                             continue;
                         }
-                        for sst_id in level_delta.removed_table_ids {
-                            if data.contains_sst(sst_id) {
+                        for sst_id in &level_delta.removed_table_ids {
+                            if data.contains_sst(*sst_id) {
                                 changed_group = true;
                                 break;
                             }
@@ -673,6 +688,7 @@ impl LocalVersion {
             if !changed_group {
                 continue;
             }
+            let origin_version = self.pinned_version.version.as_ref();
 
             if let Some(local_levels) = version.levels.get_mut(group) {
                 for sub_level in &local_levels.l0.as_ref().unwrap().sub_levels {
@@ -683,11 +699,14 @@ impl LocalVersion {
                 if let Some(origin_levels) = origin_version.levels.get(group) {
                     local_levels.l0 = origin_levels.l0.clone();
                     for sub_level in &mut local_levels.l0.as_mut().unwrap().sub_levels {
-                        sub_level.table_infos.retain(| table | ids.contains(&table.id));
+                        sub_level
+                            .table_infos
+                            .retain(|table| ids.contains(&table.id));
                     }
                 }
             }
-            self.committed_cache.retain(|data| data.compaction_group_id() != *group);
+            self.committed_cache
+                .retain(|data| data.compaction_group_id() != *group);
         }
 
         for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
