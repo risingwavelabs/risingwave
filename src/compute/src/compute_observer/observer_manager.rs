@@ -87,13 +87,17 @@ impl ObserverNodeImpl for ComputeObserverNode {
                 if let StateStoreImpl::HummockStateStore(storage) = &self.store {
                     storage.as_hummock_storage_ref().try_update_pinned_version(
                         pin_version_response::Payload::PinnedVersion(
-                            snapshot.hummock_version.unwrap(),
+                            snapshot
+                                .hummock_version
+                                .expect("hummock_version should not be None"),
                         ),
                     );
                     storage
                         .as_hummock_storage_ref()
                         .set_write_limiter_threshold(
-                            snapshot.hummock_write_limiter_threshold.unwrap(),
+                            snapshot
+                                .hummock_write_limiter_threshold
+                                .expect("hummock_write_limiter_threshold should not be None"),
                         );
                 }
 
