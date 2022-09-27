@@ -137,7 +137,7 @@ impl TopNExecutor {
 
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = Arc::new(chunk?.compact()?);
+            let chunk = Arc::new(chunk?.compact());
             for (row_id, encoded_row) in encode_chunk(&chunk, &self.order_pairs)
                 .into_iter()
                 .enumerate()

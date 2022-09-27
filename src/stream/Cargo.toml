@@ -38,7 +38,6 @@ pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }

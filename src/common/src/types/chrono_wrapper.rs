@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
-use std::fmt::{Display, Formatter};
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::io::Write;
 
 use bytes::{BufMut, BytesMut};
@@ -32,51 +30,24 @@ const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 macro_rules! impl_chrono_wrapper {
-    ($({ $variant_name:ident, $chrono:ty, $_array:ident, $_builder:ident }),*) => {
-        $(
-            #[derive(Clone, Copy, Debug, Eq, PartialOrd, Ord)]
-            #[repr(transparent)]
-            pub struct $variant_name(pub $chrono);
+    ($variant_name:ident, $chrono:ty) => {
+        #[derive(
+            Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, parse_display::Display,
+        )]
+        #[repr(transparent)]
+        pub struct $variant_name(pub $chrono);
 
-            impl $variant_name {
-                pub fn new(data: $chrono) -> Self {
-                    $variant_name(data)
-                }
+        impl $variant_name {
+            pub fn new(data: $chrono) -> Self {
+                $variant_name(data)
             }
-
-            impl Hash for $variant_name {
-                fn hash<H: Hasher>(&self, state: &mut H) {
-                    self.0.hash(state);
-                }
-            }
-
-            impl PartialEq for $variant_name {
-                fn eq(&self, other: &Self) -> bool {
-                    self.0 == other.0
-                }
-            }
-
-            impl Display for $variant_name {
-                fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-                    Display::fmt(&self.0, f)
-                }
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! for_all_chrono_variants {
-    ($macro:ident) => {
-        $macro! {
-            { NaiveDateWrapper, NaiveDate, NaiveDateArray, NaiveDateArrayBuilder },
-            { NaiveDateTimeWrapper, NaiveDateTime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
-            { NaiveTimeWrapper, NaiveTime, NaiveTimeArray, NaiveTimeArrayBuilder }
         }
     };
 }
 
-for_all_chrono_variants! { impl_chrono_wrapper }
+impl_chrono_wrapper!(NaiveDateWrapper, NaiveDate);
+impl_chrono_wrapper!(NaiveDateTimeWrapper, NaiveDateTime);
+impl_chrono_wrapper!(NaiveTimeWrapper, NaiveTime);
 
 impl Default for NaiveDateWrapper {
     fn default() -> Self {
@@ -276,7 +247,7 @@ impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
 
             // Fix the days after changing date.
             // For example, 1970.1.31 + 1 month = 1970.2.28
-            day = min(day, get_mouth_days(year, month as usize));
+            day = day.min(get_mouth_days(year, month as usize));
             date = NaiveDate::from_ymd(year, month as u32, day as u32);
         }
         let mut datetime = NaiveDateTime::new(date, self.0.time());

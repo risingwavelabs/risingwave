@@ -158,9 +158,9 @@
     create table t2 (v1 int, v2 int);
     select * from t1 right join t2 where t2.v2 > 100;
   optimized_logical_plan: |
-    LogicalJoin { type: RightOuter, on: true, output: all }
-    ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2] }
-    └─LogicalScan { table: t2, output_columns: [t2.v1, t2.v2], required_columns: [v1, v2], predicate: (t2.v2 > 100:Int32) }
+    LogicalJoin { type: LeftOuter, on: true, output: [t1.v1, t1.v2, t2.v1, t2.v2] }
+    ├─LogicalScan { table: t2, output_columns: [t2.v1, t2.v2], required_columns: [v1, v2], predicate: (t2.v2 > 100:Int32) }
+    └─LogicalScan { table: t1, columns: [t1.v1, t1.v2] }
 - sql: |
     /* Push to left, right and on */
     create table t1 (v1 int, v2 int);

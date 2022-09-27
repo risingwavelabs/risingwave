@@ -97,7 +97,7 @@ impl UpdateExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?.compact()?;
+            let data_chunk = data_chunk?.compact();
             let len = data_chunk.cardinality();
 
             let updated_data_chunk = {

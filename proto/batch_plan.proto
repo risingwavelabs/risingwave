@@ -205,10 +205,10 @@ message MergeSortExchangeNode {
 message LookupJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode condition = 2;
-  repeated uint32 build_side_key = 3;
-  plan_common.StorageTableDesc probe_side_table_desc = 4;
-  repeated uint32 probe_side_vnode_mapping = 5;
-  repeated int32 probe_side_column_ids = 6;
+  repeated uint32 outer_side_key = 3;
+  plan_common.StorageTableDesc inner_side_table_desc = 4;
+  repeated uint32 inner_side_vnode_mapping = 5;
+  repeated int32 inner_side_column_ids = 6;
   repeated uint32 output_indices = 7;
   repeated common.WorkerNode worker_nodes = 8;
   // Null safe means it treats `null = null` as true.

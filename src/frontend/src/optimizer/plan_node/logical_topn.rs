@@ -127,10 +127,8 @@ impl LogicalTopN {
         let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
-        let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-
-        internal_table_catalog_builder
-            .set_properties(self.ctx().inner().with_options.internal_table_subset());
+        let mut internal_table_catalog_builder =
+            TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
         columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
@@ -161,11 +159,11 @@ impl LogicalTopN {
                 order_cols.insert(*idx);
             }
         });
-        internal_table_catalog_builder.build(
-            self.input().distribution().dist_column_indices().to_vec(),
-            self.base.append_only,
-            vnode_col_idx,
-        )
+        if let Some(vnode_col_idx) = vnode_col_idx {
+            internal_table_catalog_builder.set_vnode_col_idx(vnode_col_idx);
+        }
+        internal_table_catalog_builder
+            .build(self.input().distribution().dist_column_indices().to_vec())
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {

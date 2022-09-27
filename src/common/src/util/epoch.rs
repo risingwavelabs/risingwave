@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt;
 use std::cmp::Ordering;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
+
+use parse_display::Display;
 
 /// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch:
 /// 2021-04-01T00:00:00Z.
 pub static UNIX_SINGULARITY_DATE_EPOCH: LazyLock<SystemTime> =
     LazyLock::new(|| SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200));
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Epoch(pub u64);
 
 /// `INVALID_EPOCH` defines the invalid epoch value.
@@ -92,12 +93,6 @@ impl Epoch {
 impl From<u64> for Epoch {
     fn from(epoch: u64) -> Self {
         Self(epoch)
-    }
-}
-
-impl fmt::Display for Epoch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
     }
 }
 
