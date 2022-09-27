@@ -54,6 +54,7 @@ macro_rules! for_all_metrics {
             write_build_l0_sst_duration: Histogram,
             write_build_l0_bytes: GenericCounter<AtomicU64>,
             write_l0_size_per_epoch: Histogram,
+            write_delay: Histogram,
 
             iter_merge_sstable_counts: HistogramVec,
 
@@ -324,8 +325,8 @@ impl StateStoreMetrics {
             register_histogram_vec_with_registry!(opts, &["level"], registry).unwrap();
         let opts = histogram_opts!(
             "state_store_get_table_id_total_time_duration",
-            "Total time of compact that have been issued to state store",
-            exponential_buckets(0.1, 1.6, 28).unwrap() // max 52000s
+            "Total time of request that gets new SST id",
+            exponential_buckets(0.001, 1.6, 28).unwrap() // max 520s
         );
         let get_table_id_total_time_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -423,6 +424,13 @@ impl StateStoreMetrics {
 
         let sstable_avg_value_size = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let opts = histogram_opts!(
+            "state_store_write_delay",
+            "Total time of delay that performs before write",
+            exponential_buckets(1.0, 2.0, 13).unwrap() // 4096 seconds
+        );
+        let write_delay = register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             get_duration,
             get_key_size,
@@ -448,6 +456,7 @@ impl StateStoreMetrics {
             write_build_l0_sst_duration,
             write_build_l0_bytes,
             write_l0_size_per_epoch,
+            write_delay,
             iter_merge_sstable_counts,
             sst_store_block_request_counts,
             shared_buffer_to_l0_duration,

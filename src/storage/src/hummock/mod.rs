@@ -202,7 +202,13 @@ impl HummockStorage {
     }
 
     pub fn get_write_delay(&self) -> Option<WriteDelay> {
-        self.write_limiter.lock().get_write_delay()
+        let write_delay = self.write_limiter.lock().get_write_delay();
+        if let Some(write_delay) = write_delay.as_ref() {
+            self.stats
+                .write_delay
+                .observe(write_delay.duration.as_secs() as f64);
+        }
+        write_delay
     }
 
     pub fn set_write_limiter_threshold(&self, threshold: WriteLimiterThreshold) {

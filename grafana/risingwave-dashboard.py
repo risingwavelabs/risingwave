@@ -868,6 +868,12 @@ def section_hummock(panels):
             ),
         ]),
 
+        panels.timeseries_latency("Write Delay", [
+            panels.target(
+                "sum by(le, job, instance)(rate(state_store_write_delay_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_write_delay_count[$__rate_interval]))", "write delay - {{job}} @ {{instance}}"
+            ),
+        ]),
+
         panels.timeseries_ops("Write Item Count", [
             panels.target(
                 "sum(rate(state_store_write_batch_tuple_counts[$__rate_interval])) by (job,instance)", "write_batch_kv_pair_count - {{instance}} "
