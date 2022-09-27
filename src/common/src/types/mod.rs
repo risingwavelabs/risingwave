@@ -115,24 +115,8 @@ pub enum DataType {
 }
 
 impl DataTypeName {
-    pub fn is_scalar(&self) -> bool {
-        match self {
-            DataTypeName::Boolean
-            | DataTypeName::Int16
-            | DataTypeName::Int32
-            | DataTypeName::Int64
-            | DataTypeName::Decimal
-            | DataTypeName::Float32
-            | DataTypeName::Float64
-            | DataTypeName::Varchar
-            | DataTypeName::Date
-            | DataTypeName::Timestamp
-            | DataTypeName::Timestampz
-            | DataTypeName::Time
-            | DataTypeName::Interval => true,
-
-            DataTypeName::Struct | DataTypeName::List => false,
-        }
+    pub fn is_scalar(self) -> bool {
+        DataType::from(self).is_scalar()
     }
 
     pub fn to_type(self) -> Option<DataType> {
