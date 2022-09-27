@@ -92,8 +92,6 @@ pub struct HummockManager<S: MetaStore> {
     compaction_scheduler: parking_lot::RwLock<Option<CompactionSchedulerChannelRef>>,
 
     side_compaction_sched_channel: parking_lot::RwLock<Option<CompactionSchedulerChannelRef>>,
-    compaction_sched_status_rx:
-        tokio::sync::Mutex<Option<UnboundedReceiver<(ScheduleStatus, CompactionGroupId)>>>,
     compactor_manager: CompactorManagerRef,
 }
 
@@ -210,7 +208,6 @@ where
             compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
             side_compaction_sched_channel: parking_lot::RwLock::new(None),
-            compaction_sched_status_rx: tokio::sync::Mutex::new(None),
             compactor_manager,
             max_committed_epoch: AtomicU64::new(0),
             max_current_epoch: AtomicU64::new(0),
@@ -908,7 +905,7 @@ where
             Some(compaction_guard) => compaction_guard,
         };
 
-        let deterministic_mode = compaction_guard.deterministic_mode;
+        let deterministic_mode = self.env.opts.enable_compaction_deterministic;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
         let mut compact_status = VarTransaction::new(
@@ -924,6 +921,8 @@ where
         let assignee_context_id = compact_task_assignment
             .remove(compact_task.task_id)
             .map(|assignment| assignment.context_id);
+
+        assert!(deterministic_mode);
 
         // For context_id is None, there is no need to check the task assignment.
         if let Some(context_id) = context_id {
@@ -1146,7 +1145,7 @@ where
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit new epochs if this flag is set
-        if versioning_guard.deterministic_mode {
+        if versioning_guard.disable_commit_epochs {
             return Ok(());
         }
 
@@ -1504,12 +1503,17 @@ where
 
     #[named]
     pub async fn disable_commit_epoch(&self) -> HummockVersion {
-        let mut compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
-        versioning_guard.deterministic_mode = true;
-        compaction_guard.deterministic_mode = true;
+        versioning_guard.disable_commit_epochs = true;
         let version = versioning_guard.current_version.clone();
         version
+    }
+
+    #[named]
+    async fn get_compact_task_assignment_size(&self) -> usize {
+        let compaction_guard = read_lock!(self, compaction).await;
+        let size = compaction_guard.compact_task_assignment.len();
+        size
     }
 
     /// Triggers compacitons to specified compaction groups.
@@ -1535,142 +1539,94 @@ where
             return Ok((old_version.id, old_version.max_committed_epoch));
         }
 
-        let mut pending_ack = compaction_groups.len();
+        let old_size = self.get_compact_task_assignment_size().await;
         for compaction_group in compaction_groups {
             self.try_sched_compaction_deterministic(compaction_group)?;
         }
+        let (schedule_ok, task_num) = self.poll_compaction_schedule_status(old_size).await;
+        let (compaction_ok, cur_version) = self
+            .poll_compaction_tasks_status(schedule_ok, task_num, &old_version)
+            .await;
 
-        let mut mutex_guard = self.compaction_sched_status_rx.lock().await;
-        if let Some(rx) = mutex_guard.as_mut() {
-            loop {
-                match rx.recv().await {
-                    Some((sched_status, compaction_group)) => {
-                        tracing::info!(
-                            "Compaction schedule {} for compaction group {}",
-                            sched_status.as_str(),
-                            compaction_group,
-                        );
-                        if sched_status == ScheduleStatus::Ok {
-                            // poll current version until its id become large
-                            let mut cur_version = self.get_current_version().await;
-                            while cur_version.id <= old_version.id {
-                                tokio::time::sleep(Duration::from_millis(50)).await;
-                                cur_version = self.get_current_version().await;
-                            }
-                        }
-                        pending_ack -= 1;
-                    }
-                    None => {
-                        tracing::warn!("Compaction status channel is closed");
-                        break;
-                    }
-                }
-                if pending_ack <= 0 {
-                    tracing::info!("Collected acks for all compaction groups");
-                    break;
-                }
-            }
+        tracing::info!(
+            "Compaction schedule_ok {}, task_num {} compaction_ok {}",
+            schedule_ok,
+            task_num,
+            compaction_ok,
+        );
+
+        if !schedule_ok && !compaction_ok {
+            return Ok((old_version.id, old_version.max_committed_epoch));
         }
-        let cur_version = self.get_current_version().await;
         return Ok((cur_version.id, cur_version.max_committed_epoch));
     }
 
-    // pub async fn trigger_compaction_deterministic(
-    //     &self,
-    //     base_version_id: HummockVersionId,
-    //     compaction_groups: Vec<CompactionGroupId>,
-    // ) -> Result<HummockVersionDeltas> {
-    //     tracing::info!(
-    //         "Trigger compaction for version {}, groups {:?}",
-    //         base_version_id,
-    //         compaction_groups
-    //     );
-    //     let old_version = self.get_current_version().await;
-    //     assert_eq!(
-    //         base_version_id, old_version.id,
-    //         "old_version epoch {}",
-    //         old_version.max_committed_epoch
-    //     );
-    //
-    //     if compaction_groups.is_empty() {
-    //         return Ok(HummockVersionDeltas {
-    //             version_deltas: vec![],
-    //         });
-    //     }
-    //
-    //     let mut pending_ack = compaction_groups.len();
-    //     for compaction_group in compaction_groups {
-    //         self.try_sched_compaction_deterministic(compaction_group)?;
-    //     }
-    //     let mut new_versions = vec![];
-    //     let mut mutex_guard = self.compaction_sched_status_rx.lock().await;
-    //     if let Some(rx) = mutex_guard.as_mut() {
-    //         loop {
-    //             match rx.recv().await {
-    //                 Some((sched_status, compaction_group)) => {
-    //                     tracing::info!(
-    //                         "Compaction schedule {} for compaction group {}",
-    //                         sched_status.as_str(),
-    //                         compaction_group,
-    //                     );
-    //                     if sched_status == ScheduleStatus::Ok {
-    //                         let mut guard = self.compaction_finish_channel.1.lock().await;
-    //                         match guard.recv().await {
-    //                             Some(version_delta) => {
-    //                                 tracing::info!(
-    //                                     "Compaction task finished. version_id: {}, epoch: {}",
-    //                                     version_delta.id,
-    //                                     version_delta.max_committed_epoch
-    //                                 );
-    //
-    //                                 // When compaction finish the version id of will increase
-    //                                 assert!(version_delta.id > old_version.id);
-    //                                 new_versions.push(version_delta.clone());
-    //
-    //                                 // notify our testing tool
-    //                                 self.env.notification_manager().notify_asynchronously(
-    //                                     WorkerType::RiseCtl,
-    //                                     Operation::Add,
-    //                                     Info::HummockVersionDeltas(
-    //                                         risingwave_pb::hummock::HummockVersionDeltas {
-    //                                             version_deltas: vec![version_delta],
-    //                                         },
-    //                                     ),
-    //                                 );
-    //                             }
-    //                             None => {
-    //                                 tracing::warn!("Compaction finish channel is closed");
-    //                             }
-    //                         }
-    //                     }
-    //                     pending_ack -= 1;
-    //                 }
-    //                 None => {
-    //                     tracing::warn!("Compaction status channel is closed");
-    //                     break;
-    //                 }
-    //             }
-    //             if pending_ack <= 0 {
-    //                 tracing::info!("Collected acks for all compaction groups");
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //     new_versions.sort_by_key(|version| version.id);
-    //     Ok(HummockVersionDeltas {
-    //         version_deltas: new_versions,
-    //     })
-    // }
+    /// Poll the compaction task assignment to aware whether scheduling is success.
+    /// Returns (whether scheduling is success, number of tasks)
+    async fn poll_compaction_schedule_status(&self, old_size: usize) -> (bool, usize) {
+        let poll_timeout = Duration::from_secs(2);
+        let poll_interval = Duration::from_millis(2);
+        let mut poll_duration_cnt = Duration::from_millis(0);
+        let mut new_size = self.get_compact_task_assignment_size().await;
+        let mut schedule_ok = false;
+        loop {
+            if new_size > old_size {
+                schedule_ok = true;
+                break;
+            }
+
+            if poll_duration_cnt >= poll_timeout {
+                break;
+            }
+            tokio::time::sleep(poll_interval).await;
+            poll_duration_cnt += poll_interval;
+            new_size = self.get_compact_task_assignment_size().await;
+        }
+        (schedule_ok, new_size - old_size)
+    }
+
+    async fn poll_compaction_tasks_status(
+        &self,
+        schedule_ok: bool,
+        task_num: usize,
+        old_version: &HummockVersion,
+    ) -> (bool, HummockVersion) {
+        // Polls current version to check whether its id become large,
+        // which means compaction tasks have finished
+        let poll_timeout = if schedule_ok {
+            Duration::from_secs(120)
+        } else {
+            Duration::from_secs(5)
+        };
+        let poll_interval = Duration::from_millis(50);
+        let mut duration_cnt = Duration::from_millis(0);
+        let mut compaction_ok = false;
+        let mut cur_version = self.get_current_version().await;
+        loop {
+            if cur_version.id > old_version.id {
+                if cur_version.id - old_version.id >= task_num as u64 {
+                    tracing::info!("Collected all of compact tasks");
+                    compaction_ok = true;
+                    break;
+                }
+            }
+            if duration_cnt >= poll_timeout {
+                break;
+            }
+            tokio::time::sleep(poll_interval).await;
+            duration_cnt += poll_interval;
+            cur_version = self.get_current_version().await;
+        }
+        (compaction_ok, cur_version)
+    }
 
     pub async fn init_compaction_scheduler(
         &self,
         sched_channel: CompactionSchedulerChannelRef,
         side_sched_channel: Option<CompactionSchedulerChannelRef>,
-        status_rx: UnboundedReceiver<(ScheduleStatus, CompactionGroupId)>,
     ) {
         *self.compaction_scheduler.write() = Some(sched_channel);
         *self.side_compaction_sched_channel.write() = side_sched_channel;
-        *self.compaction_sched_status_rx.lock().await = Some(status_rx);
     }
 
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.

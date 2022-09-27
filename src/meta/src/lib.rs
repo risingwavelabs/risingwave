@@ -133,6 +133,11 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     enable_vacuum: bool,
 
+    /// Whether to enable deterministic compaction scheduling, which
+    /// will disable all auto scheduling of compaction tasks
+    #[clap(long, default_value = "true")]
+    enable_compaction_deterministic: bool,
+
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     #[clap(long, default_value = "30")]
     vacuum_interval_sec: u64,
@@ -218,6 +223,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 minimal_scheduling: meta_config.streaming.minimal_scheduling,
                 max_idle_ms,
                 enable_vacuum: opts.enable_vacuum,
+                enable_compaction_deterministic: opts.enable_compaction_deterministic,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
                 min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,

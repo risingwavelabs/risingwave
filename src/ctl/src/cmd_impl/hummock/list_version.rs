@@ -20,11 +20,6 @@ pub async fn list_version() -> anyhow::Result<()> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
     let version = meta_client.get_current_version().await?;
-
-    let cur_version = meta_client.disable_commit_epoch().await?;
-    assert_eq!(version.id, cur_version.id);
-    assert_eq!(version.max_committed_epoch, cur_version.max_committed_epoch);
-
     println!("{:#?}", version);
     Ok(())
 }

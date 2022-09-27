@@ -173,15 +173,8 @@ where
                 (default_channel, rx, None, None)
             };
 
-        let (sched_status_tx, sched_status_rx) =
-            tokio::sync::mpsc::unbounded_channel::<(ScheduleStatus, CompactionGroupId)>();
-
         self.hummock_manager
-            .init_compaction_scheduler(
-                sched_channel.clone(),
-                side_sched_channel.clone(),
-                sched_status_rx,
-            )
+            .init_compaction_scheduler(sched_channel.clone(), side_sched_channel.clone())
             .await;
 
         tracing::info!("Start compaction scheduler.");
@@ -237,13 +230,6 @@ where
                     self.env.opts.no_available_compactor_stall_sec,
                 ))
                 .await;
-            }
-            if let Err(e) = sched_status_tx.send((status, compaction_group)) {
-                tracing::warn!(
-                    "Failed to send schedule status for compaction group {} to hummock manager. {}",
-                    compaction_group,
-                    e
-                );
             }
         }
         tracing::info!("Compaction scheduler is stopped");
@@ -375,6 +361,11 @@ where
             self.compactor_manager
                 .pause_compactor(compactor.context_id());
             return ScheduleStatus::SendFailure(compact_task);
+        }
+
+        // Bypass reschedule if we want compaction scheduling in a deterministic way
+        if self.env.opts.enable_compaction_deterministic {
+            return ScheduleStatus::Ok;
         }
 
         // 4. Reschedule it with best effort, in case there are more tasks.

@@ -79,6 +79,7 @@ pub struct MetaOpts {
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
     pub enable_vacuum: bool,
+    pub enable_compaction_deterministic: bool,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
@@ -105,6 +106,7 @@ impl Default for MetaOpts {
             minimal_scheduling: false,
             max_idle_ms: 0,
             enable_vacuum: false,
+            enable_compaction_deterministic: false,
             vacuum_interval_sec: 30,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             collect_gc_watermark_spin_interval_sec: 5,
