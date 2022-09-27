@@ -118,6 +118,7 @@ pub async fn handle_create_mv(
         {
             let catalog_reader = session.env().catalog_reader().read_guard();
             let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
+
             catalog_reader.check_relation_name_duplicated(
                 session.database(),
                 &schema_name,
@@ -125,7 +126,7 @@ pub async fn handle_create_mv(
             )?;
         }
 
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, false)?;
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, true)?;
         let graph = build_graph(plan);
 
         (table, graph)
