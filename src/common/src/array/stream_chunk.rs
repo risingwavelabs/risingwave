@@ -20,9 +20,10 @@ use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use super::ArrayResult;
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
+use crate::array::{ArrayBuilderImpl, DataChunk, Row, StructValue, Vis};
 use crate::buffer::Bitmap;
-use crate::types::{DataType, NaiveDateTimeWrapper};
+use crate::types::struct_type::StructType;
+use crate::types::{DataType, Datum, NaiveDateTimeWrapper};
 
 /// `Op` represents three operations in `StreamChunk`.
 ///
@@ -328,9 +329,30 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self {
         use crate::types::ScalarImpl;
+        fn parse_type(s: &str) -> DataType {
+            match s {
+                "I" => DataType::Int64,
+                "i" => DataType::Int32,
+                "F" => DataType::Float64,
+                "f" => DataType::Float32,
+                "TS" => DataType::Timestamp,
+                "T" => DataType::Varchar,
+                array if array.starts_with('{') && array.ends_with('}') => {
+                    DataType::Struct(Arc::new(StructType {
+                        fields: array[1..array.len() - 1]
+                            .split(',')
+                            .map(parse_type)
+                            .collect_vec(),
+                        field_names: vec![],
+                    }))
+                }
+                _ => todo!("unsupported type: {s:?}"),
+            }
+        }
 
         let mut lines = s.split('\n').filter(|l| !l.trim().is_empty());
         let mut ops = vec![];
@@ -339,15 +361,7 @@ impl StreamChunkTestExt for StreamChunk {
         let mut array_builders = header
             .split_ascii_whitespace()
             .take_while(|c| *c != "//")
-            .map(|c| match c {
-                "I" => DataType::Int64,
-                "i" => DataType::Int32,
-                "F" => DataType::Float64,
-                "f" => DataType::Float32,
-                "TS" => DataType::Timestamp,
-                "T" => DataType::Varchar,
-                _ => todo!("unsupported type: {c:?}"),
-            })
+            .map(parse_type)
             .map(|ty| ty.create_array_builder(1))
             .collect::<Vec<_>>();
         let mut visibility = vec![];
@@ -365,38 +379,52 @@ impl StreamChunkTestExt for StreamChunk {
             // allow `zip` since `token` may longer than `array_builders`
             #[allow(clippy::disallowed_methods)]
             for (builder, val_str) in array_builders.iter_mut().zip(&mut token) {
-                let datum = match val_str {
-                    "." => None,
-                    s if matches!(builder, ArrayBuilderImpl::Int32(_)) => Some(ScalarImpl::Int32(
-                        s.parse()
-                            .map_err(|_| panic!("invalid int32: {s:?}"))
-                            .unwrap(),
-                    )),
-                    s if matches!(builder, ArrayBuilderImpl::Int64(_)) => Some(ScalarImpl::Int64(
-                        s.parse()
-                            .map_err(|_| panic!("invalid int64: {s:?}"))
-                            .unwrap(),
-                    )),
-                    s if matches!(builder, ArrayBuilderImpl::Float64(_)) => {
-                        Some(ScalarImpl::Float64(
+                fn parse_datum(s: &str, builder: &ArrayBuilderImpl) -> Datum {
+                    if s == "." {
+                        return None;
+                    }
+                    Some(match builder {
+                        ArrayBuilderImpl::Int32(_) => ScalarImpl::Int32(
+                            s.parse()
+                                .map_err(|_| panic!("invalid int32: {s:?}"))
+                                .unwrap(),
+                        ),
+                        ArrayBuilderImpl::Int64(_) => ScalarImpl::Int64(
+                            s.parse()
+                                .map_err(|_| panic!("invalid int64: {s:?}"))
+                                .unwrap(),
+                        ),
+                        ArrayBuilderImpl::Float32(_) => ScalarImpl::Float32(
+                            s.parse()
+                                .map_err(|_| panic!("invalid float32: {s:?}"))
+                                .unwrap(),
+                        ),
+                        ArrayBuilderImpl::Float64(_) => ScalarImpl::Float64(
                             s.parse()
                                 .map_err(|_| panic!("invalid float64: {s:?}"))
                                 .unwrap(),
-                        ))
-                    }
-                    s if matches!(builder, ArrayBuilderImpl::NaiveDateTime(_)) => {
-                        Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                            s.parse()
-                                .map_err(|_| panic!("invalid datetime: {s:?}"))
-                                .unwrap(),
-                        )))
-                    }
-                    s if matches!(builder, ArrayBuilderImpl::Utf8(_)) => {
-                        Some(ScalarImpl::Utf8(s.into()))
-                    }
-                    _ => panic!("invalid data type"),
-                };
-                builder.append_datum(&datum);
+                        ),
+                        ArrayBuilderImpl::NaiveDateTime(_) => {
+                            ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                                s.parse()
+                                    .map_err(|_| panic!("invalid datetime: {s:?}"))
+                                    .unwrap(),
+                            ))
+                        }
+                        ArrayBuilderImpl::Utf8(_) => ScalarImpl::Utf8(s.into()),
+                        ArrayBuilderImpl::Struct(builder) => {
+                            assert!(s.starts_with('{') && s.ends_with('}'));
+                            let fields = s[1..s.len() - 1]
+                                .split(',')
+                                .zip_eq(&builder.children_array)
+                                .map(|(s, builder)| parse_datum(s, builder))
+                                .collect_vec();
+                            ScalarImpl::Struct(StructValue::new(fields))
+                        }
+                        b => panic!("invalid data type: {b:?}"),
+                    })
+                }
+                builder.append_datum(&parse_datum(val_str, builder));
             }
             let visible = match token.next() {
                 None | Some("//") => true,

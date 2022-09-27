@@ -40,7 +40,7 @@ use crate::types::{
 #[derive(Debug)]
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
-    children_array: Vec<ArrayBuilderImpl>,
+    pub(super) children_array: Vec<ArrayBuilderImpl>,
     children_type: Arc<[DataType]>,
     len: usize,
 }
@@ -301,7 +301,7 @@ impl StructArray {
     }
 }
 
-#[derive(Clone, Debug, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Hash)]
 pub struct StructValue {
     fields: Box<[Datum]>,
 }
@@ -319,12 +319,6 @@ impl fmt::Display for StructValue {
     }
 }
 
-impl PartialEq for StructValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.fields == other.fields
-    }
-}
-
 impl PartialOrd for StructValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
@@ -334,12 +328,6 @@ impl PartialOrd for StructValue {
 impl Ord for StructValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
-    }
-}
-
-impl Hash for StructValue {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.fields.hash(state);
     }
 }
 
