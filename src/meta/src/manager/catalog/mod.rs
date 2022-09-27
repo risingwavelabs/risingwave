@@ -413,15 +413,18 @@ where
     pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
-        if !core.has_table(table) && !core.has_in_progress_creation(&key) {
+
+        if core.has_table(table) {
+            bail!("table already exists");
+        } else if core.has_in_progress_creation(&key) {
+            bail!("table is in creating procedure");
+        } else {
             core.mark_creating(&key);
             core.mark_creating_table(table.id);
             for &dependent_relation_id in &table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
-        } else {
-            bail!("table already exists or in creating procedure");
         }
     }
 
@@ -643,11 +646,14 @@ where
     pub async fn start_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (source.database_id, source.schema_id, source.name.clone());
-        if !core.has_source(source) && !core.has_in_progress_creation(&key) {
+
+        if core.has_source(source) {
+            bail!("table already exists");
+        } else if core.has_in_progress_creation(&key) {
+            bail!("table is in creating procedure");
+        } else {
             core.mark_creating(&key);
             Ok(())
-        } else {
-            bail!("source already exists or in creating procedure");
         }
     }
 
@@ -731,18 +737,19 @@ where
         let core = &mut self.core.lock().await.database;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
-        if !core.has_source(source)
-            && !core.has_table(mview)
-            && !core.has_in_progress_creation(&source_key)
-            && !core.has_in_progress_creation(&mview_key)
+
+        if core.has_source(source) || core.has_table(mview) {
+            bail!("table or source already exists");
+        } else if core.has_in_progress_creation(&source_key)
+            || core.has_in_progress_creation(&mview_key)
         {
+            bail!("table or source is in creating procedure");
+        } else {
             core.mark_creating(&source_key);
             core.mark_creating(&mview_key);
             core.mark_creating_table(mview.id);
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
-        } else {
-            bail!("source or table already exists");
         }
     }
 
@@ -891,14 +898,17 @@ where
     ) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (index.database_id, index.schema_id, index.name.clone());
-        if !core.has_index(index) && !core.has_in_progress_creation(&key) {
+
+        if core.has_index(index) {
+            bail!("index already exists");
+        } else if core.has_in_progress_creation(&key) {
+            bail!("index already in creating procedure");
+        } else {
             core.mark_creating(&key);
             for &dependent_relation_id in &index_table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
-        } else {
-            bail!("index already exists or in creating procedure".to_string(),)
         }
     }
 
@@ -967,14 +977,17 @@ where
     pub async fn start_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink(sink) && !core.has_in_progress_creation(&key) {
+
+        if core.has_sink(sink) {
+            bail!("sink already exists");
+        } else if core.has_in_progress_creation(&key) {
+            bail!("sink already in creating procedure");
+        } else {
             core.mark_creating(&key);
             for &dependent_relation_id in &sink.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
-        } else {
-            bail!("sink already exists or in creating procedure");
         }
     }
 

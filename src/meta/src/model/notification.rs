@@ -38,14 +38,15 @@ impl NotificationVersion {
     where
         S: MetaStore,
     {
+        let version = self.0 + 1;
         store
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
                 b"notification_version".to_vec(),
-                self.0.to_be_bytes().to_vec(),
+                version.to_be_bytes().to_vec(),
             )
             .await?;
-        self.0 += 1;
+        self.0 = version;
         Ok(())
     }
 
