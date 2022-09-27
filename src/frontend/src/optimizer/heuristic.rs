@@ -111,14 +111,9 @@ impl Stats {
 
 impl fmt::Display for Stats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.rule_counter
-                .iter()
-                .map(|(rule, count)| format!("apply {} {} time(s)", rule, count))
-                .collect_vec()
-                .join("\n")
-        )
+        for (rule, count) in self.rule_counter.iter() {
+            writeln!(f, "apply {} {} time(s)", rule, count)?;
+        }
+        Ok(())
     }
 }
