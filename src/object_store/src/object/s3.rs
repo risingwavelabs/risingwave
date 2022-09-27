@@ -238,15 +238,14 @@ impl StreamingUploader for S3StreamingUploader {
         Ok(())
     }
 
-    /// If the data in the buffer is smaller than `MIN_PART_SIZE`, abort multipart upload
-    /// and use `PUT` to upload the data. Otherwise flush the remaining data of the buffer
-    /// to S3 as a new part. Fallback to `PUT` on failure.
+    /// If the multipart upload has not been initiated, we can use `PutObject` instead to save the
+    /// `CreateMultipartUpload` and `CompleteMultipartUpload` requests. Otherwise flush the
+    /// remaining data of the buffer to S3 as a new part.
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
         fail_point!("s3_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("s3 finish streaming upload error")
         ));
-        // If the multipart upload has not been initiated, we can use `Put` instead to save the
-        // `CreateMultipartUpload` and `CompleteMultipartUpload` requests.
+
         if self.upload_id.is_none() {
             debug_assert!(self.join_handles.is_empty());
             if self.buf.is_empty() {
@@ -611,7 +610,7 @@ impl S3ObjectStore {
     ///   - <https://github.com/minio/minio/issues/15681#issuecomment-1245126561>
     async fn configure_bucket_lifecycle(client: &Client, bucket: &str) -> ObjectResult<()> {
         // Check if lifecycle is already configured to avoid overriding existing configuration.
-        let mut lifecycle_configured = false;
+        let mut configured_rules = vec![];
         let resp = client
             .get_bucket_lifecycle_configuration()
             .bucket(bucket)
@@ -622,15 +621,15 @@ impl S3ObjectStore {
             if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
                 && rule.abort_incomplete_multipart_upload().is_some()
             {
-                lifecycle_configured = true;
-                break;
+                configured_rules.push(rule);
             }
         }
 
-        if lifecycle_configured {
+        if !configured_rules.is_empty() {
             tracing::info!(
-                "S3 bucket {} has already configured AbortIncompleteMultipartUpload",
+                "S3 bucket {} has already configured AbortIncompleteMultipartUpload: {:?}",
                 bucket,
+                configured_rules,
             );
         } else {
             let bucket_lifecycle_rule = LifecycleRule::builder()
