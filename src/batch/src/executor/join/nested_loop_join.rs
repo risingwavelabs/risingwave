@@ -109,7 +109,7 @@ impl NestedLoopJoinExecutor {
         }
 
         // Handle remaining chunk
-        if let Some(chunk) = chunk_builder.consume_all()? {
+        if let Some(chunk) = chunk_builder.consume_all() {
             yield chunk.reorder_columns(&self.output_indices)
         }
     }
@@ -121,7 +121,7 @@ impl NestedLoopJoinExecutor {
     fn concatenate_and_eval(
         expr: &dyn Expression,
         left_row_types: &[DataType],
-        left_row: RowRef,
+        left_row: RowRef<'_>,
         right_chunk: &DataChunk,
     ) -> Result<DataChunk> {
         let left_chunk = convert_row_to_chunk(&left_row, right_chunk.capacity(), left_row_types)?;
@@ -134,7 +134,7 @@ impl NestedLoopJoinExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [left_child, right_child]: [_; 2] = inputs.try_into().unwrap();
@@ -231,7 +231,7 @@ impl NestedLoopJoinExecutor {
                 if chunk.cardinality() > 0 {
                     #[for_await]
                     for spilled in chunk_builder.trunc_data_chunk(chunk) {
-                        yield spilled?
+                        yield spilled
                     }
                 }
             }
@@ -264,7 +264,7 @@ impl NestedLoopJoinExecutor {
                     matched.set(left_row_idx, true);
                     #[for_await]
                     for spilled in chunk_builder.trunc_data_chunk(chunk) {
-                        yield spilled?
+                        yield spilled
                     }
                 }
             }
@@ -279,7 +279,7 @@ impl NestedLoopJoinExecutor {
             let datum_refs = left_row
                 .values()
                 .chain(repeat_n(None, right_data_types.len()));
-            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs) {
                 yield chunk
             }
         }
@@ -318,7 +318,7 @@ impl NestedLoopJoinExecutor {
             .zip_eq(matched.finish().iter())
             .filter(|(_, matched)| if ANTI_JOIN { !*matched } else { *matched })
         {
-            if let Some(chunk) = chunk_builder.append_one_row_ref(left_row)? {
+            if let Some(chunk) = chunk_builder.append_one_row_ref(left_row) {
                 yield chunk
             }
         }
@@ -349,7 +349,7 @@ impl NestedLoopJoinExecutor {
                     matched = &matched | chunk.visibility().unwrap();
                     #[for_await]
                     for spilled in chunk_builder.trunc_data_chunk(chunk) {
-                        yield spilled?
+                        yield spilled
                     }
                 }
             }
@@ -359,7 +359,7 @@ impl NestedLoopJoinExecutor {
                 .filter(|(_, matched)| !*matched)
             {
                 let datum_refs = repeat_n(None, left_data_types.len()).chain(right_row.values());
-                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs) {
                     yield chunk
                 }
             }
@@ -397,7 +397,7 @@ impl NestedLoopJoinExecutor {
             if right_chunk.cardinality() > 0 {
                 #[for_await]
                 for spilled in chunk_builder.trunc_data_chunk(right_chunk) {
-                    yield spilled?
+                    yield spilled
                 }
             }
         }
@@ -430,7 +430,7 @@ impl NestedLoopJoinExecutor {
                     right_matched = &right_matched | chunk.visibility().unwrap();
                     #[for_await]
                     for spilled in chunk_builder.trunc_data_chunk(chunk) {
-                        yield spilled?
+                        yield spilled
                     }
                 }
             }
@@ -441,7 +441,7 @@ impl NestedLoopJoinExecutor {
                 .filter(|(_, matched)| !*matched)
             {
                 let datum_refs = repeat_n(None, left_data_types.len()).chain(right_row.values());
-                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs) {
                     yield chunk
                 }
             }
@@ -456,7 +456,7 @@ impl NestedLoopJoinExecutor {
             let datum_refs = left_row
                 .values()
                 .chain(repeat_n(None, right_data_types.len()));
-            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs) {
                 yield chunk
             }
         }

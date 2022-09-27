@@ -64,7 +64,7 @@ impl FilterExecutor {
                 for data_chunk in data_chunk_builder
                     .trunc_data_chunk(data_chunk.with_visibility(vis.iter().collect()))
                 {
-                    yield data_chunk?;
+                    yield data_chunk;
                 }
             } else {
                 return Err(
@@ -73,7 +73,7 @@ impl FilterExecutor {
             }
         }
 
-        if let Some(chunk) = data_chunk_builder.consume_all()? {
+        if let Some(chunk) = data_chunk_builder.consume_all() {
             yield chunk;
         }
     }
@@ -82,7 +82,7 @@ impl FilterExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for FilterExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [input]: [_; 1] = inputs.try_into().unwrap();

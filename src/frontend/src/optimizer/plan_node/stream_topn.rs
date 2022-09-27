@@ -61,7 +61,7 @@ impl StreamTopN {
 }
 
 impl fmt::Display for StreamTopN {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.input().append_only() {
             self.logical.fmt_with_name(f, "StreamAppendOnlyTopN")
         } else {
@@ -94,6 +94,7 @@ impl StreamNode for StreamTopN {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
+            order_by_len: self.topn_order().len() as u32,
         };
         if self.input().append_only() {
             ProstStreamNode::AppendOnlyTopN(topn_node)

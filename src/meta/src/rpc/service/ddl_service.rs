@@ -194,7 +194,7 @@ where
 
         // 2. Drop source in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::SourceId(source_id)]);
+            .delete(vec![StreamingJobId::Source(source_id)]);
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -236,7 +236,7 @@ where
 
         // 2. drop sink in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::SinkId(sink_id.into())]);
+            .delete(vec![StreamingJobId::Sink(sink_id.into())]);
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -289,7 +289,7 @@ where
 
         // 2. drop mv in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::TableId(table_id.into())]);
+            .delete(vec![StreamingJobId::Table(table_id.into())]);
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -345,7 +345,7 @@ where
 
         // 2. drop mv(index) in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::TableId(index_table_id.into())]);
+            .delete(vec![StreamingJobId::Table(index_table_id.into())]);
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -699,8 +699,8 @@ where
         // Note: we need to drop the materialized view to unmap the source_id to fragment_ids before
         // we can drop the source.
         self.table_background_deleter.delete(vec![
-            StreamingJobId::TableId(table_id.into()),
-            StreamingJobId::SourceId(source_id),
+            StreamingJobId::Table(table_id.into()),
+            StreamingJobId::Source(source_id),
         ]);
 
         Ok(version)

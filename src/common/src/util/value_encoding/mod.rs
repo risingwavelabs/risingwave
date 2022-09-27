@@ -52,7 +52,7 @@ pub fn serialize_datum(cell: &Datum, buf: impl BufMut) {
 }
 
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
-pub fn serialize_datum_ref(datum_ref: &DatumRef, mut buf: impl BufMut) {
+pub fn serialize_datum_ref(datum_ref: &DatumRef<'_>, mut buf: impl BufMut) {
     if let Some(d) = datum_ref {
         buf.put_u8(1);
         serialize_value(*d, &mut buf)
@@ -71,7 +71,7 @@ pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
     }
 }
 
-fn serialize_value(value: ScalarRefImpl, mut buf: impl BufMut) {
+fn serialize_value(value: ScalarRefImpl<'_>, mut buf: impl BufMut) {
     match value {
         ScalarRefImpl::Int16(v) => buf.put_i16_le(v),
         ScalarRefImpl::Int32(v) => buf.put_i32_le(v),

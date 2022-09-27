@@ -14,11 +14,15 @@
 
 use std::fmt::Formatter;
 
+use futures::stream::BoxStream;
+use futures::{stream, StreamExt};
+
 use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[expect(non_camel_case_types)]
+#[expect(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum StatementType {
     INSERT,
     DELETE,
@@ -71,15 +75,25 @@ impl std::fmt::Display for StatementType {
     }
 }
 
-#[derive(Debug)]
 pub struct PgResponse {
     stmt_type: StatementType,
+    // row count of effected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
+    // don't return rows.
     row_cnt: i32,
     notice: Option<String>,
-    values: Vec<Row>,
-    // Used for row_limit mode to indicate whether run out of data
-    row_end: bool,
+    values_stream: BoxStream<'static, Result<Row, BoxedError>>,
     row_desc: Vec<PgFieldDescriptor>,
+}
+
+impl std::fmt::Debug for PgResponse {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PgResponse")
+            .field("stmt_type", &self.stmt_type)
+            .field("row_cnt", &self.row_cnt)
+            .field("notice", &self.notice)
+            .field("row_desc", &self.row_desc)
+            .finish()
+    }
 }
 
 impl StatementType {
@@ -110,29 +124,41 @@ impl PgResponse {
         row_cnt: i32,
         values: Vec<Row>,
         row_desc: Vec<PgFieldDescriptor>,
-        row_end: bool,
     ) -> Self {
         Self {
             stmt_type,
             row_cnt,
-            values,
+            notice: None,
+            values_stream: futures::stream::iter(values.into_iter().map(Ok)).boxed(),
             row_desc,
-            row_end,
+        }
+    }
+
+    pub fn new_for_stream(
+        stmt_type: StatementType,
+        row_cnt: i32,
+        values_stream: BoxStream<'static, Result<Row, BoxedError>>,
+        row_desc: Vec<PgFieldDescriptor>,
+    ) -> Self {
+        Self {
+            stmt_type,
+            row_cnt,
+            values_stream,
+            row_desc,
             notice: None,
         }
     }
 
     pub fn empty_result(stmt_type: StatementType) -> Self {
-        Self::new(stmt_type, 0, vec![], vec![], true)
+        Self::new_for_stream(stmt_type, 0, stream::empty().boxed(), vec![])
     }
 
     pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
         Self {
             stmt_type,
             row_cnt: 0,
-            values: vec![],
+            values_stream: stream::empty().boxed(),
             row_desc: vec![],
-            row_end: true,
             notice: Some(notice),
         }
     }
@@ -163,19 +189,11 @@ impl PgResponse {
         self.stmt_type == StatementType::EMPTY
     }
 
-    pub fn is_row_end(&self) -> bool {
-        self.row_end
-    }
-
     pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {
         self.row_desc.clone()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Row> + '_ {
-        self.values.iter()
-    }
-
-    pub fn values(&self) -> Vec<Row> {
-        self.values.clone()
+    pub fn values_stream(&mut self) -> &mut BoxStream<'static, Result<Row, BoxedError>> {
+        &mut self.values_stream
     }
 }

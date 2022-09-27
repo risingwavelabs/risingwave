@@ -69,7 +69,7 @@ const CANONICAL_ZERO_BITS: u64 = 0x0u64;
 
 /// A wrapper around floats providing implementations of `Eq`, `Ord`, and `Hash`.
 ///
-/// NaN is sorted as *greater* than all other values and *equal*
+/// `NaN` is sorted as *greater* than all other values and *equal*
 /// to itself, in contradiction with the IEEE standard.
 ///
 /// ```ignore
@@ -195,7 +195,7 @@ impl<T: Float> Hash for OrderedFloat<T> {
 
 impl<T: Float + fmt::Display> fmt::Display for OrderedFloat<T> {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let v = self.0;
         if v.is_nan() {
             return write!(f, "NaN");

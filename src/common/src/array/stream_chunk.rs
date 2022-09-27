@@ -100,7 +100,7 @@ impl StreamChunk {
 
     /// Build a `StreamChunk` from rows.
     // TODO: introducing something like `StreamChunkBuilder` maybe better.
-    pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> ArrayResult<Self> {
+    pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> Self {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(rows.len()))
@@ -119,7 +119,7 @@ impl StreamChunk {
             .map(|builder| builder.finish())
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
-        Ok(StreamChunk::new(ops, new_columns, None))
+        StreamChunk::new(ops, new_columns, None)
     }
 
     /// `cardinality` return the number of visible tuples

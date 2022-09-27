@@ -20,43 +20,43 @@
     select v1, min(v2) + max(v3) * count(v1) as agg from t group by v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1)))] }
-        BatchHashAgg { group_key: [t.v1], aggs: [min(t.v2), max(t.v3), count(t.v1)] }
-          BatchExchange { order: [], dist: HashShard(t.v1) }
-            BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1)))] }
+      └─BatchHashAgg { group_key: [t.v1], aggs: [min(t.v2), max(t.v3), count(t.v1)] }
+        └─BatchExchange { order: [], dist: HashShard(t.v1) }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   batch_local_plan: |
     BatchProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1)))] }
-      BatchHashAgg { group_key: [t.v1], aggs: [min(t.v2), max(t.v3), count(t.v1)] }
-        BatchExchange { order: [], dist: Single }
-          BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchHashAgg { group_key: [t.v1], aggs: [min(t.v2), max(t.v3), count(t.v1)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, agg], pk_columns: [v1] }
-      StreamProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1)))] }
-        StreamHashAgg { group_key: [t.v1], aggs: [count, min(t.v2), max(t.v3), count(t.v1)] }
-          StreamExchange { dist: HashShard(t.v1) }
-            StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1)))] }
+      └─StreamHashAgg { group_key: [t.v1], aggs: [count, min(t.v2), max(t.v3), count(t.v1)] }
+        └─StreamExchange { dist: HashShard(t.v1) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) as agg from t;
   batch_plan: |
     BatchProject { exprs: [(min(min(t.v1)) + (max(max(t.v2)) * sum(count(t.v3))))] }
-      BatchSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v2)), sum(count(t.v3))] }
-        BatchExchange { order: [], dist: Single }
-          BatchSimpleAgg { aggs: [min(t.v1), max(t.v2), count(t.v3)] }
-            BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v2)), sum(count(t.v3))] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchSimpleAgg { aggs: [min(t.v1), max(t.v2), count(t.v3)] }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   batch_local_plan: |
     BatchProject { exprs: [(min(t.v1) + (max(t.v2) * count(t.v3)))] }
-      BatchSimpleAgg { aggs: [min(t.v1), max(t.v2), count(t.v3)] }
-        BatchExchange { order: [], dist: Single }
-          BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchSimpleAgg { aggs: [min(t.v1), max(t.v2), count(t.v3)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [agg], pk_columns: [] }
-      StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v2)) * sum(count(t.v3))))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), min(min(t.v1)), max(max(t.v2)), sum(count(t.v3))] }
-          StreamExchange { dist: Single }
-            StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, min(t.v1), max(t.v2), count(t.v3)] }
-              StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id)] }
-                StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v2)) * sum(count(t.v3))))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), min(min(t.v1)), max(max(t.v2)), sum(count(t.v3))] }
+        └─StreamExchange { dist: Single }
+          └─StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, min(t.v1), max(t.v2), count(t.v3)] }
+            └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id)] }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
@@ -72,51 +72,51 @@
     select v3, min(v1) * avg(v1+v2) as agg from t group by v3;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [t.v3, (min(t.v1) * (sum((t.v1 + t.v2))::Decimal / count((t.v1 + t.v2))))] }
-        BatchHashAgg { group_key: [t.v3], aggs: [min(t.v1), sum((t.v1 + t.v2)), count((t.v1 + t.v2))] }
-          BatchExchange { order: [], dist: HashShard(t.v3) }
-            BatchProject { exprs: [t.v3, t.v1, (t.v1 + t.v2)] }
-              BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchProject { exprs: [t.v3, (min(t.v1) * (sum((t.v1 + t.v2))::Decimal / count((t.v1 + t.v2))))] }
+      └─BatchHashAgg { group_key: [t.v3], aggs: [min(t.v1), sum((t.v1 + t.v2)), count((t.v1 + t.v2))] }
+        └─BatchExchange { order: [], dist: HashShard(t.v3) }
+          └─BatchProject { exprs: [t.v3, t.v1, (t.v1 + t.v2)] }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   batch_local_plan: |
     BatchProject { exprs: [t.v3, (min(t.v1) * (sum((t.v1 + t.v2))::Decimal / count((t.v1 + t.v2))))] }
-      BatchHashAgg { group_key: [t.v3], aggs: [min(t.v1), sum((t.v1 + t.v2)), count((t.v1 + t.v2))] }
-        BatchExchange { order: [], dist: Single }
-          BatchProject { exprs: [t.v3, t.v1, (t.v1 + t.v2)] }
-            BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchHashAgg { group_key: [t.v3], aggs: [min(t.v1), sum((t.v1 + t.v2)), count((t.v1 + t.v2))] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t.v3, t.v1, (t.v1 + t.v2)] }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v3, agg], pk_columns: [v3] }
-      StreamProject { exprs: [t.v3, (min(t.v1) * (sum((t.v1 + t.v2))::Decimal / count((t.v1 + t.v2))))] }
-        StreamHashAgg { group_key: [t.v3], aggs: [count, min(t.v1), sum((t.v1 + t.v2)), count((t.v1 + t.v2))] }
-          StreamExchange { dist: HashShard(t.v3) }
-            StreamProject { exprs: [t.v3, t.v1, (t.v1 + t.v2), t._row_id] }
-              StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.v3, (min(t.v1) * (sum((t.v1 + t.v2))::Decimal / count((t.v1 + t.v2))))] }
+      └─StreamHashAgg { group_key: [t.v3], aggs: [count, min(t.v1), sum((t.v1 + t.v2)), count((t.v1 + t.v2))] }
+        └─StreamExchange { dist: HashShard(t.v3) }
+          └─StreamProject { exprs: [t.v3, t.v1, (t.v1 + t.v2), t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int);
     select min(v1), sum(v1 + v2) from t group by v1 + v2;
   logical_plan: |
     LogicalProject { exprs: [min(t.v1), sum((t.v1 + t.v2))] }
-      LogicalAgg { group_key: [(t.v1 + t.v2)], aggs: [min(t.v1), sum((t.v1 + t.v2))] }
-        LogicalProject { exprs: [(t.v1 + t.v2), t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalAgg { group_key: [(t.v1 + t.v2)], aggs: [min(t.v1), sum((t.v1 + t.v2))] }
+      └─LogicalProject { exprs: [(t.v1 + t.v2), t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v1 * v2) as sum from t group by (v1 + v2) / v3, v1;
   logical_plan: |
     LogicalProject { exprs: [t.v1, sum((t.v1 * t.v2))] }
-      LogicalAgg { group_key: [((t.v1 + t.v2) / t.v3), t.v1], aggs: [sum((t.v1 * t.v2))] }
-        LogicalProject { exprs: [((t.v1 + t.v2) / t.v3), t.v1, (t.v1 * t.v2)] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+    └─LogicalAgg { group_key: [((t.v1 + t.v2) / t.v3), t.v1], aggs: [sum((t.v1 * t.v2))] }
+      └─LogicalProject { exprs: [((t.v1 + t.v2) / t.v3), t.v1, (t.v1 * t.v2)] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
 - sql: |
     /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int);
     select v1 + v2 from t group by v1 + v2;
   logical_plan: |
     LogicalProject { exprs: [(t.v1 + t.v2)] }
-      LogicalAgg { group_key: [(t.v1 + t.v2)], aggs: [] }
-        LogicalProject { exprs: [(t.v1 + t.v2)] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalAgg { group_key: [(t.v1 + t.v2)], aggs: [] }
+      └─LogicalProject { exprs: [(t.v1 + t.v2)] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* test logical_agg with complex group expression */
     /* should complain about nested agg call */
@@ -131,9 +131,9 @@
     select v1 + v2 from t group by v1, v2;
   logical_plan: |
     LogicalProject { exprs: [(t.v1 + t.v2)] }
-      LogicalAgg { group_key: [t.v1, t.v2], aggs: [] }
-        LogicalProject { exprs: [t.v1, t.v2] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalAgg { group_key: [t.v1, t.v2], aggs: [] }
+      └─LogicalProject { exprs: [t.v1, t.v2] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v1 + v2;
@@ -144,48 +144,48 @@
     select count(v1 + v2) as cnt, sum(v1 + v2) as sum from t;
   batch_plan: |
     BatchSimpleAgg { aggs: [sum(count((t.v1 + t.v2))), sum(sum((t.v1 + t.v2)))] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [count((t.v1 + t.v2)), sum((t.v1 + t.v2))] }
-          BatchProject { exprs: [(t.v1 + t.v2)] }
-            BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count((t.v1 + t.v2)), sum((t.v1 + t.v2))] }
+        └─BatchProject { exprs: [(t.v1 + t.v2)] }
+          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [count((t.v1 + t.v2)), sum((t.v1 + t.v2))] }
-      BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [(t.v1 + t.v2)] }
-          BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [(t.v1 + t.v2)] }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [cnt, sum], pk_columns: [] }
-      StreamProject { exprs: [sum(count((t.v1 + t.v2))), sum(sum((t.v1 + t.v2)))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(count((t.v1 + t.v2))), sum(sum((t.v1 + t.v2)))] }
-          StreamExchange { dist: Single }
-            StreamStatelessLocalSimpleAgg { aggs: [count, count((t.v1 + t.v2)), sum((t.v1 + t.v2))] }
-              StreamProject { exprs: [(t.v1 + t.v2), t._row_id] }
-                StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(count((t.v1 + t.v2))), sum(sum((t.v1 + t.v2)))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(count((t.v1 + t.v2))), sum(sum((t.v1 + t.v2)))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, count((t.v1 + t.v2)), sum((t.v1 + t.v2))] }
+            └─StreamProject { exprs: [(t.v1 + t.v2), t._row_id] }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v2 + v3) / count(v2 + v3) + max(v1) as agg from t group by v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [t.v1, ((sum((t.v2 + t.v3)) / count((t.v2 + t.v3))) + max(t.v1))] }
-        BatchHashAgg { group_key: [t.v1], aggs: [sum((t.v2 + t.v3)), count((t.v2 + t.v3)), max(t.v1)] }
-          BatchExchange { order: [], dist: HashShard(t.v1) }
-            BatchProject { exprs: [t.v1, (t.v2 + t.v3)] }
-              BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchProject { exprs: [t.v1, ((sum((t.v2 + t.v3)) / count((t.v2 + t.v3))) + max(t.v1))] }
+      └─BatchHashAgg { group_key: [t.v1], aggs: [sum((t.v2 + t.v3)), count((t.v2 + t.v3)), max(t.v1)] }
+        └─BatchExchange { order: [], dist: HashShard(t.v1) }
+          └─BatchProject { exprs: [t.v1, (t.v2 + t.v3)] }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, agg], pk_columns: [v1] }
-      StreamProject { exprs: [t.v1, ((sum((t.v2 + t.v3)) / count((t.v2 + t.v3))) + max(t.v1))] }
-        StreamHashAgg { group_key: [t.v1], aggs: [count, sum((t.v2 + t.v3)), count((t.v2 + t.v3)), max(t.v1)] }
-          StreamExchange { dist: HashShard(t.v1) }
-            StreamProject { exprs: [t.v1, (t.v2 + t.v3), t._row_id] }
-              StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.v1, ((sum((t.v2 + t.v3)) / count((t.v2 + t.v3))) + max(t.v1))] }
+      └─StreamHashAgg { group_key: [t.v1], aggs: [count, sum((t.v2 + t.v3)), count((t.v2 + t.v3)), max(t.v1)] }
+        └─StreamExchange { dist: HashShard(t.v1) }
+          └─StreamProject { exprs: [t.v1, (t.v2 + t.v3), t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 real);
     select v1, count(*) from t group by v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchHashAgg { group_key: [t.v1], aggs: [count] }
-        BatchExchange { order: [], dist: HashShard(t.v1) }
-          BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    └─BatchHashAgg { group_key: [t.v1], aggs: [count] }
+      └─BatchExchange { order: [], dist: HashShard(t.v1) }
+        └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     /* Use BatchSortAgg, when input provides order */
     create table t(v1 int, v2 int);
@@ -193,70 +193,70 @@
     select v1, max(v2) from mv group by v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchSortAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
-        BatchExchange { order: [mv.v1 DESC], dist: HashShard(mv.v1) }
-          BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
+    └─BatchSortAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
+      └─BatchExchange { order: [mv.v1 DESC], dist: HashShard(mv.v1) }
+        └─BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
 - sql: |
     /* Use BatchSortAgg, when output requires order */
     create table t(v1 int, v2 int);
     select v1, max(v2) from t group by v1 order by v1 desc;
   batch_plan: |
     BatchExchange { order: [t.v1 DESC], dist: Single }
-      BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
-        BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
-          BatchSort { order: [t.v1 DESC] }
-            BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+      └─BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
+        └─BatchSort { order: [t.v1 DESC] }
+          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
     /* Use BatchSortAgg, when required order satisfies input order */
     create table t(k1 int, k2 int, v1 int);
     SELECT max(v1), k1, k2 from t group by k1, k2 order by k1;
   batch_plan: |
     BatchExchange { order: [t.k1 ASC], dist: Single }
-      BatchProject { exprs: [max(t.v1), t.k1, t.k2] }
-        BatchSortAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
-          BatchExchange { order: [t.k1 ASC, t.k2 ASC], dist: HashShard(t.k1, t.k2) }
-            BatchSort { order: [t.k1 ASC, t.k2 ASC] }
-              BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
+    └─BatchProject { exprs: [max(t.v1), t.k1, t.k2] }
+      └─BatchSortAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
+        └─BatchExchange { order: [t.k1 ASC, t.k2 ASC], dist: HashShard(t.k1, t.k2) }
+          └─BatchSort { order: [t.k1 ASC, t.k2 ASC] }
+            └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
 - sql: |
     /* Use BatchSortAgg, when output requires order with swapped output*/
     create table t(v1 int, v2 int);
     select max(v2), v1 from t group by v1 order by v1 desc;
   batch_plan: |
     BatchExchange { order: [t.v1 DESC], dist: Single }
-      BatchProject { exprs: [max(t.v2), t.v1] }
-        BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
-          BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
-            BatchSort { order: [t.v1 DESC] }
-              BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchProject { exprs: [max(t.v2), t.v1] }
+      └─BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+        └─BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
+          └─BatchSort { order: [t.v1 DESC] }
+            └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
     create table t (v1 real);
     select count(*) from t;
   batch_plan: |
     BatchSimpleAgg { aggs: [sum(count)] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [count] }
-          BatchScan { table: t, columns: [], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count] }
+        └─BatchScan { table: t, columns: [], distribution: SomeShard }
 - sql: |
     /* having with agg call */
     create table t (v1 real);
     select 1 from t having sum(v1) > 5;
   batch_plan: |
     BatchProject { exprs: [1:Int32] }
-      BatchFilter { predicate: (sum(sum(t.v1)) > 5:Int32) }
-        BatchSimpleAgg { aggs: [sum(sum(t.v1))] }
-          BatchExchange { order: [], dist: Single }
-            BatchSimpleAgg { aggs: [sum(t.v1)] }
-              BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    └─BatchFilter { predicate: (sum(sum(t.v1)) > 5:Int32) }
+      └─BatchSimpleAgg { aggs: [sum(sum(t.v1))] }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchSimpleAgg { aggs: [sum(t.v1)] }
+            └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     /* having with group column */
     create table t (v1 real);
     select 1 from t group by v1 having v1 > 5;
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalFilter { predicate: (t.v1 > 5:Int32) }
-        LogicalAgg { group_key: [t.v1], aggs: [] }
-          LogicalProject { exprs: [t.v1] }
-            LogicalScan { table: t, columns: [t.v1, t._row_id] }
+    └─LogicalFilter { predicate: (t.v1 > 5:Int32) }
+      └─LogicalAgg { group_key: [t.v1], aggs: [] }
+        └─LogicalProject { exprs: [t.v1] }
+          └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
 - sql: |
     /* having with non-group column */
     create table t (v1 real, v2 int);
@@ -269,202 +269,202 @@
     select distinct v1 from t;
   logical_plan: |
     LogicalAgg { group_key: [t.v1], aggs: [] }
-      LogicalProject { exprs: [t.v1] }
-        LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalProject { exprs: [t.v1] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* distinct with agg */
     create table t (v1 int, v2 int);
     select distinct sum(v1) from t group by v2;
   logical_plan: |
     LogicalAgg { group_key: [sum(t.v1)], aggs: [] }
-      LogicalProject { exprs: [sum(t.v1)] }
-        LogicalAgg { group_key: [t.v2], aggs: [sum(t.v1)] }
-          LogicalProject { exprs: [t.v2, t.v1] }
-            LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalProject { exprs: [sum(t.v1)] }
+      └─LogicalAgg { group_key: [t.v2], aggs: [sum(t.v1)] }
+        └─LogicalProject { exprs: [t.v2, t.v1] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* arguments out-of-order */
     create table t(v1 int, v2 int, v3 int);
     select count(v3), min(v2), max(v1) from t;
   batch_plan: |
     BatchSimpleAgg { aggs: [sum(count(t.v3)), min(min(t.v2)), max(max(t.v1))] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [count(t.v3), min(t.v2), max(t.v1)] }
-          BatchProject { exprs: [t.v3, t.v2, t.v1] }
-            BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count(t.v3), min(t.v2), max(t.v1)] }
+        └─BatchProject { exprs: [t.v3, t.v2, t.v1] }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - sql: |
     /* simple-agg arguments out-of-order */
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v3) * count(v2) as agg from t;
   batch_plan: |
     BatchProject { exprs: [(min(min(t.v1)) + (max(max(t.v3)) * sum(count(t.v2))))] }
-      BatchSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v3)), sum(count(t.v2))] }
-        BatchExchange { order: [], dist: Single }
-          BatchSimpleAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
-            BatchProject { exprs: [t.v1, t.v3, t.v2] }
-              BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v3)), sum(count(t.v2))] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchSimpleAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
+          └─BatchProject { exprs: [t.v1, t.v3, t.v2] }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [agg], pk_columns: [] }
-      StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v3)) * sum(count(t.v2))))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), min(min(t.v1)), max(max(t.v3)), sum(count(t.v2))] }
-          StreamExchange { dist: Single }
-            StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, min(t.v1), max(t.v3), count(t.v2)] }
-              StreamProject { exprs: [t.v1, t.v3, t.v2, t._row_id, Vnode(t._row_id)] }
-                StreamProject { exprs: [t.v1, t.v3, t.v2, t._row_id] }
-                  StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v3)) * sum(count(t.v2))))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), min(min(t.v1)), max(max(t.v3)), sum(count(t.v2))] }
+        └─StreamExchange { dist: Single }
+          └─StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, min(t.v1), max(t.v3), count(t.v2)] }
+            └─StreamProject { exprs: [t.v1, t.v3, t.v2, t._row_id, Vnode(t._row_id)] }
+              └─StreamProject { exprs: [t.v1, t.v3, t.v2, t._row_id] }
+                └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* dup group key */
     create table t(v1 int) with (appendonly = false);
     select v1 from t group by v1, v1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-      LogicalAgg { group_key: [t.v1, t.v1], aggs: [] }
-        LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t._row_id] }
+    └─LogicalAgg { group_key: [t.v1, t.v1], aggs: [] }
+      └─LogicalProject { exprs: [t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [t.v1] }
-      LogicalAgg { group_key: [t.v1, t.v1], aggs: [] }
-        LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalAgg { group_key: [t.v1, t.v1], aggs: [] }
+      └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t.v1(hidden)], pk_columns: [v1, t.v1] }
-      StreamProject { exprs: [t.v1, t.v1] }
-        StreamHashAgg { group_key: [t.v1, t.v1], aggs: [count] }
-          StreamExchange { dist: HashShard(t.v1) }
-            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.v1, t.v1] }
+      └─StreamHashAgg { group_key: [t.v1, t.v1], aggs: [count] }
+        └─StreamExchange { dist: HashShard(t.v1) }
+          └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* dup group key */
     create table t(v1 int, v2 int, v3 int) with (appendonly = false);
     select v2, min(v1) as min_v1, v3, max(v1) as max_v1 from t group by v3, v2, v2;
   logical_plan: |
     LogicalProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
-      LogicalAgg { group_key: [t.v3, t.v2, t.v2], aggs: [min(t.v1), max(t.v1)] }
-        LogicalProject { exprs: [t.v3, t.v2, t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+    └─LogicalAgg { group_key: [t.v3, t.v2, t.v2], aggs: [min(t.v1), max(t.v1)] }
+      └─LogicalProject { exprs: [t.v3, t.v2, t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
-      LogicalAgg { group_key: [t.v3, t.v2, t.v2], aggs: [min(t.v1), max(t.v1)] }
-        LogicalProject { exprs: [t.v3, t.v2, t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
+    └─LogicalAgg { group_key: [t.v3, t.v2, t.v2], aggs: [min(t.v1), max(t.v1)] }
+      └─LogicalProject { exprs: [t.v3, t.v2, t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
   stream_plan: |
     StreamMaterialize { columns: [v2, min_v1, v3, max_v1, t.v2(hidden)], pk_columns: [v3, v2, t.v2] }
-      StreamProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1), t.v2] }
-        StreamHashAgg { group_key: [t.v3, t.v2, t.v2], aggs: [count, min(t.v1), max(t.v1)] }
-          StreamExchange { dist: HashShard(t.v3, t.v2) }
-            StreamProject { exprs: [t.v3, t.v2, t.v1, t._row_id] }
-              StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1), t.v2] }
+      └─StreamHashAgg { group_key: [t.v3, t.v2, t.v2], aggs: [count, min(t.v1), max(t.v1)] }
+        └─StreamExchange { dist: HashShard(t.v3, t.v2) }
+          └─StreamProject { exprs: [t.v3, t.v2, t.v1, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* order by agg input */
     create table t(v1 int);
     select sum(v1 order by v1) as s1 from t;
   logical_plan: |
     LogicalProject { exprs: [sum(t.v1)] }
-      LogicalAgg { aggs: [sum(t.v1)] }
-        LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t._row_id] }
+    └─LogicalAgg { aggs: [sum(t.v1)] }
+      └─LogicalProject { exprs: [t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1)] }
-      LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
     StreamMaterialize { columns: [s1], pk_columns: [] }
-      StreamProject { exprs: [sum(sum(t.v1))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
-          StreamExchange { dist: Single }
-            StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-              StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(sum(t.v1))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* order by other columns */
     create table t(v1 int, v2 varchar);
     select sum(v1 order by v2) as s1 from t;
   logical_plan: |
     LogicalProject { exprs: [sum(t.v1)] }
-      LogicalAgg { aggs: [sum(t.v1)] }
-        LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalAgg { aggs: [sum(t.v1)] }
+      └─LogicalProject { exprs: [t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1)] }
-      LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
     StreamMaterialize { columns: [s1], pk_columns: [] }
-      StreamProject { exprs: [sum(sum(t.v1))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
-          StreamExchange { dist: Single }
-            StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-              StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(sum(t.v1))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* order by ASC/DESC and default */
     create table t(v1 int, v2 varchar, v3 int);
     select sum(v1 order by v1, v2 ASC, v3 DESC) as s1 from t;
   logical_plan: |
     LogicalProject { exprs: [sum(t.v1)] }
-      LogicalAgg { aggs: [sum(t.v1)] }
-        LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+    └─LogicalAgg { aggs: [sum(t.v1)] }
+      └─LogicalProject { exprs: [t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1)] }
-      LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
     StreamMaterialize { columns: [s1], pk_columns: [] }
-      StreamProject { exprs: [sum(sum(t.v1))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
-          StreamExchange { dist: Single }
-            StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-              StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(sum(t.v1))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* order by NULLS FIRST/LAST and default */
     create table t(v1 int, v2 varchar, v3 int);
     select sum(v1 order by v1, v2 NULLS FIRST, v3 NULLS LAST) as s1 from t;
   logical_plan: |
     LogicalProject { exprs: [sum(t.v1)] }
-      LogicalAgg { aggs: [sum(t.v1)] }
-        LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+    └─LogicalAgg { aggs: [sum(t.v1)] }
+      └─LogicalProject { exprs: [t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1)] }
-      LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
     StreamMaterialize { columns: [s1], pk_columns: [] }
-      StreamProject { exprs: [sum(sum(t.v1))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
-          StreamExchange { dist: Single }
-            StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-              StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(sum(t.v1))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* order by complex expressions */
     create table t(v1 int, v2 varchar, v3 int);
     select sum(v1 order by v1 + v3 ASC, length(v2) * v3 DESC NULLS FIRST) as s1 from t;
   logical_plan: |
     LogicalProject { exprs: [sum(t.v1)] }
-      LogicalAgg { aggs: [sum(t.v1)] }
-        LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+    └─LogicalAgg { aggs: [sum(t.v1)] }
+      └─LogicalProject { exprs: [t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1)] }
-      LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
     StreamMaterialize { columns: [s1], pk_columns: [] }
-      StreamProject { exprs: [sum(sum(t.v1))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
-          StreamExchange { dist: Single }
-            StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-              StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(sum(t.v1))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* filter clause */
     create table t(v1 int);
     select sum(v1) FILTER (WHERE v1 > 0) AS sa from t;
   logical_plan: |
     LogicalProject { exprs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
-      LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
-        LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t._row_id] }
+    └─LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
+      └─LogicalProject { exprs: [t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
-      LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
     StreamMaterialize { columns: [sa], pk_columns: [] }
-      StreamProject { exprs: [sum(sum(t.v1) filter((t.v1 > 0:Int32)))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1) filter((t.v1 > 0:Int32)))] }
-          StreamExchange { dist: Single }
-            StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1) filter((t.v1 > 0:Int32))] }
-              StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(sum(t.v1) filter((t.v1 > 0:Int32)))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1) filter((t.v1 > 0:Int32)))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1) filter((t.v1 > 0:Int32))] }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* filter clause */
     /* extra calculation, should reuse result from project */
@@ -472,75 +472,75 @@
     select sum(a * b) filter (where a * b > 0) as sab from t;
   logical_plan: |
     LogicalProject { exprs: [sum((t.a * t.b)) filter(((t.a * t.b) > 0:Int32))] }
-      LogicalAgg { aggs: [sum((t.a * t.b)) filter(((t.a * t.b) > 0:Int32))] }
-        LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
-          LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+    └─LogicalAgg { aggs: [sum((t.a * t.b)) filter(((t.a * t.b) > 0:Int32))] }
+      └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum((t.a * t.b)) filter(((t.a * t.b) > 0:Int32))] }
-      LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
-        LogicalScan { table: t, columns: [t.a, t.b] }
+    └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
+      └─LogicalScan { table: t, columns: [t.a, t.b] }
 - sql: |
     /* complex filter clause */
     create table t(a int, b int);
     select max(a * b) FILTER (WHERE a < b AND a + b < 100 AND a * b != a + b - 1) AS sab from t;
   logical_plan: |
     LogicalProject { exprs: [max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
-      LogicalAgg { aggs: [max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
-        LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
-          LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+    └─LogicalAgg { aggs: [max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
+      └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
-      LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
-        LogicalScan { table: t, columns: [t.a, t.b] }
+    └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
+      └─LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |
     StreamMaterialize { columns: [sab], pk_columns: [] }
-      StreamProject { exprs: [max(max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), max(max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))))] }
-          StreamExchange { dist: Single }
-            StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
-              StreamProject { exprs: [t.a, t.b, (t.a * t.b), t._row_id, Vnode(t._row_id)] }
-                StreamProject { exprs: [t.a, t.b, (t.a * t.b), t._row_id] }
-                  StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [max(max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), max(max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))))] }
+        └─StreamExchange { dist: Single }
+          └─StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
+            └─StreamProject { exprs: [t.a, t.b, (t.a * t.b), t._row_id, Vnode(t._row_id)] }
+              └─StreamProject { exprs: [t.a, t.b, (t.a * t.b), t._row_id] }
+                └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* avg filter clause + group by */
     create table t(a int, b int);
     select avg(a) FILTER (WHERE a > b) AS avga from t group by b ;
   logical_plan: |
     LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b)))] }
-      LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
-        LogicalProject { exprs: [t.b, t.a] }
-          LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+    └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
+      └─LogicalProject { exprs: [t.b, t.a] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b)))] }
-      LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
-        LogicalProject { exprs: [t.b, t.a] }
-          LogicalScan { table: t, columns: [t.a, t.b] }
+    └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
+      └─LogicalProject { exprs: [t.b, t.a] }
+        └─LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |
     StreamMaterialize { columns: [avga, t.b(hidden)], pk_columns: [t.b] }
-      StreamProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))), t.b] }
-        StreamHashAgg { group_key: [t.b], aggs: [count, sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
-          StreamExchange { dist: HashShard(t.b) }
-            StreamProject { exprs: [t.b, t.a, t._row_id] }
-              StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))), t.b] }
+      └─StreamHashAgg { group_key: [t.b], aggs: [count, sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
+        └─StreamExchange { dist: HashShard(t.b) }
+          └─StreamProject { exprs: [t.b, t.a, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* count filter clause */
     create table t(a int, b int);
     select count(*) FILTER (WHERE a > b) AS cnt_agb from t;
   logical_plan: |
     LogicalProject { exprs: [count filter((t.a > t.b))] }
-      LogicalAgg { aggs: [count filter((t.a > t.b))] }
-        LogicalProject { exprs: [t.a, t.b] }
-          LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+    └─LogicalAgg { aggs: [count filter((t.a > t.b))] }
+      └─LogicalProject { exprs: [t.a, t.b] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [count filter((t.a > t.b))] }
-      LogicalScan { table: t, columns: [t.a, t.b] }
+    └─LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |
     StreamMaterialize { columns: [cnt_agb], pk_columns: [] }
-      StreamProject { exprs: [sum(count filter((t.a > t.b)))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(count filter((t.a > t.b)))] }
-          StreamExchange { dist: Single }
-            StreamStatelessLocalSimpleAgg { aggs: [count, count filter((t.a > t.b))] }
-              StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(count filter((t.a > t.b)))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(count filter((t.a > t.b)))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, count filter((t.a > t.b))] }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* filter clause + non-boolean function */
     create table t(a int, b int);
@@ -573,96 +573,92 @@
     with sub(a, b) as (select min(v1), sum(v2) filter (where v2 < 5) from t) select b from sub;
   batch_plan: |
     BatchSimpleAgg { aggs: [sum(sum(t.v2) filter((t.v2 < 5:Int32)))] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [sum(t.v2) filter((t.v2 < 5:Int32))] }
-          BatchScan { table: t, columns: [t.v2], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [sum(t.v2) filter((t.v2 < 5:Int32))] }
+        └─BatchScan { table: t, columns: [t.v2], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [b], pk_columns: [] }
-      StreamProject { exprs: [sum(sum(t.v2) filter((t.v2 < 5:Int32)))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v2) filter((t.v2 < 5:Int32)))] }
-          StreamExchange { dist: Single }
-            StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v2) filter((t.v2 < 5:Int32))] }
-              StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(sum(t.v2) filter((t.v2 < 5:Int32)))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v2) filter((t.v2 < 5:Int32)))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v2) filter((t.v2 < 5:Int32))] }
+            └─StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* only distinct agg */
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(distinct c) filter(where c < 100) as distinct_c_sum from t group by a;
   optimized_logical_plan: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 0:Int64)), sum(t.c) filter((count filter((t.c < 100:Int32)) > 0:Int64) AND (flag = 1:Int64))] }
-      LogicalAgg { group_key: [t.a, t.b, t.c, flag], aggs: [count filter((t.c < 100:Int32))] }
-        LogicalProject { exprs: [t.a, t.b, t.c, t.c, flag] }
-          LogicalExpand { column_subsets: [[t.a, t.b], [t.a, t.c]] }
-            LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    └─LogicalAgg { group_key: [t.a, t.b, t.c, flag], aggs: [count filter((t.c < 100:Int32))] }
+      └─LogicalProject { exprs: [t.a, t.b, t.c, t.c, flag] }
+        └─LogicalExpand { column_subsets: [[t.a, t.b], [t.a, t.c]] }
+          └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - sql: |
     /* distinct agg and non-disintct agg */
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(c) as sum_c from t group by a;
   optimized_logical_plan: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b), sum(sum(t.c))] }
-      LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c)] }
-        LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    └─LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c)] }
+      └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
   stream_plan: |
     StreamMaterialize { columns: [a, distinct_b_num, sum_c], pk_columns: [a] }
-      StreamProject { exprs: [t.a, count(t.b), sum(sum(t.c))] }
-        StreamHashAgg { group_key: [t.a], aggs: [count, count(t.b), sum(sum(t.c))] }
-          StreamExchange { dist: HashShard(t.a) }
-            StreamProject { exprs: [t.a, t.b, sum(t.c)] }
-              StreamHashAgg { group_key: [t.a, t.b], aggs: [count, sum(t.c)] }
-                StreamExchange { dist: HashShard(t.a, t.b) }
-                  StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.a, count(t.b), sum(sum(t.c))] }
+      └─StreamHashAgg { group_key: [t.a], aggs: [count, count(t.b), sum(sum(t.c))] }
+        └─StreamExchange { dist: HashShard(t.a) }
+          └─StreamProject { exprs: [t.a, t.b, sum(t.c)] }
+            └─StreamHashAgg { group_key: [t.a, t.b], aggs: [count, sum(t.c)] }
+              └─StreamExchange { dist: HashShard(t.a, t.b) }
+                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* distinct agg with filter */
     create table t(a int, b int, c int);
     select a, count(distinct b) filter(where b < 100), sum(c) from t group by a;
   optimized_logical_plan: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((count filter((t.b < 100:Int32)) > 0:Int64)), sum(sum(t.c))] }
-      LogicalAgg { group_key: [t.a, t.b], aggs: [count filter((t.b < 100:Int32)), sum(t.c)] }
-        LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    └─LogicalAgg { group_key: [t.a, t.b], aggs: [count filter((t.b < 100:Int32)), sum(t.c)] }
+      └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - sql: |
     /* non-distinct agg with filter */
     create table t(a int, b int, c int);
     select a, count(distinct b), sum(c) filter(where b < 100) from t group by a;
   optimized_logical_plan: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b), sum(sum(t.c) filter((t.b < 100:Int32)))] }
-      LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c) filter((t.b < 100:Int32))] }
-        LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    └─LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c) filter((t.b < 100:Int32))] }
+      └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - sql: |
     /* combined order by & filter clauses */
     create table t(a varchar, b int);
     select sum(length(a) * b order by length(a) + b) filter (where b < 100 AND b * 2 > 10) as s1 from t;
   logical_plan: |
     LogicalProject { exprs: [sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
-      LogicalAgg { aggs: [sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
-        LogicalProject { exprs: [t.b, (Length(t.a) * t.b)] }
-          LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+    └─LogicalAgg { aggs: [sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
+      └─LogicalProject { exprs: [t.b, (Length(t.a) * t.b)] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
-      LogicalProject { exprs: [t.b, (Length(t.a) * t.b)] }
-        LogicalScan { table: t, columns: [t.a, t.b] }
+    └─LogicalProject { exprs: [t.b, (Length(t.a) * t.b)] }
+      └─LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |
     StreamMaterialize { columns: [s1], pk_columns: [] }
-      StreamProject { exprs: [sum(sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32)))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32)))] }
-          StreamExchange { dist: Single }
-            StreamStatelessLocalSimpleAgg { aggs: [count, sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
-              StreamProject { exprs: [t.b, (Length(t.a) * t.b), t._row_id] }
-                StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32)))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32)))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
+            └─StreamProject { exprs: [t.b, (Length(t.a) * t.b), t._row_id] }
+              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int, y varchar);
     select string_agg(y, ',' order by y), count(distinct x) from t;
   planner_error: 'Invalid input syntax: Order by aggregates are disallowed to occur
     with distinct aggregates'
 - sql: |
-    create table t(x int, y varchar);
-    select single_value(distinct x) from t;
-  binder_error: 'Invalid input syntax: single_value(distinct) is disallowed'
-- sql: |
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
   optimized_logical_plan: |
     LogicalAgg { aggs: [count(t.v1)] }
-      LogicalAgg { group_key: [t.v1], aggs: [] }
-        LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalAgg { group_key: [t.v1], aggs: [] }
+      └─LogicalScan { table: t, columns: [t.v1] }
 - sql: |
     /* input is sharded by group key */
     create table t(x int);
@@ -670,40 +666,40 @@
     select count(*) as cnt from i group by x;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [count] }
-        BatchSortAgg { group_key: [i.x], aggs: [count] }
-          BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
+    └─BatchProject { exprs: [count] }
+      └─BatchSortAgg { group_key: [i.x], aggs: [count] }
+        └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |
     StreamMaterialize { columns: [cnt, i.x(hidden)], pk_columns: [i.x] }
-      StreamProject { exprs: [count, i.x] }
-        StreamHashAgg { group_key: [i.x], aggs: [count, count] }
-          StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
+    └─StreamProject { exprs: [count, i.x] }
+      └─StreamHashAgg { group_key: [i.x], aggs: [count, count] }
+        └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
 - sql: |
     /* distinct aggregates only have one distinct argument doesn't need expand */
     create table t(x int, y int);
     select count(x), sum(distinct y), sum(distinct y) from t;
   optimized_logical_plan: |
     LogicalProject { exprs: [Coalesce(sum(count(t.x)), 0:Int64), sum(t.y), sum(t.y)] }
-      LogicalAgg { aggs: [sum(count(t.x)), sum(t.y), sum(t.y)] }
-        LogicalAgg { group_key: [t.y, t.y], aggs: [count(t.x)] }
-          LogicalScan { table: t, columns: [t.x, t.y] }
+    └─LogicalAgg { aggs: [sum(count(t.x)), sum(t.y), sum(t.y)] }
+      └─LogicalAgg { group_key: [t.y, t.y], aggs: [count(t.x)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select count(y), sum(distinct y) from t;
   optimized_logical_plan: |
     LogicalProject { exprs: [Coalesce(sum(count(t.y)), 0:Int64), sum(t.y)] }
-      LogicalAgg { aggs: [sum(count(t.y)), sum(t.y)] }
-        LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
-          LogicalScan { table: t, columns: [t.y] }
+    └─LogicalAgg { aggs: [sum(count(t.y)), sum(t.y)] }
+      └─LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
+        └─LogicalScan { table: t, columns: [t.y] }
 - sql: |
     create table t(x int, y int);
     select count(distinct x), sum(distinct y) from t;
   optimized_logical_plan: |
     LogicalAgg { aggs: [count(t.x) filter((flag = 0:Int64)), sum(t.y) filter((flag = 1:Int64))] }
-      LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
-        LogicalProject { exprs: [t.x, t.y, flag] }
-          LogicalExpand { column_subsets: [[t.x], [t.y]] }
-            LogicalScan { table: t, columns: [t.x, t.y] }
+    └─LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
+      └─LogicalProject { exprs: [t.x, t.y, flag] }
+        └─LogicalExpand { column_subsets: [[t.x], [t.y]] }
+          └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x varchar, y int);
     select string_agg(x, ','), count(distinct y) from t;
@@ -716,7 +712,7 @@
     select max(distinct x), min(distinct y) from t;
   optimized_logical_plan: |
     LogicalAgg { aggs: [max(t.x), min(t.y)] }
-      LogicalScan { table: t, columns: [t.x, t.y] }
+    └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     /* agg filter: subquery */
     /* This case is valid in PostgreSQL */

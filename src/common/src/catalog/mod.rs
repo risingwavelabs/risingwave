@@ -126,7 +126,7 @@ impl From<TableId> for u32 {
 }
 
 impl fmt::Display for TableId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.table_id,)
     }
 }
@@ -217,7 +217,7 @@ impl From<IndexId> for u32 {
 }
 
 impl fmt::Display for IndexId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.index_id,)
     }
 }

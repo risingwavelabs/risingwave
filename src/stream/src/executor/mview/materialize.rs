@@ -118,7 +118,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     async fn execute_inner(mut self) {
         let mut input = self.input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch.prev);
+        self.state_table.init_epoch(barrier.epoch);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -133,7 +133,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 }
                 Message::Barrier(b) => {
                     // FIXME(ZBW): use a better error type
-                    self.state_table.commit(b.epoch.prev).await?;
+                    self.state_table.commit(b.epoch).await?;
 
                     // Update the vnode bitmap for the state table if asked.
                     if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
@@ -156,7 +156,7 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -183,6 +183,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
@@ -258,7 +259,10 @@ mod tests {
         match materialize_executor.next().await.transpose().unwrap() {
             Some(Message::Barrier(_)) => {
                 let row = table
-                    .get_row(&Row(vec![Some(3_i32.into())]), u64::MAX)
+                    .get_row(
+                        &Row(vec![Some(3_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
                     .await
                     .unwrap();
                 assert_eq!(row, Some(Row(vec![Some(3_i32.into()), Some(6_i32.into())])));
@@ -270,7 +274,10 @@ mod tests {
         match materialize_executor.next().await.transpose().unwrap() {
             Some(Message::Barrier(_)) => {
                 let row = table
-                    .get_row(&Row(vec![Some(7_i32.into())]), u64::MAX)
+                    .get_row(
+                        &Row(vec![Some(7_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
                     .await
                     .unwrap();
                 assert_eq!(row, Some(Row(vec![Some(7_i32.into()), Some(8_i32.into())])));

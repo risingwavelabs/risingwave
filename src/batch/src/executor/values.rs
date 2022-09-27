@@ -106,7 +106,7 @@ impl ValuesExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for ValuesExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(inputs.is_empty(), "ValuesExecutor should have no child!");
@@ -210,7 +210,6 @@ mod tests {
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
-        .unwrap()
         .into();
 
         if let Ok(result) = result {

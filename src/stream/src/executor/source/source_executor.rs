@@ -406,7 +406,7 @@ impl<S: StateStore> Executor for SourceExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 

@@ -18,6 +18,4 @@
 #![feature(type_alias_impl_trait)]
 #![feature(once_cell)]
 
-extern crate core;
-
 pub mod object;

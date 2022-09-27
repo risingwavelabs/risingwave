@@ -88,6 +88,7 @@ impl StreamNode for StreamGroupTopN {
             offset: self.offset() as u64,
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             table: Some(table.to_internal_table_prost()),
+            order_by_len: self.topn_order().len() as u32,
         };
 
         ProstStreamNode::GroupTopN(group_topn_node)
@@ -95,7 +96,7 @@ impl StreamNode for StreamGroupTopN {
 }
 
 impl fmt::Display for StreamGroupTopN {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamGroupTopN");
         let input = self.input();
         let input_schema = input.schema();

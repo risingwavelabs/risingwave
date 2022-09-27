@@ -139,7 +139,7 @@ impl<S: StateStore> Executor for SinkExecutor<S> {
         self.input.schema()
     }
 
-    fn pk_indices(&self) -> super::PkIndicesRef {
+    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
         &self.pk_indices
     }
 

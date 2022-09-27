@@ -127,7 +127,7 @@ impl InsertExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for InsertExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -213,10 +213,8 @@ mod tests {
                 array! { I32Array, [Some(3),None,None,None,None] }.into(),
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
-        )
-        .map(|x| Arc::new(x.into()))
-        .unwrap();
-        let col3 = Column::new(array);
+        );
+        let col3 = Column::new(Arc::new(array.into()));
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
 
@@ -292,7 +290,6 @@ mod tests {
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
-        .unwrap()
         .into();
         assert_eq!(*chunk.columns()[2].array(), array);
 

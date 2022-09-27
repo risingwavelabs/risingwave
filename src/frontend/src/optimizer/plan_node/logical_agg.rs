@@ -196,9 +196,7 @@ impl PlanAggCall {
 
     pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
         let total_agg_kind = match &self.agg_kind {
-            AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::SingleValue => {
-                self.agg_kind
-            }
+            AggKind::Min | AggKind::Max | AggKind::StringAgg => self.agg_kind,
             AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => AggKind::Sum,
             AggKind::Avg => {
                 panic!("Avg aggregation should have been rewritten to Sum+Count")
@@ -428,11 +426,7 @@ impl LogicalAgg {
                         get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
                     }
                 }
-                AggKind::Sum
-                | AggKind::Count
-                | AggKind::Avg
-                | AggKind::SingleValue
-                | AggKind::ApproxCountDistinct => {
+                AggKind::Sum | AggKind::Count | AggKind::Avg | AggKind::ApproxCountDistinct => {
                     get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
                 }
             };
@@ -795,7 +789,6 @@ impl LogicalAggBuilder {
             | AggKind::Sum
             | AggKind::Count
             | AggKind::Avg
-            | AggKind::SingleValue
             | AggKind::ApproxCountDistinct => {
                 // this order by is unnecessary.
                 order_by = OrderBy::new(vec![]);
@@ -1085,7 +1078,7 @@ impl LogicalAgg {
         self.agg_calls.as_ref()
     }
 
-    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay> {
+    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
         self.agg_calls()
             .iter()
             .map(|plan_agg_call| PlanAggCallDisplay {
@@ -1095,7 +1088,7 @@ impl LogicalAgg {
             .collect_vec()
     }
 
-    pub fn group_key_display(&self) -> Vec<FieldDisplay> {
+    pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
         self.group_key()
             .iter()
             .copied()
@@ -1143,7 +1136,7 @@ impl LogicalAgg {
         Self::new(agg_calls, group_key, input)
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         if !self.group_key.is_empty() {
             builder.field("group_key", &self.group_key_display());
@@ -1178,7 +1171,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
 impl_plan_tree_node_for_unary! {LogicalAgg}
 
 impl fmt::Display for LogicalAgg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalAgg")
     }
 }

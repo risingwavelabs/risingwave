@@ -45,7 +45,7 @@ impl Executor for LocalSimpleAggExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 

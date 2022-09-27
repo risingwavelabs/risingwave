@@ -331,7 +331,7 @@ impl Debug for KafkaSink {
     }
 }
 
-fn datum_to_json_object(field: &Field, datum: DatumRef) -> ArrayResult<Value> {
+fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value> {
     let scalar_ref = match datum {
         None => return Ok(Value::Null),
         Some(datum) => datum,
@@ -398,7 +398,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef) -> ArrayResult<Value> {
     Ok(value)
 }
 
-fn record_to_json(row: RowRef, schema: Vec<Field>) -> Result<Map<String, Value>> {
+fn record_to_json(row: RowRef<'_>, schema: Vec<Field>) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
     for (field, datum_ref) in schema.iter().zip_eq(row.values()) {
         let key = field.name.clone();
@@ -604,8 +604,7 @@ mod test {
                     array! { F32Array, [Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0), Some(6.0), Some(7.0), Some(8.0), Some(9.0),Some(10.0)] }.into(),
                 ],
                 vec![DataType::Int32, DataType::Float32],
-            )
-            .unwrap(),
+            ),
         )));
         let ops = vec![
             Op::Insert,

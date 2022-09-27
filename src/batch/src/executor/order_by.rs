@@ -55,7 +55,7 @@ impl Executor for OrderByExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for OrderByExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -103,12 +103,12 @@ impl OrderByExecutor {
         encoded_rows.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
 
         for (row, _) in encoded_rows {
-            if let Some(spilled) = chunk_builder.append_one_row_ref(row)? {
+            if let Some(spilled) = chunk_builder.append_one_row_ref(row) {
                 yield spilled
             }
         }
 
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield spilled
         }
     }
