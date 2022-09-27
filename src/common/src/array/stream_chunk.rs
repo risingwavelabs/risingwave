@@ -117,8 +117,7 @@ impl StreamChunk {
 
         let new_columns = array_builders
             .into_iter()
-            .map(|builder| builder.finish())
-            .map(|array_impl| Column::new(Arc::new(array_impl)))
+            .map(|builder| builder.finish().into())
             .collect::<Vec<_>>();
         StreamChunk::new(ops, new_columns, None)
     }
@@ -162,7 +161,7 @@ impl StreamChunk {
             .into_iter()
             .map(|col| {
                 let array = col.array();
-                Column::new(Arc::new(array.compact(&visibility, cardinality)))
+                array.compact(&visibility, cardinality).into()
             })
             .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
@@ -435,7 +434,7 @@ impl StreamChunkTestExt for StreamChunk {
         }
         let columns = array_builders
             .into_iter()
-            .map(|builder| Column::new(Arc::new(builder.finish())))
+            .map(|builder| builder.finish().into())
             .collect();
         let visibility = if visibility.iter().all(|b| *b) {
             None

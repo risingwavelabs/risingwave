@@ -92,10 +92,8 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use risingwave_common::array;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, F32Array, I32Array, StructArray};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
@@ -122,8 +120,7 @@ mod tests {
             vec![DataType::Int32, DataType::Float32],
         );
 
-        let column = Column::new(Arc::new(array.into()));
-        let data_chunk = DataChunk::new(vec![column], 1);
+        let data_chunk = DataChunk::new(vec![array.into()], 1);
         let res = field_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
@@ -161,8 +158,7 @@ mod tests {
             vec![DataType::Int32, DataType::Float32],
         );
 
-        let column = Column::new(Arc::new(array.into()));
-        let data_chunk = DataChunk::new(vec![column], 1);
+        let data_chunk = DataChunk::new(vec![array.into()], 1);
         let res = field_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Float32(1.0.into())));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Float32(2.0.into())));
