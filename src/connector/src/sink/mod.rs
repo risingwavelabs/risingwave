@@ -95,7 +95,7 @@ impl SinkImpl {
         Ok(match cfg {
             SinkConfig::Mysql(cfg) => SinkImpl::MySql(Box::new(MySqlSink::new(cfg).await?)),
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg)?)),
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg)?)),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg).await?)),
         })
     }
 
