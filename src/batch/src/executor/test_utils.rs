@@ -29,9 +29,7 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
-use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, ProbeSideSourceBuilder,
-};
+use crate::executor::{BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder};
 use crate::task::{BatchTaskContext, TaskId};
 
 const SEED: u64 = 0xFF67FEABBAEF76FF;
@@ -298,12 +296,12 @@ impl CreateSource for FakeCreateSource {
     }
 }
 
-pub struct FakeProbeSideSourceBuilder {
+pub struct FakeInnerSideExecutorBuilder {
     schema: Schema,
     datums: Vec<Vec<Datum>>,
 }
 
-impl FakeProbeSideSourceBuilder {
+impl FakeInnerSideExecutorBuilder {
     pub fn new(schema: Schema) -> Self {
         Self {
             schema,
@@ -313,8 +311,8 @@ impl FakeProbeSideSourceBuilder {
 }
 
 #[async_trait::async_trait]
-impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
-    async fn build_source(&self) -> Result<BoxedExecutor> {
+impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
+    async fn build_executor(&self) -> Result<BoxedExecutor> {
         let mut mock_executor = MockExecutor::new(self.schema.clone());
 
         let base_data_chunk = DataChunk::from_pretty(
