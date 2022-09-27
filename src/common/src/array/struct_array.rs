@@ -40,7 +40,7 @@ use crate::types::{
 #[derive(Debug)]
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
-    children_array: Vec<ArrayBuilderImpl>,
+    pub(super) children_array: Vec<ArrayBuilderImpl>,
     children_type: Arc<[DataType]>,
     len: usize,
 }
@@ -301,32 +301,21 @@ impl StructArray {
     }
 }
 
-#[derive(Clone, Debug, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Hash)]
 pub struct StructValue {
     fields: Box<[Datum]>,
 }
 
 impl fmt::Display for StructValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "({})",
-            self.fields
-                .iter()
-                .map(|f| {
-                    match f {
-                        Some(f) => format!("{}", f),
-                        None => " ".to_string(),
-                    }
-                })
-                .join(", ")
-        )
-    }
-}
-
-impl PartialEq for StructValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.fields == other.fields
+        let mut f = f.debug_tuple("");
+        for field in self.fields.iter() {
+            match field {
+                Some(field) => f.field(&format_args!("{}", field)),
+                None => f.field(&" "),
+            };
+        }
+        f.finish()
     }
 }
 
@@ -339,12 +328,6 @@ impl PartialOrd for StructValue {
 impl Ord for StructValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
-    }
-}
-
-impl Hash for StructValue {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.fields.hash(state);
     }
 }
 

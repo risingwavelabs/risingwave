@@ -486,13 +486,8 @@ impl KafkaTransactionConductor {
 
 #[cfg(test)]
 mod test {
-
     use maplit::hashmap;
-    use risingwave_common::array;
-    use risingwave_common::array::{
-        ArrayBuilder, F32Array, F32ArrayBuilder, I32Array, I32ArrayBuilder, StructArray,
-    };
-    use risingwave_common::types::OrderedF32;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
 
     use super::*;
 
@@ -539,40 +534,19 @@ mod test {
 
     #[test]
     fn test_chunk_to_json() -> Result<()> {
-        let mut column_i32_builder = I32ArrayBuilder::new(10);
-        for i in 0..10 {
-            column_i32_builder.append(Some(i));
-        }
-        let column_i32 = column_i32_builder.finish().into();
-        let mut column_f32_builder = F32ArrayBuilder::new(10);
-        for i in 0..10 {
-            column_f32_builder.append(Some(OrderedF32::from(i as f32)));
-        }
-        let column_f32 = column_f32_builder.finish().into();
-
-        let column_struct =
-            StructArray::from_slices(
-                &[true, true, true, true, true, true, true, true, true, true],
-                vec![
-                    array! { I32Array, [Some(1), Some(2), Some(3), Some(4), Some(5), Some(6), Some(7), Some(8), Some(9), Some(10)] }.into(),
-                    array! { F32Array, [Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0), Some(6.0), Some(7.0), Some(8.0), Some(9.0),Some(10.0)] }.into(),
-                ],
-                vec![DataType::Int32, DataType::Float32],
-            ).into();
-        let ops = vec![
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-        ];
-
-        let chunk = StreamChunk::new(ops, vec![column_i32, column_f32, column_struct], None);
+        let chunk = StreamChunk::from_pretty(
+            " i   f   {i,f}
+            + 0 0.0 {0,0.0}
+            + 1 1.0 {1,1.0}
+            + 2 2.0 {2,2.0}
+            + 3 3.0 {3,3.0}
+            + 4 4.0 {4,4.0}
+            + 5 5.0 {5,5.0}
+            + 6 6.0 {6,6.0}
+            + 7 7.0 {7,7.0}
+            + 8 8.0 {8,8.0}
+            + 9 9.0 {9,9.0}",
+        );
 
         let schema = Schema::new(vec![
             Field {
@@ -616,7 +590,7 @@ mod test {
         assert_eq!(schema_json.to_string(), "{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"}],\"optional\":false,\"type\":\"struct\"}");
         assert_eq!(
             json_chunk[0].as_str(),
-            "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":1,\"v5\":1.0}}"
+            "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}"
         );
 
         Ok(())

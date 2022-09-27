@@ -7,6 +7,9 @@ include ../streaming/nexmark/views/q5.slt.part
 
 sleep 15s
 
+statement ok
+flush;
+
 query I
 select count(*) > 0 as has_results from nexmark_q7;
 ----
