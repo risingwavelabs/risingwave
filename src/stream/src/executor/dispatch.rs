@@ -811,7 +811,6 @@ mod tests {
     use async_trait::async_trait;
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
@@ -1155,7 +1154,7 @@ mod tests {
             .into_iter()
             .map(|builder| {
                 let array = builder.finish();
-                Column::new(Arc::new(array.into()))
+                array.into()
             })
             .collect::<Vec<_>>();
 

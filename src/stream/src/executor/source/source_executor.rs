@@ -146,7 +146,7 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        Column::new(Arc::new(ArrayImpl::from(builder.finish())))
+        builder.finish().into()
     }
 
     async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {

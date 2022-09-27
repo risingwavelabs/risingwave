@@ -486,13 +486,11 @@ impl KafkaTransactionConductor {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
 
     use maplit::hashmap;
     use risingwave_common::array;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{
-        ArrayBuilder, ArrayImpl, F32Array, F32ArrayBuilder, I32Array, I32ArrayBuilder, StructArray,
+        ArrayBuilder, F32Array, F32ArrayBuilder, I32Array, I32ArrayBuilder, StructArray,
     };
     use risingwave_common::types::OrderedF32;
 
@@ -545,14 +543,14 @@ mod test {
         for i in 0..10 {
             column_i32_builder.append(Some(i));
         }
-        let column_i32 = Column::new(Arc::new(ArrayImpl::from(column_i32_builder.finish())));
+        let column_i32 = column_i32_builder.finish().into();
         let mut column_f32_builder = F32ArrayBuilder::new(10);
         for i in 0..10 {
             column_f32_builder.append(Some(OrderedF32::from(i as f32)));
         }
-        let column_f32 = Column::new(Arc::new(ArrayImpl::from(column_f32_builder.finish())));
+        let column_f32 = column_f32_builder.finish().into();
 
-        let column_struct = Column::new(Arc::new(ArrayImpl::from(
+        let column_struct =
             StructArray::from_slices(
                 &[true, true, true, true, true, true, true, true, true, true],
                 vec![
@@ -560,8 +558,7 @@ mod test {
                     array! { F32Array, [Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0), Some(6.0), Some(7.0), Some(8.0), Some(9.0),Some(10.0)] }.into(),
                 ],
                 vec![DataType::Int32, DataType::Float32],
-            ),
-        )));
+            ).into();
         let ops = vec![
             Op::Insert,
             Op::Insert,

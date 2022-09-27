@@ -14,11 +14,9 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -251,8 +249,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let columns = group_builders
                 .into_iter()
                 .chain(agg_builders)
-                .map(|b| Ok(Column::new(Arc::new(b.finish()))))
-                .collect::<Result<Vec<_>>>()?;
+                .map(|b| b.finish().into())
+                .collect::<Vec<_>>();
 
             let output = DataChunk::new(columns, array_len);
             yield output;

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -133,11 +131,7 @@ impl LocalSimpleAggExecutor {
                         )?;
                         let columns: Vec<Column> = builders
                             .into_iter()
-                            .map(|builder| {
-                                Ok::<_, StreamExecutorError>(Column::new(Arc::new(
-                                    builder.finish(),
-                                )))
-                            })
+                            .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))
                             .try_collect()?;
                         let ops = vec![Op::Insert; 1];
 
