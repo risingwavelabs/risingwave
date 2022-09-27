@@ -751,7 +751,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         chunk: StreamChunk,
         append_only_optimize: bool,
     ) {
-        let chunk = chunk.compact()?;
+        let chunk = chunk.compact();
 
         let (side_update, side_match) = if SIDE == SideType::Left {
             (&mut side_l, &mut side_r)

@@ -110,7 +110,7 @@ impl LimitExecutor {
             }
             yield data_chunk
                 .with_visibility(new_vis.into_iter().collect())
-                .compact()?;
+                .compact();
         }
     }
 }
@@ -318,7 +318,7 @@ mod tests {
         let stream = limit_executor.execute();
         #[for_await]
         for chunk in stream {
-            results.push(chunk.unwrap().compact().unwrap());
+            results.push(chunk.unwrap().compact());
         }
         let chunks =
             DataChunk::rechunk(results.into_iter().collect_vec().as_slice(), row_num).unwrap();

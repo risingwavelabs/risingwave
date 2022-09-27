@@ -122,7 +122,7 @@ impl TaskOutput {
                         self.output_id,
                         chunk.cardinality()
                     );
-                    let pb = chunk.to_protobuf().await?;
+                    let pb = chunk.to_protobuf().await;
                     let resp = GetDataResponse {
                         status: Default::default(),
                         record_batch: Some(pb),

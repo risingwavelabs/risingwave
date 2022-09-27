@@ -127,7 +127,7 @@ impl RemoteOutput {
 impl Output for RemoteOutput {
     async fn send(&mut self, message: Message) -> StreamResult<()> {
         let message = match message {
-            Message::Chunk(chk) => Message::Chunk(chk.compact()?),
+            Message::Chunk(chk) => Message::Chunk(chk.compact()),
             _ => message,
         };
 
