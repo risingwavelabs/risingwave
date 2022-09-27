@@ -39,9 +39,10 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use self::iter_utils::zip_by_order_key;
+use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef, ManagedLruCache};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::{ActorId, EvictableHashMap, ExecutorCache, LruManagerRef, ManagedLruCache};
+use crate::task::ActorId;
 
 type DegreeType = u64;
 
@@ -325,9 +326,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     pub fn update_epoch(&mut self, epoch: u64) {
         // Update the current epoch in `ManagedLruCache`
-        if let ExecutorCache::Managed(ref mut cache) = self.inner {
-            cache.update_epoch(epoch)
-        }
+        self.inner.update_epoch(epoch)
     }
 
     pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {

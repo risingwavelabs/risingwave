@@ -23,17 +23,16 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc::{Receiver, Sender};
 
+use crate::cache::{LruManager, LruManagerRef};
 use crate::error::StreamResult;
 use crate::executor::Message;
 
 mod barrier_manager;
 mod env;
-mod lru_manager;
 mod stream_manager;
 
 pub use barrier_manager::*;
 pub use env::*;
-pub use lru_manager::*;
 use risingwave_storage::StateStoreImpl;
 pub use stream_manager::*;
 
@@ -104,10 +103,13 @@ impl SharedContext {
         enable_managed_cache: bool,
     ) -> Self {
         let create_lru_manager = || {
-            LruManager::new(
+            let mgr = LruManager::new(
                 config.total_memory_available_bytes,
                 config.checkpoint_interval_ms,
-            )
+            );
+            // Run a background memory monitor
+            tokio::spawn(mgr.clone().run());
+            mgr
         };
         Self {
             channel_map: Default::default(),
@@ -129,7 +131,7 @@ impl SharedContext {
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
                 StateStoreImpl::for_test(),
             ))),
-            lru_manager: Some(LruManager::for_test()),
+            lru_manager: None,
         }
     }
 

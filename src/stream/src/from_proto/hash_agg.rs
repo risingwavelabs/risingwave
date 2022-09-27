@@ -22,10 +22,10 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::agg_call::build_agg_call_from_prost;
 use super::*;
+use crate::cache::LruManagerRef;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
-use crate::task::LruManagerRef;
 
 pub struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 

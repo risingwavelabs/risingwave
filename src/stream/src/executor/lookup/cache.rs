@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 use risingwave_common::array::{Op, Row, StreamChunk};
 
-use crate::task::{EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
@@ -58,11 +58,9 @@ impl LookupCache {
         self.data.evict();
     }
 
-    /// Update the current epoch if using managed lru cache
+    /// Update the current epoch.
     pub fn update_epoch(&mut self, epoch: u64) {
-        if let ExecutorCache::Managed(ref mut cache) = self.data {
-            cache.update_epoch(epoch)
-        }
+        self.data.update_epoch(epoch);
     }
 
     pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {

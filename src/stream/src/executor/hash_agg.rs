@@ -33,6 +33,7 @@ use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
+use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::common::StateTableColumnMapping;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{
@@ -41,7 +42,6 @@ use crate::executor::aggregation::{
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
-use crate::task::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
 type AggStateMap<K, S> = ExecutorCache<K, Option<Box<AggState<S>>>, PrecomputedBuildHasher>;
 
@@ -239,17 +239,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref key_indices,
             ref agg_calls,
             ref input_pk_indices,
-            group_by_key_cache_size: _,
             ref extreme_cache_size,
-            ref _input_schema,
             ref schema,
             state_tables,
-            lru_manager: _,
             ref state_table_col_mappings,
-            pk_indices: _,
             lookup_miss_count,
             total_lookup_count,
-            metrics: _,
+            ..
         }: &mut HashAggExecutorExtra<S>,
         state_map: &mut AggStateMap<K, S>,
         chunk: StreamChunk,
@@ -509,10 +505,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         }
                     }
 
-                    // Update the current epoch in `ManagedLruCache`
-                    if let ExecutorCache::Managed(ref mut cache) = state_map {
-                        cache.update_epoch(barrier.epoch.curr)
-                    }
+                    // Update the current epoch.
+                    state_map.update_epoch(barrier.epoch.curr);
 
                     yield Message::Barrier(barrier);
                 }
