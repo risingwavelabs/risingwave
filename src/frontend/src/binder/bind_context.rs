@@ -14,8 +14,8 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::Display;
 
+use parse_display::Display;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, Result};
 
@@ -40,25 +40,14 @@ impl ColumnBinding {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
+#[display(style = "TITLE CASE")]
 pub enum Clause {
     Where,
     Values,
     GroupBy,
     Having,
     Filter,
-}
-
-impl Display for Clause {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Clause::Where => write!(f, "WHERE"),
-            Clause::Values => write!(f, "VALUES"),
-            Clause::GroupBy => write!(f, "GROUP BY"),
-            Clause::Having => write!(f, "HAVING"),
-            Clause::Filter => write!(f, "FILTER"),
-        }
-    }
 }
 
 /// A `BindContext` that is only visible if the `LATERAL` keyword
