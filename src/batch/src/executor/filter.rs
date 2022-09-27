@@ -131,11 +131,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_filter_executor() {
-        use std::sync::Arc;
-
-        use risingwave_common::array::column::Column;
         use risingwave_common::array::{
-            ArrayBuilder, ArrayImpl, ArrayMeta, ListArrayBuilder, ListRef, ListValue,
+            ArrayBuilder, ArrayMeta, ListArrayBuilder, ListRef, ListValue,
         };
         use risingwave_common::types::Scalar;
 
@@ -154,10 +151,7 @@ mod tests {
         });
 
         // Use builder to obtain a single (List) column DataChunk
-        let chunk = DataChunk::new(
-            vec![Column::new(Arc::new(ArrayImpl::from(builder.finish())))],
-            4,
-        );
+        let chunk = DataChunk::new(vec![builder.finish().into()], 4);
 
         // Initialize mock executor
         let mut mock_executor = MockExecutor::new(Schema {

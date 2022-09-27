@@ -157,9 +157,7 @@ impl Aggregator for ApproxCountDistinct {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{
         ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, I64ArrayBuilder,
     };
@@ -174,7 +172,7 @@ mod tests {
             lhs.push(Some(i));
         }
 
-        let col1 = Column::new(Arc::new(I32Array::from_slice(&lhs).into()));
+        let col1 = I32Array::from_slice(&lhs).into();
         DataChunk::new(vec![col1], size)
     }
 
