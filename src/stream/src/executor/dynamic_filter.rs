@@ -275,7 +275,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             match msg? {
                 AlignedMessage::Left(chunk) => {
                     // Reuse the logic from `FilterExecutor`
-                    let chunk = chunk.compact()?; // Is this unnecessary work?
+                    let chunk = chunk.compact(); // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
                     let right_val = prev_epoch_value.clone().flatten();
@@ -296,7 +296,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 }
                 AlignedMessage::Right(chunk) => {
                     // Record the latest update to the right value
-                    let chunk = chunk.compact()?; // Is this unnecessary work?
+                    let chunk = chunk.compact(); // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
                     let mut last_is_insert = true;
@@ -504,7 +504,7 @@ mod tests {
         tx_l.push_chunk(chunk_l2);
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact().unwrap(),
+            chunk.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I
                 + 4
@@ -608,7 +608,7 @@ mod tests {
         tx_l.push_chunk(chunk_l2);
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact().unwrap(),
+            chunk.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I
                 + 4
@@ -711,7 +711,7 @@ mod tests {
         tx_l.push_chunk(chunk_l2);
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact().unwrap(),
+            chunk.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I
                 + 1
@@ -815,7 +815,7 @@ mod tests {
         tx_l.push_chunk(chunk_l2);
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact().unwrap(),
+            chunk.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I
                 + 1
