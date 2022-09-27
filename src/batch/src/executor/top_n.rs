@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::vec::Vec;
 
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
@@ -103,7 +102,41 @@ impl Executor for TopNExecutor {
     }
 }
 
-struct HeapElem {
+/// A max-heap used to find the smallest `limit+offset` items.
+pub struct TopNHeap {
+    heap: BinaryHeap<HeapElem>,
+    limit: usize,
+    offset: usize,
+}
+
+impl TopNHeap {
+    pub fn new(limit: usize, offset: usize) -> Self {
+        assert!(limit > 0);
+        Self {
+            heap: BinaryHeap::with_capacity(limit + offset),
+            limit,
+            offset,
+        }
+    }
+
+    pub fn push(&mut self, elem: HeapElem) {
+        if self.heap.len() < self.limit + self.offset {
+            self.heap.push(elem);
+        } else {
+            let mut peek = self.heap.peek_mut().unwrap();
+            if elem < *peek {
+                *peek = elem;
+            }
+        }
+    }
+
+    /// Returns the elements in the range `[offset, offset+limit)`.
+    pub fn dump(self) -> impl Iterator<Item = HeapElem> {
+        self.heap.into_iter_sorted().skip(self.offset)
+    }
+}
+
+pub struct HeapElem {
     encoded_row: Vec<u8>,
     chunk: Arc<DataChunk>,
     row_id: usize,
@@ -132,8 +165,10 @@ impl Ord for HeapElem {
 impl TopNExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let mut heap: BinaryHeap<HeapElem> = BinaryHeap::new();
-        let heap_size = self.offset + self.limit;
+        if self.limit == 0 {
+            return Ok(());
+        }
+        let mut heap = TopNHeap::new(self.limit, self.offset);
 
         #[for_await]
         for chunk in self.child.execute() {
@@ -142,24 +177,16 @@ impl TopNExecutor {
                 .into_iter()
                 .enumerate()
             {
-                if heap.len() < heap_size {
-                    heap.push(HeapElem { encoded_row, chunk: chunk.clone(), row_id });
-                }
-                // handle the case `heap_size == 0` 
-                else if let Some(peek) = heap.peek() && encoded_row < peek.encoded_row {
-                    heap.push(HeapElem { encoded_row, chunk: chunk.clone(), row_id });
-                    heap.pop();
-                }
+                heap.push(HeapElem {
+                    encoded_row,
+                    chunk: chunk.clone(),
+                    row_id,
+                });
             }
         }
 
         let mut chunk_builder = DataChunkBuilder::with_default_size(self.schema.data_types());
-        for HeapElem { chunk, row_id, .. } in heap
-            .drain()
-            .sorted_unstable()
-            .skip(self.offset)
-            .take(self.limit)
-        {
+        for HeapElem { chunk, row_id, .. } in heap.dump() {
             if let Some(spilled) =
                 chunk_builder.append_one_row_ref(chunk.row_at_unchecked_vis(row_id))
             {
