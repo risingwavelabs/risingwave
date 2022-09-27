@@ -1405,6 +1405,20 @@ impl Parser {
         }
     }
 
+    /// Parse either `ALL` or `DISTINCT` or `DISTINCT ON (<expr>)`.
+    pub fn parse_all_or_distinct_on(&mut self) -> Result<Distinct, ParserError> {
+        if self.parse_keywords(&[Keyword::DISTINCT, Keyword::ON]) {
+            self.expect_token(&Token::LParen)?;
+            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+            self.expect_token(&Token::RParen)?;
+            return Ok(Distinct::DistinctOn(exprs));
+        } else if self.parse_keyword(Keyword::DISTINCT) {
+            return Ok(Distinct::Distinct);
+        };
+        _ = self.parse_keyword(Keyword::ALL);
+        Ok(Distinct::All)
+    }
+
     /// Parse a SQL CREATE statement
     pub fn parse_create(&mut self) -> Result<Statement, ParserError> {
         let or_replace = self.parse_keywords(&[Keyword::OR, Keyword::REPLACE]);
@@ -2573,7 +2587,7 @@ impl Parser {
     /// Parse a restricted `SELECT` statement (no CTEs / `UNION` / `ORDER BY`),
     /// assuming the initial `SELECT` was already consumed
     pub fn parse_select(&mut self) -> Result<Select, ParserError> {
-        let distinct = self.parse_all_or_distinct()?;
+        let distinct = self.parse_all_or_distinct_on()?;
 
         let projection = self.parse_comma_separated(Parser::parse_select_item)?;
 

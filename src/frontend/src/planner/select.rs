@@ -17,6 +17,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
+use risingwave_sqlparser::ast::Distinct;
 
 use crate::binder::BoundSelect;
 use crate::expr::{
@@ -45,7 +46,7 @@ impl Planner {
         extra_order_exprs: Vec<ExprImpl>,
     ) -> Result<PlanRef> {
         // Append expressions in ORDER BY.
-        if distinct && !extra_order_exprs.is_empty() {
+        if distinct.is_distinct() && !extra_order_exprs.is_empty() {
             return Err(ErrorCode::InvalidInputSyntax(
                 "for SELECT DISTINCT, ORDER BY expressions must appear in select list".into(),
             )
@@ -87,7 +88,7 @@ impl Planner {
             root = LogicalProject::create(root, select_items);
         }
 
-        if distinct {
+        if distinct.is_distinct() {
             let group_key = (0..root.schema().fields().len()).collect();
             root = LogicalAgg::new(vec![], group_key, root).into();
         }

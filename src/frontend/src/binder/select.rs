@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
+use risingwave_sqlparser::ast::{Distinct, Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
@@ -33,7 +33,7 @@ use crate::expr::{
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
-    pub distinct: bool,
+    pub distinct: Distinct,
     pub select_items: Vec<ExprImpl>,
     pub aliases: Vec<Option<String>>,
     pub from: Option<Relation>,
@@ -280,7 +280,7 @@ impl Binder {
         );
 
         Ok(BoundSelect {
-            distinct: false,
+            distinct: Distinct::All,
             select_items,
             aliases: vec![None],
             from,
