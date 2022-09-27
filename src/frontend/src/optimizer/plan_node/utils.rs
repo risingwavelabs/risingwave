@@ -32,6 +32,7 @@ pub struct TableCatalogBuilder {
     properties: WithOptions,
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
+    column_names: HashMap<String, i32>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -86,13 +87,12 @@ impl TableCatalogBuilder {
     /// Check the column name whether exist before. if true, record occurrence and change the name
     /// to avoid duplicate.
     fn avoid_duplicate_col_name(&mut self, column_desc: &mut ColumnDesc) {
-        let mut column_names: HashMap<String, i32> = HashMap::default();
         let column_name = column_desc.name.clone();
-        if let Some(occurrence) = column_names.get_mut(&column_name) {
+        if let Some(occurrence) = self.column_names.get_mut(&column_name) {
             column_desc.name = format!("{}_{}", column_name, occurrence);
             *occurrence += 1;
         } else {
-            column_names.insert(column_name, 0);
+            self.column_names.insert(column_name, 0);
         }
     }
 

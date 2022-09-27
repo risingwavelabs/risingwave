@@ -334,6 +334,7 @@ impl LogicalAgg {
                     .add_order_column(tb_column_idx, OrderType::Ascending);
                 column_mapping.push(idx);
             }
+
             for (order_type, idx) in sort_keys {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
@@ -359,6 +360,7 @@ impl LogicalAgg {
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
             }
+
             internal_table_catalog_builder.build(tb_dist.unwrap_or_default())
         };
 
@@ -373,8 +375,7 @@ impl LogicalAgg {
                 internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
                 column_mapping.push(idx);
             }
-            let mapping =
-                ColIndexMapping::with_remaining_columns(self.group_key(), self.group_key().len());
+            let mapping = ColIndexMapping::with_remaining_columns(column_mapping, in_fields.len());
             let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
