@@ -146,7 +146,8 @@ impl MetaClient {
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status {
             if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
-                panic!("worker expired: {}", status.message);
+                tracing::error!("worker expired: {}", status.message);
+                std::process::exit(1);
             }
         }
         Ok(())
