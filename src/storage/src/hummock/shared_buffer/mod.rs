@@ -42,7 +42,7 @@ use crate::hummock::utils::{filter_single_sst, range_overlap};
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
-pub const MIN_CACHE_COMPACT_NUMBER: usize = 4;
+pub const MIN_CACHE_COMPACT_NUMBER: usize = 5;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UncommittedData {

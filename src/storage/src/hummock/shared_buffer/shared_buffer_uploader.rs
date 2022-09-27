@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
@@ -145,6 +146,9 @@ impl SharedBufferUploader {
                     let mut sst_ids = vec![];
                     let mut key_count = 0;
                     for level in levels.l0.as_ref().unwrap().sub_levels.iter().rev() {
+                        if level.table_infos.is_empty() {
+                            continue;
+                        }
                         if cache_size + level.total_file_size > max_cache_size {
                             break;
                         }
@@ -168,13 +172,29 @@ impl SharedBufferUploader {
                             }
                         }
                         sst_ids.extend(level.table_infos.iter().map(|table| table.id));
-                        key_count += level.table_infos.iter().map(|table|table.total_key_count).sum::<u64>();
+                        key_count += level
+                            .table_infos
+                            .iter()
+                            .map(|table| table.total_key_count)
+                            .sum::<u64>();
                         cache_size += level.total_file_size;
                     }
                     if iters.len() > MIN_CACHE_COMPACT_NUMBER {
+                        let timer = Instant::now();
                         let iter = UnorderedMergeIteratorInner::new(iters);
-                        tracing::info!("preload sstable files [{:?}] to memory", sst_ids);
-                        let data = InMemorySstableData::build(iter, key_count as usize, *group, sst_ids).await?;
+                        let data = InMemorySstableData::build(
+                            iter,
+                            key_count as usize,
+                            *group,
+                            sst_ids.clone(),
+                        )
+                        .await?;
+                        tracing::info!(
+                            "preload sstable files [{:?}] to memory for group: {} in {}ms",
+                            sst_ids,
+                            group,
+                            timer.elapsed().as_millis()
+                        );
                         ret.push(data);
                     }
                 }

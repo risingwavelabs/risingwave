@@ -662,7 +662,6 @@ impl LocalVersion {
             } else {
                 (Vec::new(), None)
             };
-        assert!(compaction_group_synced_ssts.is_none());
         for (group, levels) in &version_delta.level_deltas {
             let mut changed_group = false;
             let mut ids: HashSet<u64> = HashSet::default();

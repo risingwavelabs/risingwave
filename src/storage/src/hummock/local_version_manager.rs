@@ -350,17 +350,18 @@ impl LocalVersionManager {
             .ok();
         if need_cache {
             let local_version = self.local_version.clone();
-            let shared_buffer_uploader = self.shared_buffer_uploader.clone();
-            tokio::spawn(async move {
-                match shared_buffer_uploader.compact_l0_to_cache(version).await {
-                    Ok(ret) => {
-                        local_version.write().set_cache_data_for_l0(ret);
-                    }
-                    Err(e) => {
-                        tracing::error!("failed to preload L0 data, error: {:?}", e);
-                    }
+            match self
+                .shared_buffer_uploader
+                .compact_l0_to_cache(version)
+                .await
+            {
+                Ok(ret) => {
+                    local_version.write().set_cache_data_for_l0(ret);
                 }
-            });
+                Err(e) => {
+                    tracing::error!("failed to preload L0 data, error: {:?}", e);
+                }
+            }
         }
         true
     }
