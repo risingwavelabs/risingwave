@@ -589,13 +589,13 @@
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t1.y, t2.x), output: all }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalJoin { type: RightOuter, on: (t2.x = t3.x) AND (t2.x = t3.y), output: [t2.x] }
-      ├─LogicalScan { table: t2, output_columns: [t2.x], required_columns: [x, y], predicate: (t2.x = t2.y) }
-      └─LogicalJoin { type: Inner, on: true, output: all }
-        ├─LogicalProject { exprs: [] }
-        | └─LogicalAgg { group_key: [t1.y], aggs: [] }
-        |   └─LogicalScan { table: t1, columns: [t1.y] }
-        └─LogicalScan { table: t3, columns: [t3.x, t3.y] }
+    └─LogicalJoin { type: LeftOuter, on: (t2.x = t3.x) AND (t2.x = t3.y), output: [t2.x] }
+      ├─LogicalJoin { type: Inner, on: true, output: all }
+      | ├─LogicalProject { exprs: [] }
+      | | └─LogicalAgg { group_key: [t1.y], aggs: [] }
+      | |   └─LogicalScan { table: t1, columns: [t1.y] }
+      | └─LogicalScan { table: t3, columns: [t3.x, t3.y] }
+      └─LogicalScan { table: t2, output_columns: [t2.x], required_columns: [x, y], predicate: (t2.x = t2.y) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
