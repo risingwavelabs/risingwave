@@ -163,7 +163,6 @@ impl LogicalTopN {
         });
         internal_table_catalog_builder.build(
             self.input().distribution().dist_column_indices().to_vec(),
-            self.base.append_only,
             vnode_col_idx,
         )
     }

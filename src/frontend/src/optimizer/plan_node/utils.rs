@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::{fmt, vec};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
@@ -29,11 +29,7 @@ pub struct TableCatalogBuilder {
     columns: Vec<ColumnCatalog>,
     column_names: HashMap<String, i32>,
     pk: Vec<FieldOrder>,
-    // FIXME(stonepage): stream_key should be meaningless in internal state table, check if we
-    // can remove it later
-    stream_key: Vec<usize>,
     properties: WithOptions,
-    _value_indices: Vec<usize>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -65,7 +61,6 @@ impl TableCatalogBuilder {
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
     /// semantics and they are encoded as storage key.
     pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
-        self.stream_key.push(index);
         self.pk.push(FieldOrder {
             index,
             direct: match order_type {
@@ -93,22 +88,17 @@ impl TableCatalogBuilder {
     }
 
     /// Consume builder and create `TableCatalog` (for proto).
-    pub fn build(
-        self,
-        distribution_key: Vec<usize>,
-        append_only: bool,
-        vnode_col_idx: Option<usize>,
-    ) -> TableCatalog {
+    pub fn build(self, distribution_key: Vec<usize>, vnode_col_idx: Option<usize>) -> TableCatalog {
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
             name: String::new(),
             columns: self.columns.clone(),
             pk: self.pk,
-            stream_key: self.stream_key,
+            stream_key: vec![],
             distribution_key,
             is_index: false,
-            appendonly: append_only,
+            appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: self.properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
@@ -122,7 +112,6 @@ impl TableCatalogBuilder {
     pub fn build_with_value_indices(
         self,
         distribution_key: Vec<usize>,
-        append_only: bool,
         vnode_col_idx: Option<usize>,
         value_indices: Vec<usize>,
     ) -> TableCatalog {
@@ -132,10 +121,10 @@ impl TableCatalogBuilder {
             name: String::new(),
             columns: self.columns.clone(),
             pk: self.pk,
-            stream_key: self.stream_key,
+            stream_key: vec![],
             distribution_key,
             is_index: false,
-            appendonly: append_only,
+            appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: self.properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
@@ -149,7 +138,6 @@ impl TableCatalogBuilder {
     pub fn build_with_column_mapping(
         self,
         distribution_key: Vec<usize>,
-        append_only: bool,
         column_mapping: &[usize],
         vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
@@ -165,7 +153,7 @@ impl TableCatalogBuilder {
         // Only if all `distribution_key` is in `column_mapping`, we return transformed dist key
         // indices, otherwise empty.
         if !column_mapping_indices_set.is_superset(&input_dist_key_indices_set) {
-            return self.build(vec![], append_only, vnode_col_idx_in_table_columns);
+            return self.build(vec![], vnode_col_idx_in_table_columns);
         }
 
         // Transform `distribution_key` (based on input schema) to distribution indices on internal
@@ -181,7 +169,6 @@ impl TableCatalogBuilder {
             .collect();
         self.build(
             dist_indices_on_table_columns,
-            append_only,
             vnode_col_idx_in_table_columns,
         )
     }

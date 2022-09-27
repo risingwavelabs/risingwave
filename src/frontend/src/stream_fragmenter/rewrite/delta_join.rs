@@ -136,7 +136,6 @@ fn build_delta_join_inner(
                         .iter()
                         .map(|x| *x as usize)
                         .collect(),
-                    exchange_a0l0.append_only,
                 )
                 .to_internal_table_prost(),
             ),
@@ -179,7 +178,6 @@ fn build_delta_join_inner(
                         .iter()
                         .map(|x| *x as usize)
                         .collect(),
-                    exchange_a1l1.append_only,
                 )
                 .to_internal_table_prost(),
             ),
@@ -315,7 +313,6 @@ pub(crate) fn build_delta_join_without_arrange(
 fn infer_internal_table_catalog(
     arrangement_info: Option<&ArrangementInfo>,
     distribution_key: Vec<usize>,
-    append_only: bool,
 ) -> TableCatalog {
     let arrangement_info = arrangement_info.unwrap();
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
@@ -330,5 +327,5 @@ fn infer_internal_table_catalog(
         );
     }
 
-    internal_table_catalog_builder.build(distribution_key, append_only, None)
+    internal_table_catalog_builder.build(distribution_key, None)
 }

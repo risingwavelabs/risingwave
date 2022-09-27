@@ -267,8 +267,6 @@ fn infer_internal_and_degree_table_catalog(
     let base = input.plan_base();
     let schema = &base.schema;
 
-    let append_only = input.append_only();
-
     let internal_table_dist_keys = base.dist.dist_column_indices().to_vec();
 
     // Find the dist key position in join key.
@@ -319,10 +317,9 @@ fn infer_internal_and_degree_table_catalog(
         .set_properties(base.ctx.inner().with_options.internal_table_subset());
 
     (
-        internal_table_catalog_builder.build(internal_table_dist_keys, append_only, None),
+        internal_table_catalog_builder.build(internal_table_dist_keys, None),
         degree_table_catalog_builder.build_with_value_indices(
             degree_table_dist_keys,
-            append_only,
             None,
             value_indices,
         ),

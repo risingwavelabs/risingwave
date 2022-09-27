@@ -358,7 +358,6 @@ impl LogicalAgg {
             }
             internal_table_catalog_builder.build_with_column_mapping(
                 in_dist_key.clone(),
-                in_append_only,
                 column_mapping,
                 vnode_col_idx,
             )
@@ -379,7 +378,6 @@ impl LogicalAgg {
             internal_table_catalog_builder.add_column(&out_fields[value_key]);
             internal_table_catalog_builder.build_with_column_mapping(
                 in_dist_key.clone(),
-                in_append_only,
                 column_mapping,
                 vnode_col_idx,
             )

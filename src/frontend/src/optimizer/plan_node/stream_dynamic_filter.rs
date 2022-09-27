@@ -115,7 +115,6 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     let base = input.plan_base();
     let schema = &base.schema;
 
-    let append_only = input.append_only();
     let dist_keys = base.dist.dist_column_indices().to_vec();
 
     // The pk of dynamic filter internal table should be left_key + input_pk.
@@ -135,7 +134,7 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
 
-    internal_table_catalog_builder.build(dist_keys, append_only, None)
+    internal_table_catalog_builder.build(dist_keys, None)
 }
 
 fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
@@ -157,5 +156,5 @@ fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
     });
 
     // No distribution keys
-    internal_table_catalog_builder.build(vec![], false, None)
+    internal_table_catalog_builder.build(vec![], None)
 }
