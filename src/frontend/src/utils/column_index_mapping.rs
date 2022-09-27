@@ -294,16 +294,20 @@ impl ColIndexMapping {
             })
     }
 
+    /// Rewrite the distribution key and will return None if **any** index of the key disappear
+    /// after the mapping
+    pub fn rewrite_dist_key(&self, key: &[usize]) -> Option<Vec<usize>> {
+        key.iter()
+            .map(|col_idx| self.try_map(*col_idx))
+            .collect::<Option<Vec<_>>>()
+    }
+
     /// Rewrite the provided distribution's field index. It will try its best to give the most
     /// accurate distribution.
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
     /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `SomeShard`.
     pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
-        let mapped_dist_key = dist
-            .dist_column_indices()
-            .iter()
-            .map(|col_idx| self.try_map(*col_idx))
-            .collect::<Option<Vec<_>>>();
+        let mapped_dist_key = self.rewrite_dist_key(dist.dist_column_indices());
 
         match (mapped_dist_key, dist) {
             (None, Distribution::HashShard(_)) | (None, Distribution::UpstreamHashShard(_)) => {
@@ -339,10 +343,7 @@ impl ColIndexMapping {
             }
             RequiredDist::PhysicalDist(dist) => match dist {
                 Distribution::HashShard(keys) => {
-                    let keys = keys
-                        .iter()
-                        .map(|key| self.try_map(*key))
-                        .collect::<Option<Vec<_>>>();
+                    let keys = self.rewrite_dist_key(keys);
                     match keys {
                         Some(keys) => RequiredDist::PhysicalDist(Distribution::HashShard(keys)),
                         None => RequiredDist::Any,

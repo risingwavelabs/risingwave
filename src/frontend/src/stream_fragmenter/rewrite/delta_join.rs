@@ -327,5 +327,5 @@ fn infer_internal_table_catalog(
         );
     }
 
-    internal_table_catalog_builder.build(distribution_key, None)
+    internal_table_catalog_builder.build(distribution_key)
 }

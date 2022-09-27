@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::{fmt, vec};
 
 use itertools::Itertools;
@@ -26,10 +26,12 @@ use crate::utils::WithOptions;
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
+    /// All columns in this table
     columns: Vec<ColumnCatalog>,
-    column_names: HashMap<String, i32>,
     pk: Vec<FieldOrder>,
     properties: WithOptions,
+    value_indices: Option<Vec<usize>>,
+    vnode_col_idx: Option<usize>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -70,6 +72,14 @@ impl TableCatalogBuilder {
         });
     }
 
+    pub fn set_vnode_col_idx(&mut self, vnode_col_idx: usize) {
+        self.vnode_col_idx = Some(vnode_col_idx);
+    }
+
+    pub fn set_value_indices(&mut self, value_indices: Vec<usize>) {
+        self.value_indices = Some(value_indices);
+    }
+
     /// Set the `properties` for `TableCatalog`.
     pub fn set_properties(&mut self, properties: WithOptions) {
         self.properties = properties;
@@ -78,17 +88,18 @@ impl TableCatalogBuilder {
     /// Check the column name whether exist before. if true, record occurrence and change the name
     /// to avoid duplicate.
     fn avoid_duplicate_col_name(&mut self, column_desc: &mut ColumnDesc) {
+        let mut column_names: HashMap<String, i32> = HashMap::default();
         let column_name = column_desc.name.clone();
-        if let Some(occurrence) = self.column_names.get_mut(&column_name) {
+        if let Some(occurrence) = column_names.get_mut(&column_name) {
             column_desc.name = format!("{}_{}", column_name, occurrence);
             *occurrence += 1;
         } else {
-            self.column_names.insert(column_name, 0);
+            column_names.insert(column_name, 0);
         }
     }
 
     /// Consume builder and create `TableCatalog` (for proto).
-    pub fn build(self, distribution_key: Vec<usize>, vnode_col_idx: Option<usize>) -> TableCatalog {
+    pub fn build(self, distribution_key: Vec<usize>) -> TableCatalog {
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -103,77 +114,12 @@ impl TableCatalogBuilder {
             properties: self.properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
-            vnode_col_idx,
+            vnode_col_idx: self.vnode_col_idx,
             value_indices: (0..self.columns.len()).collect_vec(),
         }
     }
 
-    /// Consume builder and create `TableCatalog` with `value_indices`.
-    pub fn build_with_value_indices(
-        self,
-        distribution_key: Vec<usize>,
-        vnode_col_idx: Option<usize>,
-        value_indices: Vec<usize>,
-    ) -> TableCatalog {
-        TableCatalog {
-            id: TableId::placeholder(),
-            associated_source_id: None,
-            name: String::new(),
-            columns: self.columns.clone(),
-            pk: self.pk,
-            stream_key: vec![],
-            distribution_key,
-            is_index: false,
-            appendonly: false,
-            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties: self.properties,
-            // TODO(zehua): replace it with FragmentId::placeholder()
-            fragment_id: FragmentId::MAX - 1,
-            vnode_col_idx,
-            value_indices,
-        }
-    }
-
-    /// Consume builder and create `TableCatalog` (for proto).
-    pub fn build_with_column_mapping(
-        self,
-        distribution_key: Vec<usize>,
-        column_mapping: &[usize],
-        vnode_col_idx: Option<usize>,
-    ) -> TableCatalog {
-        let vnode_col_idx_in_table_columns =
-            vnode_col_idx.and_then(|x| column_mapping.iter().position(|col_idx| *col_idx == x));
-
-        // Transform indices to set for checking.
-        let input_dist_key_indices_set: HashSet<usize> =
-            HashSet::from_iter(distribution_key.iter().cloned());
-        let column_mapping_indices_set: HashSet<usize> =
-            HashSet::from_iter(column_mapping.iter().cloned());
-
-        // Only if all `distribution_key` is in `column_mapping`, we return transformed dist key
-        // indices, otherwise empty.
-        if !column_mapping_indices_set.is_superset(&input_dist_key_indices_set) {
-            return self.build(vec![], vnode_col_idx_in_table_columns);
-        }
-
-        // Transform `distribution_key` (based on input schema) to distribution indices on internal
-        // table columns via `column_mapping` (input col idx -> state table col idx).
-        let dist_indices_on_table_columns = distribution_key
-            .iter()
-            .map(|x| {
-                column_mapping
-                    .iter()
-                    .position(|col_idx| *col_idx == *x)
-                    .expect("Have checked that all input indices must be found")
-            })
-            .collect();
-        self.build(
-            dist_indices_on_table_columns,
-            vnode_col_idx_in_table_columns,
-        )
-    }
-
-    pub fn get_columns(&self) -> &[ColumnCatalog] {
+    pub fn columns(&self) -> &[ColumnCatalog] {
         &self.columns
     }
 }

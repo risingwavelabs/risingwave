@@ -134,7 +134,7 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
 
-    internal_table_catalog_builder.build(dist_keys, None)
+    internal_table_catalog_builder.build(dist_keys)
 }
 
 fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
@@ -156,5 +156,5 @@ fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
     });
 
     // No distribution keys
-    internal_table_catalog_builder.build(vec![], None)
+    internal_table_catalog_builder.build(vec![])
 }
