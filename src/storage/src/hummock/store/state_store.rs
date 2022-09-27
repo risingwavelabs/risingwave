@@ -42,7 +42,7 @@ pub struct HummockStorageCore {
     event_sender: mpsc::UnboundedSender<HummockEvent>,
 
     // TODO: use a dedicated uploader implementation to replace `LocalVersionManager`
-    uploder: Arc<LocalVersionManager>,
+    uploader: Arc<LocalVersionManager>,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
