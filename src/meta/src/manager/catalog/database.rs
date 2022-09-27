@@ -63,6 +63,9 @@ pub struct DatabaseManager<S: MetaStore> {
 
     // In-progress creation tracker
     in_progress_creation_tracker: HashSet<RelationKey>,
+    // In-progress creating table tracker: this is a workaround to avoid clean up creating
+    // streaming jobs.
+    in_progress_creation_table_tracker: HashSet<TableId>,
     // In-progress creating tables, including internal tables.
     in_progress_creating_tables: HashMap<TableId, Table>,
 }
@@ -112,8 +115,6 @@ where
             (table.database_id, table.schema_id, table.name)
         }));
 
-        let in_progress_creation_tracker = HashSet::new();
-
         Ok(Self {
             env,
             databases,
@@ -123,7 +124,8 @@ where
             tables,
             indexes,
             relation_ref_count,
-            in_progress_creation_tracker,
+            in_progress_creation_tracker: HashSet::default(),
+            in_progress_creation_table_tracker: HashSet::default(),
             in_progress_creating_tables: HashMap::default(),
         })
     }
@@ -300,8 +302,20 @@ where
         self.in_progress_creation_tracker.insert(relation.clone());
     }
 
+    pub fn mark_creating_table(&mut self, table_id: TableId) {
+        self.in_progress_creation_table_tracker.insert(table_id);
+    }
+
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
         self.in_progress_creation_tracker.remove(&relation.clone());
+    }
+
+    pub fn unmark_creating_table(&mut self, table_id: TableId) {
+        self.in_progress_creation_table_tracker.remove(&table_id);
+    }
+
+    pub fn all_creating_tables(&self) -> impl Iterator<Item = TableId> + '_ {
+        self.in_progress_creation_table_tracker.iter().cloned()
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {

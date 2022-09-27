@@ -31,7 +31,7 @@ use risingwave_storage::hummock::local_version_manager::LocalVersionManagerRef;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct TestNotificationClient<S: MetaStore> {
-    notification_manager: NotificationManagerRef,
+    notification_manager: NotificationManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
 }
 
@@ -49,7 +49,7 @@ impl<T: Send> Channel<T> for TestChannel<T> {
 
 impl<S: MetaStore> TestNotificationClient<S> {
     pub fn new(
-        notification_manager: NotificationManagerRef,
+        notification_manager: NotificationManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
     ) -> Self {
         Self {

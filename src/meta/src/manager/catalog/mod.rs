@@ -415,6 +415,7 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && !core.has_in_progress_creation(&key) {
             core.mark_creating(&key);
+            core.mark_creating_table(table.id);
             for &dependent_relation_id in &table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
@@ -433,6 +434,7 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_table(table.id);
             let mut transaction = Transaction::default();
             for table in &internal_tables {
                 table.upsert_in_transaction(&mut transaction)?;
@@ -462,6 +464,7 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_table(table.id);
             for &dependent_relation_id in &table.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
@@ -735,6 +738,7 @@ where
         {
             core.mark_creating(&source_key);
             core.mark_creating(&mview_key);
+            core.mark_creating_table(mview.id);
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
         } else {
@@ -758,6 +762,7 @@ where
         {
             core.unmark_creating(&source_key);
             core.unmark_creating(&mview_key);
+            core.unmark_creating_table(mview.id);
 
             let mut transaction = Transaction::default();
             source.upsert_in_transaction(&mut transaction)?;
@@ -1065,14 +1070,15 @@ where
             .await
     }
 
-    pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<RelationId>> {
-        self.core
-            .lock()
-            .await
-            .database
-            .list_stream_job_ids()
-            .await
-            .map(|iter| iter.collect())
+    /// `list_stream_job_ids` returns all running and creating stream job ids, this is for recovery
+    /// clean up progress.
+    pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<TableId>> {
+        let guard = self.core.lock().await;
+        let mut all_streaming_jobs: HashSet<TableId> =
+            guard.database.list_stream_job_ids().await?.collect();
+
+        all_streaming_jobs.extend(guard.database.all_creating_tables());
+        Ok(all_streaming_jobs)
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {

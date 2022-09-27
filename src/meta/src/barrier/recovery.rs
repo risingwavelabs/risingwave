@@ -21,7 +21,6 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
-use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -73,19 +72,12 @@ where
     }
 
     /// Clean up all dirty streaming jobs in topology order before recovery.
-    async fn clean_dirty_fragments(&self, on_start: bool) -> MetaResult<()> {
+    async fn clean_dirty_fragments(&self) -> MetaResult<()> {
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
         let table_fragments = self.fragment_manager.list_table_fragments().await?;
         let mut to_drop_table_fragments = table_fragments
             .into_iter()
             .filter(|table_fragment| !stream_job_ids.contains(&table_fragment.table_id().table_id))
-            .filter(|table_fragment| {
-                on_start
-                    || table_fragment
-                        .actor_status
-                        .values()
-                        .any(|status| status.get_state().unwrap() != ActorState::Running)
-            })
             .collect_vec();
         // should clean up table fragments in topology order, here we can simply in the order of
         // table id.
@@ -104,12 +96,12 @@ where
     }
 
     /// Recovery the whole cluster from the latest epoch.
-    pub(crate) async fn recovery(&self, prev_epoch: Epoch, on_start: bool) -> RecoveryResult {
+    pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> RecoveryResult {
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
         debug!("recovery start!");
-        self.clean_dirty_fragments(on_start)
+        self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
         let retry_strategy = Self::get_retry_strategy();
