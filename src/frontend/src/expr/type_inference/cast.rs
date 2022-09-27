@@ -67,16 +67,15 @@ pub fn get_most_nested(lhs: DataType, rhs: DataType) -> DataType {
 }
 
 // helper for add_nesting
-pub fn add_nesting_inner(target_dt: DataType, target_nesting: DataType, level: i32) -> DataType {
-    if level <= 0 {
+pub fn add_nesting_inner(target_dt: DataType, add_levels: i32) -> DataType {
+    if add_levels <= 0 {
         return target_dt;
     }
     add_nesting_inner(
         DataType::List {
             datatype: Box::new(target_dt),
         },
-        target_nesting,
-        level - 1,
+        add_levels - 1,
     )
 }
 
@@ -90,11 +89,7 @@ pub fn add_nesting_inner(target_dt: DataType, target_nesting: DataType, level: i
 pub fn add_nesting(target_dt: DataType, target_nesting: DataType) -> DataType {
     let target_dt_level = calc_nesting_level(target_dt.clone());
     let target_nesting_level = calc_nesting_level(target_nesting.clone());
-    add_nesting_inner(
-        target_dt,
-        target_nesting,
-        target_nesting_level - target_dt_level,
-    )
+    add_nesting_inner(target_dt, target_nesting_level - target_dt_level)
 }
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
