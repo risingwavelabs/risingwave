@@ -205,7 +205,7 @@ pub async fn compaction_test_serve(
     Ok(())
 }
 
-pub fn check_result(expect: &Vec<(Bytes, Bytes)>, actual: &Vec<(Bytes, Bytes)>) {
+pub fn check_result(expect: &[(Bytes, Bytes)], actual: &[(Bytes, Bytes)]) {
     expect.iter().zip_eq(actual.iter()).for_each(|(kv1, kv2)| {
         assert_eq!(kv1.0, kv2.0);
         assert_eq!(kv1.1, kv2.1);

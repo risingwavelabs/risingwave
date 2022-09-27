@@ -458,7 +458,10 @@ mod tests {
         fail::cfg(fp_assign_compaction_task_fail, "return").unwrap();
         assert_matches!(
             compaction_scheduler
-                .pick_and_assign(StaticCompactionGroupId::StateDefault.into())
+                .pick_and_assign(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    request_channel.clone()
+                )
                 .await,
             ScheduleStatus::AssignFailure(_)
         );
@@ -470,7 +473,10 @@ mod tests {
         fail::cfg(fp_compaction_send_task_fail, "return").unwrap();
         assert_matches!(
             compaction_scheduler
-                .pick_and_assign(StaticCompactionGroupId::StateDefault.into())
+                .pick_and_assign(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    request_channel.clone()
+                )
                 .await,
             ScheduleStatus::SendFailure(_)
         );
@@ -524,7 +530,10 @@ mod tests {
         // Succeeded.
         assert_matches!(
             compaction_scheduler
-                .pick_and_assign(StaticCompactionGroupId::StateDefault.into())
+                .pick_and_assign(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    request_channel.clone()
+                )
                 .await,
             ScheduleStatus::Ok
         );
