@@ -15,13 +15,12 @@
 use std::collections::BTreeSet;
 
 use risingwave_common::array::{Op, Row, StreamChunk};
-use risingwave_common::hash::PrecomputedBuildHasher;
 
 use crate::task::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
-    data: ExecutorCache<Row, BTreeSet<Row>, PrecomputedBuildHasher>,
+    data: ExecutorCache<Row, BTreeSet<Row>>,
 }
 
 impl LookupCache {
@@ -68,12 +67,9 @@ impl LookupCache {
 
     pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
         let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
+            ExecutorCache::Managed(lru_manager.create_cache())
         } else {
-            ExecutorCache::Local(EvictableHashMap::with_hasher(
-                cache_size,
-                PrecomputedBuildHasher,
-            ))
+            ExecutorCache::Local(EvictableHashMap::new(cache_size))
         };
         Self { data: cache }
     }

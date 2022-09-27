@@ -153,7 +153,7 @@ pub struct LruManager {
 
 pub type LruManagerRef = Arc<LruManager>;
 
-pub enum ExecutorCache<K, V, S, A: Clone + Allocator = Global> {
+pub enum ExecutorCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     /// An managed cache. Eviction depends on the node memory usage.
     Managed(ManagedLruCache<K, V, S, A>),
     /// An local cache. Eviction depends on local executor cache limit setting.
@@ -211,6 +211,9 @@ impl<K, V, S, A: Clone + Allocator> DerefMut for ExecutorCache<K, V, S, A> {
 }
 
 impl LruManager {
+    const EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
+    const EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7f64;
+
     pub fn new(total_memory_available_bytes: usize, barrier_interval_ms: u32) -> Arc<Self> {
         let manager = Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
@@ -232,6 +235,13 @@ impl LruManager {
             total_memory_available_bytes: 0,
             barrier_interval_ms: 0,
         })
+    }
+
+    pub fn create_cache<K: Hash + Eq, V>(&self) -> ManagedLruCache<K, V> {
+        ManagedLruCache {
+            inner: LruCache::unbounded(),
+            watermark_epoch: self.watermark_epoch.clone(),
+        }
     }
 
     pub fn create_cache_with_hasher_in<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator>(
@@ -262,8 +272,10 @@ impl LruManager {
     }
 
     pub async fn run(self: Arc<Self>) {
-        let mem_threshold_graceful = (self.total_memory_available_bytes as f64 * 0.7) as usize;
-        let mem_threshold_aggressive = (self.total_memory_available_bytes as f64 * 0.9) as usize;
+        let mem_threshold_graceful =
+            (self.total_memory_available_bytes as f64 * Self::EVICTION_THRESHOLD_GRACEFUL) as usize;
+        let mem_threshold_aggressive = (self.total_memory_available_bytes as f64
+            * Self::EVICTION_THRESHOLD_AGGRESSIVE) as usize;
 
         let mut watermark_time = Epoch::physical_now();
         let mut last_total_bytes_used = 0;
