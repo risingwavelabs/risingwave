@@ -47,3 +47,6 @@ cargo make clean-data
 cargo make ci-start ci-kafka
 ./scripts/source/prepare_ci_kafka.sh
 sqllogictest -p 4566 -d dev  './e2e_test/source/**/*.slt'
+
+echo "--- Run CH-benCHmark"
+./risedev slt -p 4566 -d dev ./e2e_test/ch-benchmark/ch_benchmark.slt

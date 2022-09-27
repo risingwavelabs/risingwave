@@ -112,6 +112,8 @@ impl Sstable {
             file_size: self.meta.estimated_size as u64,
             table_ids: vec![],
             meta_offset: self.meta.meta_offset,
+            stale_key_count: 0,
+            total_key_count: self.meta.key_count as u64,
         }
     }
 }

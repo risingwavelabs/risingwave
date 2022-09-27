@@ -55,7 +55,7 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
                 .field("order_by", &window_function.order_by)
                 .finish()
         } else {
-            write!(f, "{}() OVER(", window_function.function_type.name())?;
+            write!(f, "{}() OVER(", window_function.function_type)?;
 
             let mut delim = "";
             if !window_function.partition_by.is_empty() {
@@ -112,7 +112,7 @@ impl LogicalOverAgg {
         let mut schema = input.schema().clone();
         schema.fields.push(Field::with_name(
             window_function.return_type.clone(),
-            window_function.function_type.name(),
+            window_function.function_type.to_string(),
         ));
 
         let logical_pk = input.logical_pk().to_vec();
@@ -165,7 +165,7 @@ impl LogicalOverAgg {
                 }
                 if f.function_type != WindowFunctionType::RowNumber {
                     return Err(ErrorCode::NotImplemented(
-                        format!("window rank function: {}", f.function_type.name()),
+                        format!("window rank function: {}", f.function_type),
                         4847.into(),
                     )
                     .into());

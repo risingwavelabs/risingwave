@@ -155,7 +155,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             .iter()
             .enumerate()
             // skip invisible
-            .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true))
             // skip null input
             .filter(|(i, _)| columns[self.upstream_agg_col_idx].datum_at(*i).is_some())
         {

@@ -87,7 +87,7 @@ impl OrderByExecutor {
 
         #[for_await]
         for chunk in self.child.execute() {
-            chunks.push(chunk?.compact()?);
+            chunks.push(chunk?.compact());
         }
 
         for chunk in &chunks {
@@ -103,12 +103,12 @@ impl OrderByExecutor {
         encoded_rows.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
 
         for (row, _) in encoded_rows {
-            if let Some(spilled) = chunk_builder.append_one_row_ref(row)? {
+            if let Some(spilled) = chunk_builder.append_one_row_ref(row) {
                 yield spilled
             }
         }
 
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield spilled
         }
     }

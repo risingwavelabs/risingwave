@@ -128,7 +128,7 @@ impl Aggregator for ArrayAggOrdered {
     }
 
     fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let (row, vis) = input.row_at(row_id)?;
+        let (row, vis) = input.row_at(row_id);
         assert!(vis);
         self.push_row(row);
         Ok(())

@@ -75,7 +75,6 @@ static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| {
         A::Max,
         A::Count,
         A::Avg,
-        A::SingleValue,
         A::ApproxCountDistinct,
     ] {
         for input in all_types {

@@ -56,7 +56,7 @@ impl FilterExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?.compact()?;
+            let data_chunk = data_chunk?.compact();
             let vis_array = self.expr.eval(&data_chunk)?;
 
             if let Bool(vis) = vis_array.as_ref() {
@@ -64,7 +64,7 @@ impl FilterExecutor {
                 for data_chunk in data_chunk_builder
                     .trunc_data_chunk(data_chunk.with_visibility(vis.iter().collect()))
                 {
-                    yield data_chunk?;
+                    yield data_chunk;
                 }
             } else {
                 return Err(
@@ -73,7 +73,7 @@ impl FilterExecutor {
             }
         }
 
-        if let Some(chunk) = data_chunk_builder.consume_all()? {
+        if let Some(chunk) = data_chunk_builder.consume_all() {
             yield chunk;
         }
     }

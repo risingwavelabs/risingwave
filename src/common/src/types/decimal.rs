@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
-#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+#[derive(Debug, parse_display::Display, Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
+    #[display("{0}")]
     Normalized(RustDecimal),
+    #[display("NaN")]
     NaN,
+    #[display("+Inf")]
     PositiveINF,
+    #[display("-Inf")]
     NegativeINF,
 }
 
@@ -351,17 +355,6 @@ impl Sub for Decimal {
             (_, Self::PositiveINF) => Self::NegativeINF,
             (Self::NegativeINF, _) => Self::NegativeINF,
             (_, Self::NegativeINF) => Self::PositiveINF,
-        }
-    }
-}
-
-impl Display for Decimal {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Normalized(d) => Display::fmt(&d, f),
-            Self::NaN => Display::fmt("NaN", f),
-            Self::PositiveINF => Display::fmt("+Inf", f),
-            Self::NegativeINF => Display::fmt("-Inf", f),
         }
     }
 }

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -43,9 +43,9 @@ impl<S: StateStore> GroupTopNExecutor<S, false> {
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -59,9 +59,9 @@ impl<S: StateStore> GroupTopNExecutor<S, false> {
                 schema,
                 order_pairs,
                 offset_and_limit,
+                order_by_len,
                 pk_indices,
                 executor_id,
-                key_indices,
                 group_by,
                 state_table,
             )?,
@@ -75,9 +75,9 @@ impl<S: StateStore> GroupTopNExecutor<S, true> {
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -91,9 +91,9 @@ impl<S: StateStore> GroupTopNExecutor<S, true> {
                 schema,
                 order_pairs,
                 offset_and_limit,
+                order_by_len,
                 pk_indices,
                 executor_id,
-                key_indices,
                 group_by,
                 state_table,
             )?,
@@ -131,11 +131,8 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     /// group key -> cache for this group
     caches: HashMap<Vec<Datum>, TopNCache<WITH_TIES>>,
 
-    #[expect(dead_code)]
-    /// Indices of the columns on which key distribution depends.
-    key_indices: Vec<usize>,
-
-    sort_key_len: usize,
+    /// The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is true.
+    order_by_len: usize,
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIES> {
@@ -145,14 +142,20 @@ impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIE
         schema: Schema,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
+        // order_pairs is superset of pk
+        assert!(order_pairs
+            .iter()
+            .map(|x| x.column_idx)
+            .collect::<HashSet<_>>()
+            .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
+            generate_executor_pk_indices_info(&order_pairs, &schema);
 
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
@@ -172,10 +175,9 @@ impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIE
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            key_indices,
             group_by,
             caches: HashMap::new(),
-            sort_key_len: order_pairs.len(),
+            order_by_len,
         })
     }
 }
@@ -206,7 +208,7 @@ where
             match entry {
                 Occupied(_) => {}
                 Vacant(entry) => {
-                    let mut topn_cache = TopNCache::new(self.offset, self.limit, self.sort_key_len);
+                    let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
                     self.managed_state
                         .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
                         .await?;
@@ -408,9 +410,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_types,
                 (0, 2),
+                3,
                 vec![1, 2, 0],
                 1,
-                vec![],
                 vec![1],
                 state_table,
             )
@@ -500,9 +502,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_types,
                 (1, 2),
+                3,
                 vec![1, 2, 0],
                 1,
-                vec![],
                 vec![1],
                 state_table,
             )
@@ -585,9 +587,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_types,
                 (0, 2),
+                3,
                 vec![1, 2, 0],
                 1,
-                vec![],
                 vec![1, 2],
                 state_table,
             )

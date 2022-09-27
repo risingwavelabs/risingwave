@@ -62,10 +62,25 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
             hex::encode(key_range.right.as_slice())
         )
     };
-    writeln!(
-        s,
-        "SstableInfo: id={:?}, KeyRange={:?}, size={:?}",
-        sstable_info.id, key_range_str, sstable_info.file_size
-    )
-    .unwrap();
+    if sstable_info.stale_key_count > 0 {
+        let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
+        writeln!(
+            s,
+            "SstableInfo: id={:?}, KeyRange={:?}, size={:?}KB, delete_ratio={:?}%",
+            sstable_info.id,
+            key_range_str,
+            sstable_info.file_size / 1024,
+            ratio,
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            s,
+            "SstableInfo: id={:?}, KeyRange={:?}, size={:?}KB",
+            sstable_info.id,
+            key_range_str,
+            sstable_info.file_size / 1024,
+        )
+        .unwrap();
+    }
 }
