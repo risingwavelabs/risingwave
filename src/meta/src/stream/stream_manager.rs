@@ -62,7 +62,7 @@ pub struct CreateMaterializedViewContext {
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
     /// Internal TableID to Table mapping
-    pub internal_table_id_map: HashMap<u32, Option<Table>>,
+    pub internal_table_id_map: HashMap<u32, Table>,
     /// The upstream tables of all fragments containing chain nodes.
     /// These fragments need to be colocated with their upstream tables.
     ///
@@ -79,11 +79,7 @@ pub struct CreateMaterializedViewContext {
 
 impl CreateMaterializedViewContext {
     pub fn internal_tables(&self) -> Vec<Table> {
-        self.internal_table_id_map
-            .values()
-            .flatten()
-            .cloned()
-            .collect()
+        self.internal_table_id_map.values().cloned().collect()
     }
 
     pub fn internal_table_ids(&self) -> Vec<u32> {
