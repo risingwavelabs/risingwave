@@ -899,6 +899,12 @@ impl ActorGraphBuilder {
                         vnode_mapping: None,
                         // Will be filled in `record_internal_state_tables` later.
                         state_table_ids: vec![],
+                        upstream_fragment_ids: self
+                            .fragment_graph
+                            .get_upstreams(GlobalFragmentId(fragment_id))
+                            .keys()
+                            .map(|id| id.as_global_id())
+                            .collect(),
                     },
                 )
             })

@@ -30,9 +30,9 @@ pub type StreamingJobBackgroundDeleterRef = Arc<StreamingJobBackgroundDeleter>;
 #[derive(Debug)]
 // TODO(zehua): just use `TableId` instead of `StreamingJobId` after we remove source manager.
 pub enum StreamingJobId {
-    TableId(TableId),
-    SinkId(TableId),
-    SourceId(SourceId),
+    Table(TableId),
+    Sink(TableId),
+    Source(SourceId),
 }
 
 /// Used to delete actor, fragment, source and so on.
@@ -87,8 +87,8 @@ impl StreamingJobBackgroundDeleter {
         source_manager: &SourceManagerRef<S>,
     ) -> MetaResult<()> {
         let (source_ids, table_ids): (Vec<_>, Vec<_>) = ids.iter().partition_map(|id| match id {
-            StreamingJobId::SourceId(id) => either::Either::Left(id),
-            StreamingJobId::TableId(id) | StreamingJobId::SinkId(id) => either::Either::Right(id),
+            StreamingJobId::Source(id) => either::Either::Left(id),
+            StreamingJobId::Table(id) | StreamingJobId::Sink(id) => either::Either::Right(id),
         });
 
         // TODO(zehua): add batch.

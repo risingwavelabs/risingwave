@@ -58,7 +58,7 @@ impl HashCode {
         self.0
     }
 
-    pub fn to_vnode(self) -> VirtualNode {
+    pub fn to_vnode(&self) -> VirtualNode {
         (self.0 % VIRTUAL_NODE_COUNT as u64) as VirtualNode
     }
 }
@@ -646,9 +646,10 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
 
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
         let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self);
-        array_builders.iter_mut().try_for_each(|array_builder| {
-            array_builder.deserialize_from_hash_key(&mut deserializer)
-        })
+        for array_builder in array_builders.iter_mut() {
+            array_builder.deserialize_from_hash_key(&mut deserializer)?;
+        }
+        Ok(())
     }
 
     fn null_bitmap(&self) -> &FixedBitSet {
@@ -777,12 +778,7 @@ mod tests {
 
         let mut array_builders = column_indexes
             .iter()
-            .map(|idx| {
-                data.columns()[*idx]
-                    .array_ref()
-                    .create_builder(1024)
-                    .unwrap()
-            })
+            .map(|idx| data.columns()[*idx].array_ref().create_builder(1024))
             .collect::<Vec<ArrayBuilderImpl>>();
 
         keys.into_iter()

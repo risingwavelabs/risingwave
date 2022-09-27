@@ -184,7 +184,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     /// Check if an element is `null` or not.
     fn is_null(&self, idx: usize) -> bool {
-        self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
+        !self.null_bitmap().is_set(idx)
     }
 
     /// # Safety
@@ -210,7 +210,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
         self.len() == 0
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl>;
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl;
 
     fn array_meta(&self) -> ArrayMeta {
         ArrayMeta::Simple
@@ -245,11 +245,11 @@ impl From<&DataType> for ArrayMeta {
 trait CompactableArray: Array {
     /// Select some elements from `Array` based on `visibility` bitmap.
     /// `cardinality` is only used to decide capacity of the new `Array`.
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> ArrayResult<Self>;
+    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self;
 }
 
 impl<A: Array> CompactableArray for A {
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> ArrayResult<Self> {
+    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         use itertools::Itertools;
         let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
         for (elem, visible) in self.iter().zip_eq(visibility.iter()) {
@@ -257,7 +257,7 @@ impl<A: Array> CompactableArray for A {
                 builder.append(elem);
             }
         }
-        Ok(builder.finish())
+        builder.finish()
     }
 }
 
@@ -528,9 +528,9 @@ macro_rules! impl_array {
             }
 
             /// Select some elements from `Array` based on `visibility` bitmap.
-            pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> ArrayResult<Self> {
+            pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
                 match self {
-                    $( Self::$variant_name(inner) => Ok(inner.compact(visibility, cardinality)?.into()), )*
+                    $( Self::$variant_name(inner) => inner.compact(visibility, cardinality).into(), )*
                 }
             }
 
@@ -580,7 +580,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+            pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
                 match self {
                     $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
                 }

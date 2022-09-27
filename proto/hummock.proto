@@ -12,6 +12,8 @@ message SstableInfo {
   uint64 file_size = 3;
   repeated uint32 table_ids = 4;
   uint64 meta_offset = 5;
+  uint64 stale_key_count = 6;
+  uint64 total_key_count = 7;
 }
 
 enum LevelType {
@@ -389,6 +391,28 @@ message GetVersionDeltasResponse {
   HummockVersionDeltas version_deltas = 1;
 }
 
+message PinnedVersionsSummary {
+  repeated HummockPinnedVersion pinned_versions = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message PinnedSnapshotsSummary {
+  repeated HummockPinnedSnapshot pinned_snapshots = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message RiseCtlGetPinnedVersionsSummaryRequest {}
+
+message RiseCtlGetPinnedVersionsSummaryResponse {
+  PinnedVersionsSummary summary = 1;
+}
+
+message RiseCtlGetPinnedSnapshotsSummaryRequest {}
+
+message RiseCtlGetPinnedSnapshotsSummaryResponse {
+  PinnedSnapshotsSummary summary = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -406,6 +430,8 @@ service HummockManagerService {
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
+  rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
+  rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
 }
 
 service CompactorService {}

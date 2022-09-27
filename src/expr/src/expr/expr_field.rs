@@ -120,11 +120,9 @@ mod tests {
                 array! { F32Array, [Some(2.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .map(|x| Arc::new(x.into()))
-        .unwrap();
+        );
 
-        let column = Column::new(array);
+        let column = Column::new(Arc::new(array.into()));
         let data_chunk = DataChunk::new(vec![column], 1);
         let res = field_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
@@ -153,8 +151,7 @@ mod tests {
                 array! { F32Array, [Some(1.0),Some(2.0),Some(3.0),Some(4.0),Some(5.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .unwrap();
+        );
         let array = StructArray::from_slices(
             &[true],
             vec![
@@ -162,11 +159,9 @@ mod tests {
                 array! { F32Array, [Some(2.0),Some(2.0),Some(2.0),Some(2.0),Some(2.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .map(|x| Arc::new(x.into()))
-        .unwrap();
+        );
 
-        let column = Column::new(array);
+        let column = Column::new(Arc::new(array.into()));
         let data_chunk = DataChunk::new(vec![column], 1);
         let res = field_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Float32(1.0.into())));
