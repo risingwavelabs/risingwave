@@ -355,7 +355,7 @@ impl LogicalAgg {
                 internal_table_catalog_builder.add_column(&in_fields[include_key]);
                 column_mapping.push(include_key);
             }
-            let mapping = ColIndexMapping::with_remaining_columns(column_mapping, in_fields.len());
+            let mapping = ColIndexMapping::with_column_mapping(column_mapping, in_fields.len());
             let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
@@ -375,7 +375,7 @@ impl LogicalAgg {
                 internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
                 column_mapping.push(idx);
             }
-            let mapping = ColIndexMapping::with_remaining_columns(column_mapping, in_fields.len());
+            let mapping = ColIndexMapping::with_column_mapping(column_mapping, in_fields.len());
             let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
