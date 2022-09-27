@@ -111,7 +111,7 @@ impl Stats {
 
 impl fmt::Display for Stats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (rule, count) in self.rule_counter.iter() {
+        for (rule, count) in &self.rule_counter {
             writeln!(f, "apply {} {} time(s)", rule, count)?;
         }
         Ok(())

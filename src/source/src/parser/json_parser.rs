@@ -78,8 +78,6 @@ impl SourceParser for JsonParser {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnDesc;
