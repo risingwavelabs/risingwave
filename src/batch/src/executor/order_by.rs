@@ -87,7 +87,7 @@ impl OrderByExecutor {
 
         #[for_await]
         for chunk in self.child.execute() {
-            chunks.push(chunk?.compact()?);
+            chunks.push(chunk?.compact());
         }
 
         for chunk in &chunks {
