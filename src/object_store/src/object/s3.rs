@@ -611,17 +611,18 @@ impl S3ObjectStore {
     async fn configure_bucket_lifecycle(client: &Client, bucket: &str) -> ObjectResult<()> {
         // Check if lifecycle is already configured to avoid overriding existing configuration.
         let mut configured_rules = vec![];
-        let resp = client
+        let get_config_result = client
             .get_bucket_lifecycle_configuration()
             .bucket(bucket)
             .send()
-            .await
-            .unwrap();
-        for rule in resp.rules().unwrap_or_default().iter() {
-            if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
-                && rule.abort_incomplete_multipart_upload().is_some()
-            {
-                configured_rules.push(rule);
+            .await;
+        if let Ok(config) = &get_config_result {
+            for rule in config.rules().unwrap_or_default().iter() {
+                if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
+                    && rule.abort_incomplete_multipart_upload().is_some()
+                {
+                    configured_rules.push(rule);
+                }
             }
         }
 

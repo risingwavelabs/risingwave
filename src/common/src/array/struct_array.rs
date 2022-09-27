@@ -308,19 +308,14 @@ pub struct StructValue {
 
 impl fmt::Display for StructValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "({})",
-            self.fields
-                .iter()
-                .map(|f| {
-                    match f {
-                        Some(f) => format!("{}", f),
-                        None => " ".to_string(),
-                    }
-                })
-                .join(", ")
-        )
+        let mut f = f.debug_tuple("");
+        for field in self.fields.iter() {
+            match field {
+                Some(field) => f.field(&format_args!("{}", field)),
+                None => f.field(&" "),
+            };
+        }
+        f.finish()
     }
 }
 

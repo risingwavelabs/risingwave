@@ -414,8 +414,8 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self) -> Result<HummockSnapshot> {
-        let request = FlushRequest::default();
+    pub async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
+        let request = FlushRequest { checkpoint };
         let resp = self.inner.flush(request).await?;
         Ok(resp.snapshot.unwrap())
     }
