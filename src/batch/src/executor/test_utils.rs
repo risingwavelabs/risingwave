@@ -29,7 +29,9 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
-use crate::executor::{BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder,
+};
 use crate::task::{BatchTaskContext, TaskId};
 
 const SEED: u64 = 0xFF67FEABBAEF76FF;
