@@ -15,7 +15,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
@@ -506,11 +505,7 @@ where
         assert_eq!(table_ids_cnt, ctx.internal_table_ids().len() as u32);
 
         // 5. mark creating tables.
-        let mut creating_tables = ctx
-            .internal_table_id_map
-            .iter()
-            .map(|(_, table)| table.clone())
-            .collect_vec();
+        let mut creating_tables = ctx.internal_tables();
         match stream_job {
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
