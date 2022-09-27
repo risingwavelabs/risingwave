@@ -210,7 +210,6 @@ mod tests {
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
-        .unwrap()
         .into();
 
         if let Ok(result) = result {

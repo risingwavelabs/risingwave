@@ -70,11 +70,11 @@ impl ExpandExecutor {
                 for data_chunk in
                     data_chunk_builder.trunc_data_chunk(DataChunk::new(new_columns?, vis.clone()))
                 {
-                    yield data_chunk?;
+                    yield data_chunk;
                 }
             }
         }
-        if let Some(chunk) = data_chunk_builder.consume_all()? {
+        if let Some(chunk) = data_chunk_builder.consume_all() {
             yield chunk;
         }
     }

@@ -231,8 +231,6 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     null_matched: FixedBitSet,
     /// The memcomparable serializer of primary key.
     pk_serializer: OrderedRowSerializer,
-    /// Current epoch
-    current_epoch: u64,
     /// State table. Contains the data from upstream.
     state: TableInner<S>,
     /// Degree table.
@@ -309,7 +307,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             join_key_data_types,
             null_matched,
             pk_serializer,
-            current_epoch: 0,
             state,
             degree_state,
             alloc,
@@ -326,13 +323,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     pub fn init(&mut self, epoch: EpochPair) {
-        self.current_epoch = epoch.curr;
-        self.state.table.init_epoch(epoch.prev);
-        self.degree_state.table.init_epoch(epoch.prev);
-    }
-
-    pub fn update_epoch(&mut self, epoch: u64) {
-        self.current_epoch = epoch;
+        self.state.table.init_epoch(epoch);
+        self.degree_state.table.init_epoch(epoch);
     }
 
     pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
@@ -445,10 +437,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(entry_state)
     }
 
-    pub async fn flush(&mut self) -> StreamExecutorResult<()> {
+    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.metrics.flush();
-        self.state.table.commit(self.current_epoch).await?;
-        self.degree_state.table.commit(self.current_epoch).await?;
+        self.state.table.commit(epoch).await?;
+        self.degree_state.table.commit(epoch).await?;
         Ok(())
     }
 

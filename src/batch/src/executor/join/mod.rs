@@ -228,7 +228,7 @@ mod tests {
             convert_datum_refs_to_chunk(&row, 5, &probe_side_schema.data_types()).unwrap();
         assert_eq!(const_row_chunk.capacity(), 5);
         assert_eq!(
-            const_row_chunk.row_at(2).unwrap().0.value_at(0),
+            const_row_chunk.row_at(2).0.value_at(0),
             Some(ScalarRefImpl::Int32(3))
         );
     }
