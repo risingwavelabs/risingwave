@@ -21,20 +21,6 @@ use risingwave_common::types::{DataType, DataTypeName};
 
 use crate::expr::{Expr as _, ExprImpl};
 
-/// Find the nested inner `DataType` of a List
-///
-/// Examples:
-/// `get_inner_type(DataType::Boolean) -> Boolean`
-/// `get_inner_type(List{DataType::Boolean}) -> Boolean`
-/// `get_inner_type(List{List{DataType::Boolean}}) -> Boolean`
-pub fn get_inner_type(dt: DataType) -> DataType {
-    let return_val = match dt {
-        DataType::List { datatype: inner } => Some(get_inner_type(*inner)),
-        _ => Some(dt),
-    };
-    return_val.unwrap()
-}
-
 // helper for determine_nesting_level
 fn calc_nesting_level_inner(dt: DataType, level: i32) -> i32 {
     let return_val: i32 = match dt {
@@ -60,7 +46,7 @@ pub fn calc_nesting_level(dt: DataType) -> i32 {
 /// `lhs_is_more_nested(DataType::Boolean, DataType::Boolean) -> false`
 /// `lhs_is_more_nested(List{List{DataType::Boolean}}, DataType::Date) -> true`
 /// `lhs_is_more_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> false`
-fn lhs_is_more_nested(lhs: DataType, rhs: DataType) -> bool {
+pub fn lhs_is_more_nested(lhs: DataType, rhs: DataType) -> bool {
     let lhs_level = calc_nesting_level(lhs);
     let rhs_level = calc_nesting_level(rhs);
     lhs_level > rhs_level
@@ -153,6 +139,64 @@ pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<
         *e = dummy.cast_implicit(ret_type.clone())?;
     }
     Ok(ret_type)
+}
+
+/// aligns an array and an element by returning a possible common array type and casting them into
+/// the common type
+/// array_idx and element_idx indicate which element in inputs is the array and which the element
+///  Example: align_array_and_element(numeric[], int) -> numeric[]
+pub fn align_array_and_element(
+    array_idx: usize,
+    element_idx: usize,
+    inputs: &mut Vec<ExprImpl>,
+) -> std::result::Result<DataType, ErrorCode> {
+    let array = inputs[array_idx].return_type();
+    let element = inputs[element_idx].return_type();
+    let array_ele_type_opt = match &array {
+        DataType::List { datatype: array_et } => Some(array_et),
+        _ => None,
+    };
+    let array_ele_type = array_ele_type_opt
+        .ok_or_else(|| ErrorCode::BindError(format!("Cannot prepend {} to {}", array, element)))?;
+
+    // cast to least restrictive type or return error
+    let common_ele_type = least_restrictive(*array_ele_type.clone(), element.clone());
+    let nesting_level_diff =
+        (calc_nesting_level(element.clone()) - calc_nesting_level(array.clone())).abs();
+    if common_ele_type.is_err() || nesting_level_diff > 1 {
+        return Err(ErrorCode::BindError(format!(
+            "unable to find least restrictive type between {} and {}",
+            element, array
+        )));
+    }
+
+    // found common type
+    let common_ele_type = common_ele_type.unwrap();
+    let most_nested = get_most_nested(element.clone(), array.clone());
+    let array_type = add_nesting(common_ele_type.clone(), most_nested);
+
+    // try to cast inputs to inputs to common type
+    let inputs_owned = std::mem::take(inputs);
+    let try_cast: Result<Vec<ExprImpl>> = inputs_owned
+        .into_iter()
+        .map(|input| {
+            let x = input.return_type();
+            input.cast_explicit(add_nesting(common_ele_type.clone(), x))
+        })
+        .try_collect();
+
+    match try_cast {
+        Ok(casted) => {
+            *inputs = casted;
+            return Ok(array_type);
+        }
+        Err(_) => {
+            return Err(ErrorCode::BindError(format!(
+                "unable to align between {} and {}",
+                element, array
+            )));
+        }
+    }
 }
 
 /// The context a cast operation is invoked in. An implicit cast operation is allowed in a context
