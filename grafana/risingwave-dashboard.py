@@ -166,6 +166,11 @@ class Panels:
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=10)
 
+    def timeseries_id(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right")
+
     def sub_panel(self):
         return Panels(self.datasource)
 
@@ -300,11 +305,6 @@ def section_compaction(outer_panels):
                     "sum(rate(storage_level_compact_read_sstn_next[$__rate_interval])) by (le, level_index)", "L{{level_index}} read"
                 ),
             ]),
-            panels.timeseries_bytes("Hummock Version Size", [
-                panels.target(
-                    "version_size", "version size"
-                ),
-            ]),
 
             panels.timeseries_bytes("Hummock Sstable Size", [
                 panels.target(
@@ -367,9 +367,9 @@ def section_object_storage(outer_panels):
                     f"histogram_quantile({quantile}, sum(rate(object_store_operation_bytes_bucket[$__rate_interval])) by (le, type, job, instance))", "{{type}}" + f" p{legend}" + " - {{job}} @ {{instance}}"
                 ), [50, 90, 99, "max"])
             ),
-            panels.timeseries_count("Operation Failure Count", [
+            panels.timeseries_ops("Operation Failure Rate", [
                 panels.target(
-                    "sum(object_store_failure_count) by (instance, job, type)", "{{type}} - {{job}} @ {{instance}}"
+                    "sum(rate(object_store_failure_count[$__rate_interval])) by (instance, job, type)", "{{type}} - {{job}} @ {{instance}}"
                 )
             ]),
             panels.timeseries_dollar("Estimated S3 Cost (Realtime)", [
@@ -479,16 +479,6 @@ def section_streaming_actors(outer_panels):
             panels.timeseries_actor_rowsps("Executor Throughput", [
                 panels.target(
                     "rate(stream_executor_row_count[$__rate_interval]) > 0", "{{actor_id}}->{{executor_id}}"
-                ),
-            ]),
-            panels.timeseries_ns("Actor Sampled Deserialization Time", [
-                panels.target(
-                    "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
-                ),
-            ]),
-            panels.timeseries_ns("Actor Sampled Serialization Time", [
-                panels.target(
-                    "actor_sampled_serialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_percentage("Actor Backpressure", [
@@ -976,6 +966,33 @@ def section_hummock_manager(outer_panels):
                 *quantile(lambda quantile, legend: panels.target(
                     f"histogram_quantile({quantile}, sum(rate(meta_hummock_manager_real_process_time_bucket[$__rate_interval])) by (le, method))", f"Real Process Time p{legend}" + " - {{method}}"
                 ), [50, 99, 999, "max"]),
+            ]),
+            panels.timeseries_bytes("Version Size", [
+                panels.target(
+                    "storage_version_size", "version size"
+                ),
+            ]),
+            panels.timeseries_id("Version Id", [
+                panels.target(
+                    "storage_current_version_id", "current version id"
+                ),
+                panels.target(
+                    "storage_checkpoint_version_id", "checkpoint version id"
+                ),
+                panels.target(
+                    "storage_min_pinned_version_id", "min pinned version id"
+                ),
+            ]),
+            panels.timeseries_id("Epoch", [
+                panels.target(
+                    "storage_max_committed_epoch", "max committed epoch"
+                ),
+                panels.target(
+                    "storage_safe_epoch", "safe epoch"
+                ),
+                panels.target(
+                    "storage_min_pinned_epoch", "min pinned epoch"
+                ),
             ]),
         ])
     ]

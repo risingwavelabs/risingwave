@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -41,9 +44,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
@@ -56,9 +59,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 schema,
                 order_pairs,
                 offset_and_limit,
+                order_by_len,
                 pk_indices,
                 executor_id,
-                key_indices,
                 state_table,
             )?,
         })
@@ -84,11 +87,8 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
-    cache: TopNCache,
-
-    #[expect(dead_code)]
-    /// Indices of the columns on which key distribution depends.
-    key_indices: Vec<usize>,
+    /// TODO: support WITH TIES
+    cache: TopNCache<false>,
 }
 
 impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
@@ -98,13 +98,19 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         schema: Schema,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
+        // order_pairs is superset of pk
+        assert!(order_pairs
+            .iter()
+            .map(|x| x.column_idx)
+            .collect::<HashSet<_>>()
+            .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
+            generate_executor_pk_indices_info(&order_pairs, &schema);
 
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
@@ -124,8 +130,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit),
-            key_indices,
+            cache: TopNCache::new(num_offset, num_limit, order_by_len),
         })
     }
 }
@@ -199,7 +204,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         generate_output(res_rows, res_ops, &self.schema)
     }
 
-    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
@@ -207,7 +212,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -215,7 +220,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         &self.info.identity
     }
 
-    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
             .init_topn_cache(None, &mut self.cache)
@@ -237,7 +242,7 @@ mod tests {
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
     use crate::executor::top_n_appendonly::AppendOnlyTopNExecutor;
-    use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices};
+    use crate::executor::{Barrier, Executor, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -289,20 +294,11 @@ mod tests {
             schema,
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(1),
-                    ..Barrier::default()
-                }),
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(2),
-                    ..Barrier::default()
-                }),
+                Message::Barrier(Barrier::new_test_barrier(2)),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier {
-                    epoch: Epoch::new_test_epoch(3),
-                    ..Barrier::default()
-                }),
+                Message::Barrier(Barrier::new_test_barrier(3)),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
             ],
         ))
@@ -323,9 +319,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_pairs,
                 (0, 5),
+                2,
                 vec![0, 1],
                 1,
-                vec![],
                 state_table,
             )
             .unwrap(),
@@ -405,9 +401,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_pairs,
                 (3, 4),
+                2,
                 vec![0, 1],
                 1,
-                vec![],
                 state_table,
             )
             .unwrap(),

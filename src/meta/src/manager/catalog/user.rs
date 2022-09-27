@@ -70,7 +70,7 @@ impl UserManager {
     ) -> UserInfo {
         let mut user = self.user_info.get(&update_user.id).unwrap().clone();
         update_fields.iter().for_each(|&field| match field {
-            UpdateField::Unknown => unreachable!(),
+            UpdateField::Unspecified => unreachable!(),
             UpdateField::Super => user.is_super = update_user.is_super,
             UpdateField::Login => user.can_login = update_user.can_login,
             UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
@@ -114,7 +114,7 @@ impl UserManager {
     pub fn get_user_grant_relation_entry(
         &mut self,
         user_id: UserId,
-    ) -> Entry<UserId, HashSet<u32>> {
+    ) -> Entry<'_, UserId, HashSet<u32>> {
         self.user_grant_relation.entry(user_id)
     }
 
@@ -403,7 +403,7 @@ mod tests {
         let mut txn = Transaction::default();
         let users_need_update = CatalogManager::<MemStore>::release_privileges(
             catalog_manager.list_users().await,
-            &object,
+            &[object],
             &mut txn,
         )?;
         catalog_manager.env.meta_store().txn(txn).await?;

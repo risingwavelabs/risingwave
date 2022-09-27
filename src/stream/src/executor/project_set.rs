@@ -13,16 +13,13 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
 
 use either::{for_both, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    ArrayBuilder, ArrayRef, DataChunk, I64ArrayBuilder, Op, StreamChunk,
-};
+use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
@@ -85,7 +82,7 @@ impl Executor for ProjectSetExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -109,7 +106,7 @@ impl ProjectSetExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    let chunk = chunk.compact()?;
+                    let chunk = chunk.compact();
 
                     let (data_chunk, ops) = chunk.into_parts();
 
@@ -182,12 +179,11 @@ impl ProjectSetExecutor {
                     }
 
                     let mut columns = Vec::with_capacity(self.select_list.len() + 1);
-                    let projected_row_id: ArrayRef =
-                        Arc::new(projected_row_id_builder.finish().into());
+                    let projected_row_id: Column = projected_row_id_builder.finish().into();
                     let cardinality = projected_row_id.len();
-                    columns.push(Column::new(projected_row_id));
+                    columns.push(projected_row_id);
                     for builder in builders {
-                        columns.push(Column::new(Arc::new(builder.finish())))
+                        columns.push(builder.finish().into())
                     }
 
                     let chunk = DataChunk::new(columns, cardinality);

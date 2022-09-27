@@ -46,6 +46,7 @@ use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+    StreamingJobBackgroundDeleter,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -352,7 +353,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
     let (barrier_scheduler, scheduled_barriers) =
-        BarrierScheduler::new_pair(hummock_manager.clone());
+        BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
 
     let source_manager = Arc::new(
         SourceManager::new(
@@ -397,6 +398,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap(),
     );
 
+    let (table_background_deleter, deleter_handle, deleter_shutdown) =
+        StreamingJobBackgroundDeleter::new(stream_manager.clone(), source_manager.clone())
+            .await
+            .unwrap();
+    let table_background_deleter = Arc::new(table_background_deleter);
+
     compaction_group_manager
         .purge_stale_members(
             &fragment_manager
@@ -431,6 +438,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
+        table_background_deleter,
         ddl_lock.clone(),
     );
 
@@ -501,6 +509,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
     sub_tasks.push((lease_handle, lease_shutdown));
+    sub_tasks.push((deleter_handle, deleter_shutdown));
     if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,

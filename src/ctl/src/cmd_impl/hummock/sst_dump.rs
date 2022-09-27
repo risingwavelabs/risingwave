@@ -20,9 +20,9 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::{HummockSstableId, HummockVersionId};
 use risingwave_object_store::object::BlockLocation;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, SstableMeta, SstableStore,
@@ -84,6 +84,9 @@ pub async fn sst_dump() -> anyhow::Result<()> {
         }
     }
 
+    meta_client
+        .unpin_version_before(HummockVersionId::MAX)
+        .await?;
     hummock_opts.shutdown().await;
     Ok(())
 }

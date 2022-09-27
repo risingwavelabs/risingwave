@@ -122,7 +122,7 @@ fn bench_hash_agg(c: &mut Criterion) {
         (vec![0, 2], AggKind::Min, vec![1], DataType::Int64),
     ];
 
-    for (group_key_columns, agg_kind, arg_columns, return_type) in bench_variants.into_iter() {
+    for (group_key_columns, agg_kind, arg_columns, return_type) in bench_variants {
         for chunk_size in &[32, 128, 512, 1024, 2048, 4096] {
             c.bench_with_input(
                 BenchmarkId::new("HashAggExecutor", chunk_size),

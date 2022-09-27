@@ -73,14 +73,14 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
         let index_table = index.index_table.clone();
 
         let index_column_s = index_table
-            .order_key
+            .pk
             .iter()
             .filter(|x| !index_table.columns[x.index].is_hidden)
             .map(|x| index_table.columns[x.index].name().to_string())
             .collect_vec();
 
-        let order_key_column_index_set = index_table
-            .order_key
+        let pk_column_index_set = index_table
+            .pk
             .iter()
             .map(|x| x.index)
             .collect::<HashSet<_>>();
@@ -89,7 +89,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             .columns
             .iter()
             .enumerate()
-            .filter(|(i, _)| !order_key_column_index_set.contains(i))
+            .filter(|(i, _)| !pk_column_index_set.contains(i))
             .filter(|(_, x)| !x.is_hidden)
             .map(|(_, x)| x.name().to_string())
             .collect_vec();
@@ -120,7 +120,6 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
             PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
         ],
-        true,
     ))
 }
 
@@ -128,6 +127,8 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
 mod tests {
     use std::collections::HashMap;
     use std::ops::Index;
+
+    use futures_async_stream::for_await;
 
     use crate::test_utils::LocalFrontend;
 
@@ -145,22 +146,26 @@ mod tests {
             .unwrap();
 
         let sql = "describe t";
-        let pg_response = frontend.run_sql(sql).await.unwrap();
+        let mut pg_response = frontend.run_sql(sql).await.unwrap();
 
-        let columns = pg_response
-            .iter()
-            .map(|row| {
-                (
-                    std::str::from_utf8(row.index(0).as_ref().unwrap()).unwrap(),
-                    std::str::from_utf8(row.index(1).as_ref().unwrap()).unwrap(),
-                )
-            })
-            .collect::<HashMap<&str, &str>>();
+        let mut columns = HashMap::new();
+        #[for_await]
+        for row in pg_response.values_stream() {
+            let row = row.unwrap();
+            columns.insert(
+                std::str::from_utf8(row.index(0).as_ref().unwrap())
+                    .unwrap()
+                    .to_string(),
+                std::str::from_utf8(row.index(1).as_ref().unwrap())
+                    .unwrap()
+                    .to_string(),
+            );
+        }
 
-        let expected_columns = maplit::hashmap! {
-            "v1" => "Int32",
-            "v2" => "Int32",
-            "idx1" => "index(v1, v2)",
+        let expected_columns: HashMap<String, String> = maplit::hashmap! {
+            "v1".into() => "Int32".into(),
+            "v2".into() => "Int32".into(),
+            "idx1".into() => "index(v1, v2)".into(),
         };
 
         assert_eq!(columns, expected_columns);

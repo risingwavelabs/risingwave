@@ -237,7 +237,7 @@ impl LogicalScan {
         let id_to_tb_idx = self.table_desc.get_id_to_op_idx_mapping();
         let order = Order::new(
             self.table_desc
-                .order_key
+                .pk
                 .iter()
                 .map(|order| {
                     let idx = id_to_tb_idx
@@ -411,7 +411,7 @@ impl LogicalScan {
 impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl fmt::Display for LogicalScan {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         if self.predicate.always_true() {
             write!(
@@ -621,7 +621,7 @@ impl ToStream for LogicalScan {
                 }
                 let col_need_to_add = self
                     .table_desc
-                    .order_key
+                    .pk
                     .iter()
                     .filter_map(|c| {
                         if !col_ids.contains(&self.table_desc().columns[c.column_idx].column_id) {

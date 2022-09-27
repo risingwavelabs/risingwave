@@ -46,7 +46,6 @@ pull_request_rules:
         message: >
           Hey @{{ author }}, this pull request failed to merge and has been
           dequeued from the merge train.  If you believe your PR failed in
-          the merge train because of a flaky test, requeue it by commenting
-          with `@mergifyio requeue`.
-          More details can be found on the `Queue: Embarked in merge train`
-          check-run.
+          the merge train because of a flaky test, requeue it by clicking
+          "Update branch" or pushing an empty commit with 
+          `git commit --allow-empty -m "rerun" && git push`.

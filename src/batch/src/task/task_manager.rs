@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
@@ -179,15 +179,6 @@ impl BatchManager {
             }
             tokio::time::sleep(Duration::from_millis(100)).await
         }
-    }
-
-    pub fn get_error(&self, task_id: &TaskId) -> Result<Option<RwError>> {
-        Ok(self
-            .tasks
-            .lock()
-            .get(task_id)
-            .ok_or(TaskNotFound)?
-            .get_error())
     }
 
     /// Return the receivers for streaming RPC.

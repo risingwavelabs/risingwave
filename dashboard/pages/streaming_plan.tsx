@@ -17,9 +17,12 @@
 
 import {
   Box,
+  Button,
   Flex,
   FormControl,
   FormLabel,
+  HStack,
+  Input,
   Select,
   Text,
   useToast,
@@ -49,6 +52,7 @@ function buildPlanNodeDependency(
       name: node.nodeBody?.$case.toString() || "unknown",
       children: (node.input || []).map(hierarchyActorNode),
       operatorId: node.operatorId,
+      node,
     }
   }
 
@@ -56,6 +60,7 @@ function buildPlanNodeDependency(
     name:
       actor.dispatcher.map((d) => `${toLower(d.type)}Dispatcher`).join(",") ||
       "noDispatcher",
+    extraInfo: `Actor ${fragment.actors.map((a) => a.actorId).join(", ")}`,
     children: actor.nodes ? [hierarchyActorNode(actor.nodes)] : [],
     operatorId: "dispatcher",
   })
@@ -88,6 +93,7 @@ function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
       width: 0,
       height: 0,
       order: fragment.fragmentId,
+      fragment: fragment,
     } as ActorBox)
   }
   return nodes
@@ -177,6 +183,74 @@ export default function Streaming() {
 
   const planNodeDependencies = planNodeDependenciesCallback()
 
+  const mvInfoCallback = useCallback(() => {
+    const id = router.query.id
+    if (id) {
+      if (mvList) {
+        return mvList.find((x) => x.id == parseInt(id as string))
+      }
+    }
+    return undefined
+  }, [mvList, router.query.id])
+
+  const mvInfo = mvInfoCallback()
+
+  const [searchActorId, setSearchActorId] = useState<string>("")
+  const [searchFragId, setSearchFragId] = useState<string>("")
+
+  const setMvId = (id: number) => router.replace(`?id=${id}`)
+
+  const toast = useToast()
+
+  const handleSearchFragment = () => {
+    const searchFragIdInt = parseInt(searchFragId)
+    if (fragmentList) {
+      for (const mv of fragmentList) {
+        for (const fragmentId in mv.fragments) {
+          if (mv.fragments[fragmentId].fragmentId == searchFragIdInt) {
+            setMvId(mv.tableId)
+            setSelectedFragmentId(searchFragIdInt)
+            return
+          }
+        }
+      }
+    }
+
+    toast({
+      title: "Fragment not found",
+      description: "",
+      status: "error",
+      duration: 5000,
+      isClosable: true,
+    })
+  }
+
+  const handleSearchActor = () => {
+    const searchActorIdInt = parseInt(searchActorId)
+    if (fragmentList) {
+      for (const mv of fragmentList) {
+        for (const fragmentId in mv.fragments) {
+          const fragment = mv.fragments[fragmentId]
+          for (const actor of fragment.actors) {
+            if (actor.actorId == searchActorIdInt) {
+              setMvId(mv.tableId)
+              setSelectedFragmentId(fragment.fragmentId)
+              return
+            }
+          }
+        }
+      }
+    }
+
+    toast({
+      title: "Actor not found",
+      description: "",
+      status: "error",
+      duration: 5000,
+      isClosable: true,
+    })
+  }
+
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
       <Title>Streaming Plan</Title>
@@ -190,9 +264,31 @@ export default function Streaming() {
         >
           <FormControl>
             <FormLabel>Materialized View</FormLabel>
+            <Input
+              list="mvList"
+              spellCheck={false}
+              onChange={(event) => {
+                const id = mvList?.find((x) => x.name == event.target.value)?.id
+                if (id) {
+                  setMvId(id)
+                }
+              }}
+              placeholder="Search..."
+              mb={2}
+            ></Input>
+            <datalist id="mvList">
+              {mvList &&
+                mvList
+                  .filter((mv) => !mv.name.startsWith("__"))
+                  .map((mv) => (
+                    <option value={mv.name} key={mv.id}>
+                      ({mv.id}) {mv.name}
+                    </option>
+                  ))}
+            </datalist>
             <Select
               value={router.query.id}
-              onChange={(event) => router.replace(`?id=${event.target.value}`)}
+              onChange={(event) => setMvId(parseInt(event.target.value))}
             >
               {mvList &&
                 mvList
@@ -204,8 +300,34 @@ export default function Streaming() {
                   ))}
             </Select>
           </FormControl>
+          <FormControl>
+            <FormLabel>Goto</FormLabel>
+            <VStack spacing={2}>
+              <HStack>
+                <Input
+                  placeholder="Fragment Id"
+                  value={searchFragId}
+                  onChange={(event) => setSearchFragId(event.target.value)}
+                ></Input>
+                <Button onClick={(_) => handleSearchFragment()}>Go</Button>
+              </HStack>
+              <HStack>
+                <Input
+                  placeholder="Actor Id"
+                  value={searchActorId}
+                  onChange={(event) => setSearchActorId(event.target.value)}
+                ></Input>
+                <Button onClick={(_) => handleSearchActor()}>Go</Button>
+              </HStack>
+            </VStack>
+          </FormControl>
           <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Plan</Text>
+            {mvInfo && (
+              <Text>
+                {mvInfo.id} - {mvInfo.name}
+              </Text>
+            )}
             {fragmentDependencyDag && (
               <Box flex="1" overflowY="scroll">
                 <DependencyGraph
