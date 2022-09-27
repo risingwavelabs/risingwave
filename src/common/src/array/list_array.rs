@@ -223,14 +223,14 @@ impl Array for ListArray {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<super::ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = ListArrayBuilder::with_meta(
             capacity,
             ArrayMeta::List {
                 datatype: Box::new(self.value_type.clone()),
             },
         );
-        Ok(ArrayBuilderImpl::List(array_builder))
+        ArrayBuilderImpl::List(array_builder)
     }
 
     fn array_meta(&self) -> ArrayMeta {
@@ -265,12 +265,12 @@ impl ListArray {
         null_bitmap: &[bool],
         values: Vec<Option<ArrayImpl>>,
         value_type: DataType,
-    ) -> ArrayResult<ListArray> {
+    ) -> ListArray {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let mut offsets = vec![0];
         let mut values = values.into_iter().peekable();
-        let mut builder = values.peek().unwrap().as_ref().unwrap().create_builder(0)?;
+        let mut builder = values.peek().unwrap().as_ref().unwrap().create_builder(0);
         for i in values {
             match i {
                 Some(a) => {
@@ -286,13 +286,13 @@ impl ListArray {
             *x += acc;
             *x
         });
-        Ok(ListArray {
+        ListArray {
             bitmap,
             offsets,
             value: Box::new(builder.finish()),
             value_type,
             len: cardinality,
-        })
+        }
     }
 
     #[cfg(test)]
@@ -313,11 +313,12 @@ pub struct ListValue {
 impl fmt::Display for ListValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Example of ListValue display: ARRAY[1, 2]
-        write!(
-            f,
-            "ARRAY[{}]",
-            self.values.iter().map(|v| v.as_ref().unwrap()).format(", ")
-        )
+        write!(f, "ARRAY")?;
+        let mut f = f.debug_list();
+        for v in self.values.iter() {
+            f.entry(&format_args!("{}", v.as_ref().unwrap()));
+        }
+        f.finish()
     }
 }
 
@@ -422,7 +423,7 @@ macro_rules! iter_elems {
     ($self:ident, $it:ident, { $($body:tt)* }) => {
         match $self {
             ListRef::Indexed { arr, idx } => {
-                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o).to_owned_datum());
+                let $it = (arr.offsets[idx]..arr.offsets[idx + 1]).map(|o| arr.value.value_at(o).to_owned_datum());
                 $($body)*
             }
             ListRef::ValueRef { val } => {
@@ -471,7 +472,7 @@ impl<'a> ListRef<'a> {
         }
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         let elems = iter_elems!(self, it, {
             it.map(|f| match f {
                 None => {
@@ -592,8 +593,7 @@ mod tests {
                 Some(empty_array! { I32Array }.into()),
             ],
             DataType::Int32,
-        )
-        .unwrap();
+        );
         let actual = ListArray::from_protobuf(&arr.to_protobuf()).unwrap();
         let tmp = ArrayImpl::List(arr);
         assert_eq!(tmp, actual);
@@ -638,8 +638,7 @@ mod tests {
                 None,
             ],
             DataType::Int32,
-        )
-        .unwrap();
+        );
 
         let part2 = ListArray::from_slices(
             &[true, true],
@@ -648,8 +647,7 @@ mod tests {
                 Some(empty_array! { I32Array }.into()),
             ],
             DataType::Int32,
-        )
-        .unwrap();
+        );
 
         let mut builder = ListArrayBuilder::with_meta(
             4,
@@ -673,9 +671,8 @@ mod tests {
                 array! { F32Array, [Some(2.0), Some(42.0), Some(1.0)] }.into(),
             )],
             DataType::Float32,
-        )
-        .unwrap();
-        let builder = arr.create_builder(0).unwrap();
+        );
+        let builder = arr.create_builder(0);
         let arr2 = try_match_expand!(builder.finish(), ArrayImpl::List).unwrap();
         assert_eq!(arr.array_meta(), arr2.array_meta());
     }
@@ -744,8 +741,7 @@ mod tests {
                 Some(array! { I32Array, [Some(3), Some(4)] }.into()),
             ],
             DataType::Int32,
-        )
-        .unwrap();
+        );
 
         let listarray2 = ListArray::from_slices(
             &[true, false, true],
@@ -755,15 +751,13 @@ mod tests {
                 Some(array! { I32Array, [Some(8)] }.into()),
             ],
             DataType::Int32,
-        )
-        .unwrap();
+        );
 
         let listarray3 = ListArray::from_slices(
             &[true],
             vec![Some(array! { I32Array, [Some(9), Some(10)] }.into())],
             DataType::Int32,
-        )
-        .unwrap();
+        );
 
         let nestarray = ListArray::from_slices(
             &[true, true, true],
@@ -775,8 +769,7 @@ mod tests {
             DataType::List {
                 datatype: Box::new(DataType::Int32),
             },
-        )
-        .unwrap();
+        );
         let actual = ListArray::from_protobuf(&nestarray.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::List(nestarray), actual);
 
@@ -887,8 +880,7 @@ mod tests {
                 Some(array! { I32Array, [Some(3), Some(4)] }.into()),
             ],
             DataType::Int32,
-        )
-        .unwrap();
+        );
         let list_ref = arr.value_at(0).unwrap();
         let output = list_ref.to_protobuf_owned();
         let expect = ListValue::new(vec![
@@ -1049,8 +1041,7 @@ mod tests {
                 Some(array! { I32Array, [Some(4), Some(5), Some(6), Some(7)] }.into()),
             ],
             DataType::Int32,
-        )
-        .unwrap();
+        );
 
         // get 3rd ListRef from ListArray
         let list_ref = arr.value_at(2).unwrap();

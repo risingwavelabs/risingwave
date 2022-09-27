@@ -279,7 +279,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct))),
             A::Avg => Some(Expr::Function(make_agg_func("avg", exprs, distinct))),
             A::StringAgg => Some(Expr::Function(make_agg_func("string_agg", exprs, distinct))),
-            A::SingleValue => None,
             A::ApproxCountDistinct => {
                 if distinct {
                     None

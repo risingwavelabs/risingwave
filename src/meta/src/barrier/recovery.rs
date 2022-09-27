@@ -67,7 +67,7 @@ where
     async fn resolve_actor_info_for_recovery(&self) -> BarrierActorInfo {
         self.resolve_actor_info(
             &mut CheckpointControl::new(self.metrics.clone()),
-            &Command::checkpoint(),
+            &Command::barrier(),
         )
         .await
     }
@@ -159,6 +159,7 @@ where
                 prev_epoch,
                 new_epoch,
                 command,
+                true,
             ));
 
             let (barrier_complete_tx, mut barrier_complete_rx) =

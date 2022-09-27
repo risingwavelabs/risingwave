@@ -72,7 +72,7 @@ pub(crate) fn actor_mapping_from_bitmaps(bitmaps: &HashMap<ActorId, Bitmap>) -> 
 
     for (actor_id, bitmap) in bitmaps {
         for (idx, pos) in raw.iter_mut().enumerate() {
-            if bitmap.is_set(idx).unwrap() {
+            if bitmap.is_set(idx) {
                 *pos = *actor_id;
             }
         }

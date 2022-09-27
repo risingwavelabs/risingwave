@@ -1,0 +1,181 @@
+statement ok
+CREATE MATERIALIZED SOURCE tpcc_customer (
+    c_id INTEGER,
+    c_d_id INTEGER,
+    c_w_id INTEGER,
+    c_first VARCHAR,
+    c_middle VARCHAR,
+    c_last VARCHAR,
+    c_street_1 VARCHAR,
+    c_street_2 VARCHAR,
+    c_city VARCHAR,
+    c_state VARCHAR,
+    c_zip VARCHAR,
+    c_phone VARCHAR,
+    c_since TIMESTAMP,
+    c_credit VARCHAR,
+    c_credit_lim REAL,
+    c_discount REAL,
+    c_balance REAL,
+    c_ytd_payment REAL,
+    c_payment_cnt INTEGER,
+    c_delivery_cnt INTEGER,
+    c_data1 VARCHAR,
+    c_data2 VARCHAR,
+    PRIMARY KEY (c_id, c_d_id, c_w_id)
+) with (
+    connector = 'kafka',
+    topic = 'tpcc_customer',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
+
+statement ok
+CREATE MATERIALIZED SOURCE tpcc_district (
+    d_id INTEGER,
+    d_w_id INTEGER,
+    d_name VARCHAR,
+    d_street_1 VARCHAR,
+    d_street_2 VARCHAR,
+    d_city VARCHAR,
+    d_state VARCHAR,
+    d_zip VARCHAR,
+    d_tax REAL,
+    d_ytd REAL,
+    d_next_o_id INTEGER,
+    PRIMARY KEY (d_id, d_w_id)
+) with (
+    connector = 'kafka',
+    topic = 'tpcc_district',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
+
+# statement ok
+# CREATE MATERIALIZED SOURCE tpcc_history (
+#     h_c_id INTEGER,
+#     h_c_d_id INTEGER,
+#     h_c_w_id INTEGER,
+#     h_d_id INTEGER,
+#     h_w_id INTEGER,
+#     h_date TIMESTAMP,
+#     h_amount REAL,
+#     h_data VARCHAR
+# ) with (
+#     connector = 'kafka',
+#     topic = 'tpcc_history',
+#     properties.bootstrap.server = '127.0.0.1:29092',
+#     scan.startup.mode = 'earliest'
+# ) ROW FORMAT DEBEZIUM_JSON;
+
+statement ok
+CREATE MATERIALIZED SOURCE tpcc_item (
+    i_id INTEGER,
+    i_im_id INTEGER,
+    i_name VARCHAR,
+    i_price REAL,
+    i_data VARCHAR,
+    PRIMARY KEY (i_id)
+) with (
+    connector = 'kafka',
+    topic = 'tpcc_item',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
+
+statement ok
+CREATE MATERIALIZED SOURCE tpcc_neworder (
+    no_o_id INTEGER,
+    no_d_id INTEGER,
+    no_w_id INTEGER,
+    PRIMARY KEY (no_o_id, no_d_id, no_w_id)
+) with (
+    connector = 'kafka',
+    topic = 'tpcc_neworder',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
+
+statement ok
+CREATE MATERIALIZED SOURCE tpcc_orderline (
+    ol_o_id INTEGER,
+    ol_d_id INTEGER,
+    ol_w_id INTEGER,
+    ol_number INTEGER,
+    ol_i_id INTEGER,
+    ol_supply_w_id INTEGER,
+    ol_delivery_d TIMESTAMP,
+    ol_quantity INTEGER,
+    ol_amount REAL,
+    ol_dist_info VARCHAR,
+    PRIMARY KEY (ol_o_id, ol_d_id, ol_w_id, ol_number)
+) with (
+    connector = 'kafka',
+    topic = 'tpcc_orderline',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
+
+statement ok
+CREATE MATERIALIZED SOURCE tpcc_orders (
+    o_id INTEGER,
+    o_d_id INTEGER,
+    o_w_id INTEGER,
+    o_c_id INTEGER,
+    o_entry_d TIMESTAMP,
+    o_carrier_id INTEGER,
+    o_ol_cnt INTEGER,
+    o_all_local INTEGER,
+    PRIMARY KEY (o_id, o_d_id, o_w_id)
+) with (
+    connector = 'kafka',
+    topic = 'tpcc_orders',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
+
+statement ok
+CREATE MATERIALIZED SOURCE tpcc_stock (
+    st_i_id INTEGER,
+    st_w_id INTEGER,
+    st_quantity INTEGER,
+    st_dist_01 VARCHAR,
+    st_dist_02 VARCHAR,
+    st_dist_03 VARCHAR,
+    st_dist_04 VARCHAR,
+    st_dist_05 VARCHAR,
+    st_dist_06 VARCHAR,
+    st_dist_07 VARCHAR,
+    st_dist_08 VARCHAR,
+    st_dist_09 VARCHAR,
+    st_dist_10 VARCHAR,
+    st_ytd INTEGER,
+    st_order_cnt INTEGER,
+    st_remote_cnt INTEGER,
+    st_data VARCHAR,
+    PRIMARY KEY (st_i_id, st_w_id)
+) with (
+    connector = 'kafka',
+    topic = 'tpcc_stock',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;
+
+statement ok
+CREATE MATERIALIZED SOURCE tpcc_warehouse (
+    w_id INTEGER,
+    w_name VARCHAR,
+    w_street_1 VARCHAR,
+    w_street_2 VARCHAR,
+    w_city VARCHAR,
+    w_state VARCHAR,
+    w_zip VARCHAR,
+    w_tax REAL,
+    w_YTD REAL,
+    PRIMARY KEY (w_id)
+) with (
+    connector = 'kafka',
+    topic = 'tpcc_warehouse',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_JSON;

@@ -58,7 +58,7 @@ impl HashCode {
         self.0
     }
 
-    pub fn to_vnode(self) -> VirtualNode {
+    pub fn to_vnode(&self) -> VirtualNode {
         (self.0 % VIRTUAL_NODE_COUNT as u64) as VirtualNode
     }
 }
@@ -646,9 +646,10 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
 
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
         let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self);
-        array_builders.iter_mut().try_for_each(|array_builder| {
-            array_builder.deserialize_from_hash_key(&mut deserializer)
-        })
+        for array_builder in array_builders.iter_mut() {
+            array_builder.deserialize_from_hash_key(&mut deserializer)?;
+        }
+        Ok(())
     }
 
     fn null_bitmap(&self) -> &FixedBitSet {
@@ -675,15 +676,14 @@ impl HashKey for SerializedKey {
 mod tests {
     use std::collections::HashMap;
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use super::*;
     use crate::array;
     use crate::array::column::Column;
     use crate::array::{
-        ArrayRef, BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array,
-        I16Array, I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray,
-        NaiveTimeArray, Utf8Array,
+        BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array, I16Array,
+        I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray,
+        Utf8Array,
     };
     use crate::hash::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
@@ -777,12 +777,7 @@ mod tests {
 
         let mut array_builders = column_indexes
             .iter()
-            .map(|idx| {
-                data.columns()[*idx]
-                    .array_ref()
-                    .create_builder(1024)
-                    .unwrap()
-            })
+            .map(|idx| data.columns()[*idx].array_ref().create_builder(1024))
             .collect::<Vec<ArrayBuilderImpl>>();
 
         keys.into_iter()
@@ -851,16 +846,14 @@ mod tests {
     }
 
     fn generate_decimal_test_data() -> DataChunk {
-        let columns = vec![Column::new(Arc::new(
-            array! { DecimalArray, [
-                Some(Decimal::from_str("1.2").unwrap()),
-                None,
-                Some(Decimal::from_str("1.200").unwrap()),
-                Some(Decimal::from_str("0.00").unwrap()),
-                Some(Decimal::from_str("0.0").unwrap())
-            ]}
-            .into(),
-        ) as ArrayRef)];
+        let columns = vec![array! { DecimalArray, [
+            Some(Decimal::from_str("1.2").unwrap()),
+            None,
+            Some(Decimal::from_str("1.200").unwrap()),
+            Some(Decimal::from_str("0.00").unwrap()),
+            Some(Decimal::from_str("0.0").unwrap())
+        ]}
+        .into()];
 
         DataChunk::new(columns, 5)
     }

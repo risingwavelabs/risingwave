@@ -18,7 +18,6 @@ use std::sync::Arc;
 use futures::future::try_join_all;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -48,11 +47,6 @@ pub struct Reschedule {
     pub added_actors: Vec<ActorId>,
     /// Removed actors in this fragment.
     pub removed_actors: Vec<ActorId>,
-
-    /// Added parallel units in this fragment.
-    pub added_parallel_units: Vec<ParallelUnitId>,
-    /// Removed parallel units in this fragment.
-    pub removed_parallel_units: Vec<ParallelUnitId>,
 
     /// Vnode bitmap updates for some actors in this fragment.
     pub vnode_bitmap_updates: HashMap<ActorId, Bitmap>,
@@ -109,7 +103,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn checkpoint() -> Self {
+    pub fn barrier() -> Self {
         Self::Plain(None)
     }
 
@@ -152,6 +146,11 @@ impl Command {
         // previous checkpoint has been done.
         matches!(self, Self::Plain(Some(Mutation::Pause(_))))
     }
+
+    pub fn need_checkpoint(&self) -> bool {
+        // todo! Reviewing the flow of different command to reduce the amount of checkpoint
+        !matches!(self, Command::Plain(None | Some(Mutation::Resume(_))))
+    }
 }
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
@@ -169,6 +168,8 @@ pub struct CommandContext<S: MetaStore> {
     pub curr_epoch: Epoch,
 
     pub command: Command,
+
+    pub checkpoint: bool,
 }
 
 impl<S: MetaStore> CommandContext<S> {
@@ -179,6 +180,7 @@ impl<S: MetaStore> CommandContext<S> {
         prev_epoch: Epoch,
         curr_epoch: Epoch,
         command: Command,
+        checkpoint: bool,
     ) -> Self {
         Self {
             fragment_manager,
@@ -187,6 +189,7 @@ impl<S: MetaStore> CommandContext<S> {
             prev_epoch,
             curr_epoch,
             command,
+            checkpoint,
         }
     }
 }

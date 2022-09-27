@@ -183,7 +183,7 @@ impl BackwardUserIterator {
                         }
                     }
                 } else {
-                    self.stats.skip_key_count += 1;
+                    self.stats.skip_multi_version_key_count += 1;
                 }
                 // TODO: Since the real world workload may follow power law or 20/80 rule, or
                 // whatever name. We may directly seek to the next key if we have

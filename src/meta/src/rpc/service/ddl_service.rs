@@ -15,7 +15,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
@@ -194,7 +193,7 @@ where
 
         // 2. Drop source in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::SourceId(source_id)]);
+            .delete(vec![StreamingJobId::Source(source_id)]);
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -236,7 +235,7 @@ where
 
         // 2. drop sink in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::SinkId(sink_id.into())]);
+            .delete(vec![StreamingJobId::Sink(sink_id.into())]);
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -289,7 +288,7 @@ where
 
         // 2. drop mv in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::TableId(table_id.into())]);
+            .delete(vec![StreamingJobId::Table(table_id.into())]);
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -345,7 +344,7 @@ where
 
         // 2. drop mv(index) in table background deleter asynchronously.
         self.table_background_deleter
-            .delete(vec![StreamingJobId::TableId(index_table_id.into())]);
+            .delete(vec![StreamingJobId::Table(index_table_id.into())]);
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -506,16 +505,7 @@ where
         assert_eq!(table_ids_cnt, ctx.internal_table_ids().len() as u32);
 
         // 5. mark creating tables.
-        let mut creating_tables = ctx
-            .internal_table_id_map
-            .iter()
-            .map(|(id, table)| {
-                table.clone().unwrap_or(Table {
-                    id: *id,
-                    ..Default::default()
-                })
-            })
-            .collect_vec();
+        let mut creating_tables = ctx.internal_tables();
         match stream_job {
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
@@ -688,19 +678,26 @@ where
         source_id: SourceId,
         table_id: TableId,
     ) -> MetaResult<CatalogVersion> {
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id.into())
+            .await?;
+        let internal_table_ids = table_fragment.internal_table_ids();
+        assert!(internal_table_ids.len() == 1);
+
         // 1. Drop materialized source in catalog, source_id will be checked if it is
         // associated_source_id in mview.
         let version = self
             .catalog_manager
-            .drop_materialized_source(source_id, table_id)
+            .drop_materialized_source(source_id, table_id, internal_table_ids[0])
             .await?;
 
         // 2. Drop source and mv in table background deleter asynchronously.
         // Note: we need to drop the materialized view to unmap the source_id to fragment_ids before
         // we can drop the source.
         self.table_background_deleter.delete(vec![
-            StreamingJobId::TableId(table_id.into()),
-            StreamingJobId::SourceId(source_id),
+            StreamingJobId::Table(table_id.into()),
+            StreamingJobId::Source(source_id),
         ]);
 
         Ok(version)
