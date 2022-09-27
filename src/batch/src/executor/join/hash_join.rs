@@ -222,7 +222,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let build_chunk = build_chunk?;
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
-                build_side.push(build_chunk.compact()?)
+                build_side.push(build_chunk.compact())
             }
         }
         let mut hash_map =
@@ -1990,7 +1990,7 @@ mod tests {
 
             while let Some(data_chunk) = stream.next().await {
                 let data_chunk = data_chunk.unwrap();
-                let data_chunk = data_chunk.compact().unwrap();
+                let data_chunk = data_chunk.compact();
                 data_chunk_merger.append(&data_chunk).unwrap();
             }
 
@@ -2464,8 +2464,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2494,8 +2493,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2524,8 +2522,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2564,8 +2561,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2591,8 +2587,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2618,8 +2613,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2660,8 +2654,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2689,8 +2682,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2718,8 +2710,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2782,8 +2773,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.build_row_ids, Vec::new());
@@ -2823,8 +2813,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.build_row_ids, Vec::new());
@@ -2971,8 +2960,7 @@ mod tests {
                 &mut right_state,
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());
@@ -3019,8 +3007,7 @@ mod tests {
                 &mut right_state,
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());

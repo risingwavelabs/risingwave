@@ -418,7 +418,7 @@ impl<K: HashKey> LookupJoinExecutor<K> {
                 let build_chunk = build_chunk?;
                 if build_chunk.cardinality() > 0 {
                     build_row_count += build_chunk.cardinality();
-                    build_side.push(build_chunk.compact()?)
+                    build_side.push(build_chunk.compact())
                 }
             }
             let mut hash_map =
