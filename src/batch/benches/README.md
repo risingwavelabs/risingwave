@@ -31,4 +31,4 @@ cargo bench -p risingwave_batch -- "TopNExecutor/2048\(single_column: true\)"
 ## Add new Benchmarks
 
 * Add benchmark target to `src/batch/Cargo.toml`
-* Implement benchmarks in `src/batch/benches`, refering to existing ones
+* Implement benchmarks in `src/batch/benches`, referring to existing ones
