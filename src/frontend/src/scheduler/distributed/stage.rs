@@ -55,7 +55,7 @@ use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId, ROOT_TASK_ID,
 };
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::SchedulerError::{RpcError, TaskExecutionError};
+use crate::scheduler::SchedulerError::TaskExecutionError;
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
@@ -369,8 +369,7 @@ impl StageRunner {
                             //
                             // Note: For Task execution failure, it now becomes a Rpc Error and will return here.
                             // Do not process this as task status like Running/Finished/ etc.
-                            // This will also wrap the final printed error with 'RpcError: ...', but this is not a problem now so solve it later.
-                            let status = stauts_res_inner.map_err(|e| RpcError(e.into()))?;
+                            let status = stauts_res_inner.map_err(SchedulerError::from)?;
                             use risingwave_pb::task_service::task_info::TaskStatus as TaskStatusProst;
                             match TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status).unwrap() {
                                 TaskStatusProst::Running => {

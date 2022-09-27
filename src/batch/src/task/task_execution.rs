@@ -15,7 +15,6 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures::StreamExt;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
@@ -30,6 +29,7 @@ use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
+use tonic::Status;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result as BatchResult};
@@ -323,7 +323,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Execution failed [{:?}]: {:?}", &task_id, &e);
                     let err_str = e.to_string();
                     *failure.lock() = Some(e);
-                    if let Err(_e) = self
+                    if let Err(_e) = t_1
                         .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str))
                         .await
                     {
@@ -369,7 +369,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         Ok(())
     }
 
-    /// Change state and notify frontend for task status. This function can not be used to
+    /// Change state and notify frontend for task status via streaming GRPC.
     pub async fn change_state_notify(
         &self,
         task_status: TaskStatus,
@@ -379,7 +379,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         self.change_state(task_status);
         if let Some(err_str) = err_str {
             state_tx
-                .send(Err(RwError::from(anyhow!(err_str)).into()))
+                .send(Err(Status::internal(err_str)))
                 .await
                 .map_err(|_| SenderError)
         } else {
