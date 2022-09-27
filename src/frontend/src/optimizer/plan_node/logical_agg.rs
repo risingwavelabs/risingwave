@@ -337,14 +337,13 @@ impl AggCallState {
         }
     }
 }
-struct MaterializedAggInputState {
+pub struct MaterializedAggInputState {
     pub table: TableCatalog,
     pub column_mapping: Vec<usize>,
 }
 impl LogicalAgg {
     pub fn infer_result_table(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
         let out_fields = self.base.schema.fields();
-        let in_fields = self.input().schema().fields().to_vec();
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
         let mut internal_table_catalog_builder =
             TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
@@ -365,17 +364,16 @@ impl LogicalAgg {
 
     /// return StreamAgg's AggCallStates
     pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
-        let out_fields = self.base.schema.fields();
         let in_fields = self.input().schema().fields().to_vec();
         let in_pks = self.input().logical_pk().to_vec();
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
-        let mut column_mapping = vec![];
-        let get_sorted_input_state_table = |sort_keys: Vec<(OrderType, usize)>,
-                                            include_keys: Vec<usize>|
+        let get_merialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
+                                          include_keys: Vec<usize>|
          -> MaterializedAggInputState {
             let mut internal_table_catalog_builder =
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
+            let mut column_mapping = vec![];
 
             for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
@@ -417,8 +415,7 @@ impl LogicalAgg {
 
         self.agg_calls
             .iter()
-            .enumerate()
-            .map(|(agg_idx, agg_call)| match agg_call.agg_kind {
+            .map(|agg_call| match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::ArrayAgg => {
                     if !in_append_only {
                         let mut sort_column_set = BTreeSet::new();
@@ -452,10 +449,8 @@ impl LogicalAgg {
                                 .collect(),
                             _ => vec![],
                         };
-                        AggCallState::MaterializedInputState(get_sorted_input_state_table(
-                            sort_keys,
-                            include_keys,
-                        ))
+                        let state = get_merialized_input_state(sort_keys, include_keys);
+                        AggCallState::MaterializedInputState(state)
                     } else {
                         AggCallState::ResultValueState
                     }
