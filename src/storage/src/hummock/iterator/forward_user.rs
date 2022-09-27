@@ -19,20 +19,17 @@ use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
-    BackwardUserIterator, ConcatIteratorInner, Forward, HummockIterator, HummockIteratorDirection,
-    HummockIteratorUnion,
+    Backward, BackwardUserIterator, ConcatIteratorInner, Forward, HummockIterator,
+    HummockIteratorDirection, HummockIteratorUnion,
 };
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::SharedBufferIteratorType;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SstableIterator, SstableIteratorType};
+use crate::hummock::{
+    BackwardSstableIterator, HummockResult, SstableIterator, SstableIteratorType,
+};
 use crate::monitor::StoreLocalStatistic;
-
-pub enum DirectedUserIterator {
-    Forward(UserIterator),
-    Backward(BackwardUserIterator),
-}
 
 #[allow(type_alias_bounds)]
 pub type UserIteratorPayloadType<
@@ -45,6 +42,19 @@ pub type UserIteratorPayloadType<
     ConcatIteratorInner<I>,
     I,
 >;
+
+pub enum DirectedUserIterator {
+    Forward(
+        UserIterator<
+            UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
+        >,
+    ),
+    Backward(
+        BackwardUserIterator<
+            UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+        >,
+    ),
+}
 
 pub trait DirectedUserIteratorBuilder {
     type Direction: HummockIteratorDirection;
@@ -120,9 +130,9 @@ impl DirectedUserIterator {
 }
 
 /// [`UserIterator`] can be used by user directly.
-pub struct UserIterator {
+pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     /// Inner table iterator.
-    iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
+    iterator: I,
 
     /// Last user key
     last_key: Vec<u8>,
@@ -149,29 +159,10 @@ pub struct UserIterator {
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
-impl UserIterator {
-    /// Create [`UserIterator`] with maximum epoch.
-    #[cfg(test)]
-    pub(crate) fn for_test(
-        iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-    ) -> Self {
-        Self::new(iterator, key_range, HummockEpoch::MAX, 0, None)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_test_with_epoch(
-        iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_epoch: u64,
-        min_epoch: u64,
-    ) -> Self {
-        Self::new(iterator, key_range, read_epoch, min_epoch, None)
-    }
-
+impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Create [`UserIterator`] with given `read_epoch`.
     pub(crate) fn new(
-        iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
+        iterator: I,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
@@ -321,7 +312,29 @@ impl UserIterator {
     }
 }
 
-impl DirectedUserIteratorBuilder for UserIterator {
+#[cfg(test)]
+impl UserIterator<UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>> {
+    /// Create [`UserIterator`] with maximum epoch.
+    pub(crate) fn for_test(
+        iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    ) -> Self {
+        Self::new(iterator, key_range, HummockEpoch::MAX, 0, None)
+    }
+
+    pub(crate) fn for_test_with_epoch(
+        iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_epoch: u64,
+        min_epoch: u64,
+    ) -> Self {
+        Self::new(iterator, key_range, read_epoch, min_epoch, None)
+    }
+}
+
+impl DirectedUserIteratorBuilder
+    for UserIterator<UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>>
+{
     type Direction = Forward;
     type SstableIteratorType = SstableIterator;
 

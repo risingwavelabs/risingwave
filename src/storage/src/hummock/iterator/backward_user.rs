@@ -28,10 +28,9 @@ use crate::hummock::{BackwardSstableIterator, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// [`BackwardUserIterator`] can be used by user directly.
-pub struct BackwardUserIterator {
+pub struct BackwardUserIterator<I: HummockIterator<Direction = Backward>> {
     /// Inner table iterator.
-    iterator:
-        UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+    iterator: I,
 
     /// We just met a new key
     just_met_new_key: bool,
@@ -64,23 +63,10 @@ pub struct BackwardUserIterator {
     stats: StoreLocalStatistic,
 }
 
-impl BackwardUserIterator {
-    /// Creates [`BackwardUserIterator`] with maximum epoch.
-    #[cfg(test)]
-    pub(crate) fn new(
-        iterator: UnorderedMergeIteratorInner<
-            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
-        >,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-    ) -> Self {
-        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
-    }
-
+impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
     pub(crate) fn with_epoch(
-        iterator: UnorderedMergeIteratorInner<
-            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
-        >,
+        iterator: I,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
@@ -283,7 +269,39 @@ impl BackwardUserIterator {
     }
 }
 
-impl DirectedUserIteratorBuilder for BackwardUserIterator {
+#[cfg(test)]
+impl
+    BackwardUserIterator<
+        UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+    >
+{
+    /// Creates [`BackwardUserIterator`] with maximum epoch.
+    pub(crate) fn for_test(
+        iterator: UnorderedMergeIteratorInner<
+            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
+        >,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    ) -> Self {
+        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
+    }
+
+    /// Creates [`BackwardUserIterator`] with maximum epoch.
+    pub(crate) fn with_min_epoch(
+        iterator: UnorderedMergeIteratorInner<
+            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
+        >,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        min_epoch: HummockEpoch,
+    ) -> Self {
+        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, min_epoch, None)
+    }
+}
+
+impl DirectedUserIteratorBuilder
+    for BackwardUserIterator<
+        UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+    >
+{
     type Direction = Backward;
     type SstableIteratorType = BackwardSstableIterator;
 
@@ -372,7 +390,7 @@ mod tests {
         ];
 
         let mi = UnorderedMergeIteratorInner::new(backward_iters);
-        let mut ui = BackwardUserIterator::new(mi, (Unbounded, Unbounded));
+        let mut ui = BackwardUserIterator::for_test(mi, (Unbounded, Unbounded));
         let mut i = 3 * TEST_KEYS_COUNT;
         ui.rewind().await.unwrap();
         while ui.is_valid() {
@@ -433,7 +451,7 @@ mod tests {
         ];
 
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
-        let mut bui = BackwardUserIterator::new(bmi, (Unbounded, Unbounded));
+        let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, Unbounded));
 
         // right edge case
         bui.seek(user_key(iterator_test_key_of(0).as_slice()))
@@ -514,7 +532,7 @@ mod tests {
             )),
         ];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
-        let mut bui = BackwardUserIterator::new(bmi, (Unbounded, Unbounded));
+        let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, Unbounded));
 
         bui.rewind().await.unwrap();
 
@@ -566,7 +584,7 @@ mod tests {
         let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
         let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
 
-        let mut bui = BackwardUserIterator::new(bmi, (begin_key, end_key));
+        let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, end_key));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
@@ -648,7 +666,7 @@ mod tests {
         let begin_key = Excluded(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
         let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
 
-        let mut bui = BackwardUserIterator::new(bmi, (begin_key, end_key));
+        let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, end_key));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
@@ -728,7 +746,7 @@ mod tests {
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
 
-        let mut bui = BackwardUserIterator::new(bmi, (Unbounded, end_key));
+        let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, end_key));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
@@ -810,7 +828,7 @@ mod tests {
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
 
-        let mut bui = BackwardUserIterator::new(bmi, (begin_key, Unbounded));
+        let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, Unbounded));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
@@ -902,7 +920,7 @@ mod tests {
             sstable_store,
         ))];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
-        let mut bui = BackwardUserIterator::new(bmi, (start_bound, end_bound));
+        let mut bui = BackwardUserIterator::for_test(bmi, (start_bound, end_bound));
         let num_puts: usize = truth
             .iter()
             .map(|(key, inserts)| {
@@ -1152,8 +1170,7 @@ mod tests {
 
         let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
         let mi = UnorderedMergeIteratorInner::new(backward_iters);
-        let mut ui =
-            BackwardUserIterator::with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch, None);
+        let mut ui = BackwardUserIterator::with_min_epoch(mi, (Unbounded, Unbounded), min_epoch);
         ui.rewind().await.unwrap();
 
         let mut i = 0;

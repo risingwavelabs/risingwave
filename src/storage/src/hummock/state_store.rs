@@ -40,7 +40,7 @@ use super::{
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     Backward, DirectedUserIteratorBuilder, DirectionEnum, Forward, HummockIteratorDirection,
-    HummockIteratorUnion,
+    HummockIteratorUnion, UnorderedMergeIteratorInner, UserIteratorPayloadType,
 };
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::local_version_manager::SyncResult;
@@ -72,13 +72,17 @@ pub(crate) struct BackwardIter;
 impl HummockIteratorType for ForwardIter {
     type Direction = Forward;
     type SstableIteratorType = SstableIterator;
-    type UserIteratorBuilder = UserIterator;
+    type UserIteratorBuilder = UserIterator<
+        UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
+    >;
 }
 
 impl HummockIteratorType for BackwardIter {
     type Direction = Backward;
     type SstableIteratorType = BackwardSstableIterator;
-    type UserIteratorBuilder = BackwardUserIterator;
+    type UserIteratorBuilder = BackwardUserIterator<
+        UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+    >;
 }
 
 impl HummockStorage {
