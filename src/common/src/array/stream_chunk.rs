@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
