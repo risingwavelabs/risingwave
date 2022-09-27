@@ -45,7 +45,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     manager
         .send_barrier(&barrier, actor_ids.clone(), actor_ids, None)
         .unwrap();
-    let (mut collect_rx, _) = manager.remove_collect_rx(barrier.epoch.prev);
+    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev);
     // Collect barriers from actors
     let collected_barriers = rxs
         .iter_mut()
@@ -59,7 +59,12 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
         manager.collect(actor_id, &barrier).unwrap();
-        let notified = collect_rx.as_mut().unwrap().try_recv().is_ok();
+        let notified = complete_receiver
+            .complete_receiver
+            .as_mut()
+            .unwrap()
+            .try_recv()
+            .is_ok();
         assert_eq!(notified, i == count - 1);
     }
 
@@ -104,7 +109,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     manager
         .send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect, None)
         .unwrap();
-    let (mut collect_rx, _) = manager.remove_collect_rx(barrier.epoch.prev);
+    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev);
 
     // Collect barriers from actors
     let collected_barriers = rxs
@@ -119,7 +124,12 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
         manager.collect(actor_id, &barrier).unwrap();
-        let notified = collect_rx.as_mut().unwrap().try_recv().is_ok();
+        let notified = complete_receiver
+            .complete_receiver
+            .as_mut()
+            .unwrap()
+            .try_recv()
+            .is_ok();
         assert_eq!(notified, i == count - 1);
     }
 

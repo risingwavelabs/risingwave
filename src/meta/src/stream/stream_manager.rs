@@ -895,7 +895,6 @@ mod tests {
             _request: Request<BarrierCompleteRequest>,
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
             Ok(Response::new(BarrierCompleteResponse {
-                checkpoint: true,
                 ..Default::default()
             }))
         }
@@ -970,7 +969,7 @@ mod tests {
             );
 
             let (barrier_scheduler, scheduled_barriers) =
-                BarrierScheduler::new_pair(hummock_manager.clone());
+                BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
 
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await?);
