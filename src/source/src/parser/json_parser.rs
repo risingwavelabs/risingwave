@@ -109,7 +109,7 @@ mod tests {
 
         for payload in [
             br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.as_slice(),
-            br#"{"i32":1,"f64":12345,"decimal":12345}"#.as_slice(),
+            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
         ] {
             let writer = builder.row_writer();
             parser.parse(payload, writer).unwrap();
@@ -181,6 +181,10 @@ mod tests {
                 (Some(ScalarImpl::Int32(1)))
             );
             assert_eq!(row.value_at(1).to_owned_datum(), None);
+            assert_eq!(
+                row.value_at(4).to_owned_datum(),
+                (Some(ScalarImpl::Float32(12345e+10.into())))
+            );
             assert_eq!(
                 row.value_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(12345.into())))
