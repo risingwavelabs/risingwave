@@ -683,13 +683,12 @@ impl HashKey for SerializedKey {
         data_types: &[DataType],
     ) -> ArrayResult<()> {
         let mut key_buffer = self.key.as_slice();
-        let keys = data_types
+        for (datum_result, array_builder) in data_types
             .iter()
             .map(|ty| deserialize_datum(&mut key_buffer, ty))
-            .try_collect()
-            .map_err(ArrayError::internal)?;
-        for (array_builder, key) in array_builders.iter_mut().zip_eq::<Vec<_>>(keys) {
-            array_builder.append_datum(&key);
+            .zip_eq(array_builders.iter_mut())
+        {
+            array_builder.append_datum(&datum_result.map_err(ArrayError::internal)?);
         }
         Ok(())
     }
