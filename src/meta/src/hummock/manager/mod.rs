@@ -180,6 +180,7 @@ static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
         TaskStatus::SendFailCanceled,
         TaskStatus::AssignFailCanceled,
         TaskStatus::HeartbeatCanceled,
+        TaskStatus::InvalidgroupCanceled,
     ]
     .into_iter()
     .collect()
@@ -978,7 +979,7 @@ where
                 compact_status.report_compact_task(compact_task);
             }
             None => {
-                compact_task.set_task_status(TaskStatus::HeartbeatCanceled);
+                compact_task.set_task_status(TaskStatus::InvalidgroupCanceled);
             }
         }
 

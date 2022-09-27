@@ -212,9 +212,10 @@ message CompactTask {
     ASSIGN_FAIL_CANCELED = 5;
     SEND_FAIL_CANCELED = 6;
     MANUAL_CANCELED = 7;
-    EXECUTE_FAILED = 8;
-    JOIN_HANDLE_FAILED = 9;
-    TRACK_SST_ID_FAILED = 10;
+    INVALIDGROUP_CANCELED = 8;
+    EXECUTE_FAILED = 9;
+    JOIN_HANDLE_FAILED = 10;
+    TRACK_SST_ID_FAILED = 11;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
