@@ -15,7 +15,6 @@
 //! Hummock is the state store of the streaming system.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use parking_lot::Mutex;
@@ -67,7 +66,7 @@ pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
-use risingwave_pb::hummock::{pin_version_response, HummockVersion, WriteLimiterThreshold};
+use risingwave_pb::hummock::{pin_version_response, WriteLimiterThreshold};
 pub use validator::*;
 use value::*;
 
@@ -86,6 +85,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
+use crate::hummock::utils::WriteLimiter;
 use crate::monitor::StoreLocalStatistic;
 use crate::store::WriteDelay;
 
@@ -333,64 +333,4 @@ pub fn get_from_batch(
         local_stats.get_shared_buffer_hit_counts += 1;
         v
     })
-}
-
-/// Tells how long a write should be delayed before performed.
-#[derive(Default)]
-struct WriteLimiter {
-    threshold: WriteLimiterThreshold,
-    // Wakes stalled caller immediately.
-    breaker_receivers: Vec<tokio::sync::oneshot::Sender<()>>,
-    // Inputs of write delay calculation.
-    sub_level_number: u64,
-}
-
-impl WriteLimiter {
-    fn new() -> Self {
-        Self {
-            threshold: WriteLimiterThreshold {
-                max_sub_level_number: u64::MAX,
-                max_delay_sec: 0,
-                per_file_delay_sec: 0.0,
-            },
-            breaker_receivers: vec![],
-            sub_level_number: 0,
-        }
-    }
-
-    fn get_write_delay(&mut self) -> Option<WriteDelay> {
-        let exceeded = self
-            .sub_level_number
-            .saturating_sub(self.threshold.max_sub_level_number);
-        let duration = std::cmp::min(
-            self.threshold.max_delay_sec,
-            (self.threshold.per_file_delay_sec * exceeded as f32) as u64,
-        );
-        if duration == 0 {
-            return None;
-        }
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.breaker_receivers.push(tx);
-        Some(WriteDelay {
-            duration: Duration::from_secs(duration),
-            breaker: rx,
-        })
-    }
-
-    fn set_threshold(&mut self, threshold: WriteLimiterThreshold) {
-        self.threshold = threshold;
-        for breaker in self.breaker_receivers.drain(..) {
-            let _ = breaker.send(());
-        }
-    }
-
-    fn set_stats(&mut self, version: &HummockVersion) {
-        let mut sub_level_number = 0;
-        for group in version.levels.values() {
-            if let Some(l0) = group.l0.as_ref() {
-                sub_level_number += l0.sub_levels.len();
-            }
-        }
-        self.sub_level_number = sub_level_number as u64;
-    }
 }
