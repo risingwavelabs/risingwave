@@ -26,6 +26,7 @@ use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -207,7 +208,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for (row_idx, (key, hash_code)) in keys.iter().zip_eq(key_hash_codes.iter()).enumerate() {
             // if the visibility map has already shadowed this row,
             // then we pass
-            if let Some(vis_map) = visibility && !vis_map.is_set(row_idx)? {
+            if let Some(vis_map) = visibility && !vis_map.is_set(row_idx) {
                 continue;
             }
             let vis_map = key_to_vis_maps.entry(key).or_insert_with(|| {
@@ -360,7 +361,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ..
         }: &'a mut HashAggExecutorExtra<S>,
         state_map: &'a mut AggStateMap<K, S>,
-        epoch: u64,
+        epoch: EpochPair,
     ) {
         let actor_id_str = ctx.id.to_string();
         metrics
@@ -482,11 +483,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         for state_table in &mut extra.state_tables {
-            state_table.init_epoch(barrier.epoch.prev);
+            state_table.init_epoch(barrier.epoch);
         }
         state_map.update_epoch(barrier.epoch.curr);
 
-        let mut epoch = barrier.epoch.curr;
         yield Message::Barrier(barrier);
 
         #[for_await]
@@ -497,11 +497,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     Self::apply_chunk(&mut extra, &mut state_map, chunk).await?;
                 }
                 Message::Barrier(barrier) => {
-                    let next_epoch = barrier.epoch.curr;
-                    assert_eq!(epoch, barrier.epoch.prev);
-
                     #[for_await]
-                    for chunk in Self::flush_data(&mut extra, &mut state_map, epoch) {
+                    for chunk in Self::flush_data(&mut extra, &mut state_map, barrier.epoch) {
                         yield Message::Chunk(chunk?);
                     }
 
@@ -512,13 +509,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         }
                     }
 
-                    yield Message::Barrier(barrier);
-                    epoch = next_epoch;
-
                     // Update the current epoch in `ManagedLruCache`
                     if let ExecutorCache::Managed(ref mut cache) = state_map {
-                        cache.update_epoch(epoch)
+                        cache.update_epoch(barrier.epoch.curr)
                     }
+
+                    yield Message::Barrier(barrier);
                 }
             }
         }

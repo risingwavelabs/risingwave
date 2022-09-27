@@ -13,28 +13,27 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
+use fixedbitset::FixedBitSet;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, DataChunk, Row, RowRef};
+use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, Result, RwError};
+use risingwave_common::hash::{
+    calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
+};
 use risingwave_common::types::{
     DataType, Datum, ParallelUnitId, ToOwnedDatum, VirtualNode, VnodeMapping,
 };
-use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
-use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::expr_binary_nullable::{
-    new_not_distinct_from_expr, new_nullable_binary_expr,
-};
 use risingwave_expr::expr::expr_unary::new_unary_expr;
-use risingwave_expr::expr::{
-    build_from_prost, BoxedExpression, InputRefExpression, LiteralExpression,
-};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression, LiteralExpression};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -47,12 +46,12 @@ use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::StorageTableDesc;
 use uuid::Uuid;
 
-use crate::executor::join::{
-    concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
-};
+use crate::executor::join::chunked_data::ChunkedData;
+use crate::executor::join::JoinType;
 use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
-    Executor, ExecutorBuilder,
+    BufferChunkExecutor, EquiJoinParams, Executor, ExecutorBuilder, HashJoinExecutor, JoinHashMap,
+    RowId,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
@@ -284,26 +283,26 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
 /// `ExchangeExecutors`. This is done by grouping rows with the same key datums together, and also
 /// by grouping together scan ranges that point to the same partition (and can thus be easily
 /// scanned by the same worker node).
-pub struct LookupJoinExecutor<P> {
+pub struct LookupJoinExecutor<K> {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
-    build_child: Option<BoxedExecutor>,
+    build_child: BoxedExecutor,
     build_side_data_types: Vec<DataType>, // Data types of all columns of build side table
     build_side_key_idxs: Vec<usize>,
-    probe_side_source: P,
+    probe_side_source: Box<dyn ProbeSideSourceBuilder>,
     probe_side_key_types: Vec<DataType>, // Data types only of key columns of probe side table
     probe_side_key_idxs: Vec<usize>,
     null_safe: Vec<bool>,
     chunk_builder: DataChunkBuilder,
     schema: Schema,
     output_indices: Vec<usize>,
-    last_chunk: Option<SlicedDataChunk>,
     identity: String,
+    _phantom: PhantomData<K>,
 }
 
 const AT_LEAST_BUILD_SIDE_ROWS: usize = 512;
 
-impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
+impl<K: HashKey> Executor for LookupJoinExecutor<K> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -317,263 +316,192 @@ impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
     }
 }
 
-impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
+impl<K> LookupJoinExecutor<K> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        join_type: JoinType,
+        condition: Option<BoxedExpression>,
+        build_child: BoxedExecutor,
+        build_side_data_types: Vec<DataType>,
+        build_side_key_idxs: Vec<usize>,
+        probe_side_source: Box<dyn ProbeSideSourceBuilder>,
+        probe_side_key_types: Vec<DataType>,
+        probe_side_key_idxs: Vec<usize>,
+        null_safe: Vec<bool>,
+        chunk_builder: DataChunkBuilder,
+        schema: Schema,
+        output_indices: Vec<usize>,
+        identity: String,
+    ) -> Self {
+        Self {
+            join_type,
+            condition,
+            build_child,
+            build_side_data_types,
+            build_side_key_idxs,
+            probe_side_source,
+            probe_side_key_types,
+            probe_side_key_idxs,
+            null_safe,
+            chunk_builder,
+            schema,
+            output_indices,
+            identity,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<K: HashKey> LookupJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let mut build_side_batch_read_stream: BoxedDataChunkListStream = utils::batch_read(
-            self.build_child.take().unwrap().execute(),
-            AT_LEAST_BUILD_SIDE_ROWS,
-        );
+        let lookup_join_build_side_schema = self.build_child.schema().clone();
 
-        while let Some(chunk_list) = build_side_batch_read_stream.next().await {
+        let null_matched = {
+            let mut null_matched = FixedBitSet::with_capacity(self.null_safe.len());
+            for (idx, col_null_matched) in self.null_safe.iter().copied().enumerate() {
+                null_matched.set(idx, col_null_matched);
+            }
+            null_matched
+        };
+
+        let mut lookup_join_build_side_batch_read_stream: BoxedDataChunkListStream =
+            utils::batch_read(self.build_child.execute(), AT_LEAST_BUILD_SIDE_ROWS);
+
+        while let Some(chunk_list) = lookup_join_build_side_batch_read_stream.next().await {
             let chunk_list = chunk_list?;
 
             // Group rows with the same key datums together
             let groups = chunk_list
                 .iter()
-                .flat_map(|chunk| chunk.rows())
-                .into_group_map_by(|row| {
-                    self.build_side_key_idxs
-                        .iter()
-                        .map(|&idx| row.value_at(idx).to_owned_datum())
-                        .collect_vec()
-                });
-
-            let mut row_keys = vec![];
-            let mut all_row_refs = vec![];
-
-            groups.into_iter().for_each(|(row_key, row_refs)| {
-                row_keys.push(row_key);
-                all_row_refs.push(row_refs);
-            });
-
-            assert_eq!(row_keys.len(), all_row_refs.len());
-
-            self.probe_side_source.reset();
-            for row_key in &row_keys {
-                self.probe_side_source.add_scan_range(row_key)?;
-            }
-
-            let probe_child = self.probe_side_source.build_source().await?;
-            let mut probe_side_stream = probe_child.execute();
-
-            let mut probe_side_chunk_exists = true;
-
-            // for each row in the build side chunk, has_match tells us if it has a match
-            // on the probe side table
-            let mut has_match = all_row_refs
-                .iter()
-                .map(|rows| vec![false; rows.len()])
+                .flat_map(|chunk| {
+                    chunk.rows().map(|row| {
+                        self.build_side_key_idxs
+                            .iter()
+                            .map(|&idx| row.value_at(idx).to_owned_datum())
+                            .collect_vec()
+                    })
+                })
+                .sorted()
+                .dedup()
                 .collect_vec();
 
-            // Keep looping until there are no more probe side chunks to get, then do 1 more loop
-            while probe_side_chunk_exists {
-                let probe_side_chunk = probe_side_stream.next().await;
-                probe_side_chunk_exists = probe_side_chunk.is_some();
+            self.probe_side_source.reset();
+            for row_key in &groups {
+                self.probe_side_source.add_scan_range(row_key)?;
+            }
+            let lookup_join_probe_child = self.probe_side_source.build_source().await?;
 
-                let probe_side_chunk = if let Some(chunk) = probe_side_chunk {
-                    Some(chunk?.compact()?)
-                } else {
-                    None
-                };
+            // NOTICE!!!
+            // Lookup join build side will become the probe side of hash join,
+            // while its probe side will become the build side of hash join.
+            let hash_join_probe_child = Box::new(BufferChunkExecutor::new(
+                lookup_join_build_side_schema.clone(),
+                chunk_list,
+            ));
+            let hash_join_build_child = lookup_join_probe_child;
+            let hash_join_probe_data_types = self.build_side_data_types.clone();
+            let hash_join_build_data_types = hash_join_build_child.schema().data_types();
+            let hash_join_probe_side_key_idxs = self.build_side_key_idxs.clone();
+            let hash_join_build_side_key_idxs = self.probe_side_key_idxs.clone();
 
-                for (i, row_refs) in all_row_refs.iter().enumerate() {
-                    // We filter the probe side chunk to only have the rows whose key datums
-                    // matches the key datums of the row_refs we're currently looking at
-                    let expr = self.create_expression(&row_keys[i]);
-                    let chunk = if let Some(chunk) = probe_side_chunk.as_ref() {
-                        let vis = expr.eval(chunk)?;
-                        let chunk = chunk.with_visibility(vis.as_bool().iter().collect());
-                        Some(chunk.compact()?)
-                    } else {
-                        None
-                    };
+            let full_data_types = [
+                hash_join_probe_data_types.clone(),
+                hash_join_build_data_types.clone(),
+            ]
+            .concat();
 
-                    // The handling of the different join types and which operation they should
-                    // perform under each condition is very complex. For each
-                    // row, the gist of it is:
-                    //
-                    // Inner Join: Join the cur_row and the probe chunk until the latter is None.
-                    //
-                    // Left Outer Join: Same as inner join but if the probe chunk is None and the
-                    //      row has no match yet, null-pad the current row and append it
-                    //
-                    // Left Semi Join: Check for matches until probe chunk is None or a match is
-                    //      found. If there were any matches by the end, append the row.
-                    //
-                    // Left Anti Join: Check for matches until probe chunk is None or a match is
-                    //      found. If there were no matches by the end, append the row.
-                    // TODO: Simplify the logic of handling the different join types
-                    for (j, cur_row) in row_refs.iter().enumerate() {
-                        let join_result = if probe_side_chunk_exists {
-                            let chunk = chunk.as_ref().unwrap().clone();
+            let mut build_side = Vec::new();
+            let mut build_row_count = 0;
+            #[for_await]
+            for build_chunk in hash_join_build_child.execute() {
+                let build_chunk = build_chunk?;
+                if build_chunk.cardinality() > 0 {
+                    build_row_count += build_chunk.cardinality();
+                    build_side.push(build_chunk.compact()?)
+                }
+            }
+            let mut hash_map =
+                JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
+            let mut next_build_row_with_same_key =
+                ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
 
-                            match self.join_type {
-                                JoinType::LeftSemi | JoinType::LeftAnti if has_match[i][j] => {
-                                    continue;
-                                }
-                                JoinType::Inner
-                                | JoinType::LeftOuter
-                                | JoinType::LeftSemi
-                                | JoinType::LeftAnti => self.do_inner_join(cur_row, chunk),
-                                _ => unimplemented!(),
-                            }
-                        } else {
-                            match self.join_type {
-                                JoinType::Inner => break,
-                                JoinType::LeftOuter if has_match[i][j] => continue,
-                                JoinType::LeftOuter if !has_match[i][j] => {
-                                    self.do_left_outer_join(cur_row)
-                                }
-                                JoinType::LeftSemi if has_match[i][j] => {
-                                    self.convert_row_for_builder(cur_row)
-                                }
-                                JoinType::LeftSemi if !has_match[i][j] => continue,
-                                JoinType::LeftAnti if has_match[i][j] => continue,
-                                JoinType::LeftAnti if !has_match[i][j] => {
-                                    self.convert_row_for_builder(cur_row)
-                                }
-                                _ => unimplemented!(),
-                            }
-                        }?;
+            // Build hash map
+            for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
+                let build_keys = K::build(&hash_join_build_side_key_idxs, build_chunk)?;
 
-                        // Append chunk from the join result to the chunk builder if it exists
-                        if let Some(return_chunk) = join_result {
-                            if return_chunk.cardinality() > 0 {
-                                has_match[i][j] = true;
-
-                                // Skip adding if it's a Left Anti/Semi Join and the probe side
-                                // chunk exists. Rows for Left Anti/Semi Join are added at the end
-                                // when the probe side chunk is None instead.
-                                if let (JoinType::LeftSemi | JoinType::LeftAnti, true) =
-                                    (self.join_type, probe_side_chunk_exists)
-                                {
-                                    continue;
-                                }
-
-                                let append_result =
-                                    self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?;
-                                if let Some(inner_chunk) = append_result {
-                                    yield inner_chunk.reorder_columns(&self.output_indices);
-                                }
-                            }
-                        }
-
-                        // Until we don't have any more last_chunks to append to the chunk builder,
-                        // keep appending them to the chunk builder
-                        while self.last_chunk.is_some() {
-                            let temp_chunk: Option<SlicedDataChunk> =
-                                std::mem::take(&mut self.last_chunk);
-                            if let Some(inner_chunk) = self.append_chunk(temp_chunk.unwrap())? {
-                                yield inner_chunk.reorder_columns(&self.output_indices);
-                            }
-                        }
+                for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
+                    // Only insert key to hash map if it is consistent with the null safe
+                    // restriction.
+                    if build_key.null_bitmap().is_subset(&null_matched) {
+                        let row_id = RowId::new(build_chunk_id, build_row_id);
+                        next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
                     }
                 }
             }
+
+            let params = EquiJoinParams::new(
+                hash_join_probe_child,
+                hash_join_probe_data_types,
+                hash_join_probe_side_key_idxs,
+                build_side,
+                hash_join_build_data_types,
+                full_data_types,
+                hash_map,
+                next_build_row_with_same_key,
+            );
+
+            if let Some(cond) = self.condition.as_ref() {
+                let stream = match self.join_type {
+                    JoinType::Inner => {
+                        HashJoinExecutor::do_inner_join_with_non_equi_condition(params, cond)
+                    }
+                    JoinType::LeftOuter => {
+                        HashJoinExecutor::do_left_outer_join_with_non_equi_condition(params, cond)
+                    }
+                    JoinType::LeftSemi => {
+                        HashJoinExecutor::do_left_semi_join_with_non_equi_condition(params, cond)
+                    }
+                    JoinType::LeftAnti => {
+                        HashJoinExecutor::do_left_anti_join_with_non_equi_condition(params, cond)
+                    }
+                    JoinType::RightOuter
+                    | JoinType::RightSemi
+                    | JoinType::RightAnti
+                    | JoinType::FullOuter => unimplemented!(),
+                };
+                // For non-equi join, we need an output chunk builder to align the output chunks.
+                let mut output_chunk_builder =
+                    DataChunkBuilder::with_default_size(self.schema.data_types());
+                #[for_await]
+                for chunk in stream {
+                    #[for_await]
+                    for output_chunk in output_chunk_builder
+                        .trunc_data_chunk(chunk?.reorder_columns(&self.output_indices))
+                    {
+                        yield output_chunk
+                    }
+                }
+                if let Some(output_chunk) = output_chunk_builder.consume_all() {
+                    yield output_chunk
+                }
+            } else {
+                let stream = match self.join_type {
+                    JoinType::Inner => HashJoinExecutor::do_inner_join(params),
+                    JoinType::LeftOuter => HashJoinExecutor::do_left_outer_join(params),
+                    JoinType::LeftSemi => HashJoinExecutor::do_left_semi_anti_join::<false>(params),
+                    JoinType::LeftAnti => HashJoinExecutor::do_left_semi_anti_join::<true>(params),
+                    JoinType::RightOuter
+                    | JoinType::RightSemi
+                    | JoinType::RightAnti
+                    | JoinType::FullOuter => unimplemented!(),
+                };
+                #[for_await]
+                for chunk in stream {
+                    yield chunk?.reorder_columns(&self.output_indices)
+                }
+            }
         }
-
-        // Consume and yield all the remaining chunks in the chunk builder
-        if let Some(data_chunk) = self.chunk_builder.consume_all()? {
-            yield data_chunk.reorder_columns(&self.output_indices);
-        }
-    }
-
-    /// Creates an expression that returns true if the value of the datums in all the probe side
-    /// key columns match the given `key_datums`.
-    fn create_expression(&self, key_datums: &[Datum]) -> BoxedExpression {
-        self.create_expression_helper(key_datums, 0)
-    }
-
-    /// Recursively builds the expression
-    fn create_expression_helper(&self, key_datums: &[Datum], i: usize) -> BoxedExpression {
-        assert!(i < key_datums.len());
-
-        let literal = Box::new(LiteralExpression::new(
-            self.build_side_data_types[self.build_side_key_idxs[i]].clone(),
-            key_datums[i].clone(),
-        ));
-
-        let input_ref = Box::new(InputRefExpression::new(
-            self.probe_side_key_types[i].clone(),
-            self.probe_side_key_idxs[i],
-        ));
-
-        // For null safe equal pair, use `IS NOT DISTINCT FROM`.
-        let equal = if self.null_safe[i] {
-            new_not_distinct_from_expr(literal, input_ref, DataType::Boolean)
-        } else {
-            new_binary_expr(Type::Equal, DataType::Boolean, literal, input_ref)
-        };
-
-        if i + 1 == key_datums.len() {
-            equal
-        } else {
-            new_nullable_binary_expr(
-                Type::And,
-                DataType::Boolean,
-                equal,
-                self.create_expression_helper(key_datums, i + 1),
-            )
-        }
-    }
-
-    /// Inner joins the `cur_row` with the `probe_side_chunk`. The non-equi condition is also
-    /// evaluated to hide the rows in the join result that don't match the condition.
-    fn do_inner_join(
-        &self,
-        cur_row: &RowRef<'_>,
-        probe_side_chunk: DataChunk,
-    ) -> Result<Option<DataChunk>> {
-        let build_side_chunk = convert_row_to_chunk(
-            cur_row,
-            probe_side_chunk.capacity(),
-            &self.build_side_data_types,
-        )?;
-
-        let new_chunk = concatenate(&build_side_chunk, &probe_side_chunk)?;
-
-        if let Some(cond) = self.condition.as_ref() {
-            let visibility = cond.eval(&new_chunk)?;
-            Ok(Some(
-                new_chunk.with_visibility(visibility.as_bool().iter().collect()),
-            ))
-        } else {
-            Ok(Some(new_chunk))
-        }
-    }
-
-    /// Pad the row out with NULLs and return it.
-    fn do_left_outer_join(&self, cur_row: &RowRef<'_>) -> Result<Option<DataChunk>> {
-        let mut build_datum_refs = cur_row.values().collect_vec();
-
-        let builder_data_types = self.chunk_builder.data_types();
-        let difference = builder_data_types.len() - build_datum_refs.len();
-
-        for _ in 0..difference {
-            build_datum_refs.push(None);
-        }
-
-        let one_row_chunk = convert_datum_refs_to_chunk(&build_datum_refs, 1, &builder_data_types)?;
-
-        Ok(Some(one_row_chunk))
-    }
-
-    /// Converts row to a data chunk
-    fn convert_row_for_builder(&self, cur_row: &RowRef<'_>) -> Result<Option<DataChunk>> {
-        Ok(Some(convert_row_to_chunk(
-            cur_row,
-            1,
-            &self.chunk_builder.data_types(),
-        )?))
-    }
-
-    /// Appends `input_chunk` to `self.chunk_builder`. If there is a leftover chunk, assign it
-    /// to `self.last_chunk`. Note that `self.last_chunk` is always None before this is called.
-    fn append_chunk(&mut self, input_chunk: SlicedDataChunk) -> Result<Option<DataChunk>> {
-        let (mut left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(input_chunk)?;
-        std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
-        Ok(return_chunk)
     }
 }
 
@@ -670,6 +598,8 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
         let vnode_mapping = lookup_join_node.get_probe_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
+        let hash_key_kind = calc_hash_key_kind(&probe_side_key_types);
+
         let probe_side_source = ProbeSideSource {
             table_desc: table_desc.clone(),
             vnode_mapping,
@@ -684,22 +614,47 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             pu_to_scan_range_mapping: HashMap::new(),
         };
 
-        Ok(Box::new(LookupJoinExecutor {
-            join_type,
-            condition,
-            build_child: Some(build_child),
-            build_side_data_types,
-            build_side_key_idxs,
-            probe_side_source,
-            probe_side_key_types,
-            probe_side_key_idxs,
-            null_safe,
-            chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
-            schema: actual_schema,
-            output_indices,
-            last_chunk: None,
-            identity: source.plan_node().get_identity().clone(),
-        }))
+        Ok(LookupJoinExecutor::dispatch_by_kind(
+            hash_key_kind,
+            LookupJoinExecutor::new(
+                join_type,
+                condition,
+                build_child,
+                build_side_data_types,
+                build_side_key_idxs,
+                Box::new(probe_side_source),
+                probe_side_key_types,
+                probe_side_key_idxs,
+                null_safe,
+                DataChunkBuilder::with_default_size(original_schema.data_types()),
+                actual_schema,
+                output_indices,
+                source.plan_node().get_identity().clone(),
+            ),
+        ))
+    }
+}
+
+impl HashKeyDispatcher for LookupJoinExecutor<()> {
+    type Input = Self;
+    type Output = BoxedExecutor;
+
+    fn dispatch<K: HashKey>(input: Self::Input) -> Self::Output {
+        Box::new(LookupJoinExecutor::<K>::new(
+            input.join_type,
+            input.condition,
+            input.build_child,
+            input.build_side_data_types,
+            input.build_side_key_idxs,
+            input.probe_side_source,
+            input.probe_side_key_types,
+            input.probe_side_key_idxs,
+            input.null_safe,
+            input.chunk_builder,
+            input.schema,
+            input.output_indices,
+            input.identity,
+        ))
     }
 }
 
@@ -707,6 +662,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
 mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::hash::{calc_hash_key_kind, HashKeyDispatcher};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -773,22 +729,29 @@ mod tests {
             fields: build_child.schema().fields.clone(),
         };
 
-        Box::new(LookupJoinExecutor {
-            join_type,
-            condition,
-            build_side_data_types: build_child.schema().data_types(),
-            build_child: Some(build_child),
-            build_side_key_idxs: vec![0],
-            probe_side_key_types: vec![probe_side_schema.data_types()[0].clone()],
-            probe_side_source: FakeProbeSideSourceBuilder::new(probe_side_schema),
-            probe_side_key_idxs: vec![0],
-            null_safe: vec![null_safe],
-            chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
-            schema: original_schema.clone(),
-            output_indices: (0..original_schema.len()).into_iter().collect(),
-            last_chunk: None,
-            identity: "TestLookupJoinExecutor".to_string(),
-        })
+        let probe_side_data_types = probe_side_schema.data_types();
+        let build_side_data_types = build_child.schema().data_types();
+
+        let hash_key_kind = calc_hash_key_kind(&probe_side_data_types);
+
+        LookupJoinExecutor::dispatch_by_kind(
+            hash_key_kind,
+            LookupJoinExecutor::new(
+                join_type,
+                condition,
+                build_child,
+                build_side_data_types,
+                vec![0],
+                Box::new(FakeProbeSideSourceBuilder::new(probe_side_schema)),
+                vec![probe_side_data_types[0].clone()],
+                vec![0],
+                vec![null_safe],
+                DataChunkBuilder::with_default_size(original_schema.data_types()),
+                original_schema.clone(),
+                (0..original_schema.len()).into_iter().collect(),
+                "TestLookupJoinExecutor".to_string(),
+            ),
+        )
     }
 
     fn create_order_by_executor(child: BoxedExecutor) -> BoxedExecutor {
@@ -828,14 +791,14 @@ mod tests {
         let expected = DataChunk::from_pretty(
             "i f   i f
              1 6.1 1 9.2
-             2 5.5 2 4.4
              2 5.5 2 5.5
-             2 8.4 2 4.4
+             2 5.5 2 4.4
              2 8.4 2 5.5
-             5 4.1 5 3.7
+             2 8.4 2 4.4
              5 4.1 5 2.3
-             5 9.1 5 3.7
-             5 9.1 5 2.3",
+             5 4.1 5 3.7
+             5 9.1 5 2.3
+             5 9.1 5 3.7",
         );
 
         do_test(JoinType::Inner, None, false, expected).await;
@@ -846,14 +809,14 @@ mod tests {
         let expected = DataChunk::from_pretty(
             "i f   i f
              1 6.1 1 9.2
-             2 5.5 2 4.4
              2 5.5 2 5.5
-             2 8.4 2 4.4
+             2 5.5 2 4.4
              2 8.4 2 5.5
-             5 4.1 5 3.7
+             2 8.4 2 4.4
              5 4.1 5 2.3
-             5 9.1 5 3.7
+             5 4.1 5 3.7
              5 9.1 5 2.3
+             5 9.1 5 3.7
              .  .  .  .",
         );
 
@@ -865,15 +828,15 @@ mod tests {
         let expected = DataChunk::from_pretty(
             "i f   i f
              1 6.1 1 9.2
-             2 5.5 2 4.4
              2 5.5 2 5.5
-             2 8.4 2 4.4
+             2 5.5 2 4.4
              2 8.4 2 5.5
+             2 8.4 2 4.4
              3 3.9 . .
-             5 4.1 5 3.7
              5 4.1 5 2.3
-             5 9.1 5 3.7
+             5 4.1 5 3.7
              5 9.1 5 2.3
+             5 9.1 5 3.7
              . .   . .",
         );
 

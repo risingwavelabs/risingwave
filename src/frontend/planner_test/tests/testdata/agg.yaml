@@ -653,10 +653,6 @@
   planner_error: 'Invalid input syntax: Order by aggregates are disallowed to occur
     with distinct aggregates'
 - sql: |
-    create table t(x int, y varchar);
-    select single_value(distinct x) from t;
-  binder_error: 'Invalid input syntax: single_value(distinct) is disallowed'
-- sql: |
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
   optimized_logical_plan: |

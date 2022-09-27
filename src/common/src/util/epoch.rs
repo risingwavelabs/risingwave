@@ -113,7 +113,6 @@ impl EpochPair {
         Self { curr, prev }
     }
 
-    #[cfg(test)]
     pub fn inc(&self) -> Self {
         Self {
             curr: self.curr + 1,

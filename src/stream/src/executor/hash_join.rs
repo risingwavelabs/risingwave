@@ -227,8 +227,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     cond: Option<BoxedExpression>,
     /// Identity string
     identity: String,
-    /// Epoch
-    epoch: u64,
 
     #[expect(dead_code)]
     /// Logical Operator Info
@@ -594,7 +592,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             cond,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
             append_only_optimize,
             metrics,
         }
@@ -672,17 +669,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
                 }
                 AlignedMessage::Barrier(barrier) => {
-                    self.flush_data().await?;
-                    let epoch = barrier.epoch.curr;
-                    self.side_l.ht.update_epoch(epoch);
-                    self.side_r.ht.update_epoch(epoch);
-                    self.epoch = epoch;
+                    self.flush_data(barrier.epoch).await?;
 
                     // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone());
                         self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
                     }
+
+                    // Update epoch for managed cache.
+                    self.side_l.ht.update_epoch(barrier.epoch.curr);
+                    self.side_r.ht.update_epoch(barrier.epoch.curr);
 
                     // Report metrics of cached join rows/entries
                     for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
@@ -711,11 +708,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
     }
 
-    async fn flush_data(&mut self) -> StreamExecutorResult<()> {
+    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.ht.flush().await?;
-        self.side_r.ht.flush().await?;
+        self.side_l.ht.flush(epoch).await?;
+        self.side_r.ht.flush(epoch).await?;
 
         // We need to manually evict the cache to the target capacity.
         self.side_l.ht.evict();
@@ -1169,8 +1166,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1245,8 +1242,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1330,8 +1327,8 @@ mod tests {
         assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1441,8 +1438,8 @@ mod tests {
         assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1544,8 +1541,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1623,8 +1620,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1702,8 +1699,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1789,8 +1786,8 @@ mod tests {
         assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd right chunk
@@ -1910,8 +1907,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -2039,8 +2036,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_r.push_barrier(1, false);
-        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd right chunk
