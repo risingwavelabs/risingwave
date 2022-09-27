@@ -192,7 +192,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
     #[for_await]
     for chunk in expect.execute() {
         assert_matches!(chunk, Ok(_));
-        let chunk = chunk.unwrap().compact().unwrap();
+        let chunk = chunk.unwrap().compact();
         expect_cardinality += chunk.cardinality();
         expects.push(chunk);
     }
@@ -200,7 +200,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
     #[for_await]
     for chunk in actual.execute() {
         assert_matches!(chunk, Ok(_));
-        let chunk = chunk.unwrap().compact().unwrap();
+        let chunk = chunk.unwrap().compact();
         actual_cardinality += chunk.cardinality();
         actuals.push(chunk);
     }

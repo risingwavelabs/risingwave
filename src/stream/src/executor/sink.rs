@@ -91,7 +91,7 @@ impl<S: StateStore> SinkExecutor<S> {
                         in_transaction = true;
                     }
 
-                    let visible_chunk = chunk.clone().compact()?;
+                    let visible_chunk = chunk.clone().compact();
                     if let Err(e) = sink.write_batch(visible_chunk, &schema).await {
                         sink.abort().await?;
                         return Err(e.into());

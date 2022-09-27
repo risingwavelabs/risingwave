@@ -56,7 +56,7 @@ impl FilterExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?.compact()?;
+            let data_chunk = data_chunk?.compact();
             let vis_array = self.expr.eval(&data_chunk)?;
 
             if let Bool(vis) = vis_array.as_ref() {
