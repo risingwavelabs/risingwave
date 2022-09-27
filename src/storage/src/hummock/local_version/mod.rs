@@ -19,6 +19,7 @@ use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, SharedBuffer};
 
+mod flush_controller;
 pub mod local_version_impl;
 pub mod local_version_manager;
 pub mod pinned_version;
