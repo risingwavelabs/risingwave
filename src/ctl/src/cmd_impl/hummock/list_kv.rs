@@ -15,6 +15,8 @@
 use bytes::{Buf, BufMut, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::next_key;
+use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::store::ReadOptions;
 use risingwave_storage::StateStore;
 
@@ -24,7 +26,7 @@ pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
     let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
     let observer_manager = hummock_opts
-        .create_observer_manager(meta_client, hummock.clone())
+        .create_observer_manager(meta_client.clone(), hummock.clone())
         .await?;
     // This line ensures local version is valid.
     observer_manager.start().await?;
@@ -86,6 +88,9 @@ pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
         println!("{} {:?} => {:?}", print_string, k, v)
     }
 
+    meta_client
+        .unpin_version_before(HummockVersionId::MAX)
+        .await?;
     hummock_opts.shutdown().await;
     Ok(())
 }

@@ -713,10 +713,10 @@ impl StageRunner {
                 match &mut node_body {
                     NodeBody::LookupJoin(node) => {
                         let side_table_desc = node
-                            .probe_side_table_desc
+                            .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        node.probe_side_vnode_mapping = self
+                        node.inner_side_vnode_mapping = self
                             .get_vnode_mapping(&side_table_desc.table_id.into())
                             .unwrap_or_default();
                         node.worker_nodes = self.worker_node_manager.list_worker_nodes();

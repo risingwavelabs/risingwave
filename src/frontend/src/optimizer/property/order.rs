@@ -40,6 +40,10 @@ impl Order {
             .map(FieldOrder::to_protobuf)
             .collect_vec()
     }
+
+    pub fn len(&self) -> usize {
+        self.field_order.len()
+    }
 }
 
 impl fmt::Display for Order {

@@ -12,44 +12,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 
+// use super::memtable::Memtable;
 use super::{GetFutureTrait, IterFutureTrait, ReadOptions};
+use crate::hummock::local_version::PinnedVersion;
+use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockResult, HummockStateStoreIter};
-use crate::table::streaming_table::mem_table::MemTable;
+
+type ImmutableMemtable = SharedBufferBatch;
+
+// TODO: refine to use use a custom data structure Memtable
+type ImmId = SharedBufferBatchId;
+type ImmIdVec = Vec<ImmId>;
 
 /// Data not committed to Hummock. There are two types of staging data:
 /// - Immutable memtable: data that has been written into local state store but not persisted.
 /// - Uncommitted SST: data that has been uploaded to persistent storage but not committed to
 ///   hummock version.
+
+#[derive(Clone)]
 pub enum StagingData {
-    ImmMem(Arc<MemTable>),
-    Sst(LocalSstableInfo),
+    // ImmMem(Arc<Memtable>),
+    ImmMem(Arc<ImmutableMemtable>),
+    Sst((LocalSstableInfo, ImmIdVec)),
 }
 
 pub enum VersionUpdate {
-    /// We will do in-place update if a `OrderIdx` is provided.
-    /// Otherwise, a new staging data entry will be added.
-    Staging(StagingData, Option<OrderIdx>),
+    /// a new staging data entry will be added.
+    Staging(StagingData),
     CommittedDelta(HummockVersionDelta),
     CommittedSnapshot(HummockVersion),
 }
 
-pub type OrderIdx = u32;
-
-/// `OrderIdx` serves two purposes:
-/// - Represent ordering of the uncommitted data so that we can do early-stop for point get.
-/// - Use as an identifier to uncommitted data so that we can do in-place update.
-pub type StagingVersion = BTreeMap<OrderIdx, StagingData>;
+#[allow(unused)]
+pub struct StagingVersion {
+    imm: VecDeque<Arc<ImmutableMemtable>>,
+    sst: VecDeque<LocalSstableInfo>,
+}
 
 // TODO: use a custom data structure to allow in-place update instead of proto
-pub type CommittedVersion = HummockVersion;
+pub type CommittedVersion = PinnedVersion;
 
 /// A container of information required for reading from hummock.
 #[allow(unused)]
@@ -67,17 +76,22 @@ pub struct HummockReadVersion {
 impl HummockReadVersion {
     /// Updates the read version with `VersionUpdate`.
     /// A `OrderIdx` that can uniquely identify the newly added entry will be returned.
-    pub fn update(&mut self, info: VersionUpdate) -> HummockResult<OrderIdx> {
+    pub fn update(&mut self, info: VersionUpdate) -> HummockResult<()> {
         unimplemented!()
     }
 
     /// Point gets a value from the state store based on the read version.
-    fn get(&self, key: &[u8], epoch: u64, read_options: ReadOptions) -> impl GetFutureTrait<'_> {
+    pub fn get(
+        &self,
+        key: &[u8],
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl GetFutureTrait<'_> {
         async move { unimplemented!() }
     }
 
     /// Opens and returns an iterator for a given `key_range` based on the read version.
-    fn iter<R, B>(
+    pub fn iter<R, B>(
         &self,
         key_range: R,
         epoch: u64,

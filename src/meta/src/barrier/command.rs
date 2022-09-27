@@ -18,7 +18,6 @@ use std::sync::Arc;
 use futures::future::try_join_all;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -48,11 +47,6 @@ pub struct Reschedule {
     pub added_actors: Vec<ActorId>,
     /// Removed actors in this fragment.
     pub removed_actors: Vec<ActorId>,
-
-    /// Added parallel units in this fragment.
-    pub added_parallel_units: Vec<ParallelUnitId>,
-    /// Removed parallel units in this fragment.
-    pub removed_parallel_units: Vec<ParallelUnitId>,
 
     /// Vnode bitmap updates for some actors in this fragment.
     pub vnode_bitmap_updates: HashMap<ActorId, Bitmap>,
