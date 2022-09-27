@@ -45,7 +45,7 @@ pub struct LogicalMultiJoin {
     // pk_derive soon.
     /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
     /// not consider output_indices**
-    #[allow(unused)]
+    #[expect(dead_code)]
     inner_o2i_mapping: Vec<(usize, usize)>,
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }

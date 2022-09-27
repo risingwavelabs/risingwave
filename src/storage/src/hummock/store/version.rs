@@ -51,7 +51,7 @@ pub enum VersionUpdate {
     CommittedSnapshot(HummockVersion),
 }
 
-#[allow(unused)]
+#[expect(dead_code)]
 pub struct StagingVersion {
     imm: VecDeque<Arc<ImmutableMemtable>>,
     sst: VecDeque<LocalSstableInfo>,
@@ -61,7 +61,7 @@ pub struct StagingVersion {
 pub type CommittedVersion = PinnedVersion;
 
 /// A container of information required for reading from hummock.
-#[allow(unused)]
+#[expect(dead_code)]
 pub struct HummockReadVersion {
     /// Local version for staging data.
     staging: StagingVersion,
@@ -72,7 +72,7 @@ pub struct HummockReadVersion {
     sstable_store: SstableStoreRef,
 }
 
-#[allow(unused)]
+#[expect(unused_variables)]
 impl HummockReadVersion {
     /// Updates the read version with `VersionUpdate`.
     /// A `OrderIdx` that can uniquely identify the newly added entry will be returned.
