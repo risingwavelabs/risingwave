@@ -78,9 +78,9 @@ pub trait HashKeyDeserializer {
 
 /// Trait for value types that can be serialized to or deserialized from hash keys.
 ///
-/// Note that this trait is more like a marker suggesting that types that implment it can be encoded
-/// into the hash key. The actual encoding/decoding method is not limited to [`HashKeySerDe`]'s
-/// fixed-size implementation.
+/// Note that this trait is more like a marker suggesting that types that implement it can be
+/// encoded into the hash key. The actual encoding/decoding method is not limited to
+/// [`HashKeySerDe`]'s fixed-size implementation.
 pub trait HashKeySerDe<'a>: ScalarRef<'a> {
     type S: AsRef<[u8]>;
     fn fixed_size_serialize(self) -> Self::S;
