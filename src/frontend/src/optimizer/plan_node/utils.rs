@@ -132,28 +132,19 @@ pub struct IndicesDisplay<'a> {
 
 impl fmt::Display for IndicesDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "[{}]",
-            self.indices
-                .iter()
-                .map(|i| self.input_schema.fields.get(*i).unwrap().name.clone())
-                .collect_vec()
-                .join(", ")
-        )
+        write!(f, "{self:?}")
     }
 }
 
 impl fmt::Debug for IndicesDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "[{}]",
-            self.indices
-                .iter()
-                .map(|i| self.input_schema.fields.get(*i).unwrap().name.clone())
-                .collect_vec()
-                .join(", ")
-        )
+        let mut f = f.debug_list();
+        for i in self.indices {
+            f.entry(&format_args!(
+                "{}",
+                self.input_schema.fields.get(*i).unwrap().name
+            ));
+        }
+        f.finish()
     }
 }

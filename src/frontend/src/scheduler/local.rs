@@ -311,10 +311,10 @@ impl LocalQueryExecution {
                 match &mut node_body {
                     NodeBody::LookupJoin(node) => {
                         let side_table_desc = node
-                            .probe_side_table_desc
+                            .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        node.probe_side_vnode_mapping = self
+                        node.inner_side_vnode_mapping = self
                             .front_env
                             .catalog_reader()
                             .read_guard()

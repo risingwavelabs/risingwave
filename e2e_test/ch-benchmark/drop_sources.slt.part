@@ -1,0 +1,26 @@
+statement ok
+DROP SOURCE tpcc_customer;
+
+statement ok
+DROP SOURCE tpcc_district;
+
+# statement ok
+# DROP SOURCE tpcc_history;
+
+statement ok
+DROP SOURCE tpcc_item;
+
+statement ok
+DROP SOURCE tpcc_neworder;
+
+statement ok
+DROP SOURCE tpcc_orderline;
+
+statement ok
+DROP SOURCE tpcc_orders;
+
+statement ok
+DROP SOURCE tpcc_stock;
+
+statement ok
+DROP SOURCE tpcc_warehouse;
