@@ -94,9 +94,9 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
     etcd_password: String,
 
-    /// Maximum allowed heartbeat interval in ms.
-    #[clap(long, default_value = "60000")]
-    max_heartbeat_interval: u32,
+    /// Maximum allowed heartbeat interval in seconds.
+    #[clap(long, default_value = "300")]
+    max_heartbeat_interval_secs: u32,
 
     #[clap(long)]
     dashboard_ui_path: Option<String>,
@@ -177,7 +177,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             Backend::Mem => MetaStoreBackend::Mem,
         };
-        let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
+
+        let max_heartbeat_interval = Duration::from_secs(opts.max_heartbeat_interval_secs as u64);
         let barrier_interval =
             Duration::from_millis(meta_config.streaming.barrier_interval_ms as u64);
         let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
