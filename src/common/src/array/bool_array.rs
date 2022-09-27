@@ -16,7 +16,7 @@ use std::hash::{Hash, Hasher};
 
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
@@ -104,15 +104,15 @@ impl Array for BoolArray {
     #[inline(always)]
     fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
         if !self.is_null(idx) {
-            self.data.is_set(idx).unwrap().hash(state);
+            self.data.is_set(idx).hash(state);
         } else {
             NULL_VAL_FOR_HASH.hash(state);
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = BoolArrayBuilder::new(capacity);
-        Ok(ArrayBuilderImpl::Bool(array_builder))
+        ArrayBuilderImpl::Bool(array_builder)
     }
 }
 
