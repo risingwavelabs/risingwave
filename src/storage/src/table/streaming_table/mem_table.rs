@@ -163,7 +163,6 @@ impl MemTable {
                     e.insert(RowOp::Update((old_val, value)));
                 }
                 RowOp::Update((old_value, _)) => {
-                    // replace the update op
                     let old_val = std::mem::take(old_value);
                     e.insert(RowOp::Update((old_val, value)));
                 }

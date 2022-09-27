@@ -130,7 +130,7 @@ impl ManagedValueState {
                 .chain(std::iter::once(output))
                 .collect(),
         );
-        state_table.upsert(row)?;
+        state_table.upsert(row);
 
         self.is_dirty = false;
         Ok(())
