@@ -113,7 +113,9 @@ impl TableCatalogBuilder {
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
             vnode_col_idx: self.vnode_col_idx,
-            value_indices: (0..self.columns.len()).collect_vec(),
+            value_indices: self
+                .value_indices
+                .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
         }
     }
 
