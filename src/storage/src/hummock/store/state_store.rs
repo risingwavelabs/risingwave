@@ -31,7 +31,7 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockResult, HummockStateStoreIter};
 
-#[allow(unused)]
+#[expect(dead_code)]
 pub struct HummockStorageCore {
     /// Mutable memtable.
     memtable: Memtable,
@@ -52,13 +52,13 @@ pub struct HummockStorageCore {
     compaction_group_client: Arc<CompactionGroupClientImpl>,
 }
 
-#[allow(unused)]
+#[expect(dead_code)]
 #[derive(Clone)]
 pub struct HummockStorage {
     core: Arc<HummockStorageCore>,
 }
 
-#[allow(unused)]
+#[expect(unused_variables)]
 impl HummockStorageCore {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&mut self, info: VersionUpdate) -> HummockResult<()> {
@@ -66,7 +66,7 @@ impl HummockStorageCore {
     }
 }
 
-#[allow(unused)]
+#[expect(unused_variables)]
 impl StateStore for HummockStorage {
     type Iter = HummockStateStoreIter;
 
