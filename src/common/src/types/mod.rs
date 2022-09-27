@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use parse_display::Display;
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +27,7 @@ mod native_type;
 mod ops;
 mod scalar_impl;
 
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
 use std::io::Cursor;
 use std::str::FromStr;
 
@@ -51,7 +52,7 @@ use itertools::Itertools;
 pub use ops::{CheckedAdd, IsNegative};
 pub use ordered_float::IntoOrdered;
 use paste::paste;
-use postgres_types::{ToSql, Type};
+use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
 
 use self::struct_type::StructType;
@@ -76,25 +77,40 @@ pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
 /// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
 /// but without data fields.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, EnumDiscriminants)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, EnumDiscriminants)]
 #[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
 pub enum DataType {
+    #[display("boolean")]
     Boolean,
+    #[display("smallint")]
     Int16,
+    #[display("integer")]
     Int32,
+    #[display("bigint")]
     Int64,
+    #[display("real")]
     Float32,
+    #[display("double precision")]
     Float64,
+    #[display("numeric")]
     Decimal,
+    #[display("date")]
     Date,
+    #[display("varchar")]
     Varchar,
+    #[display("time without time zone")]
     Time,
+    #[display("timestamp without time zone")]
     Timestamp,
+    #[display("timestamp with time zone")]
     Timestampz,
+    #[display("interval")]
     Interval,
+    #[display("{0}")]
     Struct(Arc<StructType>),
+    #[display("{datatype}[]")]
     List { datatype: Box<DataType> },
 }
 
@@ -181,42 +197,6 @@ impl From<&ProstDataType> for DataType {
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
             TypeName::TypeUnspecified => unreachable!(),
-        }
-    }
-}
-
-impl Display for DataType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DataType::Boolean => f.write_str("boolean"),
-            DataType::Int16 => f.write_str("smallint"),
-            DataType::Int32 => f.write_str("integer"),
-            DataType::Int64 => f.write_str("bigint"),
-            DataType::Float32 => f.write_str("real"),
-            DataType::Float64 => f.write_str("double precision"),
-            DataType::Decimal => f.write_str("numeric"),
-            DataType::Date => f.write_str("date"),
-            DataType::Varchar => f.write_str("varchar"),
-            DataType::Time => f.write_str("time without time zone"),
-            DataType::Timestamp => f.write_str("timestamp without time zone"),
-            DataType::Timestampz => f.write_str("timestamp with time zone"),
-            DataType::Interval => f.write_str("interval"),
-            DataType::Struct(t) => {
-                if t.field_names.is_empty() {
-                    write!(f, "record")
-                } else {
-                    write!(
-                        f,
-                        "struct<{}>",
-                        t.fields
-                            .iter()
-                            .zip_eq(t.field_names.iter())
-                            .map(|(d, s)| format!("{} {}", s, d))
-                            .join(",")
-                    )
-                }
-            }
-            DataType::List { datatype } => write!(f, "{}[]", datatype),
         }
     }
 }
@@ -416,16 +396,16 @@ macro_rules! for_all_scalar_variants {
 macro_rules! scalar_impl_enum {
     ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
         pub enum ScalarImpl {
-            $( $variant_name($scalar) ),*
+            $( #[display("{0}")] $variant_name($scalar) ),*
         }
 
         /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
         /// framework.
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Display, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
         pub enum ScalarRefImpl<'scalar> {
-            $( $variant_name($scalar_ref) ),*
+            $( #[display("{0}")] $variant_name($scalar_ref) ),*
         }
     };
 }
@@ -698,37 +678,6 @@ pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
     }
 }
 
-impl Display for ScalarImpl {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        macro_rules! impl_display_fmt {
-            ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match self {
-                    $( Self::$variant_name(ref inner) => {
-                        Display::fmt(inner, f)
-                    }, )*
-                }
-            }
-        }
-
-        for_all_scalar_variants! { impl_display_fmt }
-    }
-}
-
-impl Display for ScalarRefImpl<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        macro_rules! impl_display_fmt {
-            ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match self {
-                    $( Self::$variant_name(inner) => {
-                        Display::fmt(inner, f)
-                    }, )*
-                }
-            }
-        }
-        for_all_scalar_variants! { impl_display_fmt }
-    }
-}
-
 pub fn display_datum_ref(d: DatumRef<'_>) -> String {
     match d {
         Some(s) => format!("{}", s),
@@ -740,60 +689,31 @@ impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
     pub fn binary_serialize(&self) -> Bytes {
-        let placeholder = Type::ANY;
+        let ty = &Type::ANY;
         let mut output = BytesMut::new();
         match self {
-            Self::Int64(v) => {
-                v.to_sql(&placeholder, &mut output).unwrap();
+            Self::Int64(v) => v.to_sql(ty, &mut output).unwrap(),
+            Self::Float32(v) => v.to_sql(ty, &mut output).unwrap(),
+            Self::Float64(v) => v.to_sql(ty, &mut output).unwrap(),
+            Self::Utf8(v) => v.to_sql(ty, &mut output).unwrap(),
+            Self::Bool(v) => v.to_sql(ty, &mut output).unwrap(),
+            Self::Int16(v) => v.to_sql(ty, &mut output).unwrap(),
+            Self::Int32(v) => v.to_sql(ty, &mut output).unwrap(),
+            Self::Decimal(Decimal::Normalized(v)) => v.to_sql(ty, &mut output).unwrap(),
+            Self::Decimal(Decimal::NaN | Decimal::PositiveINF | Decimal::NegativeINF) => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xC000);
+                output.put_i16(0);
+                IsNull::No
             }
-            Self::Float32(v) => {
-                v.to_sql(&placeholder, &mut output).unwrap();
-            }
-            Self::Float64(v) => {
-                v.to_sql(&placeholder, &mut output).unwrap();
-            }
-            Self::Utf8(v) => {
-                v.to_sql(&placeholder, &mut output).unwrap();
-            }
-            Self::Bool(v) => {
-                v.to_sql(&placeholder, &mut output).unwrap();
-            }
-            Self::Int16(v) => {
-                v.to_sql(&placeholder, &mut output).unwrap();
-            }
-            Self::Int32(v) => {
-                v.to_sql(&placeholder, &mut output).unwrap();
-            }
-            Self::Decimal(v) => match v {
-                Decimal::Normalized(v) => {
-                    v.to_sql(&placeholder, &mut output).unwrap();
-                }
-                Decimal::NaN | Decimal::PositiveINF | Decimal::NegativeINF => {
-                    output.reserve(8);
-                    output.put_u16(0);
-                    output.put_i16(0);
-                    output.put_u16(0xC000);
-                    output.put_i16(0);
-                }
-            },
-            Self::NaiveDate(v) => {
-                v.0.to_sql(&placeholder, &mut output).unwrap();
-            }
-            Self::NaiveDateTime(v) => {
-                v.0.to_sql(&placeholder, &mut output).unwrap();
-            }
-            Self::NaiveTime(v) => {
-                v.0.to_sql(&placeholder, &mut output).unwrap();
-            }
-            Self::Struct(_) => {
-                todo!("Don't support struct serialization yet")
-            }
-            Self::List(_) => {
-                todo!("Don't support list serialization yet")
-            }
-            Self::Interval(_) => {
-                todo!("Don't support interval serialization yet")
-            }
+            Self::NaiveDate(v) => v.0.to_sql(ty, &mut output).unwrap(),
+            Self::NaiveDateTime(v) => v.0.to_sql(ty, &mut output).unwrap(),
+            Self::NaiveTime(v) => v.0.to_sql(ty, &mut output).unwrap(),
+            Self::Struct(_) => todo!("Don't support struct serialization yet"),
+            Self::List(_) => todo!("Don't support list serialization yet"),
+            Self::Interval(_) => todo!("Don't support interval serialization yet"),
         };
         output.freeze()
     }
@@ -804,27 +724,27 @@ impl ScalarRefImpl<'_> {
         ser: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
         match self {
-            &Self::Int16(v) => v.serialize(ser)?,
-            &Self::Int32(v) => v.serialize(ser)?,
-            &Self::Int64(v) => v.serialize(ser)?,
-            &Self::Float32(v) => v.serialize(ser)?,
-            &Self::Float64(v) => v.serialize(ser)?,
-            &Self::Utf8(v) => v.serialize(ser)?,
-            &Self::Bool(v) => v.serialize(ser)?,
-            &Self::Decimal(v) => {
+            Self::Int16(v) => v.serialize(ser)?,
+            Self::Int32(v) => v.serialize(ser)?,
+            Self::Int64(v) => v.serialize(ser)?,
+            Self::Float32(v) => v.serialize(ser)?,
+            Self::Float64(v) => v.serialize(ser)?,
+            Self::Utf8(v) => v.serialize(ser)?,
+            Self::Bool(v) => v.serialize(ser)?,
+            Self::Decimal(v) => {
                 let (mantissa, scale) = v.mantissa_scale_for_serialization();
                 ser.serialize_decimal(mantissa, scale)?;
             }
             Self::Interval(v) => v.serialize(ser)?,
-            &Self::NaiveDate(v) => ser.serialize_naivedate(v.0.num_days_from_ce())?,
-            &Self::NaiveDateTime(v) => {
+            Self::NaiveDate(v) => ser.serialize_naivedate(v.0.num_days_from_ce())?,
+            Self::NaiveDateTime(v) => {
                 ser.serialize_naivedatetime(v.0.timestamp(), v.0.timestamp_subsec_nanos())?
             }
-            &Self::NaiveTime(v) => {
+            Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
-            &Self::Struct(v) => v.serialize(ser)?,
-            &Self::List(v) => v.serialize(ser)?,
+            Self::Struct(v) => v.serialize(ser)?,
+            Self::List(v) => v.serialize(ser)?,
         };
         Ok(())
     }

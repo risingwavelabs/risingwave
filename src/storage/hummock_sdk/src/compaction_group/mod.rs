@@ -14,7 +14,7 @@
 
 pub mod hummock_version_ext;
 
-use std::fmt::Display;
+use parse_display::Display;
 
 use crate::CompactionGroupId;
 
@@ -22,7 +22,7 @@ pub type StateTableId = u32;
 
 /// A compaction task's `StaticCompactionGroupId` indicates the compaction group that all its input
 /// SSTs belong to.
-#[derive(FromPrimitive)]
+#[derive(FromPrimitive, Display)]
 pub enum StaticCompactionGroupId {
     /// Create a new compaction group.
     NewCompactionGroup = 0,
@@ -41,17 +41,5 @@ pub enum StaticCompactionGroupId {
 impl From<StaticCompactionGroupId> for CompactionGroupId {
     fn from(cg: StaticCompactionGroupId) -> Self {
         cg as CompactionGroupId
-    }
-}
-
-impl Display for StaticCompactionGroupId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StaticCompactionGroupId::NewCompactionGroup => write!(f, "NewCompactionGroup"),
-            StaticCompactionGroupId::SharedBuffer => write!(f, "SharedBufferGroup"),
-            StaticCompactionGroupId::StateDefault => write!(f, "StateGroup"),
-            StaticCompactionGroupId::MaterializedView => write!(f, "MVGroup"),
-            StaticCompactionGroupId::End => write!(f, "END"),
-        }
     }
 }
