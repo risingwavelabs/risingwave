@@ -52,7 +52,7 @@ pub fn lhs_is_more_nested(lhs: DataType, rhs: DataType) -> bool {
     lhs_level > rhs_level
 }
 
-/// Get the more nested element. Returns lhs if both are equally nested
+/// Get the more nested element. Returns rhs if both are equally nested
 ///
 /// Examples:
 /// `get_most_nested(DataType::Boolean, DataType::Boolean) -> DataType::Boolean`
