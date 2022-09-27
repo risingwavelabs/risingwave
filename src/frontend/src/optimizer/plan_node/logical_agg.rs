@@ -325,10 +325,8 @@ impl LogicalAgg {
                                             include_keys: Vec<usize>,
                                             column_mapping: &mut Vec<usize>|
          -> TableCatalog {
-            let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-
-            internal_table_catalog_builder
-                .set_properties(self.ctx().inner().with_options.internal_table_subset());
+            let mut internal_table_catalog_builder =
+                TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
             for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
@@ -367,9 +365,8 @@ impl LogicalAgg {
         let get_value_state_table = |value_key: usize,
                                      column_mapping: &mut Vec<usize>|
          -> TableCatalog {
-            let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-            internal_table_catalog_builder
-                .set_properties(self.ctx().inner().with_options.internal_table_subset());
+            let mut internal_table_catalog_builder =
+                TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
             for &idx in &self.group_key {
                 let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);

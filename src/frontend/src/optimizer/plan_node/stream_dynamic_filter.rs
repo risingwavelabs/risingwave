@@ -122,9 +122,8 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     // TODO(yuhao): dedup the dist key and pk.
     pk_indices.extend(&base.logical_pk);
 
-    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-    internal_table_catalog_builder
-        .set_properties(base.ctx.inner().with_options.internal_table_subset());
+    let mut internal_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
@@ -147,9 +146,8 @@ fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
         Vec::<usize>::new()
     );
 
-    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-    internal_table_catalog_builder
-        .set_properties(base.ctx.inner().with_options.internal_table_subset());
+    let mut internal_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);

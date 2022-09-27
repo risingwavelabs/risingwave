@@ -38,8 +38,11 @@ pub struct TableCatalogBuilder {
 /// Be careful of the order of add column.
 impl TableCatalogBuilder {
     // TODO: Add more fields if internal table is more configurable.
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(properties: WithOptions) -> Self {
+        Self {
+            properties,
+            ..Default::default()
+        }
     }
 
     /// Add a column from Field info, return the column index of the table
@@ -78,11 +81,6 @@ impl TableCatalogBuilder {
 
     pub fn set_value_indices(&mut self, value_indices: Vec<usize>) {
         self.value_indices = Some(value_indices);
-    }
-
-    /// Set the `properties` for `TableCatalog`.
-    pub fn set_properties(&mut self, properties: WithOptions) {
-        self.properties = properties;
     }
 
     /// Check the column name whether exist before. if true, record occurrence and change the name

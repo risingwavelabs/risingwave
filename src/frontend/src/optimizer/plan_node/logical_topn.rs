@@ -127,10 +127,8 @@ impl LogicalTopN {
         let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
-        let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-
-        internal_table_catalog_builder
-            .set_properties(self.ctx().inner().with_options.internal_table_subset());
+        let mut internal_table_catalog_builder =
+            TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
         columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);

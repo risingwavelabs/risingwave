@@ -29,6 +29,7 @@ use super::super::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
 use crate::catalog::TableCatalog;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::stream_fragmenter::build_and_add_fragment;
+use crate::WithOptions;
 
 /// All exchanges inside delta join is one-to-one exchange.
 fn build_exchange_for_delta_join(
@@ -315,7 +316,8 @@ fn infer_internal_table_catalog(
     distribution_key: Vec<usize>,
 ) -> TableCatalog {
     let arrangement_info = arrangement_info.unwrap();
-    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    // FIXME(st1page)
+    let mut internal_table_catalog_builder = TableCatalogBuilder::new(WithOptions::default());
     for column_desc in &arrangement_info.column_descs {
         internal_table_catalog_builder.add_column(&Field::from(&ColumnDesc::from(column_desc)));
     }

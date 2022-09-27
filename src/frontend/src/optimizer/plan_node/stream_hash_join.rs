@@ -288,7 +288,8 @@ fn infer_internal_and_degree_table_catalog(
     pk_indices.extend(&base.logical_pk);
 
     // Build internal table
-    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    let mut internal_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
     let internal_columns_fields = schema.fields().to_vec();
 
     internal_columns_fields.iter().for_each(|field| {
@@ -300,7 +301,8 @@ fn infer_internal_and_degree_table_catalog(
     });
 
     // Build degree table.
-    let mut degree_table_catalog_builder = TableCatalogBuilder::new();
+    let mut degree_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
 
     let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
@@ -312,10 +314,6 @@ fn infer_internal_and_degree_table_catalog(
     degree_table_catalog_builder
         .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
-    internal_table_catalog_builder
-        .set_properties(base.ctx.inner().with_options.internal_table_subset());
-    degree_table_catalog_builder
-        .set_properties(base.ctx.inner().with_options.internal_table_subset());
     (
         internal_table_catalog_builder.build(internal_table_dist_keys),
         degree_table_catalog_builder.build(degree_table_dist_keys),
