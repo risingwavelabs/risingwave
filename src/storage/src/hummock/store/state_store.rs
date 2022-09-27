@@ -16,36 +16,49 @@ use std::ops::RangeBounds;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc;
 
 use super::event_handler::HummockEvent;
+use super::memtable::Memtable;
 use super::version::{HummockReadVersion, VersionUpdate};
 use super::{GetFutureTrait, IterFutureTrait, ReadOptions, StateStore};
 use crate::define_local_state_store_associated_type;
 use crate::error::StorageResult;
+use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
+use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockResult, HummockStateStoreIter};
-use crate::table::streaming_table::mem_table::MemTable;
 
 #[allow(unused)]
 pub struct HummockStorageCore {
     /// Mutable memtable.
-    memtable: MemTable,
+    memtable: Memtable,
 
     /// Read handle.
-    read_version: HummockReadVersion,
+    read_version: Mutex<HummockReadVersion>,
 
     /// Event sender.
     event_sender: mpsc::UnboundedSender<HummockEvent>,
+
+    // TODO: use a dedicated uploader implementation to replace `LocalVersionManager`
+    uploder: Arc<LocalVersionManager>,
+
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
+
+    sstable_store: SstableStoreRef,
+
+    compaction_group_client: Arc<CompactionGroupClientImpl>,
 }
 
 #[allow(unused)]
 #[derive(Clone)]
 pub struct HummockStorage {
-    core: Arc<Mutex<HummockStorageCore>>,
+    core: Arc<HummockStorageCore>,
 }
 
 #[allow(unused)]
-impl HummockStorage {
+impl HummockStorageCore {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&mut self, info: VersionUpdate) -> HummockResult<()> {
         unimplemented!()
