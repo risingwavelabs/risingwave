@@ -10,7 +10,7 @@ KAFKA_BIN="$SCRIPT_PATH/../../.risingwave/bin/kafka/bin"
 
 echo "Create topics"
 for filename in "$SCRIPT_PATH"/test_data/*; do
-    [ -e "$filename" ] || continue
+    ([ -e "$filename" ]
     base=$(basename "$filename")
     topic="${base%%.*}"
     partition="${base##*.}"
@@ -20,15 +20,17 @@ for filename in "$SCRIPT_PATH"/test_data/*; do
     "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic "$topic" --delete || true
 
     echo "Recreate topic $topic with partition $partition"
-    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic "$topic" --create --partitions "$partition"
+    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic "$topic" --create --partitions "$partition") &
 done
+wait
 
 echo "Fulfill kafka topics"
 for filename in "$SCRIPT_PATH"/test_data/*; do
-    [ -e "$filename" ] || continue
+    ([ -e "$filename" ]
     base=$(basename "$filename")
     topic="${base%%.*}"
 
     echo "Fulfill kafka topic $topic with data from $base"
-    "$KAFKA_BIN"/kafka-console-producer.sh --broker-list 127.0.0.1:29092 --topic "$topic" < "$filename"
+    "$KAFKA_BIN"/kafka-console-producer.sh --broker-list 127.0.0.1:29092 --topic "$topic" < "$filename") &
 done
+wait

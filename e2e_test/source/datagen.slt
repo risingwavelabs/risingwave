@@ -14,6 +14,9 @@ create materialized source s1 (v1 int, v2 float) with (
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
 
+statement ok
+flush;
+
 # Will only generate 10 records since `fields.v1.end` is 10
 query II rowsort
 select v1, v2 from s1 where v1 is not null limit 15;
@@ -45,6 +48,9 @@ create materialized source s1 (v1 int)  with (
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
 
+statement ok
+flush;
+
 query I
 select v1 from s1 order by v1 limit 10;
 ----
@@ -74,6 +80,9 @@ create materialized source s1 (v1 struct<v2 int>)  with (
 
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
+
+statement ok
+flush;
 
 query I
 select (v1).v2 from s1 order by v1 limit 10;

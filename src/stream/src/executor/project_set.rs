@@ -109,7 +109,7 @@ impl ProjectSetExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    let chunk = chunk.compact()?;
+                    let chunk = chunk.compact();
 
                     let (data_chunk, ops) = chunk.into_parts();
 

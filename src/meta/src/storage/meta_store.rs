@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Display, Formatter};
-use std::str;
-
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -52,26 +49,12 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
 // Error of metastore
 #[derive(Debug, Error)]
 pub enum MetaStoreError {
+    #[error("item not found: {0}")]
     ItemNotFound(String),
+    #[error("transaction abort")]
     TransactionAbort(),
+    #[error("internal error: {0}")]
     Internal(anyhow::Error),
 }
 
 pub type MetaStoreResult<T> = std::result::Result<T, MetaStoreError>;
-
-impl Display for MetaStoreError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MetaStoreError::ItemNotFound(s) => {
-                write!(f, "{}", s)
-            }
-            MetaStoreError::TransactionAbort() => {
-                // TODO: refine it
-                write!(f, "TransactionAbort")
-            }
-            MetaStoreError::Internal(err) => {
-                write!(f, "{}", err)
-            }
-        }
-    }
-}

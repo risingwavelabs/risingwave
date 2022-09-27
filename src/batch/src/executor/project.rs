@@ -53,7 +53,7 @@ impl ProjectExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            // let data_chunk = data_chunk.compact()?;
+            // let data_chunk = data_chunk.compact();
             let arrays: Vec<Column> = self
                 .expr
                 .iter_mut()
