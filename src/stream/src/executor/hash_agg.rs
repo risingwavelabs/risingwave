@@ -433,9 +433,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                 let columns: Vec<Column> = builders
                     .into_iter()
-                    .map(|builder| {
-                        Ok::<_, StreamExecutorError>(Column::new(Arc::new(builder.finish())))
-                    })
+                    .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))
                     .try_collect()?;
 
                 let chunk = StreamChunk::new(new_ops, columns, None);

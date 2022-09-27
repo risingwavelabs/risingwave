@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::ops::RangeBounds;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use bytes::Bytes;
+use parking_lot::RwLock;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc;
 
@@ -36,7 +37,7 @@ pub struct HummockStorageCore {
     memtable: Memtable,
 
     /// Read handle.
-    read_version: Mutex<HummockReadVersion>,
+    read_version: RwLock<HummockReadVersion>,
 
     /// Event sender.
     event_sender: mpsc::UnboundedSender<HummockEvent>,
