@@ -95,7 +95,8 @@ macro_rules! dispatch_state_store {
 }
 
 impl StateStoreImpl {
-    #[expect(clippy::too_many_arguments, unused_variables)]
+    #[expect(clippy::too_many_arguments)]
+    #[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
     pub async fn new(
         s: &str,
         file_cache_dir: &str,
