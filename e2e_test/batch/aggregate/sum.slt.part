@@ -2,15 +2,18 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t (v1 int, v2 numeric, v3 double)
+create table t (v1 int, v2 numeric, v3 double, v4 interval);
 
 statement ok
-insert into t values (1,2,3), (4,5,6), (7,8,9)
+insert into t values
+    (1, 2, 3, '10 second'::interval),
+    (4, 5, 6, '20 second'::interval),
+    (7, 8, 9, '30 second'::interval);
 
 query I
-select sum(v3), sum(v2), sum(v1) from t
+select sum(v4), sum(v3), sum(v2), sum(v1) from t
 ----
-18 15 12
+00:01:00 18 15 12
 
 query I
 select sum(v3)::numeric + sum(v2) + sum(v1)::numeric from t;
