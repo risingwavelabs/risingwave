@@ -146,18 +146,21 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let collect_result = self
+        let (collect_result, checkpoint) = self
             .mgr
             .collect_barrier(req.prev_epoch)
             .stack_trace(format!("collect_barrier (epoch {})", req.prev_epoch))
             .await?;
         // Must finish syncing data written in the epoch before respond back to ensure persistence
         // of the state.
-        let synced_sstables = self
-            .mgr
-            .sync_epoch(req.prev_epoch)
-            .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
-            .await?;
+        let synced_sstables = if checkpoint {
+            self.mgr
+                .sync_epoch(req.prev_epoch)
+                .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
+                .await?
+        } else {
+            vec![]
+        };
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
@@ -170,9 +173,6 @@ impl StreamService for StreamServiceImpl {
                     sst: Some(sst),
                 })
                 .collect_vec(),
-            // TODO: in the future may set it according to whether the barrier is a checkpoint
-            // barrier
-            checkpoint: true,
             worker_id: self.env.worker_id(),
         }))
     }

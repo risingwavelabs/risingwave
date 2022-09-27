@@ -217,19 +217,23 @@ impl LocalStreamManager {
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<CollectResult> {
-        let (rx, timer) = {
+    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<(CollectResult, bool)> {
+        let complete_receiver = {
             let core = self.core.lock();
             let mut barrier_manager = core.context.lock_barrier_manager();
             barrier_manager.remove_collect_rx(epoch)
         };
         // Wait for all actors finishing this barrier.
-        let result = rx
+        let result = complete_receiver
+            .complete_receiver
             .expect("no rx for local mode")
             .await
-            .context("failed to collect barrier")?;
-        timer.expect("no timer for test").observe_duration();
-        Ok(result)
+            .unwrap();
+        complete_receiver
+            .barrier_inflight_timer
+            .expect("no timer for test")
+            .observe_duration();
+        Ok((result, complete_receiver.checkpoint))
     }
 
     pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {

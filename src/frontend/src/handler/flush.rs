@@ -20,7 +20,7 @@ use crate::session::OptimizerContext;
 pub(super) async fn handle_flush(context: OptimizerContext) -> Result<PgResponse> {
     let client = context.session_ctx.env().meta_client();
     // The returned epoch >= epoch for flush, but it is okay.
-    let snapshot = client.flush().await?;
+    let snapshot = client.flush(true).await?;
     // Update max epoch to ensure read-after-write correctness.
     context
         .session_ctx

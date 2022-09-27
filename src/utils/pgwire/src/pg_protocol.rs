@@ -572,7 +572,7 @@ where
         BeMessage::write(&mut self.write_buf, message)
     }
 
-    #[allow(unused)]
+    #[expect(dead_code)]
     async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
         self.write_no_flush(message)?;
         self.flush().await?;

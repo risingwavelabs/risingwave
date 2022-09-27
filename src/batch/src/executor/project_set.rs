@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use either::{for_both, Either};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayRef, DataChunk, I64ArrayBuilder};
+use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -127,11 +125,11 @@ impl ProjectSetExecutor {
                 }
             }
             let mut columns = Vec::with_capacity(self.select_list.len() + 1);
-            let projected_row_id: ArrayRef = Arc::new(projected_row_id_builder.finish().into());
+            let projected_row_id: Column = projected_row_id_builder.finish().into();
             let cardinality = projected_row_id.len();
-            columns.push(Column::new(projected_row_id));
+            columns.push(projected_row_id);
             for builder in builders {
-                columns.push(Column::new(Arc::new(builder.finish())))
+                columns.push(builder.finish().into())
             }
 
             let chunk = DataChunk::new(columns, cardinality);

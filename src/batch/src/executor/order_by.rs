@@ -87,7 +87,7 @@ impl OrderByExecutor {
 
         #[for_await]
         for chunk in self.child.execute() {
-            chunks.push(chunk?.compact()?);
+            chunks.push(chunk?.compact());
         }
 
         for chunk in &chunks {
@@ -131,7 +131,6 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
@@ -546,7 +545,7 @@ mod tests {
         // {., 3.4}       .
         let input_chunk = DataChunk::new(
             vec![
-                Column::new(Arc::new({
+                {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("abcd".to_string().to_scalar_value()),
@@ -575,8 +574,8 @@ mod tests {
                         ]),
                     }));
                     struct_builder.finish().into()
-                })),
-                Column::new(Arc::new({
+                },
+                {
                     list_builder.append(None);
                     list_builder.append(Some(ListRef::ValueRef {
                         val: &ListValue::new(vec![
@@ -591,7 +590,7 @@ mod tests {
                     }));
                     list_builder.append(None);
                     list_builder.finish().into()
-                })),
+                },
             ],
             5,
         );
@@ -614,7 +613,7 @@ mod tests {
         // {., 3.4}       .
         let output_chunk = DataChunk::new(
             vec![
-                Column::new(Arc::new({
+                {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("abcd".to_string().to_scalar_value()),
@@ -643,8 +642,8 @@ mod tests {
                         ]),
                     }));
                     struct_builder.finish().into()
-                })),
-                Column::new(Arc::new({
+                },
+                {
                     list_builder.append(None);
                     list_builder.append(Some(ListRef::ValueRef {
                         val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
@@ -659,7 +658,7 @@ mod tests {
                     list_builder.append(None);
                     list_builder.append(None);
                     list_builder.finish().into()
-                })),
+                },
             ],
             5,
         );

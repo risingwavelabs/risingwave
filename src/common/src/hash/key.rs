@@ -703,15 +703,14 @@ impl HashKey for SerializedKey {
 mod tests {
     use std::collections::HashMap;
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use super::*;
     use crate::array;
     use crate::array::column::Column;
     use crate::array::{
-        ArrayRef, BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array,
-        I16Array, I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray,
-        NaiveTimeArray, Utf8Array,
+        BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array, I16Array,
+        I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray,
+        Utf8Array,
     };
     use crate::hash::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
@@ -891,16 +890,14 @@ mod tests {
     }
 
     fn generate_decimal_test_data() -> (DataChunk, Vec<DataType>) {
-        let columns = vec![Column::new(Arc::new(
-            array! { DecimalArray, [
-                Some(Decimal::from_str("1.2").unwrap()),
-                None,
-                Some(Decimal::from_str("1.200").unwrap()),
-                Some(Decimal::from_str("0.00").unwrap()),
-                Some(Decimal::from_str("0.0").unwrap())
-            ]}
-            .into(),
-        ) as ArrayRef)];
+        let columns = vec![array! { DecimalArray, [
+            Some(Decimal::from_str("1.2").unwrap()),
+            None,
+            Some(Decimal::from_str("1.200").unwrap()),
+            Some(Decimal::from_str("0.00").unwrap()),
+            Some(Decimal::from_str("0.0").unwrap())
+        ]}
+        .into()];
         let types = vec![DataType::Decimal];
 
         (DataChunk::new(columns, 5), types)

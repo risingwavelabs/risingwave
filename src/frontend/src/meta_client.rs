@@ -30,7 +30,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_epoch(&self) -> Result<HummockSnapshot>;
 
-    async fn flush(&self) -> Result<HummockSnapshot>;
+    async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
 
     async fn list_table_fragments(
         &self,
@@ -54,8 +54,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_epoch().await
     }
 
-    async fn flush(&self) -> Result<HummockSnapshot> {
-        self.0.flush().await
+    async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
+        self.0.flush(checkpoint).await
     }
 
     async fn list_table_fragments(
