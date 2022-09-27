@@ -32,28 +32,13 @@ use crate::manager::{LocalNotification, MetaSrvEnv};
 use crate::storage::MetaStore;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
-pub type CompactionSchedulerChannelRef = Arc<dyn CompactionSchedulerChannel>;
-
-pub trait CompactionSchedulerChannel: Send + Sync {
-    fn try_sched_compaction(
-        &self,
-        compaction_group: CompactionGroupId,
-    ) -> Result<bool, SendError<CompactionGroupId>>;
-
-    fn unschedule(&self, compaction_group: CompactionGroupId);
-}
+pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
 
 /// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
 /// compaction groups.
-pub struct DefaultCompactionSchedulerChannel {
-    tx: UnboundedSender<CompactionGroupId>,
+pub struct CompactionRequestChannel {
+    request_tx: UnboundedSender<CompactionGroupId>,
     scheduled: Mutex<HashSet<CompactionGroupId>>,
-}
-
-/// A mock channel just swallow all compaction schedule requests
-#[allow(dead_code)]
-pub struct MockCompactionSchedulerChannel {
-    tx: UnboundedSender<CompactionGroupId>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -66,51 +51,16 @@ pub enum ScheduleStatus {
     SendFailure(CompactTask),
 }
 
-impl ScheduleStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ScheduleStatus::Ok => "Ok",
-            ScheduleStatus::NoTask => "NoTask",
-            ScheduleStatus::PickFailure => "PickFailure",
-            ScheduleStatus::NoAvailableCompactor(_) => "NoAvailableCompactor",
-            ScheduleStatus::AssignFailure(_) => "AssignFailure",
-            ScheduleStatus::SendFailure(_) => "SendFailure",
-        }
-    }
-}
-
-impl DefaultCompactionSchedulerChannel {
-    pub(crate) fn new(tx: UnboundedSender<CompactionGroupId>) -> Self {
+impl CompactionRequestChannel {
+    fn new(request_tx: UnboundedSender<CompactionGroupId>) -> Self {
         Self {
-            tx,
+            request_tx,
             scheduled: Default::default(),
         }
     }
-}
 
-impl MockCompactionSchedulerChannel {
-    pub fn new(tx: UnboundedSender<CompactionGroupId>) -> Self {
-        MockCompactionSchedulerChannel { tx }
-    }
-}
-
-impl CompactionSchedulerChannel for MockCompactionSchedulerChannel {
-    fn try_sched_compaction(
-        &self,
-        _compaction_group: CompactionGroupId,
-    ) -> Result<bool, SendError<CompactionGroupId>> {
-        // do nothing
-        Ok(true)
-    }
-
-    fn unschedule(&self, _compaction_group: CompactionGroupId) {
-        // do nothing
-    }
-}
-
-impl CompactionSchedulerChannel for DefaultCompactionSchedulerChannel {
-    /// Enqueues only if the target group is not in the queue.
-    fn try_sched_compaction(
+    /// Enqueues only if the target is not yet in queue.
+    pub fn try_sched_compaction(
         &self,
         compaction_group: CompactionGroupId,
     ) -> Result<bool, SendError<CompactionGroupId>> {
@@ -118,7 +68,7 @@ impl CompactionSchedulerChannel for DefaultCompactionSchedulerChannel {
         if guard.contains(&compaction_group) {
             return Ok(false);
         }
-        self.tx.send(compaction_group)?;
+        self.request_tx.send(compaction_group)?;
         guard.insert(compaction_group);
         Ok(true)
     }
@@ -154,28 +104,12 @@ where
         }
     }
 
-    pub async fn start(&self, mut shutdown_rx: Receiver<()>, deterministic_mode: bool) {
-        let (sched_channel, mut sched_rx, side_sched_channel, mut side_sched_rx) =
-            if deterministic_mode {
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
-                let mock_channel: CompactionSchedulerChannelRef =
-                    Arc::new(MockCompactionSchedulerChannel::new(tx));
-
-                let (side_tx, side_rx) =
-                    tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
-                let side_channel: CompactionSchedulerChannelRef =
-                    Arc::new(DefaultCompactionSchedulerChannel::new(side_tx));
-                (mock_channel, rx, Some(side_channel), Some(side_rx))
-            } else {
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
-                let default_channel: CompactionSchedulerChannelRef =
-                    Arc::new(DefaultCompactionSchedulerChannel::new(tx));
-                (default_channel, rx, None, None)
-            };
+    pub async fn start(&self, mut shutdown_rx: Receiver<()>) {
+        let (sched_tx, mut sched_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
+        let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
 
         self.hummock_manager
-            .init_compaction_scheduler(sched_channel.clone(), side_sched_channel.clone())
-            .await;
+            .init_compaction_scheduler(sched_channel.clone());
 
         tracing::info!("Start compaction scheduler.");
         let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
@@ -190,15 +124,6 @@ where
                         None => {
                             tracing::warn!("Compactor Scheduler: The Hummock manager has dropped the connection,
                                 it means it has either died or started a new session. Exiting.");
-                            break;
-                        }
-                    }
-                },
-                // FIXME: handle side_sched_rx is None
-                res = side_sched_rx.as_mut().unwrap().recv(), if deterministic_mode => {
-                    match res {
-                        Some(compaction_group) => compaction_group,
-                        None => {
                             break;
                         }
                     }
@@ -219,11 +144,7 @@ where
             };
             sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
             let status = self
-                .pick_and_assign(
-                    compaction_group,
-                    sched_channel.clone(),
-                    side_sched_channel.clone(),
-                )
+                .pick_and_assign(compaction_group, sched_channel.clone())
                 .await;
             if let ScheduleStatus::NoAvailableCompactor(_) = status {
                 tokio::time::sleep(Duration::from_secs(
@@ -241,14 +162,13 @@ where
     async fn pick_and_assign(
         &self,
         compaction_group: CompactionGroupId,
-        sched_channel: CompactionSchedulerChannelRef,
-        side_sched_channel: Option<CompactionSchedulerChannelRef>,
+        sched_channel: CompactionRequestChannelRef,
     ) -> ScheduleStatus {
         let schedule_status = self
             .pick_and_assign_impl(compaction_group, sched_channel.clone())
             .await;
 
-        Self::unschedule(sched_channel, &side_sched_channel, compaction_group);
+        // Self::unschedule(sched_channel, &side_sched_channel, compaction_group);
         let cancel_state = match &schedule_status {
             ScheduleStatus::Ok => None,
             ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
@@ -289,13 +209,14 @@ where
     async fn pick_and_assign_impl(
         &self,
         compaction_group: CompactionGroupId,
-        sched_channel: CompactionSchedulerChannelRef,
+        sched_channel: CompactionRequestChannelRef,
     ) -> ScheduleStatus {
         // 1. Pick a compaction task.
         let compact_task = self
             .hummock_manager
             .get_compact_task(compaction_group)
             .await;
+        sched_channel.unschedule(compaction_group);
         let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
@@ -364,7 +285,7 @@ where
         }
 
         // Bypass reschedule if we want compaction scheduling in a deterministic way
-        if self.env.opts.enable_compaction_deterministic {
+        if self.env.opts.compaction_deterministic_test {
             return ScheduleStatus::Ok;
         }
 
@@ -378,17 +299,6 @@ where
             );
         }
         ScheduleStatus::Ok
-    }
-
-    fn unschedule(
-        sched_channel: CompactionSchedulerChannelRef,
-        side_sched_channel: &Option<CompactionSchedulerChannelRef>,
-        compaction_group: CompactionGroupId,
-    ) {
-        sched_channel.unschedule(compaction_group);
-        if let Some(channel) = side_sched_channel {
-            channel.unschedule(compaction_group);
-        }
     }
 }
 
@@ -413,7 +323,7 @@ mod tests {
             CompactionScheduler::new(env, hummock_manager.clone(), compactor_manager.clone());
 
         let (request_tx, _request_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
-        let request_channel = Arc::new(DefaultCompactionSchedulerChannel::new(request_tx));
+        let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
         // No task
         assert_eq!(
@@ -422,7 +332,6 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     request_channel.clone(),
-                    None
                 )
                 .await
         );
@@ -464,7 +373,6 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     request_channel.clone(),
-                    None
                 )
                 .await
         );
@@ -500,7 +408,6 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     request_channel.clone(),
-                    None
                 )
                 .await
         );
@@ -527,7 +434,7 @@ mod tests {
         );
 
         let (request_tx, _request_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
-        let request_channel = Arc::new(DefaultCompactionSchedulerChannel::new(request_tx));
+        let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
         let _receiver = compactor_manager.add_compactor(context_id, 1);
@@ -541,7 +448,6 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     request_channel.clone(),
-                    None
                 )
                 .await
         );

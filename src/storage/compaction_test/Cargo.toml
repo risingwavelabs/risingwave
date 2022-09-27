@@ -9,6 +9,7 @@ anyhow = "1"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
 parking_lot = "0.12"
+itertools = "0.10"
 prometheus = { version = "0.13" }
 risingwave_common = { path = "../../common" }
 risingwave_common_service = { path = "../../common/common_service" }

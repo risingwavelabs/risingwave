@@ -45,7 +45,7 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 pub use vacuum::*;
 
 pub use crate::hummock::compaction_scheduler::{
-    CompactionSchedulerChannelRef, CompactionSchedulerRef, DefaultCompactionSchedulerChannel,
+    CompactionRequestChannelRef, CompactionSchedulerRef,
 };
 use crate::hummock::utils::RetryableError;
 use crate::manager::{LocalNotification, NotificationManagerRef};
@@ -69,7 +69,7 @@ where
         start_local_notification_receiver(hummock_manager, compactor_manager, notification_manager)
             .await,
     ];
-    if meta_opts.enable_vacuum {
+    if !meta_opts.compaction_deterministic_test {
         workers.push(start_vacuum_scheduler(
             vacuum_manager.clone(),
             Duration::from_secs(meta_opts.vacuum_interval_sec),
@@ -154,7 +154,7 @@ where
     // Start compaction scheduler
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
-        compaction_scheduler.start(shutdown_rx, true).await;
+        compaction_scheduler.start(shutdown_rx).await;
     });
 
     (join_handle, shutdown_tx)

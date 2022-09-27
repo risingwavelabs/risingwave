@@ -92,6 +92,23 @@ risedev:
     - use: kafka
       persist-data: true
 
+  full-compaction-test:
+    - use: aws-s3
+      bucket: some-bucket # configure a valid bucket name
+    - use: etcd
+    - use: meta-node
+      periodic-compaction-interval-sec: 99999
+      enable-compaction-deterministic: true
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+    - use: prometheus
+    - use: grafana
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
+
   full-benchmark:
     - use: minio
     - use: etcd
@@ -571,6 +588,12 @@ template:
 
     # Interval of GC stale metadata and SST
     vacuum-interval-sec: 30
+
+    # Interval of periodical compaction
+    periodic-compaction-interval-sec: 3600
+
+    # Whether run in compaction deterministic test mode
+    enable-compaction-deterministic: true
 
     # The spin interval when collecting global GC watermark in hummock
     collect-gc-watermark-spin-interval-sec: 5

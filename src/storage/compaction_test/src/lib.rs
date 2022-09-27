@@ -46,7 +46,8 @@ pub struct CompactionTestOpts {
     #[clap(long)]
     pub client_address: Option<String>,
 
-    #[clap(long, default_value = "hummock+s3://siyuanw-test-bucket")]
+    /// The state store string e.g. hummock+s3://test-bucket
+    #[clap(short, long)]
     pub state_store: String,
 
     #[clap(long, default_value = "127.0.0.1:1260")]
@@ -62,8 +63,8 @@ pub struct CompactionTestOpts {
     #[clap(long, default_value = "")]
     pub config_path: String,
 
-    #[clap(long, default_value = "16")]
-    pub compaction_trigger_frequency: u32,
+    #[clap(short, long, default_value = "10")]
+    pub compaction_trigger_frequency: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -84,8 +85,16 @@ pub fn start(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        tracing::info!("meta address: {}", opts.meta_address.clone());
-
+        tracing::info!("Compaction test start with options {:?}", opts);
+        let prefix = opts.state_store.strip_prefix("hummock+");
+        match prefix {
+            Some(s) => {
+                assert!(s.starts_with("s3://"), "Only support S3 object store");
+            }
+            None => {
+                panic!("Invalid state store");
+            }
+        }
         let listen_address = opts.host.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_address);
 

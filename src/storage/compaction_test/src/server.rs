@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -37,8 +38,6 @@ use risingwave_storage::{StateStore, StateStoreImpl};
 
 use crate::observer::SimpleObserverNode;
 use crate::{CompactionTestOpts, TestToolConfig};
-
-const COMPACTION_FREQ: u64 = 10;
 
 struct Metrics {
     pub hummock_metrics: Arc<HummockMetrics>,
@@ -139,7 +138,9 @@ pub async fn compaction_test_serve(
 
         // We can custom more conditions for compaction triggering
         // For now I just use a static way here
-        if replay_count % COMPACTION_FREQ == 0 && !modified_compaction_groups.is_empty() {
+        if replay_count % opts.compaction_trigger_frequency == 0
+            && !modified_compaction_groups.is_empty()
+        {
             local_version_manager
                 .try_wait_epoch(HummockReadEpoch::Committed(max_committed_epoch))
                 .await?;
@@ -196,27 +197,6 @@ pub async fn compaction_test_serve(
             );
             check_result(&expect_result, &actual_result);
 
-            // if let Some(latest_version) = new_versions.version_deltas.last() {
-            //     // compare KVs after compaction finished
-            //     let actual_result = hummock
-            //         .scan::<_, Vec<u8>>(
-            //             None,
-            //             ..,
-            //             None,
-            //             ReadOptions {
-            //                 epoch: latest_version.max_committed_epoch,
-            //                 table_id: None,
-            //                 retention_seconds: None,
-            //             },
-            //         )
-            //         .await?;
-            //     tracing::info!(
-            //         "Check result for version: id: {}, max_committed_epoch: {}",
-            //         latest_version.id,
-            //         latest_version.max_committed_epoch,
-            //     );
-            //     check_result(&expect_result, &actual_result);
-            // }
             modified_compaction_groups = HashSet::new();
         }
     }
@@ -226,12 +206,10 @@ pub async fn compaction_test_serve(
 }
 
 pub fn check_result(expect: &Vec<(Bytes, Bytes)>, actual: &Vec<(Bytes, Bytes)>) {
-    assert_eq!(expect.len(), actual.len());
-    let iter = expect.iter().zip(actual.iter());
-    for (kv1, kv2) in iter {
+    expect.iter().zip_eq(actual.iter()).for_each(|(kv1, kv2)| {
         assert_eq!(kv1.0, kv2.0);
         assert_eq!(kv1.1, kv2.1);
-    }
+    });
 }
 
 pub async fn create_hummock_store_with_metrics(

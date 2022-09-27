@@ -2410,9 +2410,9 @@ checksum = "b7abddfc4e19bc38f3922e41b341fedb4e1470e922f024c4e5ae5922f56c7593"
 
 [[package]]
 name = "itertools"
-version = "0.10.3"
+version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9a9d19fa1e79b6215ff29b9d6880b706147f16e9b1dbb1e4e5947b5b02bc5e3"
+checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
 dependencies = [
  "either",
 ]
@@ -4364,6 +4364,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "clap 3.2.17",
+ "itertools",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",

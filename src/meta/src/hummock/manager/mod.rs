@@ -44,14 +44,13 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::hummock::compaction_scheduler::{CompactionSchedulerChannelRef, ScheduleStatus};
+use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::CompactorManagerRef;
@@ -89,9 +88,8 @@ pub struct HummockManager<S: MetaStore> {
     metrics: Arc<MetaMetrics>,
 
     // `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
-    compaction_scheduler: parking_lot::RwLock<Option<CompactionSchedulerChannelRef>>,
+    compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
 
-    side_compaction_sched_channel: parking_lot::RwLock<Option<CompactionSchedulerChannelRef>>,
     compactor_manager: CompactorManagerRef,
 }
 
@@ -207,7 +205,7 @@ where
             cluster_manager,
             compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
-            side_compaction_sched_channel: parking_lot::RwLock::new(None),
+            // side_compaction_sched_channel: parking_lot::RwLock::new(None),
             compactor_manager,
             max_committed_epoch: AtomicU64::new(0),
             max_current_epoch: AtomicU64::new(0),
@@ -905,7 +903,7 @@ where
             Some(compaction_guard) => compaction_guard,
         };
 
-        let deterministic_mode = self.env.opts.enable_compaction_deterministic;
+        let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
         let mut compact_status = VarTransaction::new(
@@ -1265,9 +1263,12 @@ where
             );
 
         drop(versioning_guard);
-        // commit_epoch may contains SSTs from any compaction group
-        for id in modified_compaction_groups {
-            self.try_send_compaction_request(id)?;
+        // Don't trigger compactions if we enable deterministic compaction
+        if !self.env.opts.compaction_deterministic_test {
+            // commit_epoch may contains SSTs from any compaction group
+            for id in modified_compaction_groups {
+                self.try_send_compaction_request(id)?;
+            }
         }
         #[cfg(test)]
         {
@@ -1505,15 +1506,13 @@ where
     pub async fn disable_commit_epoch(&self) -> HummockVersion {
         let mut versioning_guard = write_lock!(self, versioning).await;
         versioning_guard.disable_commit_epochs = true;
-        let version = versioning_guard.current_version.clone();
-        version
+        versioning_guard.current_version.clone()
     }
 
     #[named]
     async fn get_compact_task_assignment_size(&self) -> usize {
         let compaction_guard = read_lock!(self, compaction).await;
-        let size = compaction_guard.compact_task_assignment.len();
-        size
+        compaction_guard.compact_task_assignment.len()
     }
 
     /// Triggers compacitons to specified compaction groups.
@@ -1541,7 +1540,7 @@ where
 
         let old_size = self.get_compact_task_assignment_size().await;
         for compaction_group in compaction_groups {
-            self.try_sched_compaction_deterministic(compaction_group)?;
+            self.try_send_compaction_request(compaction_group)?;
         }
         let (schedule_ok, task_num) = self.poll_compaction_schedule_status(old_size).await;
         let (compaction_ok, cur_version) = self
@@ -1558,14 +1557,14 @@ where
         if !schedule_ok && !compaction_ok {
             return Ok((old_version.id, old_version.max_committed_epoch));
         }
-        return Ok((cur_version.id, cur_version.max_committed_epoch));
+        Ok((cur_version.id, cur_version.max_committed_epoch))
     }
 
     /// Poll the compaction task assignment to aware whether scheduling is success.
     /// Returns (whether scheduling is success, number of tasks)
     async fn poll_compaction_schedule_status(&self, old_size: usize) -> (bool, usize) {
         let poll_timeout = Duration::from_secs(2);
-        let poll_interval = Duration::from_millis(2);
+        let poll_interval = Duration::from_millis(20);
         let mut poll_duration_cnt = Duration::from_millis(0);
         let mut new_size = self.get_compact_task_assignment_size().await;
         let mut schedule_ok = false;
@@ -1603,12 +1602,12 @@ where
         let mut compaction_ok = false;
         let mut cur_version = self.get_current_version().await;
         loop {
-            if cur_version.id > old_version.id {
-                if cur_version.id - old_version.id >= task_num as u64 {
-                    tracing::info!("Collected all of compact tasks");
-                    compaction_ok = true;
-                    break;
-                }
+            if (cur_version.id > old_version.id)
+                && (cur_version.id - old_version.id >= task_num as u64)
+            {
+                tracing::info!("Collected all of compact tasks");
+                compaction_ok = true;
+                break;
             }
             if duration_cnt >= poll_timeout {
                 break;
@@ -1620,13 +1619,8 @@ where
         (compaction_ok, cur_version)
     }
 
-    pub async fn init_compaction_scheduler(
-        &self,
-        sched_channel: CompactionSchedulerChannelRef,
-        side_sched_channel: Option<CompactionSchedulerChannelRef>,
-    ) {
+    pub fn init_compaction_scheduler(&self, sched_channel: CompactionRequestChannelRef) {
         *self.compaction_scheduler.write() = Some(sched_channel);
-        *self.side_compaction_sched_channel.write() = side_sched_channel;
     }
 
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.
@@ -1661,19 +1655,6 @@ where
             self.check_state_consistency().await;
         }
         Ok(())
-    }
-
-    fn try_sched_compaction_deterministic(
-        &self,
-        compaction_group: CompactionGroupId,
-    ) -> Result<bool> {
-        if let Some(sender) = self.side_compaction_sched_channel.read().as_ref() {
-            sender
-                .try_sched_compaction(compaction_group)
-                .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))
-        } else {
-            Ok(false)
-        }
     }
 
     /// Sends a compaction request to compaction scheduler.
