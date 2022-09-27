@@ -146,9 +146,9 @@ impl StreamChunk {
     }
 
     /// compact the `StreamChunk` with its visibility map
-    pub fn compact(self) -> ArrayResult<Self> {
+    pub fn compact(self) -> Self {
         if self.visibility().is_none() {
-            return Ok(self);
+            return self;
         }
 
         let (ops, columns, visibility) = self.into_inner();
@@ -157,22 +157,20 @@ impl StreamChunk {
         let cardinality = visibility
             .iter()
             .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
-        let columns = columns
+        let columns: Vec<_> = columns
             .into_iter()
             .map(|col| {
                 let array = col.array();
-                array
-                    .compact(&visibility, cardinality)
-                    .map(|array| Column::new(Arc::new(array)))
+                Column::new(Arc::new(array.compact(&visibility, cardinality)))
             })
-            .collect::<ArrayResult<Vec<_>>>()?;
+            .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
         for (op, visible) in ops.into_iter().zip_eq(visibility.iter()) {
             if visible {
                 new_ops.push(op);
             }
         }
-        Ok(StreamChunk::new(new_ops, columns, None))
+        StreamChunk::new(new_ops, columns, None)
     }
 
     pub fn into_parts(self) -> (DataChunk, Vec<Op>) {

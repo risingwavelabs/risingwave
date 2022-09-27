@@ -21,6 +21,9 @@ seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/streaming/\*\*/\*.slt'
 echo "--- deterministic simulation e2e, ci-3cn-1fe, batch"
 seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/batch/\*\*/\*.slt'
 
+echo "--- deterministic simulation e2e, ci-3cn-1fe, kafka source"
+seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/source/kafka.slt'
+
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, streaming"
 seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER -j 16 './e2e_test/streaming/\*\*/\*.slt'
 

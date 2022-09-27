@@ -28,7 +28,6 @@ paste = "1"
 pprof = { version = "0.10", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
 prost = "0.11"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
 risingwave_common_service = { path = "../common/common_service" }

@@ -97,7 +97,7 @@ impl SimpleExecutor for SimpleProjectExecutor {
         &mut self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact()?;
+        let chunk = chunk.compact();
 
         let (data_chunk, ops) = chunk.into_parts();
 
