@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::mem::swap;
-use std::sync::Arc;
 
 use futures_async_stream::stream;
 use itertools::Itertools;
@@ -241,8 +240,7 @@ impl DataChunkBuilder {
         let columns = new_array_builders.into_iter().fold(
             Vec::with_capacity(self.data_types.len()),
             |mut vec, array_builder| -> Vec<Column> {
-                let array = array_builder.finish();
-                let column = Column::new(Arc::new(array));
+                let column = array_builder.finish().into();
                 vec.push(column);
                 vec
             },

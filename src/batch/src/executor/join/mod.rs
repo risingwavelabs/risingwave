@@ -18,14 +18,11 @@ pub mod lookup_join;
 pub mod nested_loop_join;
 mod sort_merge_join;
 
-use std::sync::Arc;
-
 pub use chunked_data::*;
 pub use hash_join::*;
 use itertools::Itertools;
 pub use lookup_join::*;
 pub use nested_loop_join::*;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, RowRef, Vis};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, DatumRef};
@@ -161,7 +158,7 @@ fn convert_datum_refs_to_chunk(
     // Finish each array builder and get Column.
     let result_columns = output_array_builders
         .into_iter()
-        .map(|builder| Column::new(Arc::new(builder.finish())))
+        .map(|b| b.finish().into())
         .collect();
 
     Ok(DataChunk::new(result_columns, num_tuples))
@@ -179,9 +176,7 @@ fn convert_row_to_chunk(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Vis};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarRefImpl};
@@ -199,7 +194,7 @@ mod tests {
                 builder.append(Some(i as i32));
             }
             let arr = builder.finish();
-            columns.push(Column::new(Arc::new(arr.into())))
+            columns.push(arr.into())
         }
         let chunk1: DataChunk = DataChunk::new(columns.clone(), length);
         let bool_vec = vec![true, false, true, false, false];

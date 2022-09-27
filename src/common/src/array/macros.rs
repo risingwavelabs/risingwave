@@ -63,7 +63,8 @@ macro_rules! column {
         {
             use $crate::array::column::Column;
             let arr = $crate::array! { $array, [ $( $value ),* ] };
-            Column::new(std::sync::Arc::new(arr.into()))
+            let col: Column = arr.into();
+            col
         }
     };
 }
@@ -75,7 +76,8 @@ macro_rules! column_nonnull {
         {
             use $crate::array::column::Column;
             let arr = $crate::array_nonnull! { $array, [ $( $value ),* ] };
-            Column::new(std::sync::Arc::new(arr.into()))
+            let col: Column = arr.into();
+            col
         }
     };
 }

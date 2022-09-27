@@ -21,7 +21,6 @@ use std::sync::Arc;
 use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
 use itertools::{repeat_n, Itertools};
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
@@ -1396,7 +1395,7 @@ impl DataChunkMutator {
             // Is it really safe to use Arc::try_unwrap here?
             let mut array = Arc::try_unwrap(build_column.into_inner()).unwrap();
             array.set_bitmap(filter.clone());
-            columns.push(Column::new(Arc::new(array)));
+            columns.push(array.into());
         }
 
         Self(DataChunk::new(columns, vis))
@@ -1731,11 +1730,9 @@ impl<K> HashJoinExecutor<K> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
@@ -1785,7 +1782,7 @@ mod tests {
             let columns = self
                 .array_builders
                 .into_iter()
-                .map(|b| Column::new(Arc::new(b.finish())))
+                .map(|b| b.finish().into())
                 .collect();
 
             Ok(DataChunk::new(columns, self.array_len))
