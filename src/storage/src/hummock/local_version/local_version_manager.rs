@@ -34,9 +34,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version::flush_controller::{
-    start_flush_controller_worker, BufferTracker,
-};
+use crate::hummock::local_version::flush_controller::{BufferTracker, FlushController};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::local_version::{LocalVersion, ReadVersion};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferItem};
@@ -167,13 +165,15 @@ impl LocalVersionManager {
             hummock_meta_client,
         ));
 
-        // Buffer size manager.
-        tokio::spawn(start_flush_controller_worker(
+        let flush_controller = FlushController::new(
             local_version_manager.clone(),
             buffer_tracker,
             sstable_id_manager,
             buffer_event_receiver,
-        ));
+        );
+
+        // Buffer size manager.
+        tokio::spawn(flush_controller.start_flush_controller_worker());
 
         Arc::new(LocalVersionManagerExternalHolder {
             local_version_manager,
