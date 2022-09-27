@@ -14,11 +14,9 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -122,7 +120,7 @@ impl HashAggExecutorBuilder {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for HashAggExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -196,7 +194,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         // consume all chunks to compute the agg result
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = chunk?.compact()?;
+            let chunk = chunk?.compact();
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
                 let states: &mut Vec<BoxedAggState> = groups.entry(key).or_insert_with(|| {
@@ -251,8 +249,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let columns = group_builders
                 .into_iter()
                 .chain(agg_builders)
-                .map(|b| Ok(Column::new(Arc::new(b.finish()))))
-                .collect::<Result<Vec<_>>>()?;
+                .map(|b| b.finish().into())
+                .collect::<Vec<_>>();
 
             let output = DataChunk::new(columns, array_len);
             yield output;

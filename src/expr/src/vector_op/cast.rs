@@ -33,9 +33,9 @@ const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes
 const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
-const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
+const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 const PARSE_ERROR_STR_TO_TIME: &str =
-    "Can't cast string to time (expected format is HH:MM:SS[.MS] or HH:MM)";
+    "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
 
 #[inline(always)]
@@ -415,7 +415,7 @@ pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue
 ///
 /// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
 pub fn list_cast(
-    input: ListRef,
+    input: ListRef<'_>,
     source_elem_type: &DataType,
     target_elem_type: &DataType,
 ) -> Result<ListValue> {
@@ -436,7 +436,7 @@ pub fn list_cast(
 /// mutual recursion with `list_cast` so that we can cast nested lists (e.g., varchar[][] to
 /// int[][]).
 fn scalar_cast(
-    source: ScalarRefImpl,
+    source: ScalarRefImpl<'_>,
     source_type: &DataType,
     target_type: &DataType,
 ) -> Result<ScalarImpl> {

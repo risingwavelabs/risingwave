@@ -40,12 +40,12 @@ where
         &self,
         context_ids: impl AsRef<[HummockContextId]>,
     ) -> Result<()> {
-        fail_point!("release_contexts_metastore_err", |_| Err(
-            Error::MetaStoreError(anyhow::anyhow!("failpoint metastore error"))
-        ));
-        fail_point!("release_contexts_internal_err", |_| Err(
-            Error::InternalError(anyhow::anyhow!("failpoint internal error"))
-        ));
+        fail_point!("release_contexts_metastore_err", |_| Err(Error::MetaStore(
+            anyhow::anyhow!("failpoint metastore error")
+        )));
+        fail_point!("release_contexts_internal_err", |_| Err(Error::Internal(
+            anyhow::anyhow!("failpoint internal error")
+        )));
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let (compact_statuses, compact_task_assignment) =

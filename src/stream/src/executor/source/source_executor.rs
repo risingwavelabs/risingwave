@@ -28,14 +28,14 @@ use risingwave_connector::source::{ConnectorState, SplitId, SplitImpl, SplitMeta
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::row_id::RowIdGenerator;
 use risingwave_source::*;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::reader::SourceReaderStream;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::source::state::SourceStateHandler;
+use crate::executor::source::state_table_handler::SourceStateTableHandler;
 use crate::executor::*;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
@@ -67,7 +67,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     source_identify: String,
 
-    split_state_store: SourceStateHandler<S>,
+    split_state_store: SourceStateTableHandler<S>,
 
     state_cache: HashMap<SplitId, SplitImpl>,
 
@@ -83,7 +83,7 @@ impl<S: StateStore> SourceExecutor<S> {
         source_id: TableId,
         source_desc: SourceDesc,
         vnodes: Bitmap,
-        keyspace: Keyspace<S>,
+        state_table: SourceStateTableHandler<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
         pk_indices: PkIndices,
@@ -112,7 +112,7 @@ impl<S: StateStore> SourceExecutor<S> {
             metrics: streaming_metrics,
             stream_source_splits: vec![],
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
-            split_state_store: SourceStateHandler::new(keyspace),
+            split_state_store: state_table,
             state_cache: HashMap::new(),
             expected_barrier_latency_ms,
         })
@@ -146,7 +146,7 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        Column::new(Arc::new(ArrayImpl::from(builder.finish())))
+        builder.finish().into()
     }
 
     async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
@@ -199,7 +199,7 @@ impl<S: StateStore> SourceExecutor<S> {
         (!no_change_flag).then_some(target_state)
     }
 
-    async fn take_snapshot(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn take_snapshot(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         let cache = self
             .state_cache
             .iter()
@@ -207,8 +207,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         if !cache.is_empty() {
-            self.split_state_store.take_snapshot(cache, epoch).await?
+            self.split_state_store.take_snapshot(cache).await?
         }
+        // commit anyway, even if no message saved
+        self.split_state_store.state_store.commit(epoch).await?;
 
         Ok(())
     }
@@ -258,13 +260,13 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        let epoch = barrier.epoch.prev;
+        self.split_state_store.init_epoch(barrier.epoch);
 
         let mut boot_state = self.stream_source_splits.clone();
         for ele in &mut boot_state {
             if let Some(recover_state) = self
                 .split_state_store
-                .try_recover_from_state_store(ele, epoch)
+                .try_recover_from_state_store(ele)
                 .await?
             {
                 *ele = recover_state;
@@ -298,7 +300,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 // This branch will be preferred.
                 Either::Left(barrier) => {
                     let barrier = barrier?;
-                    let epoch = barrier.epoch.prev;
+                    let epoch = barrier.epoch;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
@@ -406,7 +408,7 @@ impl<S: StateStore> Executor for SourceExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -436,6 +438,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, StreamSourceInfo};
@@ -516,7 +519,10 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+        let state_table = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            MemoryStateStore::new(),
+        );
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let executor = SourceExecutor::new(
@@ -524,7 +530,7 @@ mod tests {
             table_id,
             source_desc,
             vnodes,
-            keyspace,
+            state_table,
             column_ids,
             schema,
             pk_indices,
@@ -546,7 +552,10 @@ mod tests {
         barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
 
         let msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(msg.into_barrier().unwrap().epoch, Epoch::new_test_epoch(1));
+        assert_eq!(
+            msg.into_barrier().unwrap().epoch,
+            EpochPair::new_test_epoch(1)
+        );
 
         // Write 1st chunk
         write_chunk(chunk1);
@@ -637,14 +646,18 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+        let state_table = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            MemoryStateStore::new(),
+        );
+
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
         let executor = SourceExecutor::new(
             ActorContext::create(0x3f3f3f),
             table_id,
             source_desc,
             vnodes,
-            keyspace,
+            state_table,
             column_ids,
             schema,
             pk_indices,
@@ -754,20 +767,23 @@ mod tests {
 
         let source_desc = source_manager.get_source(&source_table_id).unwrap();
         let mem_state_store = MemoryStateStore::new();
-        let keyspace = Keyspace::table_root(mem_state_store.clone(), &TableId::from(0x2333));
+
         let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
         let schema = get_schema(&column_ids, &source_desc);
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
-        let source_state_handler = SourceStateHandler::new(keyspace.clone());
+        let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            mem_state_store.clone(),
+        );
 
         let source_exec = SourceExecutor::new(
             ActorContext::create(0),
             source_table_id,
             source_desc,
             vnodes,
-            keyspace.clone(),
+            source_state_handler.clone(),
             column_ids.clone(),
             schema,
             pk_indices,
@@ -825,23 +841,21 @@ mod tests {
 
         assert_eq!(chunk_1, chunk_1_truth);
 
+        let new_assignments = vec![
+            SplitImpl::Datagen(DatagenSplit {
+                split_index: 0,
+                split_num: 3,
+                start_offset: None,
+            }),
+            SplitImpl::Datagen(DatagenSplit {
+                split_index: 1,
+                split_num: 3,
+                start_offset: None,
+            }),
+        ];
         let change_split_mutation = Barrier::new_test_barrier(curr_epoch + 1).with_mutation(
             Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => Some(vec![
-                    SplitImpl::Datagen(
-                        DatagenSplit {
-                            split_index: 0,
-                            split_num: 3,
-                            start_offset: None,
-                        }
-                    ), SplitImpl::Datagen(
-                        DatagenSplit {
-                            split_index: 1,
-                            split_num: 3,
-                            start_offset: None,
-                        }
-                    ),
-                ])
+                ActorId::default() => Some(new_assignments.clone())
             }),
         );
         barrier_tx.send(change_split_mutation).unwrap();
@@ -849,8 +863,9 @@ mod tests {
         let _ = materialize.next().await.unwrap(); // barrier
 
         // there must exist state for new add partition
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(curr_epoch + 1));
         source_state_handler
-            .restore_states("3-1".to_string().into(), curr_epoch + 1)
+            .get(new_assignments[1].id())
             .await
             .unwrap()
             .unwrap();

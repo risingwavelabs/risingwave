@@ -156,7 +156,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     /// Get the output of the state. Must flush before getting output.
     pub async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
         match self {
-            Self::Value(state) => state.get_output(),
+            Self::Value(state) => Ok(state.get_output()),
             Self::Table(state) => state.get_output(state_table).await,
         }
     }
@@ -194,13 +194,11 @@ impl<S: StateStore> ManagedStateImpl<S> {
             "should set row_count for value states other than row count agg call"
         );
         match agg_call.kind {
-            AggKind::Avg
-            | AggKind::Count
-            | AggKind::Sum
-            | AggKind::ApproxCountDistinct
-            | AggKind::SingleValue => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
-            )),
+            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
+                Ok(Self::Value(
+                    ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
+                ))
+            }
             // optimization: use single-value state for append-only min/max
             AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
                 ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,

@@ -64,8 +64,10 @@ pub enum SyncUncommittedDataStage {
     CheckpointEpochSealed(BTreeMap<HummockEpoch, SharedBuffer>),
     /// Task payload when we start syncing
     Syncing(OrderSortedUncommittedData),
+    /// Sync task is failed
+    Failed(OrderSortedUncommittedData),
     /// After we finish syncing, we changed `Syncing` to `Synced`.
-    Synced(Vec<LocalSstableInfo>),
+    Synced(Vec<LocalSstableInfo>, usize),
 }
 
 #[derive(Debug, Clone)]
@@ -96,7 +98,7 @@ impl SyncUncommittedData {
         }
     }
 
-    fn start_syncing(&mut self) -> (OrderSortedUncommittedData, usize) {
+    pub fn start_syncing(&mut self) -> (OrderSortedUncommittedData, usize) {
         let (new_stage, task_payload, task_size) = match &mut self.stage {
             SyncUncommittedDataStage::CheckpointEpochSealed(shared_buffer_data) => {
                 let mut sync_size = 0;
@@ -128,9 +130,25 @@ impl SyncUncommittedData {
         (task_payload, task_size)
     }
 
-    fn synced(&mut self, ssts: Vec<LocalSstableInfo>) {
+    fn synced(&mut self, ssts: Vec<LocalSstableInfo>, sync_size: usize) {
         assert_matches!(self.stage, SyncUncommittedDataStage::Syncing(_));
-        self.stage = SyncUncommittedDataStage::Synced(ssts);
+        self.stage = SyncUncommittedDataStage::Synced(ssts, sync_size);
+    }
+
+    fn failed(&mut self) {
+        let payload = match &mut self.stage {
+            SyncUncommittedDataStage::Syncing(payload) => {
+                let mut owned_payload = OrderSortedUncommittedData::default();
+                swap(payload, &mut owned_payload);
+                owned_payload
+            }
+            invalid_stage => unreachable!("fail at invalid stage: {:?}", invalid_stage),
+        };
+        self.stage = SyncUncommittedDataStage::Failed(payload);
+    }
+
+    pub fn stage(&self) -> &SyncUncommittedDataStage {
+        &self.stage
     }
 }
 
@@ -152,27 +170,30 @@ impl SyncUncommittedData {
                     .flat_map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
                     .collect()
             }
-            SyncUncommittedDataStage::Syncing(task) => task
-                .iter()
-                .map(|order_vec_data| {
-                    order_vec_data
-                        .iter()
-                        .filter(|data| match data {
-                            UncommittedData::Batch(batch) => {
-                                batch.epoch() <= epoch
-                                    && range_overlap(
-                                        key_range,
-                                        batch.start_user_key(),
-                                        batch.end_user_key(),
-                                    )
-                            }
-                            UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
-                        })
-                        .cloned()
-                        .collect_vec()
-                })
-                .collect_vec(),
-            SyncUncommittedDataStage::Synced(ssts) => vec![ssts
+            SyncUncommittedDataStage::Syncing(task) | SyncUncommittedDataStage::Failed(task) => {
+                task.iter()
+                    .map(|order_vec_data| {
+                        order_vec_data
+                            .iter()
+                            .filter(|data| match data {
+                                UncommittedData::Batch(batch) => {
+                                    batch.epoch() <= epoch
+                                        && range_overlap(
+                                            key_range,
+                                            batch.start_user_key(),
+                                            batch.end_user_key(),
+                                        )
+                                }
+                                UncommittedData::Sst((_, info)) => {
+                                    filter_single_sst(info, key_range)
+                                }
+                            })
+                            .cloned()
+                            .collect_vec()
+                    })
+                    .collect_vec()
+            }
+            SyncUncommittedDataStage::Synced(ssts, _) => vec![ssts
                 .iter()
                 .filter(|(_, info)| filter_single_sst(info, key_range))
                 .map(|info| UncommittedData::Sst(info.clone()))
@@ -201,8 +222,6 @@ impl LocalVersion {
     }
 
     pub fn seal_epoch(&mut self, epoch: HummockEpoch, is_checkpoint: bool) {
-        // TODO: remove it when non-checkpoint barrier is enabled
-        assert!(is_checkpoint, "current seal_epoch must be a checkpoint");
         assert!(
             epoch > self.sealed_epoch,
             "sealed epoch not advance. new epoch: {}, current {}",
@@ -210,7 +229,9 @@ impl LocalVersion {
             self.sealed_epoch
         );
         self.sealed_epoch = epoch;
-        self.advance_max_sync_epoch(epoch)
+        if is_checkpoint {
+            self.advance_max_sync_epoch(epoch)
+        }
     }
 
     pub fn get_sealed_epoch(&self) -> HummockEpoch {
@@ -308,12 +329,32 @@ impl LocalVersion {
         data.start_syncing()
     }
 
-    pub fn data_synced(&mut self, sync_epoch: HummockEpoch, ssts: Vec<LocalSstableInfo>) {
+    pub fn data_synced(
+        &mut self,
+        sync_epoch: HummockEpoch,
+        ssts: Vec<LocalSstableInfo>,
+        sync_size: usize,
+    ) {
         let data = self
             .sync_uncommitted_data
             .get_mut(&sync_epoch)
             .expect("should find");
-        data.synced(ssts);
+        data.synced(ssts, sync_size);
+    }
+
+    pub fn fail_epoch_sync(&mut self, sync_epoch: HummockEpoch) {
+        self.sync_uncommitted_data
+            .get_mut(&sync_epoch)
+            .expect("should find")
+            .failed();
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn get_synced_ssts(&self, sync_epoch: HummockEpoch) -> &Vec<LocalSstableInfo> {
+        match &self.sync_uncommitted_data.get(&sync_epoch).unwrap().stage {
+            SyncUncommittedDataStage::Synced(ssts, _) => ssts,
+            invalid_stage => unreachable!("get synced data at invalid stage: {:?}", invalid_stage),
+        }
     }
 
     #[cfg(any(test, feature = "test"))]
@@ -500,7 +541,7 @@ impl LocalVersion {
                         (
                             data.epochs,
                             match data.stage {
-                                SyncUncommittedDataStage::Synced(ssts) => ssts,
+                                SyncUncommittedDataStage::Synced(ssts, _) => ssts,
                                 invalid_stage => {
                                     unreachable!("expect synced. Now is {:?}", invalid_stage)
                                 }

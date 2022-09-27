@@ -63,9 +63,9 @@ where
     #[cfg_attr(coverage, no_coverage)]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
-        let _req = request.into_inner();
+        let req = request.into_inner();
 
-        let snapshot = self.barrier_scheduler.flush().await?;
+        let snapshot = self.barrier_scheduler.flush(req.checkpoint).await?;
         Ok(Response::new(FlushResponse {
             status: None,
             snapshot: Some(snapshot),

@@ -98,7 +98,7 @@ impl LogicalTopN {
         &self.group_key
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         let input = self.input();
         let input_schema = input.schema();
@@ -122,36 +122,28 @@ impl LogicalTopN {
     }
 
     /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
-    pub fn infer_internal_table_catalog(
-        &self,
-        group_key: Option<&[usize]>,
-        vnode_col_idx: Option<usize>,
-    ) -> TableCatalog {
+    pub fn infer_internal_table_catalog(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
         let schema = &self.base.schema;
         let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
-        let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-
-        internal_table_catalog_builder
-            .set_properties(self.ctx().inner().with_options.internal_table_subset());
+        let mut internal_table_catalog_builder =
+            TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
         columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
         let mut order_cols = HashSet::new();
 
-        if let Some(group_key) = group_key {
-            // Here we want the state table to store the states in the order we want, fisrtly in
-            // ascending order by the columns specified by the group key, then by the columns
-            // specified by `order`. If we do that, when the later group topN operator
-            // does a prefix scannimg with the group key, we can fetch the data in the
-            // desired order.
-            group_key.iter().for_each(|idx| {
-                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
-                order_cols.insert(*idx);
-            });
-        }
+        // Here we want the state table to store the states in the order we want, fisrtly in
+        // ascending order by the columns specified by the group key, then by the columns
+        // specified by `order`. If we do that, when the later group topN operator
+        // does a prefix scannimg with the group key, we can fetch the data in the
+        // desired order.
+        self.group_key().iter().for_each(|idx| {
+            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
+            order_cols.insert(*idx);
+        });
 
         field_order.iter().for_each(|field_order| {
             if !order_cols.contains(&field_order.index) {
@@ -167,11 +159,11 @@ impl LogicalTopN {
                 order_cols.insert(*idx);
             }
         });
-        internal_table_catalog_builder.build(
-            self.input().distribution().dist_column_indices().to_vec(),
-            self.base.append_only,
-            vnode_col_idx,
-        )
+        if let Some(vnode_col_idx) = vnode_col_idx {
+            internal_table_catalog_builder.set_vnode_col_idx(vnode_col_idx);
+        }
+        internal_table_catalog_builder
+            .build(self.input().distribution().dist_column_indices().to_vec())
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
@@ -292,7 +284,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
 }
 impl_plan_tree_node_for_unary! {LogicalTopN}
 impl fmt::Display for LogicalTopN {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalTopN")
     }
 }

@@ -521,7 +521,7 @@ impl StreamGraphBuilder {
         upstream_fragment_id: &mut HashMap<u64, GlobalFragmentId>,
     ) -> MetaResult<StreamNode> {
         let table_id_offset = ctx.table_id_offset;
-        let mut check_and_fill_internal_table = |table_id: u32, table: Option<Table>| {
+        let mut check_and_fill_internal_table = |table_id: u32, table: Table| {
             ctx.internal_table_id_map.entry(table_id).or_insert(table);
         };
 
@@ -536,7 +536,7 @@ impl StreamGraphBuilder {
                 table_type_name,
             );
             table.fragment_id = fragment_id.as_global_id();
-            check_and_fill_internal_table(table.id, Some(table.clone()));
+            check_and_fill_internal_table(table.id, table.clone());
         };
 
         match stream_node.get_node_body()? {
@@ -565,9 +565,9 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::Source(node) => {
-                        node.state_table_id += table_id_offset;
-                        // fill internal table for source node with None catalog.
-                        check_and_fill_internal_table(node.state_table_id, None);
+                        if let Some(table) = &mut node.state_table {
+                            update_table(table, "SourceInternalTable");
+                        }
                     }
 
                     NodeBody::Lookup(node) => {
@@ -910,6 +910,12 @@ impl ActorGraphBuilder {
                         vnode_mapping: None,
                         // Will be filled in `record_internal_state_tables` later.
                         state_table_ids: vec![],
+                        upstream_fragment_ids: self
+                            .fragment_graph
+                            .get_upstreams(GlobalFragmentId(fragment_id))
+                            .keys()
+                            .map(|id| id.as_global_id())
+                            .collect(),
                     },
                 )
             })
@@ -1057,7 +1063,7 @@ impl ActorGraphBuilder {
                 vec![node.get_table_id()]
             }
             NodeBody::Source(node) => {
-                vec![node.state_table_id]
+                vec![node.state_table.as_ref().unwrap().id]
             }
             NodeBody::Arrange(node) => {
                 vec![node.table.as_ref().unwrap().id]

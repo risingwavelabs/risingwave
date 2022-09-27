@@ -20,11 +20,12 @@ use std::ops::RangeBounds;
 use anyhow::anyhow;
 use risingwave_common::array::Row;
 use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{Epoch, StreamExecutorResult};
+use crate::executor::StreamExecutorResult;
 
 /// The `RangeCache` caches a given range of `ScalarImpl` keys and corresponding rows.
 /// It will evict keys from memory if it is above capacity and shrink its range.
@@ -45,29 +46,26 @@ pub struct RangeCache<S: StateStore> {
     /// from storage
     range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
 
-    #[allow(unused)]
+    #[expect(dead_code)]
     num_rows_stored: usize,
-    #[allow(unused)]
+    #[expect(dead_code)]
     capacity: usize,
-    current_epoch: u64,
 }
 
 impl<S: StateStore> RangeCache<S> {
     /// Create a [`RangeCache`] with given capacity and epoch
-    pub fn new(state_table: StateTable<S>, current_epoch: u64, capacity: usize) -> Self {
+    pub fn new(state_table: StateTable<S>, capacity: usize) -> Self {
         Self {
             cache: BTreeMap::new(),
             state_table,
             range: (Unbounded, Unbounded),
             num_rows_stored: 0,
             capacity,
-            current_epoch,
         }
     }
 
-    pub fn init(&mut self, epoch: Epoch) {
-        self.state_table.init_epoch(epoch.prev);
-        self.current_epoch = epoch.curr;
+    pub fn init(&mut self, epoch: EpochPair) {
+        self.state_table.init_epoch(epoch);
     }
 
     /// Insert a row and corresponding scalar value key into cache (if within range) and
@@ -109,7 +107,7 @@ impl<S: StateStore> RangeCache<S> {
         &self,
         range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
         _latest_is_lower: bool,
-    ) -> Range<ScalarImpl, HashSet<Row>> {
+    ) -> Range<'_, ScalarImpl, HashSet<Row>> {
         // TODO (cache behaviour):
         // What we want: At the end of every epoch we will try to read
         // ranges based on the new value. The values in the range may not all be cached.
@@ -146,14 +144,9 @@ impl<S: StateStore> RangeCache<S> {
     }
 
     /// Flush writes to the `StateTable` from the in-memory buffer.
-    pub async fn flush(&mut self) -> StreamExecutorResult<()> {
+    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         // self.metrics.flush();
-        self.state_table.commit(self.current_epoch).await?;
+        self.state_table.commit(epoch).await?;
         Ok(())
-    }
-
-    /// Updates the current epoch
-    pub fn update_epoch(&mut self, epoch: u64) {
-        self.current_epoch = epoch;
     }
 }

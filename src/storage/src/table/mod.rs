@@ -113,12 +113,14 @@ fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
-        row.hash_by_indices(indices, &Crc32FastBuilder {})
-            .to_vnode()
+        let vnode = row
+            .hash_by_indices(indices, &Crc32FastBuilder {})
+            .to_vnode();
+        check_vnode_is_set(vnode, vnodes);
+        vnode
     };
 
     tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
-    check_vnode_is_set(vnode, vnodes);
 
     vnode
 }
@@ -146,7 +148,7 @@ fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) ->
 
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
 fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
-    let is_set = vnodes.is_set(vnode as usize).unwrap();
+    let is_set = vnodes.is_set(vnode as usize);
     assert!(
         is_set,
         "vnode {} should not be accessed by this table",

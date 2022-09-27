@@ -31,10 +31,12 @@ fn extract_type_from_option(option_segment: &PathSegment) -> Type {
 }
 
 /// For example:
-///   #[prost(enumeration = "data_type::TypeName", tag = "1")]
-///   pub type_name: i32,
+/// ```ignore
+/// #[prost(enumeration = "data_type::TypeName", tag = "1")]
+/// pub type_name: i32,
+/// ```
 ///
-/// Returns "data_type::TypeName".
+/// Returns `data_type::TypeName`.
 fn extract_enum_type_from_field(field: &Field) -> Option<Type> {
     use syn::punctuated::Punctuated;
     use syn::Token;

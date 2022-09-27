@@ -135,7 +135,7 @@ impl StreamHashJoin {
 }
 
 impl fmt::Display for StreamHashJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = if self.is_append_only {
             f.debug_struct("StreamAppendOnlyHashJoin")
         } else {
@@ -267,8 +267,6 @@ fn infer_internal_and_degree_table_catalog(
     let base = input.plan_base();
     let schema = &base.schema;
 
-    let append_only = input.append_only();
-
     let internal_table_dist_keys = base.dist.dist_column_indices().to_vec();
 
     // Find the dist key position in join key.
@@ -290,7 +288,8 @@ fn infer_internal_and_degree_table_catalog(
     pk_indices.extend(&base.logical_pk);
 
     // Build internal table
-    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    let mut internal_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
     let internal_columns_fields = schema.fields().to_vec();
 
     internal_columns_fields.iter().for_each(|field| {
@@ -302,7 +301,8 @@ fn infer_internal_and_degree_table_catalog(
     });
 
     // Build degree table.
-    let mut degree_table_catalog_builder = TableCatalogBuilder::new();
+    let mut degree_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
 
     let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
@@ -311,20 +311,11 @@ fn infer_internal_and_degree_table_catalog(
         degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
     });
     degree_table_catalog_builder.add_column(&degree_column_field);
-
-    internal_table_catalog_builder
-        .set_properties(base.ctx.inner().with_options.internal_table_subset());
-    let value_indices = vec![degree_table_catalog_builder.get_columns().len() - 1];
     degree_table_catalog_builder
-        .set_properties(base.ctx.inner().with_options.internal_table_subset());
+        .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
     (
-        internal_table_catalog_builder.build(internal_table_dist_keys, append_only, None),
-        degree_table_catalog_builder.build_with_value_indices(
-            degree_table_dist_keys,
-            append_only,
-            None,
-            value_indices,
-        ),
+        internal_table_catalog_builder.build(internal_table_dist_keys),
+        degree_table_catalog_builder.build(degree_table_dist_keys),
     )
 }

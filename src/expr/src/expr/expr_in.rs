@@ -225,8 +225,7 @@ mod tests {
             let res = search_expr
                 .eval(&data_chunks[i])
                 .unwrap()
-                .compact(vis.unwrap(), expected[i].len())
-                .unwrap();
+                .compact(vis.unwrap(), expected[i].len());
 
             for (i, expect) in expected[i].iter().enumerate() {
                 assert_eq!(res.datum_at(i), expect.map(ScalarImpl::Bool));
