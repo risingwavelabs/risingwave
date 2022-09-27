@@ -16,7 +16,7 @@ pub struct GooglePubsubSplitEnumerator {
     // only upwards)
     split_count: u32,
 
-    // To use a pubsub emulator as the soruce
+    // To use a pubsub emulator as the source
     emulator_host: Option<String>,
 
     // Optionally filter messages by attributes -- again not sure if this belongs here.
@@ -48,7 +48,8 @@ impl SplitEnumerator for GooglePubsubSplitEnumerator {
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PubsubSplit>> {
         let splits: Vec<PubsubSplit> = (0..self.split_count)
-            .map(|_| PubsubSplit {
+            .map(|i| PubsubSplit {
+                index: i,
                 topic: self.topic.clone(),
                 subscription: self.subscription.clone(),
             })

@@ -8,6 +8,8 @@ use crate::source::{SplitMetaData, SplitId};
 pub struct PubsubSplit {
     pub(crate) topic: String,
     pub(crate) subscription: String,
+    pub(crate) index: u32,
+
 }
 
 impl PubsubSplit {}
@@ -15,7 +17,7 @@ impl PubsubSplit {}
 impl SplitMetaData for PubsubSplit {
     fn id(&self) -> SplitId {
         // for now, until we figure out how we take care of IDs here
-        format!("{}", 0).into()
+        format!("{}", self.index).into()
     }
 
     fn encode_to_bytes(&self) -> bytes::Bytes {
