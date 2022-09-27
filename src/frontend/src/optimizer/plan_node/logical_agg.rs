@@ -24,6 +24,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
+use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
@@ -41,6 +42,7 @@ use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
     Direction, Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
 };
+use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, Substitute};
 
 /// Rewritten version of [`crate::expr::OrderByExpr`] which uses `InputRef` instead of `ExprImpl`.
@@ -308,21 +310,70 @@ pub struct LogicalAgg {
     input: PlanRef,
 }
 
+pub enum AggCallState {
+    ResultValueState,
+    MaterializedInputState(MaterializedAggInputState),
+}
+impl AggCallState {
+    pub fn to_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStateProst {
+        AggCallStateProst {
+            inner: Some(match self {
+                AggCallState::ResultValueState => agg_call_state::Inner::ResultValueState(
+                    risingwave_pb::stream_plan::AggResultState {},
+                ),
+                AggCallState::MaterializedInputState(s) => {
+                    agg_call_state::Inner::MaterializedState(
+                        risingwave_pb::stream_plan::MaterializedAggInputState {
+                            table: Some(
+                                s.table
+                                    .with_id(state.gen_table_id_wrapped())
+                                    .to_internal_table_prost(),
+                            ),
+                            column_mapping: s.column_mapping.into_iter().map(|x| x as _).collect(),
+                        },
+                    )
+                }
+            }),
+        }
+    }
+}
+struct MaterializedAggInputState {
+    pub table: TableCatalog,
+    pub column_mapping: Vec<usize>,
+}
 impl LogicalAgg {
-    pub fn infer_internal_table_catalog(
-        &self,
-        vnode_col_idx: Option<usize>,
-    ) -> (Vec<TableCatalog>, Vec<Vec<usize>>) {
-        let mut table_catalogs = vec![];
+    pub fn infer_result_table(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
+        let out_fields = self.base.schema.fields();
+        let in_fields = self.input().schema().fields().to_vec();
+        let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
+        let mut internal_table_catalog_builder =
+            TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
+        for field in out_fields.iter() {
+            let tb_column_idx = internal_table_catalog_builder.add_column(field);
+            if tb_column_idx < self.group_key().len() {
+                internal_table_catalog_builder
+                    .add_order_column(tb_column_idx, OrderType::Ascending);
+            }
+        }
+        let mapping = self.i2o_col_mapping();
+        let tb_dist = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
+        if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
+            internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
+        }
+        internal_table_catalog_builder.build(tb_dist)
+    }
+
+    /// return StreamAgg's AggCallStates
+    pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
         let out_fields = self.base.schema.fields();
         let in_fields = self.input().schema().fields().to_vec();
         let in_pks = self.input().logical_pk().to_vec();
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
+        let mut column_mapping = vec![];
         let get_sorted_input_state_table = |sort_keys: Vec<(OrderType, usize)>,
-                                            include_keys: Vec<usize>,
-                                            column_mapping: &mut Vec<usize>|
-         -> TableCatalog {
+                                            include_keys: Vec<usize>|
+         -> MaterializedAggInputState {
             let mut internal_table_catalog_builder =
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
@@ -353,40 +404,21 @@ impl LogicalAgg {
                 internal_table_catalog_builder.add_column(&in_fields[include_key]);
                 column_mapping.push(include_key);
             }
-            let mapping = ColIndexMapping::with_column_mapping(column_mapping, in_fields.len());
+            let mapping = ColIndexMapping::with_column_mapping(&column_mapping, in_fields.len());
             let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
             }
-
-            internal_table_catalog_builder.build(tb_dist.unwrap_or_default())
+            MaterializedAggInputState {
+                table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
+                column_mapping,
+            }
         };
 
-        let get_value_state_table = |value_key: usize,
-                                     column_mapping: &mut Vec<usize>|
-         -> TableCatalog {
-            let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-
-            for &idx in &self.group_key {
-                let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
-                internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
-                column_mapping.push(idx);
-            }
-            let mapping = ColIndexMapping::with_column_mapping(column_mapping, in_fields.len());
-            let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
-            if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
-                internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
-            }
-
-            internal_table_catalog_builder.add_column(&out_fields[value_key]);
-            internal_table_catalog_builder.build(tb_dist.unwrap_or_default())
-        };
-        // Map input col idx -> table col idx.
-        let mut column_mappings_vec = vec![];
-        for (agg_idx, agg_call) in self.agg_calls.iter().enumerate() {
-            let mut column_mapping = vec![];
-            let state_table = match agg_call.agg_kind {
+        self.agg_calls
+            .iter()
+            .enumerate()
+            .map(|(agg_idx, agg_call)| match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::ArrayAgg => {
                     if !in_append_only {
                         let mut sort_column_set = BTreeSet::new();
@@ -420,21 +452,19 @@ impl LogicalAgg {
                                 .collect(),
                             _ => vec![],
                         };
-
-                        get_sorted_input_state_table(sort_keys, include_keys, &mut column_mapping)
+                        AggCallState::MaterializedInputState(get_sorted_input_state_table(
+                            sort_keys,
+                            include_keys,
+                        ))
                     } else {
-                        get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
+                        AggCallState::ResultValueState
                     }
                 }
                 AggKind::Sum | AggKind::Count | AggKind::Avg | AggKind::ApproxCountDistinct => {
-                    get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
+                    AggCallState::ResultValueState
                 }
-            };
-
-            table_catalogs.push(state_table);
-            column_mappings_vec.push(column_mapping);
-        }
-        (table_catalogs, column_mappings_vec)
+            })
+            .collect()
     }
 
     /// Generate plan for stateless 2-phase streaming agg.

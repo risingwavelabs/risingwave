@@ -153,16 +153,13 @@ message OptionalColumnIndex {
 }
 
 // use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extream.
-message AggResultState {
-  // the column index of the streamAgg's result table which is the aggCall's result
-  uint32 col_idx_in_table = 1;
-}
+message AggResultState {}
 
 // use the some column of the Upstream's materialization as the AggCall's state, used for extream/string_agg/array_agg.
 message MaterializedAggInputState {
   catalog.Table table = 1;
   // column_mapping
-  repeated OptionalColumnIndex column_mapping = 2;
+  repeated uint32 column_mapping = 2;
 }
 
 message AggCallState {
