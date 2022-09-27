@@ -51,12 +51,12 @@ impl BoxedExecutorBuilder for LimitExecutor {
         let limit = limit_node.get_limit() as usize;
         let offset = limit_node.get_offset() as usize;
 
-        Ok(Box::new(Self {
+        Ok(Box::new(Self::new(
             child,
             limit,
             offset,
-            identity: source.plan_node().get_identity().clone(),
-        }))
+            source.plan_node().get_identity().clone(),
+        )))
     }
 }
 
@@ -126,6 +126,17 @@ impl Executor for LimitExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+}
+
+impl LimitExecutor {
+    pub fn new(child: BoxedExecutor, offset: usize, limit: usize, identity: String) -> Self {
+        Self {
+            child,
+            offset,
+            limit,
+            identity,
+        }
     }
 }
 
