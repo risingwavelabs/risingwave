@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::hummock::WriteLimiterThreshold;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::hummock::error::Result;
 use crate::hummock::HummockManager;
@@ -62,7 +63,13 @@ where
             threshold,
             guard.write_limiter_threshold
         );
-        guard.write_limiter_threshold = threshold;
+        guard.write_limiter_threshold = threshold.clone();
+        self.env
+            .notification_manager()
+            .notify_compute_asynchronously(
+                Operation::Update,
+                Info::HummockWriteLimiterThreshold(threshold),
+            );
         Ok(())
     }
 }

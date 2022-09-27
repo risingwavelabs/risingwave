@@ -206,12 +206,13 @@ impl HummockStorage {
         if let Some(write_delay) = write_delay.as_ref() {
             self.stats
                 .write_delay
-                .observe(write_delay.duration.as_secs() as f64);
+                .observe(write_delay.duration.as_secs_f64());
         }
         write_delay
     }
 
     pub fn set_write_limiter_threshold(&self, threshold: WriteLimiterThreshold) {
+        tracing::info!("Set write limiter threshold {:#?}", threshold);
         self.write_limiter.lock().set_threshold(threshold);
     }
 
@@ -359,9 +360,8 @@ impl WriteLimiter {
 
     fn get_write_delay(&mut self) -> Option<WriteDelay> {
         let exceeded = self
-            .threshold
-            .max_sub_level_number
-            .saturating_sub(self.sub_level_number);
+            .sub_level_number
+            .saturating_sub(self.threshold.max_sub_level_number);
         let duration = std::cmp::min(
             self.threshold.max_delay_sec,
             (self.threshold.per_file_delay_sec * exceeded as f32) as u64,

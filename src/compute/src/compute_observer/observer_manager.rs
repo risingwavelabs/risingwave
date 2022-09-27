@@ -63,6 +63,14 @@ impl ObserverNodeImpl for ComputeObserverNode {
                 }
             }
 
+            Info::HummockWriteLimiterThreshold(threshold) => {
+                if let StateStoreImpl::HummockStateStore(storage) = &self.store {
+                    storage
+                        .as_hummock_storage_ref()
+                        .set_write_limiter_threshold(threshold);
+                }
+            }
+
             _ => {
                 panic!("error type notification");
             }
@@ -82,6 +90,11 @@ impl ObserverNodeImpl for ComputeObserverNode {
                             snapshot.hummock_version.unwrap(),
                         ),
                     );
+                    storage
+                        .as_hummock_storage_ref()
+                        .set_write_limiter_threshold(
+                            snapshot.hummock_write_limiter_threshold.unwrap(),
+                        );
                 }
 
                 self.version = resp.version;
