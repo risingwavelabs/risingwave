@@ -509,12 +509,7 @@ where
         let mut creating_tables = ctx
             .internal_table_id_map
             .iter()
-            .map(|(id, table)| {
-                table.clone().unwrap_or(Table {
-                    id: *id,
-                    ..Default::default()
-                })
-            })
+            .map(|(_, table)| table.clone())
             .collect_vec();
         match stream_job {
             StreamingJob::MaterializedView(table)

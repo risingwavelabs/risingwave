@@ -520,7 +520,7 @@ impl StreamGraphBuilder {
         upstream_fragment_id: &mut HashMap<u64, GlobalFragmentId>,
     ) -> MetaResult<StreamNode> {
         let table_id_offset = ctx.table_id_offset;
-        let mut check_and_fill_internal_table = |table_id: u32, table: Option<Table>| {
+        let mut check_and_fill_internal_table = |table_id: u32, table: Table| {
             ctx.internal_table_id_map.entry(table_id).or_insert(table);
         };
 
@@ -535,7 +535,7 @@ impl StreamGraphBuilder {
                 table_type_name,
             );
             table.fragment_id = fragment_id.as_global_id();
-            check_and_fill_internal_table(table.id, Some(table.clone()));
+            check_and_fill_internal_table(table.id, table.clone());
         };
 
         match stream_node.get_node_body()? {
