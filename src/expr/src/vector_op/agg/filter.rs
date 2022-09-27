@@ -42,7 +42,7 @@ impl Aggregator for Filter {
     }
 
     fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let (row_ref, vis) = input.row_at(row_id)?;
+        let (row_ref, vis) = input.row_at(row_id);
         assert!(vis); // cuz the input chunk is supposed to be compacted
         if self
             .condition
@@ -68,7 +68,7 @@ impl Aggregator for Filter {
             // otherwise, run `eval_row` on each row
             (start_row_id..end_row_id)
                 .map(|row_id| -> Result<bool> {
-                    let (row_ref, vis) = input.row_at(row_id)?;
+                    let (row_ref, vis) = input.row_at(row_id);
                     assert!(vis); // cuz the input chunk is supposed to be compacted
                     Ok(self
                         .condition
@@ -88,7 +88,7 @@ impl Aggregator for Filter {
             // https://github.com/risingwavelabs/risingwave/pull/4972#discussion_r958013816
             for (_, row_id) in (start_row_id..end_row_id)
                 .enumerate()
-                .filter(|(i, _)| bitmap.is_set(*i).unwrap())
+                .filter(|(i, _)| bitmap.is_set(*i))
             {
                 self.inner.update_single(input, row_id)?;
             }

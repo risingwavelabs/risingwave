@@ -69,7 +69,7 @@ impl Column {
             .iter()
             .map(|column| {
                 let array = column.array_ref();
-                let mut builder = array.create_builder(cardinality)?;
+                let mut builder = array.create_builder(cardinality);
                 // TODO: use a more efficient way to generate `null_column`.
                 (0..cardinality).for_each(|_i| builder.append_null());
                 Ok::<Column, ArrayError>(Column::new(Arc::new(builder.finish())))

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -42,9 +44,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
@@ -57,9 +59,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 schema,
                 order_pairs,
                 offset_and_limit,
+                order_by_len,
                 pk_indices,
                 executor_id,
-                key_indices,
                 state_table,
             )?,
         })
@@ -87,10 +89,6 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     /// TODO: support WITH TIES
     cache: TopNCache<false>,
-
-    #[expect(dead_code)]
-    /// Indices of the columns on which key distribution depends.
-    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
@@ -100,13 +98,19 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         schema: Schema,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
+        // order_pairs is superset of pk
+        assert!(order_pairs
+            .iter()
+            .map(|x| x.column_idx)
+            .collect::<HashSet<_>>()
+            .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
+            generate_executor_pk_indices_info(&order_pairs, &schema);
 
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
@@ -126,8 +130,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit, order_pairs.len()),
-            key_indices,
+            cache: TopNCache::new(num_offset, num_limit, order_by_len),
         })
     }
 }
@@ -316,9 +319,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_pairs,
                 (0, 5),
+                2,
                 vec![0, 1],
                 1,
-                vec![],
                 state_table,
             )
             .unwrap(),
@@ -398,9 +401,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_pairs,
                 (3, 4),
+                2,
                 vec![0, 1],
                 1,
-                vec![],
                 state_table,
             )
             .unwrap(),

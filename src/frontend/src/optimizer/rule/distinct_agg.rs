@@ -267,7 +267,6 @@ impl DistinctAggRule {
                     | AggKind::Sum
                     | AggKind::Avg
                     | AggKind::StringAgg
-                    | AggKind::SingleValue
                     | AggKind::ApproxCountDistinct
                     | AggKind::ArrayAgg => (),
                     AggKind::Count => {
