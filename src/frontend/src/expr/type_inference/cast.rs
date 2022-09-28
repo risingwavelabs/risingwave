@@ -172,26 +172,20 @@ pub fn align_array_and_element(
 
     // try to cast inputs to inputs to common type
     let inputs_owned = std::mem::take(inputs);
-    let try_cast: Result<Vec<ExprImpl>> = inputs_owned
+    let casted_res: Result<Vec<ExprImpl>> = inputs_owned
         .into_iter()
         .map(|input| {
             let x = input.return_type();
-            input.cast_explicit(add_nesting(common_ele_type.clone(), x))
+            input.cast_implicit(add_nesting(common_ele_type.clone(), x))
         })
         .try_collect();
 
-    match try_cast {
-        Ok(casted) => {
-            *inputs = casted;
-            return Ok(array_type);
-        }
-        Err(_) => {
-            return Err(ErrorCode::BindError(format!(
-                "unable to align between {} and {}",
-                element, array
-            )));
-        }
-    }
+    let casted = casted_res.map_err(|_| {
+        ErrorCode::BindError(format!("unable to align between {} and {}", element, array))
+    })?;
+
+    *inputs = casted;
+    Ok(array_type)
 }
 
 /// The context a cast operation is invoked in. An implicit cast operation is allowed in a context
