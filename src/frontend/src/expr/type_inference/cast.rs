@@ -88,7 +88,7 @@ pub fn add_nesting_inner(target_dt: DataType, add_levels: i32) -> DataType {
 /// already more nested`
 pub fn add_nesting(target_dt: DataType, target_nesting: DataType) -> DataType {
     let target_dt_level = calc_nesting_level(target_dt.clone());
-    let target_nesting_level = calc_nesting_level(target_nesting.clone());
+    let target_nesting_level = calc_nesting_level(target_nesting);
     add_nesting_inner(target_dt, target_nesting_level - target_dt_level)
 }
 
