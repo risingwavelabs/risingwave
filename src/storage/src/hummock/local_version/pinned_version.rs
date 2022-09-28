@@ -17,7 +17,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::hummock::{HummockVersion, Level};
 use risingwave_rpc_client::HummockMetaClient;
