@@ -15,6 +15,7 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -23,7 +24,7 @@ use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::iterator::test_utils::{
     iterator_test_key_of_epoch, mock_sstable_store,
 };
-use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
+use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::version::{
     HummockReadVersion, ImmutableMemtable, StagingData, StagingSstableInfo, VersionUpdate,
 };
@@ -37,7 +38,7 @@ async fn test_read_version_basic() {
         opt.clone(),
         mock_sstable_store(),
         Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
+            hummock_manager_ref,
             worker_node.id,
         )),
         ConflictDetector::new_from_config(opt),
@@ -55,7 +56,7 @@ async fn test_read_version_basic() {
             epoch,
             compaction_group_id,
             kv_pairs,
-            table_id,
+            TableId::from(table_id),
         );
 
         read_version
@@ -74,23 +75,21 @@ async fn test_read_version_basic() {
             .cloned()
             .collect::<Vec<ImmutableMemtable>>();
 
-        let staging_sst = staging_sst_iter.cloned().collect::<Vec<_>>();
-
         assert_eq!(1, staging_imm.len());
-        assert_eq!(0, staging_sst.len());
+        assert_eq!(0, staging_sst_iter.count());
         assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
     }
 
     {
         // several epoch
         for _ in 0..5 {
-            epoch = epoch + 1;
+            epoch += 1;
             let kv_pairs = gen_dummy_batch(epoch);
             let imm = local_version_manager.build_shared_buffer_batch(
                 epoch,
                 compaction_group_id,
                 kv_pairs,
-                table_id,
+                TableId::from(table_id),
             );
 
             read_version
@@ -110,10 +109,8 @@ async fn test_read_version_basic() {
             .cloned()
             .collect::<Vec<ImmutableMemtable>>();
 
-        let staging_sst = staging_sst_iter.cloned().collect::<Vec<_>>();
-
         assert_eq!(1, staging_imm.len());
-        assert_eq!(0, staging_sst.len());
+        assert_eq!(0, staging_sst_iter.count());
         assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
     }
 

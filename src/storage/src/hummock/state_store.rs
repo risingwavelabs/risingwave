@@ -505,12 +505,7 @@ impl StateStore for HummockStorage {
             // compaction_group_id in read/write path.
             let size = self
                 .local_version_manager
-                .write_shared_buffer(
-                    epoch,
-                    compaction_group_id,
-                    kv_pairs,
-                    write_options.table_id.into(),
-                )
+                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, write_options.table_id)
                 .await?;
             Ok(size)
         }
