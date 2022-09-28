@@ -155,16 +155,6 @@ pub fn align_array_and_element(
         ErrorCode::BindError(format!("cannot combine {} with {}", array, element))
     })?;
 
-    // we are unable to combine arrays like integer[] with integer[][][]
-    let nesting_level_diff =
-        (calc_nesting_level(element.clone()) - calc_nesting_level(array.clone())).abs();
-    if nesting_level_diff > 1 {
-        return Err(ErrorCode::BindError(format!(
-            "unable to align between {} and {}",
-            element, array
-        )));
-    }
-
     // cast to least restrictive type or return error
     let common_ele_type = least_restrictive(*array_ele_type.clone(), element.clone());
     if common_ele_type.is_err() {
