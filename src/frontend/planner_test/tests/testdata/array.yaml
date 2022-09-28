@@ -72,7 +72,7 @@
     └─BatchValues { rows: [[]] }
 - sql: |
     select array_cat(array[233], array[array[array[66]]]);
-  binder_error: "Bind error: Cannot concatenate integer[] and integer[][][]"
+  binder_error: "Bind error: unable to align between integer[] and integer[][][]"
 - sql: |
     select array_cat(array[233], 123);
   binder_error: "Bind error: Cannot concatenate integer[] and integer"

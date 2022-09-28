@@ -219,7 +219,12 @@ fn infer_type_for_special(
             let common_type = align_array_and_element(0, 1, inputs);
             match common_type {
                 Ok(casted) => Ok(Some(casted)),
-                Err(err) => Err(err.into()),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot append {} to {}",
+                    inputs[0].return_type(),
+                    inputs[1].return_type()
+                ))
+                .into()),
             }
         }
         ExprType::ArrayPrepend => {
@@ -227,7 +232,12 @@ fn infer_type_for_special(
             let common_type = align_array_and_element(1, 0, inputs);
             match common_type {
                 Ok(casted) => Ok(Some(casted)),
-                Err(err) => Err(err.into()),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot prepend {} to {}",
+                    inputs[0].return_type(),
+                    inputs[1].return_type()
+                ))
+                .into()),
             }
         }
         ExprType::Vnode => {

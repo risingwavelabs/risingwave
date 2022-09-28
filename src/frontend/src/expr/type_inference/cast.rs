@@ -151,17 +151,9 @@ pub fn align_array_and_element(
         DataType::List { datatype: array_et } => Some(array_et),
         _ => None,
     };
-    let array_ele_type = array_ele_type_opt
-        .ok_or_else(|| ErrorCode::BindError(format!("Cannot prepend {} to {}", array, element)))?;
-
-    // cast to least restrictive type or return error
-    let common_ele_type = least_restrictive(*array_ele_type.clone(), element.clone());
-    if common_ele_type.is_err() {
-        return Err(ErrorCode::BindError(format!(
-            "unable to find least restrictive type between {} and {}",
-            element, array
-        )));
-    }
+    let array_ele_type = array_ele_type_opt.ok_or_else(|| {
+        ErrorCode::BindError(format!("cannot combine {} with {}", array, element))
+    })?;
 
     // we are unable to combine arrays like integer[] with integer[][][]
     let nesting_level_diff =
@@ -169,6 +161,15 @@ pub fn align_array_and_element(
     if nesting_level_diff > 1 {
         return Err(ErrorCode::BindError(format!(
             "unable to align between {} and {}",
+            element, array
+        )));
+    }
+
+    // cast to least restrictive type or return error
+    let common_ele_type = least_restrictive(*array_ele_type.clone(), element.clone());
+    if common_ele_type.is_err() {
+        return Err(ErrorCode::BindError(format!(
+            "unable to find least restrictive type between {} and {}",
             element, array
         )));
     }
