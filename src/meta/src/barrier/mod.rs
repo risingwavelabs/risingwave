@@ -60,6 +60,7 @@ mod notifier;
 mod progress;
 mod recovery;
 mod schedule;
+mod snapshot;
 
 pub use self::command::{Command, Reschedule};
 pub use self::schedule::BarrierScheduler;
