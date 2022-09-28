@@ -514,6 +514,9 @@ template:
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
 
+    # Whether to use a managed lru cache (evict by epoch)
+    enable-managed-cache: false
+    
     # Minio instances used by this compute node
     provide-minio: "minio*"
 

@@ -12,25 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(no_coverage))]
-
-use global_stats_alloc::INSTRUMENTED_JEMALLOC;
 use stats_alloc::StatsAlloc;
 use tikv_jemallocator::Jemalloc;
 
-#[global_allocator]
-static GLOBAL: &StatsAlloc<Jemalloc> = &INSTRUMENTED_JEMALLOC;
-
-#[cfg_attr(coverage, no_coverage)]
-fn main() {
-    use clap::StructOpt;
-
-    let opts = risingwave_compute::ComputeNodeOpts::parse();
-
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(
-        opts.enable_jaeger_tracing,
-        false,
-    ));
-
-    risingwave_rt::main_okk(risingwave_compute::start(opts))
-}
+pub static INSTRUMENTED_JEMALLOC: StatsAlloc<Jemalloc> = StatsAlloc::new(Jemalloc);
