@@ -29,12 +29,10 @@ use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::aggregation::agg_call_filter_res;
+use super::aggregation::{agg_call_filter_res, AggStateTable};
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
-use crate::common::StateTableColumnMapping;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{
     generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -82,15 +80,13 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
 
+    /// Relational state tables for each aggregation calls.
+    /// `None` means the agg call need not to maintain a state table by itself.
+    agg_state_tables: Vec<Option<AggStateTable<S>>>,
+
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
-
-    /// Relational state tables for each aggregation calls.
-    state_tables: Vec<StateTable<S>>,
-
-    /// State table column mappings for each aggregation calls,
-    state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
 
     /// How many times have we hit the cache of join executor
     lookup_miss_count: AtomicU64,
@@ -130,22 +126,23 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
+        mut agg_state_tables: Vec<Option<AggStateTable<S>>>,
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
         group_by_key_cache_size: usize,
         extreme_cache_size: usize,
-        mut state_tables: Vec<StateTable<S>>,
-        state_table_col_mappings: Vec<Vec<usize>>,
         metrics: Arc<StreamingMetrics>,
     ) -> StreamResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
-        // // TODO: enable sanity check for hash agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
-        for state_table in &mut state_tables {
-            state_table.disable_sanity_check();
-        }
+        // TODO: enable sanity check for hash agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
+        agg_state_tables.iter_mut().for_each(|state_table| {
+            if let Some(state_table) = state_table {
+                state_table.table.disable_sanity_check();
+            }
+        });
 
         Ok(Self {
             input,
@@ -157,15 +154,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_pk_indices: input_info.pk_indices,
                 _input_schema: input_info.schema,
                 agg_calls,
+                agg_state_tables,
                 key_indices,
                 group_by_key_cache_size,
                 extreme_cache_size,
-                state_tables,
-                state_table_col_mappings: state_table_col_mappings
-                    .into_iter()
-                    .map(StateTableColumnMapping::new)
-                    .map(Arc::new)
-                    .collect(),
                 lookup_miss_count: AtomicU64::new(0),
                 total_lookup_count: AtomicU64::new(0),
                 metrics,
@@ -231,13 +223,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref identity,
             ref key_indices,
             ref agg_calls,
+            ref agg_state_tables,
             ref input_pk_indices,
             group_by_key_cache_size: _,
             ref extreme_cache_size,
             ref _input_schema,
             ref schema,
-            state_tables,
-            ref state_table_col_mappings,
             pk_indices: _,
             lookup_miss_count,
             total_lookup_count,

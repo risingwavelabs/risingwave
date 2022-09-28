@@ -18,11 +18,10 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 
-use super::agg_call::build_agg_call_from_prost;
+use super::agg_common::{build_agg_call_from_prost, build_agg_state_tables_from_proto};
 use super::*;
-use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
+use crate::executor::aggregation::{AggCall, AggStateTable};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
 
@@ -32,13 +31,12 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
     input: BoxedExecutor,
     agg_calls: Vec<AggCall>,
+    agg_state_tables: Vec<Option<AggStateTable<S>>>,
     key_indices: Vec<usize>,
     pk_indices: PkIndices,
     group_by_cache_size: usize,
     extreme_cache_size: usize,
     executor_id: u64,
-    state_tables: Vec<StateTable<S>>,
-    state_table_col_mappings: Vec<Vec<usize>>,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -51,13 +49,12 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.ctx,
             args.input,
             args.agg_calls,
+            args.agg_state_tables,
             args.pk_indices,
             args.executor_id,
             args.key_indices,
             args.group_by_cache_size,
             args.extreme_cache_size,
-            args.state_tables,
-            args.state_table_col_mappings,
             args.metrics,
         )?
         .boxed())
@@ -79,16 +76,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
-        let agg_calls: Vec<AggCall> = node
-            .get_agg_calls()
-            .iter()
-            .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
-            .try_collect()?;
-        let state_table_col_mappings: Vec<Vec<usize>> = node
-            .get_column_mappings()
-            .iter()
-            .map(|mapping| mapping.indices.iter().map(|idx| *idx as usize).collect())
-            .collect();
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let keys = key_indices
             .iter()
@@ -96,21 +83,26 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .collect_vec();
         let kind = calc_hash_key_kind(&keys);
 
-        let vnodes = params.vnode_bitmap.expect("vnodes not set for hash agg");
-        let state_tables =
-            generate_state_tables_from_proto(store, &node.internal_tables, Some(vnodes.into()));
+        let agg_calls: Vec<AggCall> = node
+            .get_agg_calls()
+            .iter()
+            .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
+            .try_collect()?;
+
+        let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash agg"));
+        let agg_state_tables =
+            build_agg_state_tables_from_proto(store, node.get_agg_call_states(), Some(vnodes));
 
         let args = HashAggExecutorDispatcherArgs {
             ctx: params.actor_context,
             input,
             agg_calls,
+            agg_state_tables,
             key_indices,
             pk_indices: params.pk_indices,
             group_by_cache_size: stream.config.developer.unsafe_hash_agg_cache_size,
             extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
             executor_id: params.executor_id,
-            state_tables,
-            state_table_col_mappings,
             metrics: params.executor_stats,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)

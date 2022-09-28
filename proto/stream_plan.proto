@@ -158,8 +158,8 @@ message AggResultState {}
 // use the some column of the Upstream's materialization as the AggCall's state, used for extreme/string_agg/array_agg.
 message MaterializedAggInputState {
   catalog.Table table = 1;
-  // column_mapping
-  repeated uint32 column_mapping = 2;
+  // for contructing state table column mapping
+  repeated uint32 upstream_column_indices = 2;
 }
 
 message AggCallState {

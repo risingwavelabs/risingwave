@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 pub use agg_call::*;
 pub use agg_state::*;
+pub use agg_state_table::*;
 use anyhow::anyhow;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
@@ -47,6 +48,7 @@ use crate::executor::Executor;
 
 mod agg_call;
 mod agg_state;
+mod agg_state_table;
 mod approx_count_distinct;
 mod foldable;
 mod row_count;
@@ -316,24 +318,6 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         managed_states,
         prev_states: None,
     })
-}
-
-/// Parse from stream proto plan internal tables, generate state tables used by agg.
-/// The `vnodes` is generally `Some` for Hash Agg and `None` for Simple Agg.
-pub fn generate_state_tables_from_proto<S: StateStore>(
-    store: S,
-    internal_tables: &[risingwave_pb::catalog::Table],
-    vnodes: Option<Arc<Bitmap>>,
-) -> Vec<StateTable<S>> {
-    let mut state_tables = Vec::with_capacity(internal_tables.len());
-
-    for table_catalog in internal_tables {
-        // Parse info from proto and create state table.
-        let state_table =
-            StateTable::from_table_catalog(table_catalog, store.clone(), vnodes.clone());
-        state_tables.push(state_table)
-    }
-    state_tables
 }
 
 pub fn agg_call_filter_res(

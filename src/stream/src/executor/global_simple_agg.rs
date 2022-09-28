@@ -21,7 +21,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::aggregation::agg_call_filter_res;
+use super::aggregation::{agg_call_filter_res, AggStateTable};
 use super::*;
 use crate::common::StateTableColumnMapping;
 use crate::error::StreamResult;
@@ -64,10 +64,8 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     agg_calls: Vec<AggCall>,
 
     /// Relational state tables for each aggregation calls.
-    state_tables: Vec<StateTable<S>>,
-
-    /// State table column mappings for each aggregation calls,
-    state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
+    /// `None` means the agg call need not to maintain a state table by itself.
+    agg_state_tables: Vec<Option<AggStateTable<S>>>,
 
     extreme_cache_size: usize,
 }
@@ -96,19 +94,20 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
+        mut agg_state_tables: Vec<Option<AggStateTable<S>>>,
         pk_indices: PkIndices,
         executor_id: u64,
         extreme_cache_size: usize,
-        mut state_tables: Vec<StateTable<S>>,
-        state_table_col_mappings: Vec<Vec<usize>>,
     ) -> StreamResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
 
         // TODO: enable sanity check for globle simple agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
-        for state_table in &mut state_tables {
-            state_table.disable_sanity_check();
-        }
+        agg_state_tables.iter_mut().for_each(|state_table| {
+            if let Some(state_table) = state_table {
+                state_table.table.disable_sanity_check();
+            }
+        });
 
         Ok(Self {
             ctx,
@@ -122,12 +121,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             input_schema: input_info.schema,
             states: None,
             agg_calls,
-            state_tables,
-            state_table_col_mappings: state_table_col_mappings
-                .into_iter()
-                .map(StateTableColumnMapping::new)
-                .map(Arc::new)
-                .collect(),
+            agg_state_tables,
             extreme_cache_size,
         })
     }
