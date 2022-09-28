@@ -175,12 +175,12 @@ pub struct FixedSizeKey<const N: usize> {
     null_bitmap: FixedBitSet,
 }
 
-/// Designed for hash keys which can't be represented by [`FixedSizeKey`]. It uses value encoding
-/// under the hood because ordering is not needed.
+/// Designed for hash keys which can't be represented by [`FixedSizeKey`].
 ///
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
 pub struct SerializedKey {
+    // Key encoding.
     key: Vec<u8>,
     hash_code: u64,
     null_bitmap: FixedBitSet,
