@@ -180,6 +180,14 @@ static CACEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     .collect()
 });
 
+#[derive(Debug)]
+pub enum CompactionResumeTrigger {
+    /// The addition (re-subscription) of compactors
+    CompactorAddition { context_id: HummockContextId },
+    /// A compaction task is reported when all compactors are not idle.
+    TaskReport { original_task_num: usize },
+}
+
 impl<S> HummockManager<S>
 where
     S: MetaStore,
@@ -998,7 +1006,9 @@ where
             // Tell compaction scheduler to resume compaction if there's any compactor becoming
             // available.
             if assigned_task_num == self.compactor_manager.max_concurrent_task_number() {
-                self.try_resume_compaction();
+                self.try_resume_compaction(CompactionResumeTrigger::TaskReport {
+                    original_task_num: assigned_task_num,
+                });
             }
             // Update compaaction task count.
             //
@@ -1455,7 +1465,8 @@ where
     }
 
     /// Tell compaction scheduler to resume compaction.
-    pub fn try_resume_compaction(&self) {
+    pub fn try_resume_compaction(&self, trigger: CompactionResumeTrigger) {
+        tracing::debug!("resume compaction, trigger: {:?}", trigger);
         if let Some(notifier) = self.compaction_resume_notifier.read().as_ref() {
             notifier.notify_one();
         }

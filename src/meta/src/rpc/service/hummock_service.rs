@@ -22,7 +22,9 @@ use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumManagerRef};
+use crate::hummock::{
+    CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
+};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -203,7 +205,8 @@ where
                 );
             }
         }
-        self.hummock_manager.try_resume_compaction();
+        self.hummock_manager
+            .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 

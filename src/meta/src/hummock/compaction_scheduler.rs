@@ -83,11 +83,10 @@ impl CompactionRequestChannel {
 /// Schedules compaction task picking and assignment.
 ///
 /// When no idle compactor is available, the scheduling will be paused until
-/// `compaction_resume_notifier` is `notified`. Currently there are 2 cases where scheduling can be
-/// resumed (preferably by calling `HummockManager::try_resume_compaction`):
+/// `compaction_resume_notifier` is `notified`. Compaction should only be resumed by calling
+/// `HummockManager::try_resume_compaction`. See [`CompactionResumeTrigger`] for all cases that can
+/// resume compaction.
 /// - The addition (re-subscription) of compactors
-/// - Compactor availability change. Currently it just means a compaction task is reported when all
-///   compactors are not idle.
 pub struct CompactionScheduler<S>
 where
     S: MetaStore,
@@ -163,7 +162,7 @@ where
                 if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
                     break compactor;
                 } else {
-                    tracing::warn!("No available compactor, pausing compaction.");
+                    tracing::debug!("No available compactor, pausing compaction.");
                     tokio::select! {
                         _ = self.compaction_resume_notifier.notified() => {},
                         _ = &mut shutdown_rx => {
