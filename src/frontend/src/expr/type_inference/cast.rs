@@ -474,44 +474,4 @@ mod tests {
         assert!(!lhs_is_more_nested(nested_2, nested_3.clone()));
         assert!(!lhs_is_more_nested(nested_1, nested_3));
     }
-
-    #[test]
-    fn test_get_inner_type_ok() {
-        for dt in vec![
-            DataType::Boolean,
-            DataType::Int16,
-            DataType::Int32,
-            DataType::Int64,
-            DataType::Float32,
-            DataType::Float64,
-            DataType::Decimal,
-            DataType::Date,
-            DataType::Varchar,
-            DataType::Time,
-            DataType::Timestamp,
-            DataType::Timestampz,
-            DataType::Interval,
-        ] {
-            let nested_1 = DataType::List {
-                datatype: Box::new(dt.clone()),
-            };
-            let nested_2 = DataType::List {
-                datatype: Box::new(nested_1.clone()),
-            };
-            let nested_3 = DataType::List {
-                datatype: Box::new(nested_2.clone()),
-            };
-            let combinations = vec![nested_1, nested_2, nested_3];
-            for (i, ele_i) in combinations.iter().enumerate() {
-                for (_, ele_j) in combinations[..i].iter().enumerate() {
-                    assert_eq!(dt.clone(), get_inner_type(ele_i.clone())); // compare simple with nested
-                    assert_eq!(get_inner_type(ele_i.clone()), get_inner_type(ele_j.clone())); // compare nested
-                }
-            }
-            for ele in combinations {
-                let nested = add_nesting(dt.clone(), ele.clone());
-                assert_eq!(nested, ele);
-            }
-        }
-    }
 }
