@@ -941,7 +941,7 @@ where
                 compact_statuses.remove(group_id);
             }
         }
-        
+
         let assigned_task_num = compaction.compact_task_assignment.len();
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
