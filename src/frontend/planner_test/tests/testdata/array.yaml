@@ -94,8 +94,8 @@
     /* Combining multidimensional arrays as such is supported beyond what PostgresSQL allows */
     select array_append(array[array[66]], array[233]);
   logical_plan: |
-    BatchProject { exprs: [ArrayAppend(Array(Array(66:Int32)), Array(233:Int32))] }
-    └─BatchValues { rows: [[]] }
+    LogicalProject { exprs: [ArrayAppend(Array(Array(66:Int32)), Array(233:Int32))] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select array_prepend(123, array[66]);
   logical_plan: |
@@ -110,8 +110,8 @@
 - sql: |
     select array_prepend(array[233], array[array[66]]);
   logical_plan: |
-    BatchProject { exprs: [ArrayPrepend(Array(233:Int32), Array(Array(66:Int32)))] }
-    └─BatchValues { rows: [[]] }
+    LogicalProject { exprs: [ArrayPrepend(Array(233:Int32), Array(Array(66:Int32)))] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     /* string from/to varchar[] in implicit context */
     values (array['a', 'b']), ('{c,' || 'd}');
