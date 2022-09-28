@@ -46,9 +46,9 @@ pub struct RangeCache<S: StateStore> {
     /// from storage
     range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
 
-    #[allow(unused)]
+    #[expect(dead_code)]
     num_rows_stored: usize,
-    #[allow(unused)]
+    #[expect(dead_code)]
     capacity: usize,
 }
 

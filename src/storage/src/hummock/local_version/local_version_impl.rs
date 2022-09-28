@@ -177,8 +177,6 @@ impl LocalVersion {
     }
 
     pub fn seal_epoch(&mut self, epoch: HummockEpoch, is_checkpoint: bool) {
-        // TODO: remove it when non-checkpoint barrier is enabled
-        assert!(is_checkpoint, "current seal_epoch must be a checkpoint");
         assert!(
             epoch > self.sealed_epoch,
             "sealed epoch not advance. new epoch: {}, current {}",
@@ -186,7 +184,9 @@ impl LocalVersion {
             self.sealed_epoch
         );
         self.sealed_epoch = epoch;
-        self.advance_max_sync_epoch(epoch)
+        if is_checkpoint {
+            self.advance_max_sync_epoch(epoch)
+        }
     }
 
     pub fn get_sealed_epoch(&self) -> HummockEpoch {

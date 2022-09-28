@@ -103,7 +103,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn checkpoint() -> Self {
+    pub fn barrier() -> Self {
         Self::Plain(None)
     }
 
@@ -146,6 +146,11 @@ impl Command {
         // previous checkpoint has been done.
         matches!(self, Self::Plain(Some(Mutation::Pause(_))))
     }
+
+    pub fn need_checkpoint(&self) -> bool {
+        // todo! Reviewing the flow of different command to reduce the amount of checkpoint
+        !matches!(self, Command::Plain(None | Some(Mutation::Resume(_))))
+    }
 }
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
@@ -163,6 +168,8 @@ pub struct CommandContext<S: MetaStore> {
     pub curr_epoch: Epoch,
 
     pub command: Command,
+
+    pub checkpoint: bool,
 }
 
 impl<S: MetaStore> CommandContext<S> {
@@ -173,6 +180,7 @@ impl<S: MetaStore> CommandContext<S> {
         prev_epoch: Epoch,
         curr_epoch: Epoch,
         command: Command,
+        checkpoint: bool,
     ) -> Self {
         Self {
             fragment_manager,
@@ -181,6 +189,7 @@ impl<S: MetaStore> CommandContext<S> {
             prev_epoch,
             curr_epoch,
             command,
+            checkpoint,
         }
     }
 }
