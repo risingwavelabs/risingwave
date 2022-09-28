@@ -86,7 +86,6 @@ impl CompactionRequestChannel {
 /// `compaction_resume_notifier` is `notified`. Compaction should only be resumed by calling
 /// `HummockManager::try_resume_compaction`. See [`CompactionResumeTrigger`] for all cases that can
 /// resume compaction.
-/// - The addition (re-subscription) of compactors
 pub struct CompactionScheduler<S>
 where
     S: MetaStore,
