@@ -1,5 +1,4 @@
 // Copyright 2022 Singularity Data
-//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -13,6 +12,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::ops::IndexMut;
 use std::sync::LazyLock;
 
 use itertools::Itertools as _;
@@ -50,46 +50,6 @@ pub fn lhs_is_more_nested(lhs: DataType, rhs: DataType) -> bool {
     let lhs_level = calc_nesting_level(lhs);
     let rhs_level = calc_nesting_level(rhs);
     lhs_level > rhs_level
-}
-
-/// Get the more nested element. Returns rhs if both are equally nested
-///
-/// Examples:
-/// `get_most_nested(DataType::Boolean, DataType::Boolean) -> DataType::Boolean`
-/// `get_most_nested(DataType::Date, List{List{DataType::Boolean}}) ->
-/// List{List{DataType::Boolean}}` `get_most_nested(List{DataType::Int16},
-/// List{List{DataType::Boolean}}) -> List{List{DataType::Boolean}}`
-pub fn get_most_nested(lhs: DataType, rhs: DataType) -> DataType {
-    if lhs_is_more_nested(lhs.clone(), rhs.clone()) {
-        return lhs;
-    }
-    rhs
-}
-
-// helper for add_nesting
-pub fn add_nesting_inner(target_dt: DataType, add_levels: i32) -> DataType {
-    if add_levels <= 0 {
-        return target_dt;
-    }
-    add_nesting_inner(
-        DataType::List {
-            datatype: Box::new(target_dt),
-        },
-        add_levels - 1,
-    )
-}
-
-/// Add levels to target dt until it is as nested as `target_nesting`
-///
-/// Examples:
-/// `add_nesting(DataType::Boolean, DataType::Boolean) -> DataType::Boolean`
-/// `add_nesting(DataType::Date, List{List{DataType::Boolean}}) -> List{List{DataType::Date}}`
-/// `add_nesting(List{List{DataType::Int16}}, DataType::Interval) -> List{List{DataType::Int16}} //
-/// already more nested`
-pub fn add_nesting(target_dt: DataType, target_nesting: DataType) -> DataType {
-    let target_dt_level = calc_nesting_level(target_dt.clone());
-    let target_nesting_level = calc_nesting_level(target_nesting);
-    add_nesting_inner(target_dt, target_nesting_level - target_dt_level)
 }
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -166,16 +126,22 @@ pub fn align_array_and_element(
 
     // found common type
     let common_ele_type = common_ele_type.unwrap();
-    let most_nested = get_most_nested(element.clone(), array.clone());
-    let array_type = add_nesting(common_ele_type.clone(), most_nested);
+    let array_type = DataType::List {
+        datatype: Box::new(common_ele_type.clone()),
+    };
 
     // try to cast inputs to inputs to common type
     let inputs_owned = std::mem::take(inputs);
+
     let casted_res: Result<Vec<ExprImpl>> = inputs_owned
         .into_iter()
-        .map(|input| {
-            let x = input.return_type();
-            input.cast_implicit(add_nesting(common_ele_type.clone(), x))
+        .enumerate()
+        .map(|(idx, input)| {
+            if idx == array_idx {
+                input.cast_implicit(array_type.clone())
+            } else {
+                input.cast_implicit(common_ele_type.clone())
+            }
         })
         .try_collect();
 
