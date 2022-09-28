@@ -17,6 +17,7 @@ use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
@@ -42,9 +43,9 @@ use crate::hummock::local_version::local_version_manager::{
     LocalVersionManager, LocalVersionManagerRef,
 };
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::utils::{prune_ssts, range_overlap};
+use crate::hummock::utils::prune_ssts;
 use crate::hummock::{
-    get_from_batch, get_from_table, HummockResult, HummockStateStoreIter, SstableIdManager,
+    get_from_batch, get_from_sstable_info, HummockResult, HummockStateStoreIter, SstableIdManager,
     SstableIdManagerRef,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -86,8 +87,8 @@ pub struct HummockStorage {
     core: Arc<HummockStorageCore>,
 }
 
-#[expect(unused_variables)]
 impl HummockStorageCore {
+    #[cfg(any(test, feature = "test"))]
     pub fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
@@ -132,11 +133,7 @@ impl HummockStorageCore {
             filter_key_extractor_manager,
         );
 
-        // let basic_version = HummockVersion {
-        //     id: INVALID_VERSION_ID,
-        //     ..Default::default()
-        // };
-        let read_version = HummockReadVersion::for_test();
+        let read_version = HummockReadVersion::default();
 
         let instance = Self {
             options,
@@ -165,11 +162,9 @@ impl HummockStorageCore {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         use parking_lot::RwLockReadGuard;
-        let compaction_group_id = match read_options.table_id.as_ref() {
-            None => None,
-            Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
-        };
 
+        // TODO: remove option
+        let compaction_group_id = Some(self.get_compaction_group_id(read_options.table_id).await?);
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
         let (staging_imm, staging_sst, committed_version) = {
@@ -184,7 +179,7 @@ impl HummockStorageCore {
                 .cloned()
                 .collect::<Vec<ImmutableMemtable>>();
 
-            let staging_sst = staging_sst_iter.cloned().collect::<Vec<_>>();
+            let staging_sst = staging_sst_iter.cloned().collect_vec();
             let committed_version = read_version.committed().clone();
 
             RwLockReadGuard::unlock_fair(read_version);
@@ -196,30 +191,19 @@ impl HummockStorageCore {
         let mut local_stats = StoreLocalStatistic::default();
 
         // 1. read staging data
-        // 2. use rev to ensure read the newest data first
+        // 2. order guarantee: imm -> sst
         for imm in staging_imm {
-            if imm.epoch() != epoch {
-                continue;
-            }
-
-            if !range_overlap(&(key..=key), imm.start_user_key(), imm.end_user_key()) {
-                continue;
-            }
-
             if let Some(data) = get_from_batch(&imm, key, &mut local_stats) {
                 return Ok(data.into_user_value());
             }
         }
 
         for local_sst in staging_sst {
-            let table = self
-                .sstable_store
-                .sstable(&local_sst, &mut local_stats)
-                .await?;
+            table_counts += 1;
 
-            if let Some(data) = get_from_table(
+            if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
-                table,
+                &local_sst,
                 &internal_key,
                 read_options.check_bloom_filter,
                 &mut local_stats,
@@ -230,77 +214,78 @@ impl HummockStorageCore {
             }
         }
 
-        for level in committed_version.levels(compaction_group_id) {
-            if level.table_infos.is_empty() {
-                continue;
-            }
-            match level.level_type() {
-                LevelType::Overlapping | LevelType::Unspecified => {
-                    let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
-                    for table_info in table_infos {
-                        let table = self
-                            .sstable_store
-                            .sstable(table_info, &mut local_stats)
-                            .await?;
+        // 2. read from committed_version sst file
+        if committed_version.is_valid() {
+            for level in committed_version.levels(compaction_group_id) {
+                if level.table_infos.is_empty() {
+                    continue;
+                }
+                match level.level_type() {
+                    LevelType::Overlapping | LevelType::Unspecified => {
+                        let sstable_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+                        for sstable_info in sstable_infos {
+                            table_counts += 1;
+                            if let Some(v) = get_from_sstable_info(
+                                self.sstable_store.clone(),
+                                sstable_info,
+                                &internal_key,
+                                read_options.check_bloom_filter,
+                                &mut local_stats,
+                            )
+                            .await?
+                            {
+                                // todo add global stat to report
+                                local_stats.report(self.stats.as_ref());
+                                return Ok(v.into_user_value());
+                            }
+                        }
+                    }
+                    LevelType::Nonoverlapping => {
+                        let mut table_info_idx = level.table_infos.partition_point(|table| {
+                            let ord =
+                                user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+                            ord == Ordering::Less || ord == Ordering::Equal
+                        });
+                        if table_info_idx == 0 {
+                            continue;
+                        }
+                        table_info_idx = table_info_idx.saturating_sub(1);
+                        let ord = user_key(
+                            &level.table_infos[table_info_idx]
+                                .key_range
+                                .as_ref()
+                                .unwrap()
+                                .right,
+                        )
+                        .cmp(key.as_ref());
+                        // the case that the key falls into the gap between two ssts
+                        if ord == Ordering::Less {
+                            continue;
+                        }
+
                         table_counts += 1;
-                        if let Some(v) = get_from_table(
+                        if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
-                            table,
+                            &level.table_infos[table_info_idx],
                             &internal_key,
                             read_options.check_bloom_filter,
                             &mut local_stats,
                         )
                         .await?
                         {
-                            // todo add global stat to report
                             local_stats.report(self.stats.as_ref());
                             return Ok(v.into_user_value());
                         }
                     }
                 }
-                LevelType::Nonoverlapping => {
-                    let mut table_info_idx = level.table_infos.partition_point(|table| {
-                        let ord =
-                            user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
-                        ord == Ordering::Less || ord == Ordering::Equal
-                    });
-                    if table_info_idx == 0 {
-                        continue;
-                    }
-                    table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = user_key(
-                        &level.table_infos[table_info_idx]
-                            .key_range
-                            .as_ref()
-                            .unwrap()
-                            .right,
-                    )
-                    .cmp(key.as_ref());
-                    // the case that the key falls into the gap between two ssts
-                    if ord == Ordering::Less {
-                        continue;
-                    }
-
-                    let table = self
-                        .sstable_store
-                        .sstable(&level.table_infos[table_info_idx], &mut local_stats)
-                        .await?;
-                    table_counts += 1;
-                    if let Some(v) = get_from_table(
-                        self.sstable_store.clone(),
-                        table,
-                        &internal_key,
-                        read_options.check_bloom_filter,
-                        &mut local_stats,
-                    )
-                    .await?
-                    {
-                        local_stats.report(self.stats.as_ref());
-                        return Ok(v.into_user_value());
-                    }
-                }
             }
         }
+
+        local_stats.report(self.stats.as_ref());
+        self.stats
+            .iter_merge_sstable_counts
+            .with_label_values(&["sub-iter"])
+            .observe(table_counts as f64);
 
         Ok(None)
     }
@@ -384,6 +369,7 @@ impl StateStore for HummockStorage {
 }
 
 impl HummockStorage {
+    #[cfg(any(test, feature = "test"))]
     pub fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,

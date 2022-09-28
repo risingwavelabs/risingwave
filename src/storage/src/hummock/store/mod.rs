@@ -112,6 +112,8 @@ pub struct ReadOptions {
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Vec<u8>>,
     pub check_bloom_filter: bool,
+
+    // TODO: support min_epoch
     pub retention_seconds: Option<u32>,
-    pub table_id: Option<TableId>,
+    pub table_id: TableId,
 }

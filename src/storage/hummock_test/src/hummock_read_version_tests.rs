@@ -44,7 +44,7 @@ async fn test_read_version_basic() {
         ConflictDetector::new_from_config(opt),
     );
 
-    let mut read_version = HummockReadVersion::for_test();
+    let mut read_version = HummockReadVersion::default();
     let mut epoch = 1;
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let table_id = 0;

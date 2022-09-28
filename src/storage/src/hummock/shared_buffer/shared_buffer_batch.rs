@@ -118,10 +118,6 @@ impl SharedBufferBatch {
         }
     }
 
-    pub fn get_batch_id(&self) -> SharedBufferBatchId {
-        self.inner.batch_id
-    }
-
     pub fn measure_batch_size(batches: &[SharedBufferItem]) -> usize {
         // size = Sum(length of full key + length of user value)
         batches

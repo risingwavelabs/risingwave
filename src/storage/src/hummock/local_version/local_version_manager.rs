@@ -364,8 +364,8 @@ impl LocalVersionManager {
             let (tx, rx) = oneshot::channel();
             self.buffer_tracker
                 .send_event(SharedBufferEvent::WriteRequest(WriteRequest {
-                    batch: batch.clone(),
                     epoch: batch.epoch(),
+                    batch,
                     grant_sender: tx,
                 }));
             rx.await.unwrap();
