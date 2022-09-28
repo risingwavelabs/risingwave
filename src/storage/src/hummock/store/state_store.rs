@@ -15,7 +15,7 @@
 use std::future::Future;
 use std::iter::once;
 use std::ops::Bound::{Excluded, Included};
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Deref, RangeBounds};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -44,7 +44,7 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::{prune_ssts, search_sst_idx};
 use crate::hummock::{hit_sstable_bloom_filter, HummockResult, SstableIterator};
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::{define_local_state_store_associated_type, StateStoreIter};
 
 #[expect(dead_code)]
@@ -66,6 +66,8 @@ pub struct HummockStorageCore {
     sstable_store: SstableStoreRef,
 
     compaction_group_client: Arc<CompactionGroupClientImpl>,
+
+    stats: Arc<StateStoreMetrics>,
 }
 
 #[derive(Clone)]
@@ -109,25 +111,30 @@ impl StateStore for HummockStorage {
             // TODO: get compaction group id by table id
             let compaction_group_id = None;
             // 1. build iterator from staging data
-            let (batches, sstable_infos, committed) = {
+            let (imms, sstable_infos, committed) = {
                 let read_guard = self.core.read_version.read();
-                let (batch_iter, sstable_info_iter) =
+                let (imm_iter, sstable_info_iter) =
                     read_guard
                         .staging()
                         .prune_overlap(epoch, compaction_group_id, &key_range);
                 (
-                    batch_iter.cloned().collect_vec(),
+                    imm_iter.cloned().collect_vec(),
                     sstable_info_iter.cloned().collect_vec(),
                     read_guard.committed().clone(),
                 )
             };
             let mut local_stats = StoreLocalStatistic::default();
-            let mut staging_iters = Vec::with_capacity(batches.len() + sstable_infos.len());
+            let mut staging_iters = Vec::with_capacity(imms.len() + sstable_infos.len());
+            self.core
+                .stats
+                .iter_merge_sstable_counts
+                .with_label_values(&["staging-imm-iter"])
+                .observe(imms.len() as f64);
             staging_iters.extend(
-                batches
-                    .into_iter()
-                    .map(|batch| HummockIteratorUnion::First(batch.into_forward_iter())),
+                imms.into_iter()
+                    .map(|imm| HummockIteratorUnion::First(imm.into_forward_iter())),
             );
+            let mut staging_sst_iter_count = 0;
             for sstable_info in sstable_infos {
                 let table_holder = self
                     .core
@@ -140,18 +147,23 @@ impl StateStore for HummockStorage {
                         continue;
                     }
                 }
+                staging_sst_iter_count += 1;
                 staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
                     table_holder,
                     self.core.sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
                 )));
             }
+            self.core
+                .stats
+                .iter_merge_sstable_counts
+                .with_label_values(&["staging-sst-iter"])
+                .observe(staging_sst_iter_count as f64);
             let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
 
             // 2. build iterator from committed
             let mut non_overlapping_iters = Vec::new();
             let mut overlapping_iters = Vec::new();
-            // TODO: use the compaction group id obtained from table id
             for level in committed.levels(compaction_group_id) {
                 let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
                 if table_infos.is_empty() {
@@ -226,6 +238,16 @@ impl StateStore for HummockStorage {
                     }
                 }
             }
+            self.core
+                .stats
+                .iter_merge_sstable_counts
+                .with_label_values(&["committed-overlapping-iter"])
+                .observe(overlapping_iters.len() as f64);
+            self.core
+                .stats
+                .iter_merge_sstable_counts
+                .with_label_values(&["committed-non-overlapping-iter"])
+                .observe(non_overlapping_iters.len() as f64);
 
             // 3. build user_iterator
             let merge_iter = UnorderedMergeIteratorInner::new(
@@ -241,8 +263,13 @@ impl StateStore for HummockStorage {
                             .map(HummockIteratorUnion::Third),
                     ),
             );
+            // TODO: may want to set `min_epoch` by retention time.
             let mut user_iter = UserIterator::new(merge_iter, key_range, epoch, 0, Some(committed));
-            user_iter.rewind().await?;
+            user_iter
+                .rewind()
+                .in_span(Span::enter_with_local_parent("rewind"))
+                .await?;
+            local_stats.report(self.core.stats.deref());
             Ok(HummockStorageIterator { inner: user_iter })
         }
     }
