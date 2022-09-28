@@ -49,12 +49,6 @@ pub struct CompactionTestOpts {
     #[clap(short, long)]
     pub state_store: String,
 
-    #[clap(long, default_value = "127.0.0.1:1260")]
-    pub prometheus_listener_addr: String,
-
-    #[clap(long, default_value = "0")]
-    pub metrics_level: u32,
-
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
@@ -62,6 +56,7 @@ pub struct CompactionTestOpts {
     #[clap(long, default_value = "")]
     pub config_path: String,
 
+    /// The number of version deltas needed to be replayed before triggering a compaction
     #[clap(short, long, default_value = "10")]
     pub compaction_trigger_frequency: u64,
 }

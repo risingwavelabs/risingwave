@@ -69,7 +69,7 @@ where
         start_local_notification_receiver(hummock_manager, compactor_manager, notification_manager)
             .await,
     ];
-    // Start vaccum in non-deterministic compaction test
+    // Start vacuum in non-deterministic compaction test
     if !meta_opts.compaction_deterministic_test {
         workers.push(start_vacuum_scheduler(
             vacuum_manager.clone(),

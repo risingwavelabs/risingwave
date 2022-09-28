@@ -435,14 +435,11 @@ message TriggerCompactionDeterministicRequest {
 }
 
 message TriggerCompactionDeterministicResponse {
-//  HummockVersionDeltas versions = 1;
   uint64 version_id = 1;
   uint64 max_committed_epoch = 2;
 }
 
-message DisableCommitEpochRequest {
-
-}
+message DisableCommitEpochRequest {}
 
 message DisableCommitEpochResponse {
   HummockVersion current_version = 1;

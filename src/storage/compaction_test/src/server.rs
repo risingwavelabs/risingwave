@@ -78,7 +78,7 @@ pub async fn compaction_test_serve(
     // Resets the current hummock version
     let version_before_reset = meta_client.reset_current_version().await?;
     tracing::info!(
-        "Reseted hummock version id: {}, max_committed_epoch: {}",
+        "Reset hummock version id: {}, max_committed_epoch: {}",
         version_before_reset.id,
         version_before_reset.max_committed_epoch
     );
