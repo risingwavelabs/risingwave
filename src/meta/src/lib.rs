@@ -139,10 +139,6 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value = "60")]
     pub periodic_compaction_interval_sec: u64,
 
-    /// Seconds compaction scheduler should stall when there is no available compactor.
-    #[clap(long, default_value = "5")]
-    pub no_available_compactor_stall_sec: u64,
-
     #[clap(long, default_value = "10")]
     node_num_monitor_interval_sec: u64,
 }
@@ -210,7 +206,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
-                no_available_compactor_stall_sec: opts.no_available_compactor_stall_sec,
                 node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
             },
         )

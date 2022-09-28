@@ -28,6 +28,7 @@ pub struct ComputeNodeConfig {
     pub listen_address: String,
     pub exporter_port: u16,
     pub enable_async_stack_trace: bool,
+    pub enable_managed_cache: bool,
     pub enable_tiered_cache: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -67,7 +68,6 @@ pub struct MetaNodeConfig {
     pub collect_gc_watermark_spin_interval_sec: u64,
     pub min_sst_retention_time_sec: u64,
     pub enable_committed_sst_sanity_check: bool,
-    pub no_available_compactor_stall_sec: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

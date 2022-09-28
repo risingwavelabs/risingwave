@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::alloc::{Allocator, Global};
-use std::cmp::Eq;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 
@@ -21,7 +20,7 @@ use lru::{DefaultHasher, LruCache};
 
 /// A wrapper for [`LruCache`] which provides manual eviction.
 pub struct EvictableHashMap<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
-    inner: LruCache<K, V, S, A>,
+    pub(super) inner: LruCache<K, V, S, A>,
 
     /// Target capacity to keep when calling `evict_to_target_cap`.
     target_cap: usize,
@@ -96,28 +95,5 @@ impl<K, V, S, A: Clone + Allocator> Deref for EvictableHashMap<K, V, S, A> {
 impl<K, V, S, A: Clone + Allocator> DerefMut for EvictableHashMap<K, V, S, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_len_after_evict() {
-        let target_cap = 114;
-        let items_count = 514;
-        let mut map = EvictableHashMap::new(target_cap);
-
-        for i in 0..items_count {
-            map.put(i, ());
-        }
-        assert_eq!(map.len(), items_count);
-
-        map.evict_to_target_cap();
-        assert_eq!(map.len(), target_cap);
-
-        assert!(map.get(&(items_count - target_cap - 1)).is_none());
-        assert!(map.get(&(items_count - target_cap)).is_some());
     }
 }
