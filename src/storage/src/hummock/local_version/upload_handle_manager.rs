@@ -232,7 +232,9 @@ mod tests {
     use futures::FutureExt;
     use tokio::sync::oneshot;
 
-    use crate::hummock::upload_handle_manager::{AttachedFuture, UploadHandleManager};
+    use crate::hummock::local_version::upload_handle_manager::{
+        AttachedFuture, UploadHandleManager,
+    };
 
     async fn is_pending<F>(future: &mut F) -> bool
     where

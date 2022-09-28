@@ -22,6 +22,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::agg_call::build_agg_call_from_prost;
 use super::*;
+use crate::cache::LruManagerRef;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
@@ -39,6 +40,7 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     state_tables: Vec<StateTable<S>>,
     state_table_col_mappings: Vec<Vec<usize>>,
+    lru_manager: Option<LruManagerRef>,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -58,6 +60,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.extreme_cache_size,
             args.state_tables,
             args.state_table_col_mappings,
+            args.lru_manager,
             args.metrics,
         )?
         .boxed())
@@ -111,6 +114,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             executor_id: params.executor_id,
             state_tables,
             state_table_col_mappings,
+            lru_manager: stream.context.lru_manager.clone(),
             metrics: params.executor_stats,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)

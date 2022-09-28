@@ -118,7 +118,8 @@ where
     T: FromStr,
     <T as FromStr>::Err: std::fmt::Display,
 {
-    elem.parse()
+    elem.trim()
+        .parse()
         .map_err(|_| ExprError::Cast(type_name::<str>(), type_name::<T>()))
 }
 
