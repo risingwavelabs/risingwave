@@ -172,7 +172,7 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
         }
         for i in (0..DENSE_BITS).rev() {
             if self.dense_counts[i] > 0 {
-                return Ok(i as u8);
+                return Ok(i as u8 + 1);
             }
         }
         Ok(0)
@@ -382,6 +382,27 @@ mod tests {
         test_register_bucket_get_and_update_inner::<0>();
         // dense case
         test_register_bucket_get_and_update_inner::<4>();
+    }
+
+    #[test]
+    fn test_error_ratio() {
+        let mut agg = StreamingApproxCountDistinct::<16>::new();
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
+
+        let actual_ndv = 1000000;
+        for i in 0..1000000 {
+            agg.apply_batch(
+                &[Op::Insert, Op::Insert, Op::Insert],
+                None,
+                &[&array_nonnull!(I64Array, [i, i, i]).into()],
+            ).unwrap();
+        }
+
+        let estimation = agg.get_output().unwrap().unwrap().into_int64();
+        let error_ratio = ((estimation - actual_ndv) as f64 / actual_ndv as f64).abs();
+        println!("estimation = {}", estimation);
+        println!("error ratio = {}", error_ratio);
+        assert!(error_ratio < 0.01);
     }
 
     fn test_register_bucket_get_and_update_inner<const DENSE_BITS: usize>() {
