@@ -337,6 +337,40 @@ impl LocalVersionManager {
             .collect_vec()
     }
 
+    pub fn build_shared_buffer_batch(
+        &self,
+        epoch: HummockEpoch,
+        compaction_group_id: CompactionGroupId,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        table_id: u32,
+    ) -> SharedBufferBatch {
+        let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
+        SharedBufferBatch::new(
+            sorted_items,
+            epoch,
+            self.buffer_tracker.buffer_event_sender.clone(),
+            compaction_group_id,
+            table_id,
+        )
+    }
+
+    pub async fn blocking_write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
+        let batch_size = batch.size();
+        if self.buffer_tracker.try_write(batch_size) {
+            self.write_shared_buffer_inner(batch.epoch(), batch);
+            self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
+        } else {
+            let (tx, rx) = oneshot::channel();
+            self.buffer_tracker
+                .send_event(SharedBufferEvent::WriteRequest(WriteRequest {
+                    batch: batch.clone(),
+                    epoch: batch.epoch(),
+                    grant_sender: tx,
+                }));
+            rx.await.unwrap();
+        }
+    }
+
     pub async fn write_shared_buffer(
         &self,
         epoch: HummockEpoch,
@@ -344,28 +378,10 @@ impl LocalVersionManager {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         table_id: u32,
     ) -> HummockResult<usize> {
-        let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
-        let batch = SharedBufferBatch::new(
-            sorted_items,
-            epoch,
-            self.buffer_tracker.buffer_event_sender.clone(),
-            compaction_group_id,
-            table_id,
-        );
+        let batch = self.build_shared_buffer_batch(epoch, compaction_group_id, kv_pairs, table_id);
         let batch_size = batch.size();
-        if self.buffer_tracker.try_write(batch_size) {
-            self.write_shared_buffer_inner(epoch, batch);
-            self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
-        } else {
-            let (tx, rx) = oneshot::channel();
-            self.buffer_tracker
-                .send_event(SharedBufferEvent::WriteRequest(WriteRequest {
-                    batch,
-                    epoch,
-                    grant_sender: tx,
-                }));
-            rx.await.unwrap();
-        }
+        self.blocking_write_shared_buffer_batch(batch);
+
         Ok(batch_size)
     }
 

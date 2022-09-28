@@ -207,6 +207,10 @@ impl SharedBufferBatch {
             assert!(prefix == key[0..prefix.len()]);
         }
     }
+
+    pub fn batch_id(&self) -> SharedBufferBatchId {
+        self.inner.batch_id
+    }
 }
 
 pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {
