@@ -213,8 +213,6 @@ fn infer_type_for_special(
             })?))
         }
         ExprType::ArrayAppend => {
-            // TODO: ArrayAppend and ArrayPrepend are basically the same. Refactor in one common
-            // function
             ensure_arity!("array_append", | inputs | == 2);
             let common_type = align_array_and_element(0, 1, inputs);
             match common_type {
