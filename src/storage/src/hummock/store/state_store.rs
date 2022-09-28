@@ -172,7 +172,7 @@ impl HummockStorageCore {
 
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
-        let (staging_imm, staging_sst, commited_version) = {
+        let (staging_imm, staging_sst, committed_version) = {
             let read_version = self.read_version.read();
 
             let (staging_imm_iter, staging_sst_iter) =
@@ -185,10 +185,10 @@ impl HummockStorageCore {
                 .collect::<Vec<ImmutableMemtable>>();
 
             let staging_sst = staging_sst_iter.cloned().collect::<Vec<_>>();
-            let commited_version = read_version.committed().clone();
+            let committed_version = read_version.committed().clone();
 
             RwLockReadGuard::unlock_fair(read_version);
-            (staging_imm, staging_sst, commited_version)
+            (staging_imm, staging_sst, committed_version)
         };
 
         let mut table_counts = 0;
@@ -230,7 +230,7 @@ impl HummockStorageCore {
             }
         }
 
-        for level in commited_version.levels(compaction_group_id) {
+        for level in committed_version.levels(compaction_group_id) {
             if level.table_infos.is_empty() {
                 continue;
             }
