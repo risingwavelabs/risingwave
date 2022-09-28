@@ -1,13 +1,35 @@
-include ./create_sources.slt.part
+# Create tpch tables
 include ../tpch/create_tables.slt.part
+
+# Drop unneeded tables
+statement ok
+DROP TABLE lineitem;
+
+statement ok
+DROP TABLE orders;
+
+statement ok
+DROP TABLE customer;
+
+statement ok
+DROP TABLE partsupp;
+
+statement ok
+DROP TABLE part;
+
+# Insert data to tpch tables
 include ../tpch/insert_nation.slt.part
 include ../tpch/insert_region.slt.part
 include ../tpch/insert_supplier.slt.part
+
+# Create materialized sources from tpcc tables
+include ./create_sources.slt.part
 
 # Ensure that the upstream data is fully consumed
 statement ok
 flush;
 
+# Run CH-benCHmark queries
 # include ./q01.slt.part --> precision error
 include ./q02.slt.part
 # include ./q03.slt.part --> no output
@@ -32,4 +54,13 @@ include ./q19.slt.part
 # include ./q22.slt.part --> no output
 
 include ./drop_sources.slt.part
-include ../tpch/drop_tables.slt.part
+
+# Drop tpch tables
+statement ok
+DROP TABLE supplier;
+
+statement ok
+DROP TABLE region;
+
+statement ok
+DROP TABLE  nation;

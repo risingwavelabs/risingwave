@@ -1,6 +1,6 @@
 query R rowsort
 select  sum(ol_amount) as revenue
-from  tpcc_orderline, tpcc_item
+from  orderline, item
 where	(
 	      ol_i_id = i_id
           and i_data like '%a'
