@@ -15,8 +15,10 @@
 mod generator;
 mod reader;
 
+use std::time::Duration;
+
 pub use reader::*;
 
 const SEQUENCE_FIELD_KIND: &str = "sequence";
 /// default datagen generator next() interval
-const DEFAULT_DATAGEN_INTERVAL: u128 = 1000;
+const DEFAULT_DATAGEN_INTERVAL: Duration = Duration::from_secs(1);

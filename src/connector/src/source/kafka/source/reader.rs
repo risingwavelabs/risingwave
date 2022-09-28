@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
@@ -26,12 +25,12 @@ use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use crate::source::base::{SourceMessage, SplitReader};
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::KafkaProperties;
-use crate::source::{Column, ConnectorState, SplitImpl};
+use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct KafkaSplitReader {
-    consumer: Arc<StreamConsumer<DefaultConsumerContext>>,
+    consumer: StreamConsumer<DefaultConsumerContext>,
     assigned_splits: HashMap<String, Vec<KafkaSplit>>,
 }
 
@@ -43,10 +42,7 @@ impl SplitReader for KafkaSplitReader {
         properties: KafkaProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
-    where
-        Self: Sized,
-    {
+    ) -> Result<Self> {
         let bootstrap_servers = properties.brokers;
 
         let mut config = ClientConfig::new();
@@ -99,26 +95,22 @@ impl SplitReader for KafkaSplitReader {
         }
 
         Ok(Self {
-            consumer: Arc::new(consumer),
+            consumer,
             assigned_splits: HashMap::new(),
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        let mut stream = self
-            .consumer
-            .stream()
-            .ready_chunks(KAFKA_MAX_FETCH_MESSAGES);
+    fn into_stream(self) -> BoxSourceStream {
+        self.into_stream()
+    }
+}
 
-        let chunk = match stream.next().await {
-            None => return Ok(None),
-            Some(chunk) => chunk,
-        };
-
-        chunk
-            .into_iter()
-            .map(|msg| msg.map_err(|e| anyhow!(e)).map(SourceMessage::from))
-            .collect::<Result<Vec<SourceMessage>>>()
-            .map(Some)
+impl KafkaSplitReader {
+    #[try_stream(boxed, ok = SourceMessage, error = anyhow::Error)]
+    pub async fn into_stream(self) {
+        #[for_await]
+        for msg in self.consumer.stream() {
+            yield SourceMessage::from(msg?);
+        }
     }
 }

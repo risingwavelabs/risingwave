@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::BorrowMut;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, ensure, Result};
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
@@ -26,7 +25,9 @@ use risingwave_common::try_match_expand;
 
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
-use crate::source::{Column, ConnectorState, SourceMessage, SplitImpl, SplitReader};
+use crate::source::{
+    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitImpl, SplitReader,
+};
 
 pub struct PulsarSplitReader {
     pulsar: Pulsar<TokioExecutor>,
@@ -76,8 +77,6 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
     Ok(message_id)
 }
 
-const PULSAR_MAX_FETCH_MESSAGES: usize = 1024;
-
 #[async_trait]
 impl SplitReader for PulsarSplitReader {
     type Properties = PulsarProperties;
@@ -86,14 +85,10 @@ impl SplitReader for PulsarSplitReader {
         props: PulsarProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
-    where
-        Self: Sized,
-    {
+    ) -> Result<Self> {
         let splits = state.ok_or_else(|| anyhow!("no default state for reader"))?;
         ensure!(splits.len() == 1, "only support single split");
-        let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)
-            .map_err(|e| anyhow!(e))?;
+        let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)?;
 
         let service_url = &props.service_url;
         let topic = split.topic.to_string();
@@ -133,13 +128,12 @@ impl SplitReader for PulsarSplitReader {
             PulsarEnumeratorOffset::Timestamp(_) => builder,
         };
 
-        let consumer: Consumer<Vec<u8>, _> = builder.build().await.map_err(|e| anyhow!(e))?;
+        let consumer: Consumer<Vec<u8>, _> = builder.build().await?;
         if let PulsarEnumeratorOffset::Timestamp(_ts) = split.start_offset {
             // FIXME: Here we need pulsar-rs to support the send + sync consumer
             // consumer
             //     .seek(None, None, Some(ts as u64), pulsar.clone())
-            //     .await
-            //     .map_err(|e| anyhow!(e))?;
+            //     .await?;
         }
 
         Ok(Self {
@@ -149,24 +143,17 @@ impl SplitReader for PulsarSplitReader {
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        let mut stream = self
-            .consumer
-            .borrow_mut()
-            .ready_chunks(PULSAR_MAX_FETCH_MESSAGES);
+    fn into_stream(self) -> BoxSourceStream {
+        self.into_stream()
+    }
+}
 
-        let chunk = match stream.next().await {
-            None => return Ok(None),
-            Some(chunk) => chunk,
-        };
-
-        let mut ret = Vec::with_capacity(chunk.len());
-
-        for msg in chunk {
-            let msg = msg.map_err(|e| anyhow!(e))?;
-            ret.push(SourceMessage::from(msg));
+impl PulsarSplitReader {
+    #[try_stream(boxed, ok = SourceMessage, error = anyhow::Error)]
+    async fn into_stream(self) {
+        #[for_await]
+        for msg in self.consumer {
+            yield SourceMessage::from(msg?);
         }
-
-        Ok(Some(ret))
     }
 }

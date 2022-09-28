@@ -11,9 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::borrow::BorrowMut;
+
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -21,12 +20,11 @@ use aws_sdk_s3::client as s3_client;
 use aws_smithy_http::byte_stream::ByteStream;
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
 use io::StreamReader;
-use itertools::Itertools;
-use mpsc::Sender;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
@@ -34,16 +32,15 @@ use tracing::{error, info};
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2, AwsCredentialV2};
 use crate::source::base::{SourceMessage, SplitReader};
-use crate::source::filesystem::file_common::{EntryStat, StatusWatch};
+use crate::source::filesystem::file_common::EntryStat;
 use crate::source::filesystem::s3::s3_dir::FileSystemOptError::IllegalS3FilePath;
 use crate::source::filesystem::s3::s3_dir::{
     AwsCustomConfig, S3SourceBasicConfig, S3SourceConfig, SqsReceiveMsgConfig,
 };
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{Column, ConnectorState, SplitId, SplitMetaData};
+use crate::source::{BoxSourceStream, Column, ConnectorState, SplitId, SplitMetaData};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
-const READ_CHUNK_SIZE: usize = 1024;
 const STREAM_READER_CAPACITY: usize = 4096;
 
 #[derive(Debug, Clone)]
@@ -91,20 +88,18 @@ impl S3FileSplit {
         let mut s3_file = S3File::default();
         s3_file.object.path = path_string.clone();
         let path = std::path::Path::new(path_string.as_str());
-        let parent = path.parent();
-        if let Some(parent_path) = parent {
-            Ok(Self {
-                bucket: parent_path
-                    .file_name()
-                    .unwrap()
-                    .to_os_string()
-                    .into_string()
-                    .unwrap(),
-                s3_file,
-            })
-        } else {
-            Err(IllegalS3FilePath(path_string).into())
-        }
+        let parent_path = path
+            .parent()
+            .ok_or_else(|| IllegalS3FilePath(path_string.clone()))?;
+        Ok(Self {
+            bucket: parent_path
+                .file_name()
+                .unwrap()
+                .to_os_string()
+                .into_string()
+                .unwrap(),
+            s3_file,
+        })
     }
 
     fn new(bucket: String, s3_files: S3File) -> Self {
@@ -138,51 +133,25 @@ pub struct S3FileReader {
     // it is necessary to maintain multiple file offsets in a single S3FileReader .
     split_offset: HashMap<String, u64>,
     s3_receive_stream: ReceiverStream<S3InnerMessage>,
-    s3_msg_sender: Sender<S3InnerMessage>,
-    stop_signal: Arc<watch::Sender<StatusWatch>>,
-}
-
-impl Drop for S3FileReader {
-    fn drop(&mut self) {
-        self.stop_signal.send(StatusWatch::Stopped).unwrap();
-    }
+    s3_msg_sender: mpsc::Sender<S3InnerMessage>,
 }
 
 impl S3FileReader {
     fn build_from_config(s3_source_config: S3SourceConfig) -> Self {
         let (tx, rx) = mpsc::channel(MAX_CHANNEL_BUFFER_SIZE);
         let (split_s, mut split_r) = mpsc::unbounded_channel();
-        let (signal_s, mut signal_r) = watch::channel(StatusWatch::Running);
-        let signal_arc = Arc::new(signal_s);
         let s3_file_reader = S3FileReader {
             client_for_s3: s3_client(&s3_source_config.shared_config, None),
             s3_file_sender: split_s,
             split_offset: HashMap::new(),
             s3_receive_stream: ReceiverStream::from(rx),
             s3_msg_sender: tx.clone(),
-            stop_signal: signal_arc.clone(),
         };
-        signal_arc.send(StatusWatch::Running).unwrap();
         tokio::task::spawn(async move {
             let s3_client = s3_client(&s3_source_config.shared_config, Some(default_conn_config()));
-            loop {
-                tokio::select! {
-                    s3_split = split_r.recv() => {
-                        if let Some(s3_split) = s3_split {
-                            let _rs = S3FileReader::stream_read(s3_client.clone(), s3_split.clone(), tx.clone()).await;
-                        } else {
-                            continue;
-                        }
-                    }
-                    running_status = signal_r.changed() => {
-                        if running_status.is_ok() {
-                            if let StatusWatch::Stopped = *signal_r.borrow() {
-                                break;
-                            }
-                        }
-                        continue;
-                    }
-                }
+            while let Some(s3_split) = split_r.recv().await {
+                _ = S3FileReader::stream_read(s3_client.clone(), s3_split.clone(), tx.clone())
+                    .await;
             }
         });
         s3_file_reader
@@ -191,7 +160,7 @@ impl S3FileReader {
     async fn stream_read(
         client_for_s3: s3_client::Client,
         s3_file_split: S3FileSplit,
-        s3_msg_sender: Sender<S3InnerMessage>,
+        s3_msg_sender: mpsc::Sender<S3InnerMessage>,
     ) -> Result<()> {
         let bucket = s3_file_split.bucket.clone();
         let s3_file = s3_file_split.s3_file.clone();
@@ -306,10 +275,7 @@ impl SplitReader for S3FileReader {
         props: S3Properties,
         _state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
-    where
-        Self: Sized,
-    {
+    ) -> Result<Self> {
         let s3_basic_config = S3SourceBasicConfig::from(props);
         let credential = if s3_basic_config.secret.is_empty() || s3_basic_config.access.is_empty() {
             AwsCredentialV2::None
@@ -339,33 +305,30 @@ impl SplitReader for S3FileReader {
         Ok(s3_file_reader)
     }
 
-    async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
-        let mut read_chunk = self
-            .s3_receive_stream
-            .borrow_mut()
-            .ready_chunks(READ_CHUNK_SIZE);
-        let msg_vec = match read_chunk.next().await {
-            None => return Ok(None),
-            Some(inner_msg) => inner_msg
-                .into_iter()
-                .map(|msg| {
-                    let msg_id = msg.msg_id;
-                    let new_offset = if !self.split_offset.contains_key(msg_id.as_str()) {
-                        1_u64
-                    } else {
-                        let curr_offset = self.split_offset.get(msg_id.as_str()).unwrap();
-                        curr_offset + 1_u64
-                    };
-                    self.split_offset.insert(msg_id.clone(), new_offset);
-                    SourceMessage {
-                        payload: Some(msg.payload),
-                        offset: new_offset.to_string(),
-                        split_id: msg_id.into(),
-                    }
-                })
-                .collect_vec(),
-        };
-        Ok(Some(msg_vec))
+    fn into_stream(self) -> BoxSourceStream {
+        self.into_stream()
+    }
+}
+
+impl S3FileReader {
+    #[try_stream(boxed, ok = SourceMessage, error = anyhow::Error)]
+    async fn into_stream(mut self) {
+        #[for_await]
+        for msg in self.s3_receive_stream {
+            let msg_id = msg.msg_id;
+            let new_offset = if !self.split_offset.contains_key(msg_id.as_str()) {
+                1_u64
+            } else {
+                let curr_offset = self.split_offset.get(msg_id.as_str()).unwrap();
+                curr_offset + 1_u64
+            };
+            self.split_offset.insert(msg_id.clone(), new_offset);
+            yield SourceMessage {
+                payload: Some(msg.payload),
+                offset: new_offset.to_string(),
+                split_id: msg_id.into(),
+            };
+        }
     }
 }
 

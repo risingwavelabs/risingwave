@@ -19,6 +19,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
+use futures::stream::BoxStream;
 use futures::{pin_mut, Stream, StreamExt};
 use itertools::Itertools;
 use prost::Message;
@@ -76,8 +77,10 @@ pub trait SplitReader: Sized {
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+    fn into_stream(self) -> BoxStream<'static, Result<SourceMessage>>;
 }
+
+pub type BoxSourceStream = BoxStream<'static, Result<SourceMessage>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]
 pub enum SplitImpl {
@@ -183,16 +186,13 @@ pub trait SplitMetaData: Sized {
 /// split readers.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
-/// Used for acquiring the generated data for [`spawn_data_generation_stream`].
-pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
-
 /// Spawn the data generator to a dedicated runtime, returns a channel receiver
 /// for acquiring the generated data. This is used for the [`DatagenSplitReader`] and
 /// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
 pub fn spawn_data_generation_stream(
-    stream: impl Stream<Item = Result<Vec<SourceMessage>>> + Send + 'static,
-) -> DataGenerationReceiver {
-    const GENERATION_BUFFER: usize = 4;
+    stream: impl Stream<Item = Result<SourceMessage>> + Send + 'static,
+) -> impl Stream<Item = Result<SourceMessage>> + Send + 'static {
+    const GENERATION_BUFFER: usize = 1000;
 
     let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);
     RUNTIME.spawn(async move {
@@ -205,7 +205,7 @@ pub fn spawn_data_generation_stream(
         }
     });
 
-    generation_rx
+    tokio_stream::wrappers::ReceiverStream::new(generation_rx)
 }
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
