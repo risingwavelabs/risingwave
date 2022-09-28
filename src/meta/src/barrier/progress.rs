@@ -155,14 +155,17 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
                     for actor in o.get().0.actors() {
                         self.actor_map.remove(&actor);
                     }
-                    // Notify about finishing.
-                    let command = o.remove().1;
-                    Some(command)
+                    Some(o.remove().1)
                 } else {
                     None
                 }
             }
-            Entry::Vacant(_) => unreachable!(),
+            Entry::Vacant(_) => {
+                tracing::warn!(
+                    "update the progress of an inexistent create-mview DDL: {progress:?}"
+                );
+                None
+            }
         }
     }
 }
