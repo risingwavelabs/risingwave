@@ -25,8 +25,8 @@ use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::HummockVersionDeltas;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
-use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 use risingwave_storage::hummock::compaction_group_client::CompactionGroupClientImpl;
+use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 
 pub struct ComputeObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
