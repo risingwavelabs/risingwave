@@ -20,9 +20,12 @@ use std::sync::Arc;
 
 use lru::{DefaultHasher, LruCache};
 
+/// The managed cache is a lru cache that bounds the memory usage by epoch.
+/// Should be used with `LruManager`.
 pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     pub(super) inner: LruCache<K, V, S, A>,
     /// The entry with epoch less than water should be evicted.
+    /// Should only be updated by the `LruManager`.
     pub(super) watermark_epoch: Arc<AtomicU64>,
 }
 

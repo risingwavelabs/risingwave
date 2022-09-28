@@ -24,9 +24,14 @@ use risingwave_common::util::epoch::Epoch;
 
 use super::ManagedLruCache;
 
+/// When `enable_managed_cache` is set, compute node will launch a [`LruManager`] to limit the
+/// memory usage.
 pub struct LruManager {
+    /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
+    /// Total memory can be allocated by the process.
     total_memory_available_bytes: usize,
+    /// Barrier interval.
     barrier_interval_ms: u32,
 }
 
