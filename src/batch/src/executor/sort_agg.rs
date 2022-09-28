@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -168,7 +165,7 @@ impl SortAggExecutor {
                     let columns: Vec<_> = group_builders
                         .into_iter()
                         .chain(agg_builders)
-                        .map(|b| Column::new(Arc::new(b.finish())))
+                        .map(|b| b.finish().into())
                         .collect();
 
                     let output = DataChunk::new(columns, self.output_size_limit);
@@ -210,7 +207,7 @@ impl SortAggExecutor {
         let columns: Vec<_> = group_builders
             .into_iter()
             .chain(agg_builders)
-            .map(|b| Column::new(Arc::new(b.finish())))
+            .map(|b| b.finish().into())
             .collect();
 
         let output = DataChunk::new(columns, self.output_size_limit - left_capacity + 1);

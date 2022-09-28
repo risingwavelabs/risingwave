@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use parse_display::Display;
 use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -174,7 +175,8 @@ impl fmt::Display for FieldOrder {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Copy, Hash)]
+#[derive(Debug, Display, Clone, Eq, PartialEq, Copy, Hash)]
+#[display(style = "UPPERCASE")]
 pub enum Direction {
     Asc,
     Desc,
@@ -188,17 +190,6 @@ impl From<Direction> for OrderType {
             Direction::Desc => OrderType::Descending,
             Direction::Any => OrderType::Ascending,
         }
-    }
-}
-
-impl fmt::Display for Direction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Direction::Asc => "ASC",
-            Direction::Desc => "DESC",
-            Direction::Any => "ANY",
-        };
-        f.write_str(s)
     }
 }
 

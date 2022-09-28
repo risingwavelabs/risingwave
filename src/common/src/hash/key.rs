@@ -214,10 +214,13 @@ impl Hash for SerializedKey {
     }
 }
 
-/// A special hasher designed our hashmap, which just stores precomputed hash key.
+/// A special hasher designed for [`HashKey`], which stores a hash key from `HashKey::hash()` and
+/// outputs it on `finish()`.
 ///
 /// We need this because we compute hash keys in vectorized fashion, and we store them in this
 /// hasher.
+///
+/// WARN: This should ONLY be used along with [`HashKey`].
 #[derive(Default)]
 pub struct PrecomputedHasher {
     hash_code: u64,
@@ -229,7 +232,12 @@ impl Hasher for PrecomputedHasher {
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        self.hash_code = u64::from_ne_bytes(bytes.try_into().unwrap());
+        assert_eq!(self.hash_code, 0);
+        self.hash_code = u64::from_ne_bytes(
+            bytes
+                .try_into()
+                .expect("must writes from HashKey with write_u64"),
+        );
     }
 }
 
@@ -676,15 +684,14 @@ impl HashKey for SerializedKey {
 mod tests {
     use std::collections::HashMap;
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use super::*;
     use crate::array;
     use crate::array::column::Column;
     use crate::array::{
-        ArrayRef, BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array,
-        I16Array, I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray,
-        NaiveTimeArray, Utf8Array,
+        BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array, I16Array,
+        I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray,
+        Utf8Array,
     };
     use crate::hash::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
@@ -847,16 +854,14 @@ mod tests {
     }
 
     fn generate_decimal_test_data() -> DataChunk {
-        let columns = vec![Column::new(Arc::new(
-            array! { DecimalArray, [
-                Some(Decimal::from_str("1.2").unwrap()),
-                None,
-                Some(Decimal::from_str("1.200").unwrap()),
-                Some(Decimal::from_str("0.00").unwrap()),
-                Some(Decimal::from_str("0.0").unwrap())
-            ]}
-            .into(),
-        ) as ArrayRef)];
+        let columns = vec![array! { DecimalArray, [
+            Some(Decimal::from_str("1.2").unwrap()),
+            None,
+            Some(Decimal::from_str("1.200").unwrap()),
+            Some(Decimal::from_str("0.00").unwrap()),
+            Some(Decimal::from_str("0.0").unwrap())
+        ]}
+        .into()];
 
         DataChunk::new(columns, 5)
     }

@@ -92,10 +92,10 @@ impl MetaNodeService {
 
         cmd.arg("--vacuum-interval-sec")
             .arg(format!("{}", config.vacuum_interval_sec))
+            .arg("--max-heartbeat-interval-secs")
+            .arg(format!("{}", config.max_heartbeat_interval_secs))
             .arg("--collect-gc-watermark-spin-interval-sec")
             .arg(format!("{}", config.collect_gc_watermark_spin_interval_sec))
-            .arg("--no-available-compactor-stall-sec")
-            .arg(format!("{}", config.no_available_compactor_stall_sec))
             .arg("--min-sst-retention-time-sec")
             .arg(format!("{}", config.min_sst_retention_time_sec));
 

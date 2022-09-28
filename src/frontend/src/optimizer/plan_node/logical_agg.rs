@@ -323,10 +323,8 @@ impl LogicalAgg {
                                             include_keys: Vec<usize>,
                                             column_mapping: &mut Vec<usize>|
          -> TableCatalog {
-            let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-
-            internal_table_catalog_builder
-                .set_properties(self.ctx().inner().with_options.internal_table_subset());
+            let mut internal_table_catalog_builder =
+                TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
             for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
@@ -334,6 +332,7 @@ impl LogicalAgg {
                     .add_order_column(tb_column_idx, OrderType::Ascending);
                 column_mapping.push(idx);
             }
+
             for (order_type, idx) in sort_keys {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
@@ -354,33 +353,34 @@ impl LogicalAgg {
                 internal_table_catalog_builder.add_column(&in_fields[include_key]);
                 column_mapping.push(include_key);
             }
-            internal_table_catalog_builder.build_with_column_mapping(
-                in_dist_key.clone(),
-                in_append_only,
-                column_mapping,
-                vnode_col_idx,
-            )
+            let mapping = ColIndexMapping::with_column_mapping(column_mapping, in_fields.len());
+            let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
+            if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
+                internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
+            }
+
+            internal_table_catalog_builder.build(tb_dist.unwrap_or_default())
         };
 
         let get_value_state_table = |value_key: usize,
                                      column_mapping: &mut Vec<usize>|
          -> TableCatalog {
-            let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-            internal_table_catalog_builder
-                .set_properties(self.ctx().inner().with_options.internal_table_subset());
+            let mut internal_table_catalog_builder =
+                TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
             for &idx in &self.group_key {
                 let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
                 column_mapping.push(idx);
             }
+            let mapping = ColIndexMapping::with_column_mapping(column_mapping, in_fields.len());
+            let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
+            if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
+                internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
+            }
+
             internal_table_catalog_builder.add_column(&out_fields[value_key]);
-            internal_table_catalog_builder.build_with_column_mapping(
-                in_dist_key.clone(),
-                in_append_only,
-                column_mapping,
-                vnode_col_idx,
-            )
+            internal_table_catalog_builder.build(tb_dist.unwrap_or_default())
         };
         // Map input col idx -> table col idx.
         let mut column_mappings_vec = vec![];

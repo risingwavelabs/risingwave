@@ -78,9 +78,9 @@ message Barrier {
     UpdateMutation update = 5;
     // Change the split of some sources.
     SourceChangeSplitMutation splits = 6;
-    // Pause the dataflow of the whole streaming graph.
+    // Pause the dataflow of the whole streaming graph, only used for scaling.
     PauseMutation pause = 7;
-    // Resume the dataflow of the whole streaming graph.
+    // Resume the dataflow of the whole streaming graph, only used for scaling.
     ResumeMutation resume = 8;
   }
   // Used for tracing.
@@ -115,7 +115,7 @@ message SourceNode {
   uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
-  uint32 state_table_id = 4; // use state_table_id as state store prefix
+  catalog.Table state_table = 4;
 }
 
 message SinkNode {

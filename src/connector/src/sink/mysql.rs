@@ -293,11 +293,9 @@ async fn write_to_mysql<'a>(
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
 
     use risingwave_common::array;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayImpl, I32Array, Op, Utf8Array};
+    use risingwave_common::array::{I32Array, Op, Utf8Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::types::chrono_wrapper::*;
     use risingwave_common::types::DataType;
@@ -392,10 +390,7 @@ mod test {
 
         let chunk = StreamChunk::new(
             vec![Op::Insert, Op::Insert],
-            vec![Column::new(Arc::new(ArrayImpl::from(array!(
-                I32Array,
-                [Some(1), Some(2)]
-            ))))],
+            vec![array!(I32Array, [Some(1), Some(2)]).into()],
             None,
         );
 
@@ -446,14 +441,8 @@ mod test {
         let chunk = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
             vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    I32Array,
-                    [Some(1), Some(2), Some(3)]
-                )))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("1"), Some("2"), Some("; drop database")]
-                )))),
+                array!(I32Array, [Some(1), Some(2), Some(3)]).into(),
+                array!(Utf8Array, [Some("1"), Some("2"), Some("; drop database")]).into(),
             ],
             None,
         );
