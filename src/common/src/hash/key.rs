@@ -232,9 +232,12 @@ impl Hasher for PrecomputedHasher {
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        assert_eq!(bytes.len(), 8, "must writes from HashKey with write_u64");
         assert_eq!(self.hash_code, 0);
-        self.hash_code = u64::from_ne_bytes(bytes.try_into().unwrap());
+        self.hash_code = u64::from_ne_bytes(
+            bytes
+                .try_into()
+                .expect("must writes from HashKey with write_u64"),
+        );
     }
 }
 
