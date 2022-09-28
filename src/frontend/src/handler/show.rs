@@ -95,7 +95,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
 
             return Ok(PgResponse::new(
                 StatementType::SHOW_COMMAND,
-                rows.len() as i32,
+                Some(rows.len() as i32),
                 rows,
                 vec![
                     PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
@@ -112,7 +112,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
 
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
-        rows.len() as i32,
+        Some(rows.len() as i32),
         rows,
         vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
     ))

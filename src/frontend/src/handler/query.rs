@@ -69,7 +69,7 @@ pub async fn handle_query(
     };
 
     let rows_count = match stmt_type {
-        StatementType::SELECT => 0_i32,
+        StatementType::SELECT => None,
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             // Get the row from the row_stream.
             let first_row_set = row_stream
@@ -80,10 +80,12 @@ pub async fn handle_query(
             let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");
-            String::from_utf8(affected_rows_str.to_vec())
-                .unwrap()
-                .parse()
-                .unwrap_or_default()
+            Some(
+                String::from_utf8(affected_rows_str.to_vec())
+                    .unwrap()
+                    .parse()
+                    .unwrap_or_default(),
+            )
         }
         _ => unreachable!(),
     };

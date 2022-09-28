@@ -190,7 +190,9 @@ impl PgPortal {
             msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                 stmt_type: result.get_stmt_type(),
                 notice: result.get_notice(),
-                rows_cnt: result.get_effected_rows_cnt(),
+                rows_cnt: result
+                    .get_effected_rows_cnt()
+                    .expect("row count should be set"),
             }))?;
         }
 

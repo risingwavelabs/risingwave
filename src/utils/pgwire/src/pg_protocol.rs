@@ -315,7 +315,9 @@ where
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),
                     notice: res.get_notice(),
-                    rows_cnt: res.get_effected_rows_cnt(),
+                    rows_cnt: res
+                        .get_effected_rows_cnt()
+                        .expect("row count should be set"),
                 }))?;
         }
 

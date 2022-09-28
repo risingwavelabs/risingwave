@@ -114,7 +114,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     // TODO: recover the original user statement
     Ok(PgResponse::new(
         StatementType::DESCRIBE_TABLE,
-        rows.len() as i32,
+        Some(rows.len() as i32),
         rows,
         vec![
             PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),

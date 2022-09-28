@@ -80,7 +80,7 @@ pub struct PgResponse {
     stmt_type: StatementType,
     // row count of effected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
-    row_cnt: i32,
+    row_cnt: Option<i32>,
     notice: Option<String>,
     values_stream: PgResultSet,
     row_desc: Vec<PgFieldDescriptor>,
@@ -117,12 +117,22 @@ impl StatementType {
             StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE
         )
     }
+
+    pub fn is_query(&self) -> bool {
+        matches!(
+            self,
+            StatementType::SELECT
+                | StatementType::EXPLAIN
+                | StatementType::SHOW_COMMAND
+                | StatementType::DESCRIBE_TABLE
+        )
+    }
 }
 
 impl PgResponse {
     pub fn new(
         stmt_type: StatementType,
-        row_cnt: i32,
+        row_cnt: Option<i32>,
         values: Vec<Row>,
         row_desc: Vec<PgFieldDescriptor>,
     ) -> Self {
@@ -137,7 +147,7 @@ impl PgResponse {
 
     pub fn new_for_stream(
         stmt_type: StatementType,
-        row_cnt: i32,
+        row_cnt: Option<i32>,
         values_stream: BoxStream<'static, Result<Vec<Row>, BoxedError>>,
         row_desc: Vec<PgFieldDescriptor>,
     ) -> Self {
@@ -151,13 +161,15 @@ impl PgResponse {
     }
 
     pub fn empty_result(stmt_type: StatementType) -> Self {
-        Self::new_for_stream(stmt_type, 0, stream::empty().boxed(), vec![])
+        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
+        Self::new_for_stream(stmt_type, row_cnt, stream::empty().boxed(), vec![])
     }
 
     pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
+        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
         Self {
             stmt_type,
-            row_cnt: 0,
+            row_cnt,
             values_stream: stream::empty().boxed(),
             row_desc: vec![],
             notice: Some(notice),
@@ -172,18 +184,12 @@ impl PgResponse {
         self.notice.clone()
     }
 
-    pub fn get_effected_rows_cnt(&self) -> i32 {
+    pub fn get_effected_rows_cnt(&self) -> Option<i32> {
         self.row_cnt
     }
 
     pub fn is_query(&self) -> bool {
-        matches!(
-            self.stmt_type,
-            StatementType::SELECT
-                | StatementType::EXPLAIN
-                | StatementType::SHOW_COMMAND
-                | StatementType::DESCRIBE_TABLE
-        )
+        self.stmt_type.is_query()
     }
 
     pub fn is_empty(&self) -> bool {
