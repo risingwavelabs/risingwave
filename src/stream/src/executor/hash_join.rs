@@ -38,6 +38,7 @@ use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
+use crate::cache::LruManagerRef;
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::JoinType::LeftAnti;
 use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
@@ -226,8 +227,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     cond: Option<BoxedExpression>,
     /// Identity string
     identity: String,
-    /// Epoch
-    epoch: u64,
 
     #[expect(dead_code)]
     /// Logical Operator Info
@@ -428,6 +427,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
         degree_state_table_r: StateTable<S>,
+        lru_manager: Option<LruManagerRef>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -545,6 +545,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
+                    lru_manager.clone(),
                     cache_size,
                     join_key_data_types_l,
                     state_all_data_types_l.clone(),
@@ -566,6 +567,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
+                    lru_manager,
                     cache_size,
                     join_key_data_types_r,
                     state_all_data_types_r.clone(),
@@ -590,7 +592,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             cond,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
             append_only_optimize,
             metrics,
         }
@@ -668,11 +669,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
                 }
                 AlignedMessage::Barrier(barrier) => {
-                    self.flush_data().await?;
-                    let epoch = barrier.epoch.curr;
-                    self.side_l.ht.update_epoch(epoch);
-                    self.side_r.ht.update_epoch(epoch);
-                    self.epoch = epoch;
+                    self.flush_data(barrier.epoch).await?;
 
                     // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
@@ -680,20 +677,28 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
                     }
 
+                    // Update epoch for managed cache.
+                    self.side_l.ht.update_epoch(barrier.epoch.curr);
+                    self.side_r.ht.update_epoch(barrier.epoch.curr);
+
                     // Report metrics of cached join rows/entries
                     for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
-                        self.metrics
-                            .join_cached_rows
-                            .with_label_values(&[&actor_id_str, side])
-                            .set(ht.cached_rows() as i64);
+                        // TODO(yuhao): Those two metric calculation cost too much time (>250ms).
+                        // Those will result in that barrier is always ready
+                        // in source. Since select barrier is preferred,
+                        // chunk would never be selected.
+                        // self.metrics
+                        //     .join_cached_rows
+                        //     .with_label_values(&[&actor_id_str, side])
+                        //     .set(ht.cached_rows() as i64);
                         self.metrics
                             .join_cached_entries
                             .with_label_values(&[&actor_id_str, side])
                             .set(ht.entry_count() as i64);
-                        self.metrics
-                            .join_cached_estimated_size
-                            .with_label_values(&[&actor_id_str, side])
-                            .set(ht.estimated_size() as i64);
+                        // self.metrics
+                        //     .join_cached_estimated_size
+                        //     .with_label_values(&[&actor_id_str, side])
+                        //     .set(ht.estimated_size() as i64);
                     }
 
                     yield Message::Barrier(barrier);
@@ -703,15 +708,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
     }
 
-    async fn flush_data(&mut self) -> StreamExecutorResult<()> {
+    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.ht.flush().await?;
-        self.side_r.ht.flush().await?;
+        self.side_l.ht.flush(epoch).await?;
+        self.side_r.ht.flush(epoch).await?;
 
         // We need to manually evict the cache to the target capacity.
-        self.side_l.ht.evict_to_target_cap();
-        self.side_r.ht.evict_to_target_cap();
+        self.side_l.ht.evict();
+        self.side_r.ht.evict();
 
         Ok(())
     }
@@ -758,7 +763,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         chunk: StreamChunk,
         append_only_optimize: bool,
     ) {
-        let chunk = chunk.compact()?;
+        let chunk = chunk.compact();
 
         let (side_update, side_match) = if SIDE == SideType::Left {
             (&mut side_l, &mut side_r)
@@ -1043,6 +1048,7 @@ mod tests {
             degree_state_l,
             state_r,
             degree_state_r,
+            None,
             false,
             Arc::new(StreamingMetrics::unused()),
         );
@@ -1112,6 +1118,7 @@ mod tests {
             degree_state_l,
             state_r,
             degree_state_r,
+            None,
             true,
             Arc::new(StreamingMetrics::unused()),
         );
@@ -1159,8 +1166,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1235,8 +1242,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1320,8 +1327,8 @@ mod tests {
         assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1431,8 +1438,8 @@ mod tests {
         assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1534,8 +1541,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1613,8 +1620,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1692,8 +1699,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -1779,8 +1786,8 @@ mod tests {
         assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd right chunk
@@ -1900,8 +1907,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
@@ -2029,8 +2036,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        tx_r.push_barrier(1, false);
-        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(2, false);
         hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd right chunk

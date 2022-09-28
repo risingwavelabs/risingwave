@@ -36,7 +36,7 @@ pub enum Memtable {
     BTree(BTreeMapMemtable),
 }
 
-#[allow(unused)]
+#[expect(dead_code)]
 impl Memtable {
     /// Inserts a key-value entry associated with a given `epoch` into memtable.
     fn insert(&mut self, key: Bytes, val: Bytes, epoch: u64) {
@@ -67,12 +67,12 @@ impl Memtable {
     }
 }
 
-#[allow(unused)]
+#[expect(dead_code)]
 pub struct BTreeMapMemtable {
     mem: BTreeMap<Bytes, Bytes>,
 }
 
-#[allow(unused)]
+#[expect(unused_variables, dead_code)]
 impl BTreeMapMemtable {
     fn insert(&mut self, key: Bytes, val: Bytes, epoch: u64) {
         unimplemented!()

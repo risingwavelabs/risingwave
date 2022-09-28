@@ -77,7 +77,9 @@ message ActorLocation {
   repeated stream_plan.StreamActor actors = 2;
 }
 
-message FlushRequest {}
+message FlushRequest {
+  bool checkpoint = 1;
+}
 
 message FlushResponse {
   common.Status status = 1;

@@ -23,12 +23,14 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
+use crate::cache::LruManagerRef;
 use crate::common::StreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
@@ -101,6 +103,8 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     pub state_table: StateTable<S>,
 
+    pub lru_manager: Option<LruManagerRef>,
+
     pub cache_size: usize,
 }
 
@@ -118,6 +122,7 @@ impl<S: StateStore> LookupExecutor<S> {
             schema: output_schema,
             column_mapping,
             state_table,
+            lru_manager,
             cache_size,
         } = params;
 
@@ -214,7 +219,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(cache_size),
+            lookup_cache: LookupCache::new(lru_manager, cache_size),
         }
     }
 
@@ -249,6 +254,10 @@ impl<S: StateStore> LookupExecutor<S> {
                         // arrange barrier. So we flush now.
                         self.lookup_cache.flush();
                     }
+
+                    // Use the new stream barrier epoch as new cache epoch
+                    self.lookup_cache.update_epoch(barrier.epoch.curr);
+
                     self.process_barrier(barrier.clone()).await?;
                     if self.arrangement.use_current_epoch {
                         // When lookup this epoch, stream side barrier always come after arrangement
@@ -278,7 +287,7 @@ impl<S: StateStore> LookupExecutor<S> {
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {
-                    let chunk = chunk.compact()?;
+                    let chunk = chunk.compact();
                     let (chunk, ops) = chunk.into_parts();
 
                     let mut builder = StreamChunkBuilder::new(
@@ -333,26 +342,19 @@ impl<S: StateStore> LookupExecutor<S> {
                 },
                 ..barrier
             });
-            if self.arrangement.use_current_epoch {
-                self.arrangement.state_table.init_epoch(barrier.epoch.curr);
-            } else {
-                self.arrangement.state_table.init_epoch(0);
-            };
+
+            self.arrangement.state_table.init_epoch(barrier.epoch);
             return Ok(());
         } else {
             // there is no write operation on the arrangement table by the lookup executor, so here
             // the `state_table::commit(epoch)` just means the data in the epoch will be visible by
             // the lookup executor
             // TODO(st1page): maybe we should not use state table here.
-            if self.arrangement.use_current_epoch {
-                self.arrangement
-                    .state_table
-                    .commit_no_data_expected(barrier.epoch.curr);
-            } else {
-                self.arrangement
-                    .state_table
-                    .commit_no_data_expected(barrier.epoch.prev);
-            };
+
+            self.arrangement
+                .state_table
+                .commit_no_data_expected(barrier.epoch);
+
             self.last_barrier = Some(barrier)
         }
 
@@ -378,11 +380,21 @@ impl<S: StateStore> LookupExecutor<S> {
         let mut all_rows = vec![];
         // Drop the stream.
         {
-            let all_data_iter = self
-                .arrangement
-                .state_table
-                .iter_with_pk_prefix(&lookup_row)
-                .await?;
+            let all_data_iter = match self.arrangement.use_current_epoch {
+                true => {
+                    self.arrangement
+                        .state_table
+                        .iter_with_pk_prefix(&lookup_row)
+                        .await?
+                }
+                false => {
+                    self.arrangement
+                        .state_table
+                        .iter_prev_epoch_with_pk_prefix(&lookup_row)
+                        .await?
+                }
+            };
+
             pin_mut!(all_data_iter);
             while let Some(inner) = all_data_iter.next().await {
                 // Only need value (include storage pk).

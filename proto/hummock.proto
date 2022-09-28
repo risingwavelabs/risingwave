@@ -12,6 +12,8 @@ message SstableInfo {
   uint64 file_size = 3;
   repeated uint32 table_ids = 4;
   uint64 meta_offset = 5;
+  uint64 stale_key_count = 6;
+  uint64 total_key_count = 7;
 }
 
 enum LevelType {

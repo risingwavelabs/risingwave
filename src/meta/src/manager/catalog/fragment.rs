@@ -579,8 +579,6 @@ where
                 let Reschedule {
                     added_actors,
                     removed_actors,
-                    added_parallel_units,
-                    removed_parallel_units,
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
@@ -616,42 +614,25 @@ where
 
                 // update fragment's vnode mapping
                 if let Some(vnode_mapping) = fragment.vnode_mapping.as_mut() {
-                    if removed_parallel_units.len() == added_parallel_units.len() {
-                        // for migration, use the added actor to replace the removed actor
-                        let replace_map: HashMap<_, _> = removed_parallel_units
-                            .into_iter()
-                            .zip_eq(added_parallel_units.into_iter())
-                            .collect();
-
-                        for parallel_unit_id in &mut vnode_mapping.data {
-                            if let Some(target) = replace_map.get(parallel_unit_id) {
-                                *parallel_unit_id = *target;
+                    let mut actor_to_parallel_unit = HashMap::with_capacity(fragment.actors.len());
+                    for actor in &fragment.actors {
+                        if let Some(actor_status) = table_fragment.actor_status.get(&actor.actor_id)
+                        {
+                            if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
+                                actor_to_parallel_unit.insert(
+                                    actor.actor_id as ActorId,
+                                    parallel_unit.id as ParallelUnitId,
+                                );
                             }
                         }
-                    } else {
-                        // for scaling, use actor mapping to restore vnode mapping
-                        let mut actor_to_parallel_unit =
-                            HashMap::with_capacity(fragment.actors.len());
-                        for actor in &fragment.actors {
-                            if let Some(actor_status) =
-                                table_fragment.actor_status.get(&actor.actor_id)
-                            {
-                                if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
-                                    actor_to_parallel_unit.insert(
-                                        actor.actor_id as ActorId,
-                                        parallel_unit.id as ParallelUnitId,
-                                    );
-                                }
-                            }
-                        }
+                    }
 
-                        if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
-                            *vnode_mapping = actor_mapping_to_parallel_unit_mapping(
-                                fragment_id,
-                                &actor_to_parallel_unit,
-                                actor_mapping,
-                            )
-                        }
+                    if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
+                        *vnode_mapping = actor_mapping_to_parallel_unit_mapping(
+                            fragment_id,
+                            &actor_to_parallel_unit,
+                            actor_mapping,
+                        )
                     }
 
                     if !fragment.state_table_ids.is_empty() {
