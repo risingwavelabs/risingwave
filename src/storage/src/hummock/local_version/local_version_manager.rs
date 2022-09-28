@@ -97,7 +97,7 @@ pub type LocalVersionManagerRef = Arc<LocalVersionManagerExternalHolder>;
 pub struct LocalVersionManager {
     pub(crate) local_version: RwLock<LocalVersion>,
     worker_context: WorkerContext,
-    buffer_tracker: Arc<BufferTracker>,
+    buffer_tracker: BufferTracker,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
@@ -128,13 +128,13 @@ impl LocalVersionManager {
 
         let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
 
-        let buffer_tracker = Arc::new(BufferTracker::new(
+        let buffer_tracker = BufferTracker::new(
             // 0.8 * capacity
             // TODO: enable setting the ratio with config
             capacity * 4 / 5,
             capacity,
             buffer_event_sender.clone(),
-        ));
+        );
 
         let local_version_manager = Arc::new(LocalVersionManager {
             local_version: RwLock::new(LocalVersion::new(

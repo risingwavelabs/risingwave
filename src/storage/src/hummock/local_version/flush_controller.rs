@@ -32,6 +32,7 @@ use crate::hummock::shared_buffer::{SharedBufferEvent, WriteRequest};
 use crate::hummock::{HummockError, HummockResult, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
+#[derive(Clone)]
 pub(crate) struct BufferTracker {
     flush_threshold: usize,
     block_write_threshold: usize,
@@ -107,7 +108,7 @@ impl BufferTracker {
 
 pub(crate) struct FlushController {
     local_version_manager: Arc<LocalVersionManager>,
-    buffer_tracker: Arc<BufferTracker>,
+    buffer_tracker: BufferTracker,
     sstable_id_manager: SstableIdManagerRef,
     shared_buffer_event_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
     upload_handle_manager: UploadHandleManager,
@@ -118,7 +119,7 @@ pub(crate) struct FlushController {
 impl FlushController {
     pub(crate) fn new(
         local_version_manager: Arc<LocalVersionManager>,
-        buffer_tracker: Arc<BufferTracker>,
+        buffer_tracker: BufferTracker,
         sstable_id_manager: SstableIdManagerRef,
         shared_buffer_event_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
     ) -> Self {
