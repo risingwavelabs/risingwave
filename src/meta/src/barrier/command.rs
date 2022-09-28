@@ -33,6 +33,7 @@ use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
+use super::snapshot::SnapshotManagerRef;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
@@ -158,6 +159,8 @@ impl Command {
 pub struct CommandContext<S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
+    snapshot_manager: SnapshotManagerRef<S>,
+
     client_pool: StreamClientPoolRef,
 
     /// Resolved info in this barrier loop.
@@ -173,8 +176,10 @@ pub struct CommandContext<S: MetaStore> {
 }
 
 impl<S: MetaStore> CommandContext<S> {
-    pub fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new(
         fragment_manager: FragmentManagerRef<S>,
+        snapshot_manager: SnapshotManagerRef<S>,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
         prev_epoch: Epoch,
@@ -184,6 +189,7 @@ impl<S: MetaStore> CommandContext<S> {
     ) -> Self {
         Self {
             fragment_manager,
+            snapshot_manager,
             client_pool,
             info: Arc::new(info),
             prev_epoch,
@@ -422,6 +428,8 @@ where
                         dependent_table_actors,
                     )
                     .await?;
+
+                self.snapshot_manager.pin(self.prev_epoch).await?;
             }
 
             Command::RescheduleFragment(reschedules) => {
@@ -471,6 +479,19 @@ where
                     .post_apply_reschedules(reschedules.clone())
                     .await?;
             }
+        }
+
+        Ok(())
+    }
+
+    pub async fn pre_finish(&self) -> MetaResult<()> {
+        #[allow(clippy::single_match)]
+        match &self.command {
+            Command::CreateMaterializedView { .. } => {
+                self.snapshot_manager.unpin(self.prev_epoch).await?;
+            }
+
+            _ => {}
         }
 
         Ok(())
