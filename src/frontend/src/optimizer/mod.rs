@@ -286,6 +286,13 @@ impl PlanRoot {
 
         plan = self.optimize_by_rules(
             plan,
+            "Join Commute".to_string(),
+            vec![JoinCommuteRule::create()],
+            ApplyOrder::TopDown,
+        );
+
+        plan = self.optimize_by_rules(
+            plan,
             "Project Remove".to_string(),
             vec![
                 // merge should be applied before eliminate

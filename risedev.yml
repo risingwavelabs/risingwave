@@ -566,6 +566,9 @@ template:
     # Whether to enable dashboard-v2
     enable-dashboard-v2: false
 
+    # Maximum allowed heartbeat interval in seconds.
+    max-heartbeat-interval-secs: 600
+
     # Whether to disable recovery mode
     unsafe-disable-recovery: false
 
@@ -581,9 +584,6 @@ template:
 
     # Enable sanity check when SSTs are committed. Disabled by default.
     enable-committed-sst-sanity-check: false
-
-    # Seconds compaction scheduler should stall when there is no available compactor.
-    no-available-compactor-stall-sec: 5
 
   prometheus:
     # Advertise address of Prometheus

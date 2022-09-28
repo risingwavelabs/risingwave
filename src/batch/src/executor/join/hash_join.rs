@@ -21,7 +21,6 @@ use std::sync::Arc;
 use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
 use itertools::{repeat_n, Itertools};
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
@@ -222,7 +221,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let build_chunk = build_chunk?;
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
-                build_side.push(build_chunk.compact()?)
+                build_side.push(build_chunk.compact())
             }
         }
         let mut hash_map =
@@ -1396,7 +1395,7 @@ impl DataChunkMutator {
             // Is it really safe to use Arc::try_unwrap here?
             let mut array = Arc::try_unwrap(build_column.into_inner()).unwrap();
             array.set_bitmap(filter.clone());
-            columns.push(Column::new(Arc::new(array)));
+            columns.push(array.into());
         }
 
         Self(DataChunk::new(columns, vis))
@@ -1731,11 +1730,9 @@ impl<K> HashJoinExecutor<K> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
@@ -1785,7 +1782,7 @@ mod tests {
             let columns = self
                 .array_builders
                 .into_iter()
-                .map(|b| Column::new(Arc::new(b.finish())))
+                .map(|b| b.finish().into())
                 .collect();
 
             Ok(DataChunk::new(columns, self.array_len))
@@ -1990,7 +1987,7 @@ mod tests {
 
             while let Some(data_chunk) = stream.next().await {
                 let data_chunk = data_chunk.unwrap();
-                let data_chunk = data_chunk.compact().unwrap();
+                let data_chunk = data_chunk.compact();
                 data_chunk_merger.append(&data_chunk).unwrap();
             }
 
@@ -2464,8 +2461,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2494,8 +2490,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2524,8 +2519,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2564,8 +2558,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2591,8 +2584,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2618,8 +2610,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2660,8 +2651,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2689,8 +2679,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2718,8 +2707,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2782,8 +2770,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.build_row_ids, Vec::new());
@@ -2823,8 +2810,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.build_row_ids, Vec::new());
@@ -2971,8 +2957,7 @@ mod tests {
                 &mut right_state,
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());
@@ -3019,8 +3004,7 @@ mod tests {
                 &mut right_state,
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());
