@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{error, fmt};
+use std::str::FromStr;
+
+use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct PgFieldDescriptor {
@@ -49,13 +51,13 @@ impl PgFieldDescriptor {
         };
 
         Self {
-            type_modifier,
-            format_code,
             name,
             table_oid,
             col_attr_num,
-            type_len,
             type_oid,
+            type_len,
+            type_modifier,
+            format_code,
         }
     }
 
@@ -88,7 +90,7 @@ impl PgFieldDescriptor {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TypeOid {
     Boolean,
     BigInt,
@@ -105,20 +107,9 @@ pub enum TypeOid {
     Interval,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Error)]
+#[error("oid:{0} can't be supported")]
 pub struct TypeOidError(i32);
-
-impl fmt::Display for TypeOidError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "oid:{} can't be supported", self.0)
-    }
-}
-
-impl error::Error for TypeOidError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        None
-    }
-}
 
 impl TypeOid {
     // TypeOid can refer from
@@ -163,6 +154,30 @@ impl TypeOid {
             TypeOid::Timestampz => 1184,
             TypeOid::Decimal => 1700,
             TypeOid::Interval => 1186,
+        }
+    }
+}
+
+impl FromStr for TypeOid {
+    type Err = TypeOidError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.to_ascii_lowercase();
+        match s.as_str() {
+            "boolean" => Ok(TypeOid::Boolean),
+            "bigint" => Ok(TypeOid::BigInt),
+            "smallint" => Ok(TypeOid::SmallInt),
+            "int" | "int4" => Ok(TypeOid::Int),
+            "float4" => Ok(TypeOid::Float4),
+            "float8" => Ok(TypeOid::Float8),
+            "varchar" => Ok(TypeOid::Varchar),
+            "date" => Ok(TypeOid::Date),
+            "time" => Ok(TypeOid::Time),
+            "timestamp" => Ok(TypeOid::Timestamp),
+            "timestampz" => Ok(TypeOid::Timestampz),
+            "decimal" => Ok(TypeOid::Decimal),
+            "interval" => Ok(TypeOid::Interval),
+            _ => Err(TypeOidError(0)),
         }
     }
 }

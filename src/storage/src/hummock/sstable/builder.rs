@@ -104,6 +104,8 @@ pub struct SstableBuilder<W: SstableWriter> {
 
     total_key_size: usize,
     total_value_size: usize,
+    stale_key_count: u64,
+    total_key_count: u64,
 }
 
 impl<W: SstableWriter> SstableBuilder<W> {
@@ -144,11 +146,18 @@ impl<W: SstableWriter> SstableBuilder<W> {
             last_bloom_filter_key_length: 0,
             total_key_size: 0,
             total_value_size: 0,
+            stale_key_count: 0,
+            total_key_count: 0,
         }
     }
 
     /// Add kv pair to sstable.
-    pub fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) -> HummockResult<()> {
+    pub async fn add(
+        &mut self,
+        full_key: &[u8],
+        value: HummockValue<&[u8]>,
+        is_new_user_key: bool,
+    ) -> HummockResult<()> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
@@ -161,39 +170,42 @@ impl<W: SstableWriter> SstableBuilder<W> {
 
         // TODO: refine me
         value.encode(&mut self.raw_value);
-        let mut extract_key = user_key(full_key);
-        if let Some(table_id) = get_table_id(full_key) {
-            if self.last_table_id != table_id {
-                self.table_ids.insert(table_id);
-                self.last_table_id = table_id;
+        if is_new_user_key {
+            let mut extract_key = user_key(full_key);
+            if let Some(table_id) = get_table_id(full_key) {
+                if self.last_table_id != table_id {
+                    self.table_ids.insert(table_id);
+                    self.last_table_id = table_id;
+                }
             }
-        }
+            extract_key = self.filter_key_extractor.extract(extract_key);
 
-        extract_key = self.filter_key_extractor.extract(extract_key);
+            // add bloom_filter check
+            // 1. not empty_key
+            // 2. extract_key key is not duplicate
+            if !extract_key.is_empty()
+                && (extract_key != &self.last_full_key[0..self.last_bloom_filter_key_length])
+            {
+                // avoid duplicate add to bloom filter
+                self.user_key_hashes
+                    .push(farmhash::fingerprint32(extract_key));
+                self.last_bloom_filter_key_length = extract_key.len();
+            }
+        } else {
+            self.stale_key_count += 1;
+        }
+        self.total_key_count += 1;
 
         self.block_builder.add(full_key, self.raw_value.as_ref());
         self.total_key_size += full_key.len();
         self.total_value_size += self.raw_value.len();
-
         self.raw_value.clear();
-
-        // add bloom_filter check
-        // 1. not empty_key
-        // 2. extract_key key is not duplicate
-        if !extract_key.is_empty()
-            && (extract_key != &self.last_full_key[0..self.last_bloom_filter_key_length])
-        {
-            // avoid duplicate add to bloom filter
-            self.user_key_hashes
-                .push(farmhash::fingerprint32(extract_key));
-            self.last_bloom_filter_key_length = extract_key.len();
-        }
 
         self.last_full_key.clear();
         self.last_full_key.extend_from_slice(full_key);
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
-            self.build_block()?;
+            self.build_block().await?;
         }
         self.key_count += 1;
 
@@ -212,11 +224,11 @@ impl<W: SstableWriter> SstableBuilder<W> {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
+    pub async fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.clone();
 
-        self.build_block()?;
+        self.build_block().await?;
         let meta_offset = self.writer.data_len() as u64;
         assert!(!smallest_key.is_empty());
 
@@ -249,6 +261,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
             file_size: meta.estimated_size as u64,
             table_ids: self.table_ids.into_iter().collect(),
             meta_offset: meta.meta_offset,
+            stale_key_count: self.stale_key_count,
+            total_key_count: self.total_key_count,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} ",
@@ -260,7 +274,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         let avg_key_size = self.total_key_size / self.key_count;
         let avg_value_size = self.total_value_size / self.key_count;
 
-        let writer_output = self.writer.finish(meta)?;
+        let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
             sst_info,
             bloom_filter_size,
@@ -276,7 +290,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             + self.user_key_hashes.len() * 4
     }
 
-    fn build_block(&mut self) -> HummockResult<()> {
+    async fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
             return Ok(());
@@ -285,7 +299,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         let mut block_meta = self.block_metas.last_mut().unwrap();
         block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
         let block = self.block_builder.build();
-        self.writer.write_block(block, block_meta)?;
+        self.writer.write_block(block, block_meta).await?;
         block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
         self.block_builder.clear();
         Ok(())
@@ -327,7 +341,7 @@ pub(super) mod tests {
 
         let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
 
-        b.finish().unwrap();
+        b.finish().await.unwrap();
     }
 
     #[tokio::test]
@@ -336,11 +350,12 @@ pub(super) mod tests {
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)))
+            b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)), true)
+                .await
                 .unwrap();
         }
 
-        let output = b.finish().unwrap();
+        let output = b.finish().await.unwrap();
         let info = output.sst_info;
 
         assert_eq!(test_key_of(0), info.key_range.as_ref().unwrap().left);

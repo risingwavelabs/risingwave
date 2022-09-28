@@ -15,6 +15,7 @@
 #![cfg_attr(not(madsim), allow(dead_code))]
 #![feature(once_cell)]
 
+use std::path::Path;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -127,6 +128,19 @@ async fn main() {
                 .unwrap();
         })
         .build();
+
+    // kafka broker
+    handle
+        .create_node()
+        .name("kafka-broker")
+        .ip("192.168.11.1".parse().unwrap())
+        .init(move || async move {
+            rdkafka::SimBroker::default()
+                .serve("0.0.0.0:29092".parse().unwrap())
+                .await
+        })
+        .build();
+
     // wait for the service to be ready
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
@@ -230,6 +244,66 @@ async fn main() {
             .build();
     }
 
+    // prepare data for kafka
+    handle
+        .create_node()
+        .name("kafka-producer")
+        .ip("192.168.11.2".parse().unwrap())
+        .build()
+        .spawn(async move {
+            use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+            use rdkafka::error::{KafkaError, RDKafkaErrorCode};
+            use rdkafka::producer::{BaseProducer, BaseRecord};
+            use rdkafka::ClientConfig;
+
+            let admin = ClientConfig::new()
+                .set("bootstrap.servers", "192.168.11.1:29092")
+                .create::<AdminClient<_>>()
+                .await
+                .expect("failed to create kafka admin client");
+
+            let producer = ClientConfig::new()
+                .set("bootstrap.servers", "192.168.11.1:29092")
+                .create::<BaseProducer>()
+                .await
+                .expect("failed to create kafka producer");
+
+            for file in std::fs::read_dir("scripts/source/test_data").unwrap() {
+                let file = file.unwrap();
+                let name = file.file_name().into_string().unwrap();
+                let (topic, partitions) = name.split_once('.').unwrap();
+                admin
+                    .create_topics(
+                        &[NewTopic::new(
+                            topic,
+                            partitions.parse().unwrap(),
+                            TopicReplication::Fixed(1),
+                        )],
+                        &AdminOptions::default(),
+                    )
+                    .await
+                    .expect("failed to create topic");
+
+                let content = std::fs::read(file.path()).unwrap();
+                for line in content.split(|&b| b == b'\n') {
+                    loop {
+                        let record = BaseRecord::<(), _>::to(topic).payload(line);
+                        match producer.send(record) {
+                            Ok(_) => break,
+                            Err((
+                                KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull),
+                                _,
+                            )) => {
+                                producer.flush(None).await;
+                            }
+                            Err((e, _)) => panic!("failed to send message: {}", e),
+                        }
+                    }
+                }
+                producer.flush(None).await;
+            }
+        });
+
     // wait for the service to be ready
     tokio::time::sleep(Duration::from_secs(30)).await;
     // client
@@ -302,6 +376,7 @@ async fn kill_node() {
 }
 
 #[cfg(not(madsim))]
+#[allow(clippy::unused_async)]
 async fn kill_node() {}
 
 async fn run_slt_task(glob: &str, host: &str) {
@@ -320,6 +395,9 @@ async fn run_slt_task(glob: &str, host: &str) {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
+        // XXX: hack for kafka source test
+        let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
+        let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
@@ -381,6 +459,23 @@ async fn run_parallel_slt_task(
         .run_parallel_async(glob, hosts.to_vec(), Risingwave::connect, jobs)
         .await
         .map_err(|e| panic!("{e}"))
+}
+
+/// Replace some strings in kafka.slt and write to a new temp file.
+fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
+    let content = std::fs::read_to_string(path).expect("failed to read file");
+    let avsc_full_path = std::fs::canonicalize("src/source/src/test_data/simple-schema.avsc")
+        .expect("failed to get schema path");
+    let content = content
+        .replace("127.0.0.1:29092", "192.168.11.1:29092")
+        .replace(
+            "/risingwave/avro-simple-schema.avsc",
+            avsc_full_path.to_str().unwrap(),
+        );
+    let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
+    std::fs::write(file.path(), content).expect("failed to write file");
+    println!("created a temp file for kafka test: {:?}", file.path());
+    file
 }
 
 struct Risingwave {

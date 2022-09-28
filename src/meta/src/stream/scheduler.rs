@@ -254,7 +254,7 @@ impl Scheduler {
         fragment.vnode_mapping = Some(ParallelUnitMapping {
             original_indices,
             data,
-            ..Default::default()
+            fragment_id: fragment.fragment_id,
         });
 
         Ok(vnode_mapping)

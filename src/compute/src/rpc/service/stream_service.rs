@@ -22,7 +22,7 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::{Barrier, Epoch, Mutation};
+use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
@@ -116,21 +116,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<ForceStopActorsRequest>,
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
-        let epoch = req.epoch.unwrap();
-
-        let barrier = &Barrier {
-            epoch: Epoch {
-                curr: epoch.curr,
-                prev: epoch.prev,
-            },
-            mutation: Some(Arc::new(Mutation::Stop(
-                req.actor_ids.into_iter().collect(),
-            ))),
-            checkpoint: true,
-            passed_actors: vec![],
-        };
-
-        self.mgr.stop_all_actors(barrier).await?;
+        self.mgr.stop_all_actors().await?;
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -160,18 +146,21 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let collect_result = self
+        let (collect_result, checkpoint) = self
             .mgr
             .collect_barrier(req.prev_epoch)
             .stack_trace(format!("collect_barrier (epoch {})", req.prev_epoch))
-            .await;
-        // Must finish syncing data written in the epoch before respond back to ensure persistency
-        // of the state.
-        let synced_sstables = self
-            .mgr
-            .sync_epoch(req.prev_epoch)
-            .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
             .await?;
+        // Must finish syncing data written in the epoch before respond back to ensure persistence
+        // of the state.
+        let synced_sstables = if checkpoint {
+            self.mgr
+                .sync_epoch(req.prev_epoch)
+                .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
+                .await?
+        } else {
+            vec![]
+        };
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
@@ -184,9 +173,6 @@ impl StreamService for StreamServiceImpl {
                     sst: Some(sst),
                 })
                 .collect_vec(),
-            // TODO: in the future may set it according to whether the barrier is a checkpoint
-            // barrier
-            checkpoint: true,
             worker_id: self.env.worker_id(),
         }))
     }

@@ -157,7 +157,7 @@ pub struct TestCaseResult {
 
 impl TestCaseResult {
     /// Convert a result to test case
-    pub fn as_test_case(self, original_test_case: &TestCase) -> Result<TestCase> {
+    pub fn into_test_case(self, original_test_case: &TestCase) -> Result<TestCase> {
         if original_test_case.binder_error.is_none() && let Some(ref err) = self.binder_error {
             return Err(anyhow!("unexpected binder error: {}", err));
         }
@@ -450,8 +450,9 @@ impl TestCase {
                     context,
                     q,
                     ObjectName(vec!["test".into()]),
+                    false,
                 ) {
-                    Ok((stream_plan, _table)) => stream_plan,
+                    Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {
                         ret.stream_error = Some(err.to_string());
                         break 'stream;
@@ -466,7 +467,7 @@ impl TestCase {
                 // Only generate stream_dist_plan if it is specified in test case
                 if self.stream_dist_plan.is_some() {
                     let graph = build_graph(stream_plan);
-                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, true).unwrap());
+                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, false).unwrap());
                 }
             }
         }

@@ -131,7 +131,9 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
-                    if let Some(update) = barrier.as_update_merge(self.actor_context.id) {
+                    if let Some(update) =
+                        barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)
+                    {
                         if !update.added_upstream_actor_id.is_empty() {
                             // Create new upstreams receivers.
                             let new_upstreams = update
@@ -184,7 +186,7 @@ impl Executor for MergeExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -246,36 +248,30 @@ impl Stream for SelectReceivers {
                     poll_count += 1;
                     continue;
                 }
-                Poll::Ready(item) => {
-                    let message = item
-                        .expect("upstream closed unexpectedly, please check error in upstream executors")
-                        .expect("upstream error");
-
-                    match message {
-                        Message::Barrier(barrier) => {
-                            let rc = self.upstreams.swap_remove(idx);
-                            self.blocks.push(rc);
-                            if let Some(current_barrier) = self.barrier.as_ref() {
-                                if current_barrier.epoch != barrier.epoch {
-                                    return Poll::Ready(Some(Err(
-                                        StreamExecutorError::align_barrier(
-                                            current_barrier.clone(),
-                                            barrier,
-                                        ),
-                                    )));
-                                }
-                            } else {
-                                self.barrier = Some(barrier);
+                Poll::Ready(item) => match item {
+                    None => return Poll::Ready(None),
+                    Some(Err(e)) => return Poll::Ready(Some(Err(e))),
+                    Some(Ok(Message::Barrier(barrier))) => {
+                        let rc = self.upstreams.swap_remove(idx);
+                        self.blocks.push(rc);
+                        if let Some(current_barrier) = self.barrier.as_ref() {
+                            if current_barrier.epoch != barrier.epoch {
+                                return Poll::Ready(Some(Err(StreamExecutorError::align_barrier(
+                                    current_barrier.clone(),
+                                    barrier,
+                                ))));
                             }
-                            poll_count = 0;
+                        } else {
+                            self.barrier = Some(barrier);
                         }
-                        Message::Chunk(chunk) => {
-                            let message = Message::Chunk(chunk);
-                            self.last_base = (idx + 1) % self.upstreams.len();
-                            return Poll::Ready(Some(Ok(message)));
-                        }
+                        poll_count = 0;
                     }
-                }
+                    Some(Ok(Message::Chunk(chunk))) => {
+                        let message = Message::Chunk(chunk);
+                        self.last_base = (idx + 1) % self.upstreams.len();
+                        return Poll::Ready(Some(Ok(message)));
+                    }
+                },
             }
         }
         if self.upstreams.is_empty() {
@@ -415,10 +411,19 @@ mod tests {
             vec![(untouched, actor_id), (old, actor_id), (new, actor_id)],
         );
 
+        let (upstream_fragment_id, fragment_id) = (10, 18);
+
         let inputs: Vec<_> = [untouched, old]
             .into_iter()
             .map(|upstream_actor_id| {
-                new_input(&ctx, metrics.clone(), actor_id, 0, upstream_actor_id, 0)
+                new_input(
+                    &ctx,
+                    metrics.clone(),
+                    actor_id,
+                    fragment_id,
+                    upstream_actor_id,
+                    upstream_fragment_id,
+                )
             })
             .try_collect()
             .unwrap();
@@ -427,8 +432,8 @@ mod tests {
             schema,
             vec![],
             ActorContext::create(actor_id),
-            0,
-            0,
+            fragment_id,
+            upstream_fragment_id,
             inputs,
             ctx.clone(),
             233,
@@ -465,7 +470,9 @@ mod tests {
 
         // 4. Send a configuration change barrier.
         let merge_updates = maplit::hashmap! {
-            actor_id => MergeUpdate {
+            (actor_id, upstream_fragment_id) => MergeUpdate {
+                actor_id,
+                upstream_fragment_id,
                 added_upstream_actor_id: vec![new],
                 removed_upstream_actor_id: vec![old],
             }

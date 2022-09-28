@@ -155,18 +155,13 @@ where
         Ok(())
     }
 
-    pub async fn notify_fragment_mapping(
-        &self,
-        table_fragment: &TableFragments,
-        operation: Operation,
-    ) {
+    async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         for fragment in table_fragment.fragments.values() {
             if !fragment.state_table_ids.is_empty() {
-                let mut mapping = fragment
+                let mapping = fragment
                     .vnode_mapping
                     .clone()
                     .expect("no data distribution found");
-                mapping.fragment_id = fragment.fragment_id;
                 self.env
                     .notification_manager()
                     .notify_frontend(operation, Info::ParallelUnitMapping(mapping))
@@ -257,6 +252,8 @@ where
             }
 
             self.env.meta_store().txn(transaction).await?;
+            self.notify_fragment_mapping(&table_fragments, Operation::Add)
+                .await;
             map.insert(*table_id, table_fragments);
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
@@ -313,10 +310,9 @@ where
 
             self.notify_fragment_mapping(&delete_table_fragments, Operation::Delete)
                 .await;
-            Ok(())
-        } else {
-            bail!("table_fragment not exist: id={}", table_id);
         }
+
+        Ok(())
     }
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
@@ -583,8 +579,6 @@ where
                 let Reschedule {
                     added_actors,
                     removed_actors,
-                    added_parallel_units,
-                    removed_parallel_units,
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
@@ -620,42 +614,25 @@ where
 
                 // update fragment's vnode mapping
                 if let Some(vnode_mapping) = fragment.vnode_mapping.as_mut() {
-                    if removed_parallel_units.len() == added_parallel_units.len() {
-                        // for migration, use the added actor to replace the removed actor
-                        let replace_map: HashMap<_, _> = removed_parallel_units
-                            .into_iter()
-                            .zip_eq(added_parallel_units.into_iter())
-                            .collect();
-
-                        for parallel_unit_id in &mut vnode_mapping.data {
-                            if let Some(target) = replace_map.get(parallel_unit_id) {
-                                *parallel_unit_id = *target;
+                    let mut actor_to_parallel_unit = HashMap::with_capacity(fragment.actors.len());
+                    for actor in &fragment.actors {
+                        if let Some(actor_status) = table_fragment.actor_status.get(&actor.actor_id)
+                        {
+                            if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
+                                actor_to_parallel_unit.insert(
+                                    actor.actor_id as ActorId,
+                                    parallel_unit.id as ParallelUnitId,
+                                );
                             }
                         }
-                    } else {
-                        // for scaling, use actor mapping to restore vnode mapping
-                        let mut actor_to_parallel_unit =
-                            HashMap::with_capacity(fragment.actors.len());
-                        for actor in &fragment.actors {
-                            if let Some(actor_status) =
-                                table_fragment.actor_status.get(&actor.actor_id)
-                            {
-                                if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
-                                    actor_to_parallel_unit.insert(
-                                        actor.actor_id as ActorId,
-                                        parallel_unit.id as ParallelUnitId,
-                                    );
-                                }
-                            }
-                        }
+                    }
 
-                        if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
-                            *vnode_mapping = actor_mapping_to_parallel_unit_mapping(
-                                fragment_id,
-                                &actor_to_parallel_unit,
-                                actor_mapping,
-                            )
-                        }
+                    if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
+                        *vnode_mapping = actor_mapping_to_parallel_unit_mapping(
+                            fragment_id,
+                            &actor_to_parallel_unit,
+                            actor_mapping,
+                        )
                     }
 
                     if !fragment.state_table_ids.is_empty() {

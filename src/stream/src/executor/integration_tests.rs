@@ -17,7 +17,6 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
@@ -42,7 +41,6 @@ use crate::task::SharedContext;
 #[tokio::test]
 async fn test_merger_sum_aggr() {
     let actor_ctx = ActorContext::create(0);
-
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
         let _schema = Schema {
@@ -84,6 +82,7 @@ async fn test_merger_sum_aggr() {
         let context = SharedContext::for_test().into();
         let actor = Actor::new(
             consumer,
+            vec![],
             0,
             context,
             StreamingMetrics::unused().into(),
@@ -129,6 +128,7 @@ async fn test_merger_sum_aggr() {
     let context = SharedContext::for_test().into();
     let actor = Actor::new(
         dispatcher,
+        vec![],
         0,
         context,
         StreamingMetrics::unused().into(),
@@ -187,6 +187,7 @@ async fn test_merger_sum_aggr() {
     let context = SharedContext::for_test().into();
     let actor = Actor::new(
         consumer,
+        vec![],
         0,
         context,
         StreamingMetrics::unused().into(),
@@ -205,9 +206,7 @@ async fn test_merger_sum_aggr() {
         for i in 0..10 {
             let chunk = StreamChunk::new(
                 vec![op; i],
-                vec![Column::new(Arc::new(
-                    I64Array::from_slice(vec![Some(1); i].as_slice()).into(),
-                ))],
+                vec![I64Array::from_slice(vec![Some(1); i].as_slice()).into()],
                 None,
             );
             input.send(Message::Chunk(chunk)).await.unwrap();

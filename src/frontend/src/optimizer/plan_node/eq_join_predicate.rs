@@ -34,7 +34,7 @@ pub struct EqJoinPredicate {
 }
 
 impl fmt::Display for EqJoinPredicate {
-    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         let mut eq_keys = self.eq_keys().iter();
         if let Some((k1, k2, null_safe)) = eq_keys.next() {
             write!(
@@ -208,7 +208,7 @@ pub struct EqJoinPredicateDisplay<'a> {
 }
 
 impl EqJoinPredicateDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.eq_join_predicate;
         let mut eq_keys = that.eq_keys().iter();
         if let Some((k1, k2, null_safe)) = eq_keys.next() {
@@ -265,13 +265,13 @@ impl EqJoinPredicateDisplay<'_> {
 }
 
 impl fmt::Display for EqJoinPredicateDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         self.fmt(f)
     }
 }
 
 impl fmt::Debug for EqJoinPredicateDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         self.fmt(f)
     }
 }

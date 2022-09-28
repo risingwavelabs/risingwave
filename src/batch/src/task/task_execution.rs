@@ -122,7 +122,7 @@ impl TaskOutput {
                         self.output_id,
                         chunk.cardinality()
                     );
-                    let pb = chunk.to_protobuf().await?;
+                    let pb = chunk.to_protobuf().await;
                     let resp = GetDataResponse {
                         status: Default::default(),
                         record_batch: Some(pb),
@@ -135,7 +135,7 @@ impl TaskOutput {
                 }
                 // Error happened
                 Err(e) => {
-                    let possible_err = self.failure.lock().clone();
+                    let possible_err = self.failure.lock().take();
                     return if let Some(err) = possible_err {
                         // Task error
                         Err(err)
@@ -444,10 +444,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             failure: self.failure.clone(),
         };
         Ok(task_output)
-    }
-
-    pub fn get_error(&self) -> Option<RwError> {
-        self.failure.lock().clone()
     }
 
     pub fn check_if_running(&self) -> Result<()> {

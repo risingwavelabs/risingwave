@@ -53,9 +53,7 @@ mod tests {
     use risingwave_storage::store::{ReadOptions, WriteOptions};
     use risingwave_storage::{Keyspace, StateStore};
 
-    async fn get_hummock_storage(
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> HummockStorage {
+    fn get_hummock_storage(hummock_meta_client: Arc<dyn HummockMetaClient>) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_string();
         let options = Arc::new(StorageConfig {
             sstable_size_mb: 1,
@@ -76,7 +74,7 @@ mod tests {
         .unwrap()
     }
 
-    async fn get_hummock_storage_with_filter_key_extractor_manager(
+    fn get_hummock_storage_with_filter_key_extractor_manager(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> HummockStorage {
@@ -179,7 +177,7 @@ mod tests {
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
+        let storage = get_hummock_storage(hummock_meta_client.clone());
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables
@@ -295,7 +293,7 @@ mod tests {
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
+        let storage = get_hummock_storage(hummock_meta_client.clone());
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables with 1MB value
@@ -417,8 +415,7 @@ mod tests {
         let storage = get_hummock_storage_with_filter_key_extractor_manager(
             hummock_meta_client.clone(),
             filter_key_extractor_manager.clone(),
-        )
-        .await;
+        );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
@@ -543,8 +540,7 @@ mod tests {
         let storage = get_hummock_storage_with_filter_key_extractor_manager(
             hummock_meta_client.clone(),
             filter_key_extractor_manager.clone(),
-        )
-        .await;
+        );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
@@ -707,8 +703,7 @@ mod tests {
         let storage = get_hummock_storage_with_filter_key_extractor_manager(
             hummock_meta_client.clone(),
             filter_key_extractor_manager.clone(),
-        )
-        .await;
+        );
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
             &hummock_meta_client,
@@ -749,6 +744,7 @@ mod tests {
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
+
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
                 .await
@@ -886,8 +882,7 @@ mod tests {
         let storage = get_hummock_storage_with_filter_key_extractor_manager(
             hummock_meta_client.clone(),
             filter_key_extractor_manager.clone(),
-        )
-        .await;
+        );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,

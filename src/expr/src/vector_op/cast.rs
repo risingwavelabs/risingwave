@@ -22,6 +22,7 @@ use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     OrderedF32, OrderedF64, Scalar, ScalarImpl, ScalarRefImpl,
 };
+use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 
 use crate::{ExprError, Result};
 
@@ -32,46 +33,69 @@ const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes
 const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
-const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
+const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 const PARSE_ERROR_STR_TO_TIME: &str =
-    "Can't cast string to time (expected format is HH:MM:SS[.MS] or HH:MM)";
+    "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
 
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
-    Ok(NaiveDateWrapper::new(
-        NaiveDate::parse_from_str(elem, "%Y-%m-%d")
-            .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE))?,
-    ))
+    Ok(NaiveDateWrapper::new(parse_naive_date(elem)?))
 }
 
 #[inline(always)]
 pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
-    if let Ok(time) = NaiveTime::parse_from_str(elem, "%H:%M:%S%.f") {
-        return Ok(NaiveTimeWrapper::new(time));
-    }
-    if let Ok(time) = NaiveTime::parse_from_str(elem, "%H:%M") {
-        return Ok(NaiveTimeWrapper::new(time));
-    }
-    Err(ExprError::Parse(PARSE_ERROR_STR_TO_TIME))
+    Ok(NaiveTimeWrapper::new(parse_naive_time(elem)?))
 }
 
 #[inline(always)]
 pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
-    if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S%.f") {
-        return Ok(NaiveDateTimeWrapper::new(timestamp));
+    Ok(NaiveDateTimeWrapper::new(parse_naive_datetime(elem)?))
+}
+
+#[inline]
+fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
+    if let Ok(res) = SpeedDateTime::parse_str(s) {
+        let date = NaiveDate::from_ymd(
+            res.date.year as i32,
+            res.date.month as u32,
+            res.date.day as u32,
+        );
+        let time = NaiveTime::from_hms_micro(
+            res.time.hour as u32,
+            res.time.minute as u32,
+            res.time.second as u32,
+            res.time.microsecond as u32,
+        );
+        Ok(NaiveDateTime::new(date, time))
+    } else {
+        let res =
+            SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))?;
+        let date = NaiveDate::from_ymd(res.year as i32, res.month as u32, res.day as u32);
+        let time = NaiveTime::from_hms_micro(0, 0, 0, 0);
+        Ok(NaiveDateTime::new(date, time))
     }
-    if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M") {
-        return Ok(NaiveDateTimeWrapper::new(timestamp));
-    }
-    if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%+") {
-        // ISO 8601 format
-        return Ok(NaiveDateTimeWrapper::new(timestamp));
-    }
-    if let Ok(date) = NaiveDate::parse_from_str(elem, "%Y-%m-%d") {
-        return Ok(NaiveDateTimeWrapper::new(date.and_hms(0, 0, 0)));
-    }
-    Err(ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))
+}
+
+#[inline]
+fn parse_naive_date(s: &str) -> Result<NaiveDate> {
+    let res = SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE))?;
+    Ok(NaiveDate::from_ymd(
+        res.year as i32,
+        res.month as u32,
+        res.day as u32,
+    ))
+}
+
+#[inline]
+fn parse_naive_time(s: &str) -> Result<NaiveTime> {
+    let res = SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME))?;
+    Ok(NaiveTime::from_hms_micro(
+        res.hour as u32,
+        res.minute as u32,
+        res.second as u32,
+        res.microsecond as u32,
+    ))
 }
 
 #[inline(always)]
@@ -391,7 +415,7 @@ pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue
 ///
 /// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
 pub fn list_cast(
-    input: ListRef,
+    input: ListRef<'_>,
     source_elem_type: &DataType,
     target_elem_type: &DataType,
 ) -> Result<ListValue> {
@@ -412,7 +436,7 @@ pub fn list_cast(
 /// mutual recursion with `list_cast` so that we can cast nested lists (e.g., varchar[][] to
 /// int[][]).
 fn scalar_cast(
-    source: ScalarRefImpl,
+    source: ScalarRefImpl<'_>,
     source_type: &DataType,
     target_type: &DataType,
 ) -> Result<ScalarImpl> {

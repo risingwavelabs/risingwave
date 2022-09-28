@@ -4,10 +4,10 @@
     select * from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: t, columns: [t.country], distribution: SomeShard }
+    └─BatchScan { table: t, columns: [t.country], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [country, t._row_id(hidden)], pk_columns: [t._row_id] }
-      StreamTableScan { table: t, columns: [t.country, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.country, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
   create_source:
     row_format: protobuf
     name: s
@@ -34,7 +34,7 @@
     select (t).country.city,(t).country,(country).city.address from t;
   logical_plan: |
     LogicalProject { exprs: [Field(t.country, 1:Int32), t.country, Field(Field(t.country, 1:Int32), 0:Int32)] }
-      LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -69,13 +69,13 @@
     select (t).country.city.*,(t.country).*,(country).city.* from t;
   logical_plan: |
     LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 0:Int32), Field(Field(t.country, 1:Int32), 1:Int32), Field(t.country, 0:Int32), Field(t.country, 1:Int32), Field(t.country, 2:Int32), Field(Field(t.country, 1:Int32), 0:Int32), Field(Field(t.country, 1:Int32), 1:Int32)] }
-      LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
 - sql: |
     create materialized view t as select * from s;
     select (t).country1.city.*,(t.country2).*,(country3).city.* from t;
   logical_plan: |
     LogicalProject { exprs: [Field(Field(t.country1, 1:Int32), 0:Int32), Field(Field(t.country1, 1:Int32), 1:Int32), Field(t.country2, 0:Int32), Field(t.country2, 1:Int32), Field(t.country2, 2:Int32), Field(Field(t.country3, 1:Int32), 0:Int32), Field(Field(t.country3, 1:Int32), 1:Int32)] }
-      LogicalScan { table: t, columns: [t.id, t.country1, t.country2, t.country3, t.zipcode, t.rate, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.id, t.country1, t.country2, t.country3, t.zipcode, t.rate, t._row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -104,8 +104,8 @@
     select (c).zipcode from (select (t).country.city as c from t);
   logical_plan: |
     LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 1:Int32)] }
-      LogicalProject { exprs: [Field(t.country, 1:Int32)] }
-        LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
+    └─LogicalProject { exprs: [Field(t.country, 1:Int32)] }
+      └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -132,10 +132,10 @@
     select (c).zipcode from (select min((t).country.city) as c from t);
   logical_plan: |
     LogicalProject { exprs: [Field(min(Field(t.country, 1:Int32)), 1:Int32)] }
-      LogicalProject { exprs: [min(Field(t.country, 1:Int32))] }
-        LogicalAgg { aggs: [min(Field(t.country, 1:Int32))] }
-          LogicalProject { exprs: [Field(t.country, 1:Int32)] }
-            LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
+    └─LogicalProject { exprs: [min(Field(t.country, 1:Int32))] }
+      └─LogicalAgg { aggs: [min(Field(t.country, 1:Int32))] }
+        └─LogicalProject { exprs: [Field(t.country, 1:Int32)] }
+          └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -162,10 +162,10 @@
     select * from (select (country).city as c from t) as vv join t on (c).zipcode=(t.country).zipcode;
   logical_plan: |
     LogicalProject { exprs: [Field(t.country, 1:Int32), t.id, t.country, t.zipcode, t.rate] }
-      LogicalJoin { type: Inner, on: (Field(Field(t.country, 1:Int32), 1:Int32) = Field(t.country, 2:Int32)), output: all }
-        LogicalProject { exprs: [Field(t.country, 1:Int32)] }
-          LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
-        LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
+    └─LogicalJoin { type: Inner, on: (Field(Field(t.country, 1:Int32), 1:Int32) = Field(t.country, 2:Int32)), output: all }
+      ├─LogicalProject { exprs: [Field(t.country, 1:Int32)] }
+      | └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -192,9 +192,9 @@
     select min((t.country).city.address) + max((t.country).city.address) * count(zipcode) from t;
   logical_plan: |
     LogicalProject { exprs: [(min(Field(Field(t.country, 1:Int32), 0:Int32)) + (max(Field(Field(t.country, 1:Int32), 0:Int32)) * count(t.zipcode)))] }
-      LogicalAgg { aggs: [min(Field(Field(t.country, 1:Int32), 0:Int32)), max(Field(Field(t.country, 1:Int32), 0:Int32)), count(t.zipcode)] }
-        LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 0:Int32), t.zipcode] }
-          LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
+    └─LogicalAgg { aggs: [min(Field(Field(t.country, 1:Int32), 0:Int32)), max(Field(Field(t.country, 1:Int32), 0:Int32)), count(t.zipcode)] }
+      └─LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 0:Int32), t.zipcode] }
+        └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -221,10 +221,10 @@
     select count(1), count((country).city.zipcode) from t where (country).city.address>1;
   logical_plan: |
     LogicalProject { exprs: [count(1:Int32), count(Field(Field(t.country, 1:Int32), 1:Int32))] }
-      LogicalAgg { aggs: [count(1:Int32), count(Field(Field(t.country, 1:Int32), 1:Int32))] }
-        LogicalProject { exprs: [1:Int32, Field(Field(t.country, 1:Int32), 1:Int32)] }
-          LogicalFilter { predicate: (Field(Field(t.country, 1:Int32), 0:Int32) > 1:Int32) }
-            LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
+    └─LogicalAgg { aggs: [count(1:Int32), count(Field(Field(t.country, 1:Int32), 1:Int32))] }
+      └─LogicalProject { exprs: [1:Int32, Field(Field(t.country, 1:Int32), 1:Int32)] }
+        └─LogicalFilter { predicate: (Field(Field(t.country, 1:Int32), 0:Int32) > 1:Int32) }
+          └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -338,7 +338,7 @@
     insert into s values (1,2,(1,2,(1,2,null)));
   logical_plan: |
     LogicalInsert { table: s }
-      LogicalValues { rows: [[1:Int32, 2:Int32, Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, null:Int32))]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Struct(StructType { fields: [Int32, Int32, Struct(StructType { fields: [Int32, Int32, Int32], field_names: ["v1", "v2", "v3"] })], field_names: ["v1", "v2", "v3"] })] } }
+    └─LogicalValues { rows: [[1:Int32, 2:Int32, Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, null:Int32))]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Struct(StructType { fields: [Int32, Int32, Struct(StructType { fields: [Int32, Int32, Int32], field_names: ["v1", "v2", "v3"] })], field_names: ["v1", "v2", "v3"] })] } }
   create_source:
     row_format: protobuf
     name: s
@@ -365,8 +365,8 @@
     select * from s where s.v3 = (1,2,(1,2,3));
   logical_plan: |
     LogicalProject { exprs: [s.v1, s.v2, s.v3] }
-      LogicalFilter { predicate: (s.v3 = Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, 3:Int32))) }
-        LogicalScan { table: s, columns: [s._row_id, s.v1, s.v2, s.v3] }
+    └─LogicalFilter { predicate: (s.v3 = Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, 3:Int32))) }
+      └─LogicalScan { table: s, columns: [s._row_id, s.v1, s.v2, s.v3] }
   create_source:
     row_format: protobuf
     name: s

@@ -22,7 +22,6 @@
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(let_else)]
 

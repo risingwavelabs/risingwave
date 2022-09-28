@@ -25,7 +25,7 @@ use crate::handler::util::data_type_to_type_oid;
 /// The catalog `pg_cast` stores data type conversion paths.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
 pub const PG_CAST_TABLE_NAME: &str = "pg_cast";
-pub const PG_CAST_COLUMNS: &[PgCatalogColumnsDef] = &[
+pub const PG_CAST_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Int32, "castsource"),
     (DataType::Int32, "casttarget"),

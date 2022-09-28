@@ -20,18 +20,18 @@ use std::sync::Arc;
 use std::{str, vec};
 
 use bytes::{Bytes, BytesMut};
+use futures::stream::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::log::trace;
 
 use crate::error::{PsqlError, PsqlResult};
-use crate::pg_extended::{PgPortal, PgStatement};
+use crate::pg_extended::{PgPortal, PgStatement, PreparedStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
     FePasswordMessage, FeStartupMessage,
 };
-use crate::pg_response::PgResponse;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 
 /// The state machine for each psql connection.
@@ -169,14 +169,15 @@ where
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg)?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
-            FeMessage::CancelQuery(m) => self.process_cancel_msg(m).await?,
+            FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => self.process_parse_msg(m).await?,
-            FeMessage::Bind(m) => self.process_bind_msg(m).await?,
+            FeMessage::Bind(m) => self.process_bind_msg(m)?,
             FeMessage::Execute(m) => self.process_execute_msg(m).await?,
-            FeMessage::Describe(m) => self.process_describe_msg(m).await?,
+            FeMessage::Describe(m) => self.process_describe_msg(m)?,
             FeMessage::Sync => self.stream.write_no_flush(&BeMessage::ReadyForQuery)?,
-            FeMessage::Close(m) => self.process_close_msg(m).await?,
+            FeMessage::Close(m) => self.process_close_msg(m)?,
+            FeMessage::Flush => self.stream.flush().await?,
         }
         self.stream.flush().await?;
         Ok(false)
@@ -269,7 +270,7 @@ where
         Ok(())
     }
 
-    async fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
+    fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
         let session_id = (m.target_process_id, m.target_secret_key);
         self.session_mgr.cancel_queries_in_session(session_id);
         self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
@@ -282,7 +283,7 @@ where
 
         let session = self.session.clone().unwrap();
         // execute query
-        let res = session
+        let mut res = session
             .run_statement(sql, false)
             .await
             .map_err(|err| PsqlError::QueryError(err))?;
@@ -290,7 +291,24 @@ where
         if res.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if res.is_query() {
-            self.process_response_results(res, false).await?;
+            self.stream
+                .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
+
+            let mut rows_cnt = 0;
+
+            while let Some(row) = res.values_stream().next().await {
+                self.stream.write_no_flush(&BeMessage::DataRow(
+                    &row.map_err(|err| PsqlError::QueryError(err))?,
+                ))?;
+                rows_cnt += 1;
+            }
+
+            self.stream
+                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                    stmt_type: res.get_stmt_type(),
+                    notice: res.get_notice(),
+                    rows_cnt,
+                }))?;
         } else {
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
@@ -311,7 +329,7 @@ where
     async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         tracing::trace!("(extended query)parse query: {}", sql);
-        // 1. Create the types description.
+        // Create the types description.
         let types = msg
             .type_ids
             .iter()
@@ -328,58 +346,17 @@ where
                 || lower_sql.starts_with("describe")
         };
 
+        let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), types)?;
+
         // 2. Create the row description.
         let fields: Vec<PgFieldDescriptor> = if is_query_sql {
-            if types.is_empty() {
-                let session = self.session.clone().unwrap();
-                session
-                    .infer_return_type(sql)
-                    .await
-                    .map_err(PsqlError::ParseError)?
-            } else {
-                // Process the statement with params.
-                // For now, we can only process the statement type like this e.g. 'select
-                // $1,$2,$3...'. The following process only consider statement as
-                // 'select $1,$2,$3...'.
+            let sql = prepared_statement.instance_default()?;
 
-                // Get the generic params e.g. [$1,$2,$3]
-                let generic_params: Vec<&str> = sql
-                    .split(&[' ', ',', ';'])
-                    .skip(1)
-                    .into_iter()
-                    .take_while(|x| !x.is_empty())
-                    .collect();
-
-                // Strip the '$' from the generic params e.g. [1,2,3]
-                let mut idx = Vec::with_capacity(generic_params.len());
-                for x in generic_params.iter() {
-                    // NOTE: Assume all output are generic params.
-                    let str = x
-                        .strip_prefix('$')
-                        .ok_or_else(|| PsqlError::ParseError("Invalid generic param".into()))?;
-                    // NOTE: Assume all generic are valid.
-                    let v: i32 = str
-                        .parse()
-                        .map_err(|e| PsqlError::ParseError(Box::new(e)))?;
-                    if !v.is_positive() {
-                        return Err(PsqlError::ParseError("Invalid generic param".into()));
-                    }
-                    idx.push(v);
-                }
-
-                // Create the PgFieldDescriptor according the type of generic params.
-                let mut res = Vec::with_capacity(idx.len());
-                for x in idx.iter() {
-                    if ((x - 1) as usize) >= types.len() {
-                        return Err(PsqlError::ParseError("Invalid generic param".into()));
-                    }
-                    res.push(PgFieldDescriptor::new(
-                        String::new(),
-                        types[(x - 1) as usize].to_owned(),
-                    ));
-                }
-                res
-            }
+            let session = self.session.clone().unwrap();
+            session
+                .infer_return_type(&sql)
+                .await
+                .map_err(PsqlError::ParseError)?
         } else {
             vec![]
         };
@@ -387,8 +364,7 @@ where
         // 3. Create the statement.
         let statement = PgStatement::new(
             cstr_to_str(&msg.statement_name).unwrap().to_string(),
-            msg.sql_bytes,
-            types,
+            prepared_statement,
             fields,
             is_query_sql,
         );
@@ -404,7 +380,7 @@ where
         Ok(())
     }
 
-    async fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
+    fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         // 1. Get statement.
         trace!(
@@ -423,15 +399,12 @@ where
 
         // 2. Instance the statement to get the portal.
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
-        let portal = statement
-            .instance::<SM>(
-                self.session.clone().unwrap(),
-                portal_name.clone(),
-                &msg.params,
-                msg.result_format_code,
-                msg.param_format_code,
-            )
-            .await?;
+        let portal = statement.instance(
+            portal_name.clone(),
+            &msg.params,
+            msg.result_format_code,
+            msg.param_format_code,
+        )?;
 
         // 3. Insert the Portal.
         if portal_name.is_empty() {
@@ -457,36 +430,19 @@ where
                 .ok_or_else(PsqlError::no_portal_in_execute)?
         };
 
-        tracing::trace!(
-            "(extended query)execute query: {}",
-            cstr_to_str(&portal.query_string()).unwrap()
-        );
+        tracing::trace!("(extended query)execute query: {}", portal.query_string());
 
         // 2. Execute instance statement using portal.
         let session = self.session.clone().unwrap();
-        let res = portal
-            .execute::<SM>(session, msg.max_rows.try_into().unwrap())
-            .await
-            .map_err(PsqlError::ExecuteError)?;
-
-        if res.is_empty() {
-            self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
-        } else if res.is_query() {
-            self.process_response_results(res, true).await?;
-        } else {
-            self.stream
-                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
-                    stmt_type: res.get_stmt_type(),
-                    notice: res.get_notice(),
-                    rows_cnt: res.get_effected_rows_cnt(),
-                }))?;
-        }
+        portal
+            .execute::<SM, S>(session, msg.max_rows.try_into().unwrap(), &mut self.stream)
+            .await?;
 
         // NOTE there is no ReadyForQuery message.
         Ok(())
     }
 
-    async fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
+    fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
         //  b'S' => Statement
         //  b'P' => Portal
         tracing::trace!(
@@ -547,7 +503,7 @@ where
         Ok(())
     }
 
-    async fn process_close_msg(&mut self, msg: FeCloseMessage) -> PsqlResult<()> {
+    fn process_close_msg(&mut self, msg: FeCloseMessage) -> PsqlResult<()> {
         let name = cstr_to_str(&msg.name).unwrap().to_string();
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {
@@ -558,52 +514,10 @@ where
         self.stream.write_no_flush(&BeMessage::CloseComplete)?;
         Ok(())
     }
-
-    async fn process_response_results(
-        &mut self,
-        res: PgResponse,
-        is_extended: bool,
-    ) -> Result<(), IoError> {
-        // The possible responses to Execute are the same as those described above for queries
-        // issued via simple query protocol, except that Execute doesn't cause ReadyForQuery or
-        // RowDescription to be issued.
-        // Quoted from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-        if !is_extended {
-            self.stream
-                .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
-        }
-
-        let mut rows_cnt = 0;
-
-        let iter = res.iter();
-        for val in iter {
-            self.stream.write_no_flush(&BeMessage::DataRow(val))?;
-            rows_cnt += 1;
-        }
-
-        // If has rows limit, it must be extended mode.
-        // If Execute terminates before completing the execution of a portal (due to reaching a
-        // nonzero result-row count), it will send a PortalSuspended message; the appearance of this
-        // message tells the frontend that another Execute should be issued against the same portal
-        // to complete the operation. The CommandComplete message indicating completion of the
-        // source SQL command is not sent until the portal's execution is completed.
-        // Quote from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended
-        if !is_extended || res.is_row_end() {
-            self.stream
-                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
-                    stmt_type: res.get_stmt_type(),
-                    notice: res.get_notice(),
-                    rows_cnt,
-                }))?;
-        } else {
-            self.stream.write_no_flush(&BeMessage::PortalSuspended)?;
-        }
-        Ok(())
-    }
 }
 
 /// Wraps a byte stream and read/write pg messages.
-struct PgStream<S> {
+pub struct PgStream<S> {
     /// The underlying stream.
     stream: S,
     /// Write into buffer before flush to stream.
@@ -654,11 +568,11 @@ where
         });
     }
 
-    fn write_no_flush(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
+    pub fn write_no_flush(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
         BeMessage::write(&mut self.write_buf, message)
     }
 
-    #[allow(unused)]
+    #[expect(dead_code)]
     async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
         self.write_no_flush(message)?;
         self.flush().await?;

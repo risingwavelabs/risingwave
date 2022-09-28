@@ -163,7 +163,7 @@ impl Executor for WrapperExecutor {
         self.input.schema()
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         self.input.pk_indices()
     }
 

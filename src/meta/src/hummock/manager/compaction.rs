@@ -42,8 +42,8 @@ impl Compaction {
         &mut self,
         context_ids: &[HummockContextId],
     ) -> Result<(
-        BTreeMapTransaction<CompactionGroupId, CompactStatus>,
-        BTreeMapTransaction<HummockCompactionTaskId, CompactTaskAssignment>,
+        BTreeMapTransaction<'_, CompactionGroupId, CompactStatus>,
+        BTreeMapTransaction<'_, HummockCompactionTaskId, CompactTaskAssignment>,
     )> {
         let mut compact_statuses = BTreeMapTransaction::new(&mut self.compaction_statuses);
         let mut compact_task_assignment =

@@ -4,17 +4,17 @@
     select v1 from (select * from t) where v2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-      LogicalFilter { predicate: (t.v2 > 1:Int32) }
-        LogicalProject { exprs: [t.v1, t.v2] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+      └─LogicalProject { exprs: [t.v1, t.v2] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* merge and then eliminate */
     create table t (v1 bigint, v2 double precision);
     select a1 as v1, a2 as v2 from (select v1 as a1, v2 as a2 from t);
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2] }
-      LogicalProject { exprs: [t.v1, t.v2] }
-        LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalProject { exprs: [t.v1, t.v2] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
     LogicalScan { table: t, columns: [t.v1, t.v2] }
 - sql: |
@@ -26,27 +26,27 @@
     select v3 from (select v2, v1 as v3 from t) where v2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-      LogicalFilter { predicate: (t.v2 > 1:Int32) }
-        LogicalProject { exprs: [t.v2, t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+      └─LogicalProject { exprs: [t.v2, t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* consecutive projects are merged */
     create table t (v1 bigint, v2 double precision);
     select v1, 2 from (select v1, v2, 1 from t);
   logical_plan: |
     LogicalProject { exprs: [t.v1, 2:Int32] }
-      LogicalProject { exprs: [t.v1, t.v2, 1:Int32] }
-        LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalProject { exprs: [t.v1, t.v2, 1:Int32] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [t.v1, 2:Int32] }
-      LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalScan { table: t, columns: [t.v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t);
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2] }
-      LogicalProject { exprs: [t.v1, t.v2] }
-        LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalProject { exprs: [t.v1, t.v2] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
     LogicalScan { table: t, columns: [t.v1, t.v2] }
 - sql: |
@@ -55,30 +55,30 @@
     select * from (select * from t), t;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
-      LogicalJoin { type: Inner, on: true, output: all }
-        LogicalProject { exprs: [t.v1, t.v2] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-        LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalJoin { type: Inner, on: true, output: all }
+      ├─LogicalProject { exprs: [t.v1, t.v2] }
+      | └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* table alias */
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt join t on tt.v1=t.v1;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
-      LogicalJoin { type: Inner, on: (t.v1 = t.v1), output: all }
-        LogicalProject { exprs: [t.v1, t.v2] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-        LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalJoin { type: Inner, on: (t.v1 = t.v1), output: all }
+      ├─LogicalProject { exprs: [t.v1, t.v2] }
+      | └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* alias less columns than available */
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a) join t on a=v1;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
-      LogicalJoin { type: Inner, on: (t.v1 = t.v1), output: all }
-        LogicalProject { exprs: [t.v1, t.v2] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-        LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalJoin { type: Inner, on: (t.v1 = t.v1), output: all }
+      ├─LogicalProject { exprs: [t.v1, t.v2] }
+      | └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* alias more columns than available */
     create table t (v1 bigint, v2 double precision);
@@ -108,10 +108,10 @@
     );
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(ab.a, bc.b), output: all }
-      LogicalScan { table: ab, columns: [ab.a, ab.b] }
-      LogicalJoin { type: Inner, on: true, output: all }
-        LogicalScan { table: bc, columns: [bc.b] }
-        LogicalScan { table: t, output_columns: [], required_columns: [v1], predicate: IsNotNull(t.v1) }
+    ├─LogicalScan { table: ab, columns: [ab.a, ab.b] }
+    └─LogicalJoin { type: Inner, on: true, output: all }
+      ├─LogicalScan { table: bc, columns: [bc.b] }
+      └─LogicalScan { table: t, output_columns: [], required_columns: [v1], predicate: IsNotNull(t.v1) }
 - sql: |
     /* We cannot reference columns in left table if not lateral */
     create table ab (a int, b int);
@@ -140,31 +140,31 @@
     select count(1) from (select sum(distinct 1) from t1), t2;
   logical_plan: |
     LogicalProject { exprs: [count(1:Int32)] }
-      LogicalAgg { aggs: [count(1:Int32)] }
-        LogicalProject { exprs: [1:Int32] }
-          LogicalJoin { type: Inner, on: true, output: all }
-            LogicalProject { exprs: [sum(distinct 1:Int32)] }
-              LogicalAgg { aggs: [sum(distinct 1:Int32)] }
-                LogicalProject { exprs: [1:Int32] }
-                  LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-            LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+    └─LogicalAgg { aggs: [count(1:Int32)] }
+      └─LogicalProject { exprs: [1:Int32] }
+        └─LogicalJoin { type: Inner, on: true, output: all }
+          ├─LogicalProject { exprs: [sum(distinct 1:Int32)] }
+          | └─LogicalAgg { aggs: [sum(distinct 1:Int32)] }
+          |   └─LogicalProject { exprs: [1:Int32] }
+          |     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [count(1:Int32)] }
-      LogicalProject { exprs: [1:Int32] }
-        LogicalJoin { type: Inner, on: true, output: all }
-          LogicalAgg { aggs: [] }
-            LogicalScan { table: t1, columns: [] }
-          LogicalScan { table: t2, columns: [] }
+    └─LogicalProject { exprs: [1:Int32] }
+      └─LogicalJoin { type: Inner, on: true, output: all }
+        ├─LogicalAgg { aggs: [] }
+        | └─LogicalScan { table: t1, columns: [] }
+        └─LogicalScan { table: t2, columns: [] }
   batch_plan: |
     BatchSimpleAgg { aggs: [count(1:Int32)] }
-      BatchProject { exprs: [1:Int32] }
-        BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-          BatchSimpleAgg { aggs: [] }
-            BatchExchange { order: [], dist: Single }
-              BatchSimpleAgg { aggs: [] }
-                BatchScan { table: t1, columns: [], distribution: SomeShard }
-          BatchExchange { order: [], dist: Single }
-            BatchScan { table: t2, columns: [], distribution: SomeShard }
+    └─BatchProject { exprs: [1:Int32] }
+      └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+        ├─BatchSimpleAgg { aggs: [] }
+        | └─BatchExchange { order: [], dist: Single }
+        |   └─BatchSimpleAgg { aggs: [] }
+        |     └─BatchScan { table: t1, columns: [], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchScan { table: t2, columns: [], distribution: SomeShard }
 - sql: |
     SELECT n.nspname as "Schema",
     c.relname as "Name",
@@ -180,27 +180,27 @@
     ORDER BY 1,2;
   logical_plan: |
     LogicalProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar), pg_user.name] }
-      LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        LogicalFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
-          LogicalJoin { type: LeftOuter, on: (pg_namespace.oid = pg_class.relnamespace), output: all }
-            LogicalScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind] }
-            LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
-        LogicalProject { exprs: [pg_user.name] }
-          LogicalFilter { predicate: (CorrelatedInputRef { index: 3, correlated_id: 1 } = pg_user.usesysid) }
-            LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
+      | └─LogicalJoin { type: LeftOuter, on: (pg_namespace.oid = pg_class.relnamespace), output: all }
+      |   ├─LogicalScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind] }
+      |   └─LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
+      └─LogicalProject { exprs: [pg_user.name] }
+        └─LogicalFilter { predicate: (CorrelatedInputRef { index: 3, correlated_id: 1 } = pg_user.usesysid) }
+          └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
   batch_plan: |
     BatchExchange { order: [pg_namespace.nspname ASC, pg_class.relname ASC], dist: Single }
-      BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar), pg_user.name] }
-        BatchSort { order: [pg_namespace.nspname ASC, pg_class.relname ASC] }
-          BatchHashJoin { type: LeftOuter, predicate: pg_class.relowner = pg_user.usesysid, output: [pg_class.relname, pg_class.relkind, pg_namespace.nspname, pg_user.name] }
-            BatchExchange { order: [], dist: HashShard(pg_class.relowner) }
-              BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = pg_namespace.oid, output: [pg_class.relname, pg_class.relowner, pg_class.relkind, pg_namespace.nspname] }
-                BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
-                  BatchFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) }
-                    BatchScan { table: pg_class, columns: [pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind], distribution: Single }
-                BatchExchange { order: [], dist: HashShard(pg_namespace.oid) }
-                  BatchFilter { predicate: (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
-                    BatchScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname], distribution: Single }
-            BatchExchange { order: [], dist: HashShard(pg_user.usesysid) }
-              BatchProject { exprs: [pg_user.name, pg_user.usesysid] }
-                BatchScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name], distribution: Single }
+    └─BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar), pg_user.name] }
+      └─BatchSort { order: [pg_namespace.nspname ASC, pg_class.relname ASC] }
+        └─BatchHashJoin { type: LeftOuter, predicate: pg_class.relowner = pg_user.usesysid, output: [pg_class.relname, pg_class.relkind, pg_namespace.nspname, pg_user.name] }
+          ├─BatchExchange { order: [], dist: HashShard(pg_class.relowner) }
+          | └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = pg_namespace.oid, output: [pg_class.relname, pg_class.relowner, pg_class.relkind, pg_namespace.nspname] }
+          |   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+          |   | └─BatchFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) }
+          |   |   └─BatchScan { table: pg_class, columns: [pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind], distribution: Single }
+          |   └─BatchExchange { order: [], dist: HashShard(pg_namespace.oid) }
+          |     └─BatchFilter { predicate: (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
+          |       └─BatchScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname], distribution: Single }
+          └─BatchExchange { order: [], dist: HashShard(pg_user.usesysid) }
+            └─BatchProject { exprs: [pg_user.name, pg_user.usesysid] }
+              └─BatchScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name], distribution: Single }

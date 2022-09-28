@@ -26,18 +26,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::HummockVersionDeltas;
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::SubscribeResponse;
-use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
+use risingwave_storage::hummock::local_version_manager::LocalVersionManagerRef;
 
 pub struct SimpleObserverNode {
-    local_version_manager: Arc<LocalVersionManager>,
+    local_version_manager: LocalVersionManagerRef,
     version: u64,
 }
 
@@ -105,7 +103,7 @@ impl ObserverNodeImpl for SimpleObserverNode {
 }
 
 impl SimpleObserverNode {
-    pub fn new(local_version_manager: Arc<LocalVersionManager>) -> Self {
+    pub fn new(local_version_manager: LocalVersionManagerRef) -> Self {
         Self {
             local_version_manager,
             version: 0,

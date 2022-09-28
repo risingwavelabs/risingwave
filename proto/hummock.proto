@@ -12,6 +12,8 @@ message SstableInfo {
   uint64 file_size = 3;
   repeated uint32 table_ids = 4;
   uint64 meta_offset = 5;
+  uint64 stale_key_count = 6;
+  uint64 total_key_count = 7;
 }
 
 enum LevelType {
@@ -177,16 +179,17 @@ message TableOption {
 
 message CompactTask {
   enum TaskStatus {
-    PENDING = 0;
-    SUCCESS = 1;
-    HEARTBEAT_CANCELED = 2;
-    NO_AVAIL_CANCELED = 3;
-    ASSIGN_FAIL_CANCELED = 4;
-    SEND_FAIL_CANCELED = 5;
-    MANUAL_CANCELED = 6;
-    EXECUTE_FAILED = 7;
-    JOIN_HANDLE_FAILED = 8;
-    TRACK_SST_ID_FAILED = 9;
+    UNSPECIFIED = 0;
+    PENDING = 1;
+    SUCCESS = 2;
+    HEARTBEAT_CANCELED = 3;
+    NO_AVAIL_CANCELED = 4;
+    ASSIGN_FAIL_CANCELED = 5;
+    SEND_FAIL_CANCELED = 6;
+    MANUAL_CANCELED = 7;
+    EXECUTE_FAILED = 8;
+    JOIN_HANDLE_FAILED = 9;
+    TRACK_SST_ID_FAILED = 10;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
@@ -388,6 +391,28 @@ message ListVersionDeltasResponse {
   HummockVersionDeltas version_deltas = 1;
 }
 
+message PinnedVersionsSummary {
+  repeated HummockPinnedVersion pinned_versions = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message PinnedSnapshotsSummary {
+  repeated HummockPinnedSnapshot pinned_snapshots = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message RiseCtlGetPinnedVersionsSummaryRequest {}
+
+message RiseCtlGetPinnedVersionsSummaryResponse {
+  PinnedVersionsSummary summary = 1;
+}
+
+message RiseCtlGetPinnedSnapshotsSummaryRequest {}
+
+message RiseCtlGetPinnedSnapshotsSummaryResponse {
+  PinnedSnapshotsSummary summary = 1;
+}
+
 message ResetCurrentVersionRequest {}
 
 message ResetCurrentVersionResponse {
@@ -444,6 +469,8 @@ service HummockManagerService {
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
+  rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
+  rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
 }
 
 service CompactorService {}
