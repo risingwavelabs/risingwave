@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
@@ -22,7 +23,9 @@ use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumManagerRef};
+use crate::hummock::{
+    CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
+};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -188,6 +191,23 @@ where
         let rx = self
             .compactor_manager
             .add_compactor(context_id, req.max_concurrent_task_number);
+        // Trigger compaction on all compaction groups.
+        for cg_id in self
+            .hummock_manager
+            .compaction_group_manager()
+            .compaction_group_ids()
+            .await
+        {
+            if let Err(e) = self.hummock_manager.try_send_compaction_request(cg_id) {
+                tracing::warn!(
+                    "Failed to schedule compaction for compaction group {}. {}",
+                    cg_id,
+                    e
+                );
+            }
+        }
+        self.hummock_manager
+            .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
@@ -336,5 +356,39 @@ where
             .await
             .map_err(MetaError::from)?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
+    }
+
+    async fn rise_ctl_get_pinned_versions_summary(
+        &self,
+        _request: Request<RiseCtlGetPinnedVersionsSummaryRequest>,
+    ) -> Result<Response<RiseCtlGetPinnedVersionsSummaryResponse>, Status> {
+        let pinned_versions = self.hummock_manager.list_pinned_version().await;
+        let workers = self
+            .hummock_manager
+            .list_workers(&pinned_versions.iter().map(|v| v.context_id).collect_vec())
+            .await;
+        Ok(Response::new(RiseCtlGetPinnedVersionsSummaryResponse {
+            summary: Some(PinnedVersionsSummary {
+                pinned_versions,
+                workers,
+            }),
+        }))
+    }
+
+    async fn rise_ctl_get_pinned_snapshots_summary(
+        &self,
+        _request: Request<RiseCtlGetPinnedSnapshotsSummaryRequest>,
+    ) -> Result<Response<RiseCtlGetPinnedSnapshotsSummaryResponse>, Status> {
+        let pinned_snapshots = self.hummock_manager.list_pinned_snapshot().await;
+        let workers = self
+            .hummock_manager
+            .list_workers(&pinned_snapshots.iter().map(|p| p.context_id).collect_vec())
+            .await;
+        Ok(Response::new(RiseCtlGetPinnedSnapshotsSummaryResponse {
+            summary: Some(PinnedSnapshotsSummary {
+                pinned_snapshots,
+                workers,
+            }),
+        }))
     }
 }

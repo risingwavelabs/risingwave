@@ -327,7 +327,6 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> Boxed
 mod tests {
     use chrono::NaiveDate;
     use itertools::Itertools;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::types::{NaiveDateWrapper, Scalar};
     use risingwave_pb::data::data_type::TypeName;
@@ -359,7 +358,7 @@ mod tests {
                 target.push(None);
             }
         }
-        let col1 = Column::new(Arc::new(I16Array::from_slice(&input).into()));
+        let col1 = I16Array::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
@@ -402,7 +401,7 @@ mod tests {
         target.push(Some(0));
         target.push(Some(1));
 
-        let col1 = Column::new(Arc::new(I32Array::from_slice(&input).into()));
+        let col1 = I32Array::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 3);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
@@ -452,7 +451,7 @@ mod tests {
             }
         }
         let col1_data = &input.iter().map(|x| x.as_ref().map(|x| &**x)).collect_vec();
-        let col1 = Column::new(Arc::new(Utf8Array::from_slice(col1_data).into()));
+        let col1 = Utf8Array::from_slice(col1_data).into();
         let data_chunk = DataChunk::new(vec![col1], 1);
         let return_type = DataType {
             type_name: TypeName::Int16 as i32,
@@ -507,7 +506,7 @@ mod tests {
             }
         }
 
-        let col1 = Column::new(Arc::new(BoolArray::from_slice(&input).into()));
+        let col1 = BoolArray::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -546,7 +545,7 @@ mod tests {
             }
         }
 
-        let col1 = Column::new(Arc::new(NaiveDateArray::from_slice(&input).into()));
+        let col1 = NaiveDateArray::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Date], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();

@@ -34,6 +34,13 @@ macro_rules! ensure_float {
     };
 }
 
+macro_rules! simd_json_ensure_float {
+    ($v:ident, $t:ty) => {
+        $v.cast_f64()
+            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?
+    };
+}
+
 macro_rules! ensure_int {
     ($v:ident, $t:ty) => {
         $v.as_i64()
@@ -64,6 +71,7 @@ fn do_parse_json_value(column: &ColumnDesc, v: &Value) -> Result<ScalarImpl> {
         DataType::Int64 => ensure_int!(v, i64).into(),
         DataType::Float32 => ScalarImpl::Float32((ensure_float!(v, f32) as f32).into()),
         DataType::Float64 => ScalarImpl::Float64((ensure_float!(v, f64) as f64).into()),
+        // FIXME: decimal should have more precision than f64
         DataType::Decimal => Decimal::from_f64(ensure_float!(v, Decimal))
             .ok_or_else(|| anyhow!("expect decimal"))?
             .into(),
@@ -116,9 +124,10 @@ fn do_parse_simd_json_value(column: &ColumnDesc, v: &BorrowedValue<'_>) -> Resul
                 .map_err(|e| anyhow!("expect i32: {}", e))?,
         ),
         DataType::Int64 => ensure_int!(v, i64).into(),
-        DataType::Float32 => ScalarImpl::Float32((ensure_float!(v, f32) as f32).into()),
-        DataType::Float64 => ScalarImpl::Float64((ensure_float!(v, f64) as f64).into()),
-        DataType::Decimal => Decimal::from_f64(ensure_float!(v, Decimal))
+        DataType::Float32 => ScalarImpl::Float32((simd_json_ensure_float!(v, f32) as f32).into()),
+        DataType::Float64 => ScalarImpl::Float64((simd_json_ensure_float!(v, f64) as f64).into()),
+        // FIXME: decimal should have more precision than f64
+        DataType::Decimal => Decimal::from_f64(simd_json_ensure_float!(v, Decimal))
             .ok_or_else(|| anyhow!("expect decimal"))?
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),

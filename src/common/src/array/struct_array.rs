@@ -40,7 +40,7 @@ use crate::types::{
 #[derive(Debug)]
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
-    children_array: Vec<ArrayBuilderImpl>,
+    pub(super) children_array: Vec<ArrayBuilderImpl>,
     children_type: Arc<[DataType]>,
     len: usize,
 }
@@ -221,14 +221,14 @@ impl Array for StructArray {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<super::ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = StructArrayBuilder::with_meta(
             capacity,
             ArrayMeta::Struct {
                 children: self.children_type.clone(),
             },
         );
-        Ok(ArrayBuilderImpl::Struct(array_builder))
+        ArrayBuilderImpl::Struct(array_builder)
     }
 
     fn array_meta(&self) -> ArrayMeta {
@@ -279,16 +279,16 @@ impl StructArray {
         null_bitmap: &[bool],
         children: Vec<ArrayImpl>,
         children_type: Vec<DataType>,
-    ) -> ArrayResult<StructArray> {
+    ) -> StructArray {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let children = children.into_iter().map(Arc::new).collect_vec();
-        Ok(StructArray {
+        StructArray {
             bitmap,
             children_type: children_type.into(),
             len: cardinality,
             children,
-        })
+        }
     }
 
     #[cfg(test)]
@@ -301,32 +301,21 @@ impl StructArray {
     }
 }
 
-#[derive(Clone, Debug, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Hash)]
 pub struct StructValue {
     fields: Box<[Datum]>,
 }
 
 impl fmt::Display for StructValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "({})",
-            self.fields
-                .iter()
-                .map(|f| {
-                    match f {
-                        Some(f) => format!("{}", f),
-                        None => " ".to_string(),
-                    }
-                })
-                .join(", ")
-        )
-    }
-}
-
-impl PartialEq for StructValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.fields == other.fields
+        let mut f = f.debug_tuple("");
+        for field in self.fields.iter() {
+            match field {
+                Some(field) => f.field(&format_args!("{}", field)),
+                None => f.field(&" "),
+            };
+        }
+        f.finish()
     }
 }
 
@@ -339,12 +328,6 @@ impl PartialOrd for StructValue {
 impl Ord for StructValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
-    }
-}
-
-impl Hash for StructValue {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.fields.hash(state);
     }
 }
 
@@ -549,7 +532,7 @@ mod tests {
     // `CREATE TYPE foo_empty as ();`, e.g.
     #[test]
     fn test_struct_new_empty() {
-        let arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]).unwrap();
+        let arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]);
         let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
     }
@@ -564,8 +547,7 @@ mod tests {
                 array! { F32Array, [None, Some(3.0), None, Some(4.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .unwrap();
+        );
         let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
 
@@ -611,9 +593,8 @@ mod tests {
                 array! { F32Array, [Some(2.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .unwrap();
-        let builder = arr.create_builder(4).unwrap();
+        );
+        let builder = arr.create_builder(4);
         let arr2 = try_match_expand!(builder.finish(), ArrayImpl::Struct).unwrap();
         assert_eq!(arr.array_meta(), arr2.array_meta());
     }
@@ -652,8 +633,7 @@ mod tests {
                 array! { F32Array, [Some(2.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .unwrap();
+        );
         let struct_ref = arr.value_at(0).unwrap();
         let output = struct_ref.to_protobuf_owned();
         let expect = StructValue::new(vec![

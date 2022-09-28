@@ -25,8 +25,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("invalid hummock context {0}")]
     InvalidContext(HummockContextId),
-    #[error("no idle compactor")]
-    NoIdleCompactor,
     #[error(transparent)]
     MetaStore(anyhow::Error),
     #[error("compactor {0} is disconnected")]

@@ -39,8 +39,6 @@ pub mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
-pub mod local_version;
-pub mod local_version_manager;
 pub mod shared_buffer;
 pub mod sstable_store;
 mod state_store;
@@ -49,11 +47,14 @@ pub mod test_utils;
 pub mod utils;
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
+pub mod local_version;
 pub mod store;
 pub mod vacuum;
 mod validator;
 pub mod value;
+
 pub use error::*;
+use local_version::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -71,7 +72,6 @@ use crate::hummock::compaction_group_client::{
     CompactionGroupClientImpl, DummyCompactionGroupClient,
 };
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;

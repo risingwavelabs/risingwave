@@ -88,7 +88,7 @@ pub async fn handle_query(
         flush_for_write(&session, stmt_type).await?;
     }
 
-    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
+    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {
@@ -218,7 +218,7 @@ async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Res
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();
-            let snapshot = client.flush().await?;
+            let snapshot = client.flush(true).await?;
             session
                 .env()
                 .hummock_snapshot_manager()
