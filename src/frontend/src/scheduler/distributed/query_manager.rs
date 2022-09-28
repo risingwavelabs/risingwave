@@ -191,14 +191,12 @@ impl QueryResultFetcher {
         Box::pin(self.run_inner())
     }
 
-    #[try_stream(ok = Row, error = BoxedError)]
+    #[try_stream(ok = Vec<Row>, error = BoxedError)]
     async fn stream_from_channel_inner(mut self, format: bool) {
         while let Some(chunk_inner) = self.chunk_rx.recv().await {
             let chunk = chunk_inner?;
             let rows = to_pg_rows(chunk, format);
-            for row in rows {
-                yield row;
-            }
+            yield rows;
         }
     }
 

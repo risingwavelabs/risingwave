@@ -101,14 +101,12 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    #[try_stream(ok = Row, error = BoxedError)]
+    #[try_stream(ok = Vec<Row>, error = BoxedError)]
     async fn stream_row_inner(data_stream: BoxedDataChunkStream, format: bool) {
         #[for_await]
         for chunk in data_stream {
             let rows = to_pg_rows(chunk?, format);
-            for row in rows {
-                yield row;
-            }
+            yield rows;
         }
     }
 

@@ -174,16 +174,18 @@ mod tests {
 
         let mut columns = HashMap::new();
         #[for_await]
-        for row in pg_response.values_stream() {
-            let row = row.unwrap();
-            columns.insert(
-                std::str::from_utf8(row.index(0).as_ref().unwrap())
-                    .unwrap()
-                    .to_string(),
-                std::str::from_utf8(row.index(1).as_ref().unwrap())
-                    .unwrap()
-                    .to_string(),
-            );
+        for row_set in pg_response.values_stream() {
+            let row_set = row_set.unwrap();
+            for row in row_set {
+                columns.insert(
+                    std::str::from_utf8(row.index(0).as_ref().unwrap())
+                        .unwrap()
+                        .to_string(),
+                    std::str::from_utf8(row.index(1).as_ref().unwrap())
+                        .unwrap()
+                        .to_string(),
+                );
+            }
         }
 
         let expected_columns: HashMap<String, String> = maplit::hashmap! {

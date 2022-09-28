@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::stream::BoxStream;
 use futures::StreamExt;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
-use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::pg_server::BoxedError;
-use pgwire::types::Row;
+use pgwire::pg_response::{PgResponse, PgResultSet, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
@@ -32,7 +29,7 @@ use crate::scheduler::{
 };
 use crate::session::{OptimizerContext, SessionImpl};
 
-pub type QueryResultSet = BoxStream<'static, std::result::Result<Row, BoxedError>>;
+pub type QueryResultSet = PgResultSet;
 
 pub async fn handle_query(
     context: OptimizerContext,
@@ -75,12 +72,12 @@ pub async fn handle_query(
         StatementType::SELECT => 0_i32,
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             // Get the row from the row_stream.
-            let first_row = row_stream
+            let first_row_set = row_stream
                 .next()
                 .await
                 .expect("compute node should return affected rows in output")
                 .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?;
-            let affected_rows_str = first_row.values()[0]
+            let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");
             String::from_utf8(affected_rows_str.to_vec())

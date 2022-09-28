@@ -21,6 +21,7 @@ use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
 
+pub type PgResultSet = BoxStream<'static, Result<Vec<Row>, BoxedError>>;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[expect(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum StatementType {
@@ -81,7 +82,7 @@ pub struct PgResponse {
     // don't return rows.
     row_cnt: i32,
     notice: Option<String>,
-    values_stream: BoxStream<'static, Result<Row, BoxedError>>,
+    values_stream: PgResultSet,
     row_desc: Vec<PgFieldDescriptor>,
 }
 
@@ -129,7 +130,7 @@ impl PgResponse {
             stmt_type,
             row_cnt,
             notice: None,
-            values_stream: futures::stream::iter(values.into_iter().map(Ok)).boxed(),
+            values_stream: futures::stream::iter(vec![Ok(values)]).boxed(),
             row_desc,
         }
     }
@@ -137,7 +138,7 @@ impl PgResponse {
     pub fn new_for_stream(
         stmt_type: StatementType,
         row_cnt: i32,
-        values_stream: BoxStream<'static, Result<Row, BoxedError>>,
+        values_stream: BoxStream<'static, Result<Vec<Row>, BoxedError>>,
         row_desc: Vec<PgFieldDescriptor>,
     ) -> Self {
         Self {
@@ -193,7 +194,7 @@ impl PgResponse {
         self.row_desc.clone()
     }
 
-    pub fn values_stream(&mut self) -> &mut BoxStream<'static, Result<Row, BoxedError>> {
+    pub fn values_stream(&mut self) -> &mut PgResultSet {
         &mut self.values_stream
     }
 }
