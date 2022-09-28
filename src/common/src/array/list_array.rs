@@ -313,11 +313,12 @@ pub struct ListValue {
 impl fmt::Display for ListValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Example of ListValue display: ARRAY[1, 2]
-        write!(
-            f,
-            "ARRAY[{}]",
-            self.values.iter().map(|v| v.as_ref().unwrap()).format(", ")
-        )
+        write!(f, "ARRAY")?;
+        let mut f = f.debug_list();
+        for v in self.values.iter() {
+            f.entry(&format_args!("{}", v.as_ref().unwrap()));
+        }
+        f.finish()
     }
 }
 

@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayResult, Op, Row, RowRef, StreamChunk};
 use risingwave_common::types::DataType;
 
@@ -169,7 +166,7 @@ impl StreamChunkBuilder {
             .map(|(builder, datatype)| {
                 std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
             })
-            .map(|array_impl| Column::new(Arc::new(array_impl)))
+            .map(Into::into)
             .collect::<Vec<_>>();
 
         Ok(Some(StreamChunk::new(
