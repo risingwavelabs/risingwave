@@ -12,6 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module contains implementation for hash key serialization for
+//! hash-agg, hash-join, and perhaps other hash-based operators.
+//!
+//! There may be multiple columns in one row being combined and encoded into
+//! one single hash key.
+//! For example, `SELECT sum(t.a) FROM t GROUP BY t.b, t.c`, the hash keys
+//! are encoded from both `t.b` and `t.c`. If `t.b="abc"` and `t.c=1`, the hashkey may be
+//! encoded in certain format of `("abc", 1)`.
+
 use std::convert::TryInto;
 use std::default::Default;
 use std::fmt::Debug;
@@ -33,15 +42,6 @@ use crate::types::{
     VIRTUAL_NODE_COUNT,
 };
 use crate::util::hash_util::Crc32FastBuilder;
-
-/// This file contains implementation for hash key serialization for
-/// hash-agg, hash-join, and perhaps other hash-based operators.
-///
-/// There may be multiple columns in one row being combined and encoded into
-/// one single hash key.
-/// For example, `SELECT sum(t.a) FROM t GROUP BY t.b, t.c`, the hash keys
-/// are encoded from both `t.b, t.c`. If t.b="abc", t.c=1, the hashkey may be
-/// encoded in certain format of ("abc", 1).
 
 /// A wrapper for u64 hash result.
 #[derive(Default, Clone, Debug, PartialEq)]
