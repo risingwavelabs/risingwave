@@ -14,10 +14,12 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
+use global_stats_alloc::INSTRUMENTED_JEMALLOC;
+use stats_alloc::StatsAlloc;
 use tikv_jemallocator::Jemalloc;
 
 #[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+static GLOBAL: &StatsAlloc<Jemalloc> = &INSTRUMENTED_JEMALLOC;
 
 use std::collections::HashMap;
 use std::env;

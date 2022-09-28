@@ -150,6 +150,7 @@ where
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         compaction_scheduler.start(shutdown_rx).await;
+        tracing::info!("Compaction scheduler is stopped");
     });
 
     (join_handle, shutdown_tx)
