@@ -40,13 +40,13 @@ include ./q02.slt.part
 # include ./q08.slt.part --> no output
 # include ./q09.slt.part --> no output
 # include ./q10.slt.part --> no output
-# include ./q11.slt.part --> no output
+include ./q11.slt.part
 include ./q12.slt.part
 include ./q13.slt.part
 # include ./q14.slt.part --> panic, see issue: https://github.com/risingwavelabs/risingwave/issues/5563
 # include ./q15.slt.part --> no output
 include ./q16.slt.part
-# include ./q17.slt.part --> no output
+include ./q17.slt.part
 # include ./q18.slt.part --> no output
 include ./q19.slt.part
 # include ./q20.slt.part --> no output
