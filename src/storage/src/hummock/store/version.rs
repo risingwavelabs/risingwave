@@ -19,7 +19,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, SstableInfo};
 
 // use super::memtable::Memtable;
-use crate::hummock::local_version::PinnedVersion;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{filter_single_sst, range_overlap};
 use crate::hummock::HummockResult;
