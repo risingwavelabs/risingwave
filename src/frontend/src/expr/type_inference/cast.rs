@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_more_nested_ok() {
+    fn test_lhs_is_more_nested_ok() {
         let dt = DataType::Boolean;
         let nested_1 = DataType::List {
             datatype: Box::new(dt.clone()),
