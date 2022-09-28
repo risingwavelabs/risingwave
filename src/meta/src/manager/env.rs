@@ -95,8 +95,6 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
-    /// Seconds compaction scheduler should stall when there is no available compactor.
-    pub no_available_compactor_stall_sec: u64,
 }
 
 impl Default for MetaOpts {
@@ -115,7 +113,6 @@ impl Default for MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
-            no_available_compactor_stall_sec: 5,
         }
     }
 }
