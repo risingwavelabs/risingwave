@@ -377,7 +377,8 @@ where
         }
     }
 
-    /// Do some stuffs after barriers are collected, for the given command.
+    /// Do some stuffs after barriers are collected and the new storage version is committed, for
+    /// the given command.
     pub async fn post_collect(&self) -> MetaResult<()> {
         match &self.command {
             Command::Plain(_) => {}
@@ -429,6 +430,9 @@ where
                     )
                     .await?;
 
+                // For mview creation, the snapshot ingestion may last for several epochs. By
+                // pinning a snapshot in `post_collect` which is called sequentially, we can ensure
+                // that the pinned snapshot is the just committed one.
                 self.snapshot_manager.pin(self.prev_epoch).await?;
             }
 
@@ -484,10 +488,14 @@ where
         Ok(())
     }
 
+    /// Do some stuffs before the barrier is `finish`ed. Only used for `CreateMaterializedView`.
     pub async fn pre_finish(&self) -> MetaResult<()> {
         #[allow(clippy::single_match)]
         match &self.command {
             Command::CreateMaterializedView { .. } => {
+                // Since the compute node reports that the chain actors have caught up with the
+                // upstream and finished the creation, we can unpin the snapshot.
+                // TODO: we can unpin the snapshot earlier, when the snapshot ingestion is done.
                 self.snapshot_manager.unpin(self.prev_epoch).await?;
             }
 

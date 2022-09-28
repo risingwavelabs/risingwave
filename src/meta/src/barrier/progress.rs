@@ -80,9 +80,12 @@ impl Progress {
     }
 }
 
+/// The command tracking by the [`CreateMviewProgressTracker`].
 pub(super) struct TrackingCommand<S: MetaStore> {
+    /// The context of the command.
     pub context: Arc<CommandContext<S>>,
 
+    /// Should be called when the command is finished.
     pub notifiers: Vec<Notifier>,
 }
 
@@ -104,10 +107,9 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
         }
     }
 
-    /// Add a new create-mview DDL command to track with current epoch as `ddl_epoch` and
-    /// `notifiers`, that needs to wait for `actors` to report progress.
+    /// Add a new create-mview DDL command to track.
     ///
-    /// If `actors` is empty, [`Notifier::notify_finished`] will be called immediately.
+    /// If the actors to track is empty, return the given command as it can be finished immediately.
     pub fn add(&mut self, command: TrackingCommand<S>) -> Option<TrackingCommand<S>> {
         let actors = command.context.actors_to_track();
         if actors.is_empty() {
@@ -126,8 +128,9 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
         None
     }
 
-    /// Update the progress of `actor` according to the Prost struct. If all actors in this MV have
-    /// finished, `notify_finished` will be called on registered notifiers.
+    /// Update the progress of `actor` according to the Prost struct.
+    ///
+    /// If all actors in this MV have finished, returns the command.
     pub fn update(&mut self, progress: &CreateMviewProgress) -> Option<TrackingCommand<S>> {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {

@@ -484,12 +484,7 @@ where
             assert!(new_epoch > state.in_flight_prev_epoch);
             state.in_flight_prev_epoch = new_epoch;
 
-            let (new_epoch, _actors_to_track, _create_mview_progress) =
-                self.recovery(state.in_flight_prev_epoch, true).await;
-            // tracker.add(new_epoch, actors_to_track, vec![]);
-            // for progress in &create_mview_progress {
-            //     tracker.update(progress);
-            // }
+            let new_epoch = self.recovery(state.in_flight_prev_epoch, true).await;
             state.in_flight_prev_epoch = new_epoch;
             state
                 .update_inflight_prev_epoch(self.env.meta_store())
@@ -765,13 +760,8 @@ where
         }
         if self.enable_recovery {
             // If failed, enter recovery mode.
-            let (new_epoch, _actors_to_track, _create_mview_progress) =
-                self.recovery(state.in_flight_prev_epoch, false).await;
             *tracker = CreateMviewProgressTracker::new();
-            // tracker.add(new_epoch, actors_to_track, vec![]);
-            // for progress in &create_mview_progress {
-            //     tracker.update(progress);
-            // }
+            let new_epoch = self.recovery(state.in_flight_prev_epoch, false).await;
             state.in_flight_prev_epoch = new_epoch;
             state
                 .update_inflight_prev_epoch(self.env.meta_store())
@@ -861,6 +851,7 @@ where
                     self.scheduled_barriers.force_checkpoint_in_next_barrier();
                 }
                 for TrackingCommand { context, notifiers } in finished_commands {
+                    // The command is ready to finish. Call `pre_finish` here.
                     context.pre_finish().await?;
                     checkpoint_control.add_finished_notifiers(notifiers);
                 }
