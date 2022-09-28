@@ -290,7 +290,9 @@ pub struct WriteLimiter {
     threshold: WriteLimiterThreshold,
     // Wakes stalled caller immediately.
     breaker_receivers: Vec<tokio::sync::oneshot::Sender<()>>,
+
     // Inputs of write delay calculation.
+    // Max sub_level_number of all compaction groups.
     sub_level_number: u64,
 }
 
@@ -337,7 +339,7 @@ impl WriteLimiter {
         let mut sub_level_number = 0;
         for group in version.levels.values() {
             if let Some(l0) = group.l0.as_ref() {
-                sub_level_number += l0.sub_levels.len();
+                sub_level_number = std::cmp::max(l0.sub_levels.len(), sub_level_number);
             }
         }
         self.sub_level_number = sub_level_number as u64;
@@ -372,7 +374,10 @@ mod tests {
                 Levels {
                     levels: vec![],
                     l0: Some(OverlappingLevel {
-                        sub_levels: iter::once(Level::default()).cycle().take(50).collect_vec(),
+                        sub_levels: iter::once(Level::default())
+                            .cycle()
+                            .take(((i + 1) * 50) as usize)
+                            .collect_vec(),
                         total_file_size: 0,
                     }),
                 },
