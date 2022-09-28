@@ -60,19 +60,17 @@ struct InnerConnectorSourceReader {
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or
 /// batch processing. [`ConnectorSource`] introduces schema at this level while
-/// [`SplitReaderImpl`] simply loadsF raw content from message queue or file system.
+/// [`SplitReaderImpl`] simply loads raw content from message queue or file system.
 /// Parallel means that multiple [`InnerConnectorSourceReader`] will run in parallel during the
 /// `next`, so that 0 or more Splits reads can be handled at the Source level.
-#[allow(dead_code)]
 pub struct ConnectorSourceReader {
     pub config: ConnectorProperties,
     pub parser: Arc<SourceParserImpl>,
     pub columns: Vec<SourceColumnDesc>,
 
     // merge all streams of inner reader into one
+    // TODO: make this static dispatch instead of box
     all_reader_stream: BoxStream<'static, Result<Vec<SourceMessage>>>,
-    metrics: Arc<SourceMetrics>,
-    context: SourceContext,
 }
 
 impl InnerConnectorSourceReader {
@@ -276,8 +274,6 @@ impl ConnectorSource {
             parser: self.parser.clone(),
             columns,
             all_reader_stream: streams,
-            metrics: metrics.clone(),
-            context: context.clone(),
         })
     }
 }
