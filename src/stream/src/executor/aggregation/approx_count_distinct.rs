@@ -401,8 +401,6 @@ mod tests {
 
         let estimation = agg.get_output().unwrap().unwrap().into_int64();
         let error_ratio = ((estimation - actual_ndv) as f64 / actual_ndv as f64).abs();
-        println!("estimation = {}", estimation);
-        println!("error ratio = {}", error_ratio);
         assert!(error_ratio < 0.01);
     }
 
