@@ -45,6 +45,13 @@ enum MetaErrorInner {
     #[error("Invalid worker: {0}")]
     InvalidWorker(WorkerId),
 
+    // Used for catalog errors.
+    #[error("{0} not found: {1}")]
+    NotFound(&'static str, String),
+
+    #[error("{0} with name {1} exists")]
+    Duplicated(&'static str, String),
+
     #[error(transparent)]
     Internal(anyhow::Error),
 }
@@ -94,6 +101,14 @@ impl MetaError {
         use std::borrow::Borrow;
         std::matches!(self.inner.borrow(), &MetaErrorInner::InvalidWorker(_))
     }
+
+    pub fn catalog_not_found<T: ToString>(relation: &'static str, name: T) -> Self {
+        MetaErrorInner::NotFound(relation, name.to_string()).into()
+    }
+
+    pub fn catalog_duplicated<T: ToString>(relation: &'static str, name: T) -> Self {
+        MetaErrorInner::Duplicated(relation, name.to_string()).into()
+    }
 }
 
 impl From<MetadataModelError> for MetaError {
@@ -126,6 +141,8 @@ impl From<MetaError> for tonic::Status {
             MetaErrorInner::PermissionDenied(_) => {
                 tonic::Status::permission_denied(err.to_string())
             }
+            MetaErrorInner::NotFound(_, _) => tonic::Status::not_found(err.to_string()),
+            MetaErrorInner::Duplicated(_, _) => tonic::Status::already_exists(err.to_string()),
             _ => tonic::Status::internal(err.to_string()),
         }
     }

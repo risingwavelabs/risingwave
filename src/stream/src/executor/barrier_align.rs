@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::Context;
 use enum_as_inner::EnumAsInner;
 use futures::future::{select, Either};
 use futures::StreamExt;
@@ -60,7 +61,7 @@ pub async fn barrier_align(
                     match msg? {
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(_) => {
-                            panic!("right barrier received while left stream end")
+                            error!("right barrier received while left stream end");
                         }
                     }
                 }
@@ -72,7 +73,7 @@ pub async fn barrier_align(
                     match msg? {
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(_) => {
-                            panic!("left barrier received while right stream end")
+                            error!("left barrier received while right stream end");
                         }
                     }
                 }
@@ -83,7 +84,11 @@ pub async fn barrier_align(
                 Message::Barrier(_) => loop {
                     let start_time = Instant::now();
                     // received left barrier, waiting for right barrier
-                    match right.next().await.unwrap()? {
+                    match right
+                        .next()
+                        .await
+                        .context("failed to pull right message, stream closed unexpectedly")??
+                    {
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
@@ -101,7 +106,11 @@ pub async fn barrier_align(
                 Message::Barrier(_) => loop {
                     let start_time = Instant::now();
                     // received right barrier, waiting for left barrier
-                    match left.next().await.unwrap()? {
+                    match left
+                        .next()
+                        .await
+                        .context("failed to pull left message, stream closed unexpectedly")??
+                    {
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);

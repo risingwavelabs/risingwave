@@ -434,7 +434,14 @@ async fn run_slt_task(glob: &str, host: &str) {
                 match tester.run_async(record.clone()).await {
                     Ok(_) => break,
                     // allow 'table exists' error when retry CREATE statement
-                    Err(e) if is_create && i != 0 && e.to_string().contains("exists") => break,
+                    Err(e)
+                        if is_create
+                            && i != 0
+                            && e.to_string().contains("exists")
+                            && e.to_string().contains("Catalog error") =>
+                    {
+                        break
+                    }
                     // allow 'not found' error when retry DROP statement
                     Err(e) if is_drop && i != 0 && e.to_string().contains("not found") => break,
                     Err(e) if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),

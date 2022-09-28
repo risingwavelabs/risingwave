@@ -648,7 +648,7 @@ where
         let key = (source.database_id, source.schema_id, source.name.clone());
 
         if core.has_source(source) {
-            bail!("table already exists");
+            Err(MetaError::catalog_duplicated("source", &source.name))
         } else if core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
@@ -725,7 +725,10 @@ where
                 }
             }
         } else {
-            bail!("source doesn't exist");
+            Err(MetaError::catalog_not_found(
+                "source",
+                source_id.to_string(),
+            ))
         }
     }
 
@@ -739,7 +742,7 @@ where
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
 
         if core.has_source(source) || core.has_table(mview) {
-            bail!("table or source already exists");
+            Err(MetaError::catalog_duplicated("source", &source.name))
         } else if core.has_in_progress_creation(&source_key)
             || core.has_in_progress_creation(&mview_key)
         {
@@ -887,7 +890,10 @@ where
                 Ok(version)
             }
 
-            _ => bail!("table or source doesn't exist"),
+            _ => Err(MetaError::catalog_not_found(
+                "source",
+                source_id.to_string(),
+            )),
         }
     }
 
@@ -900,7 +906,7 @@ where
         let key = (index.database_id, index.schema_id, index.name.clone());
 
         if core.has_index(index) {
-            bail!("index already exists");
+            Err(MetaError::catalog_duplicated("index", &index.name))
         } else if core.has_in_progress_creation(&key) {
             bail!("index already in creating procedure");
         } else {
@@ -979,7 +985,7 @@ where
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
 
         if core.has_sink(sink) {
-            bail!("sink already exists");
+            Err(MetaError::catalog_duplicated("sink", &sink.name))
         } else if core.has_in_progress_creation(&key) {
             bail!("sink already in creating procedure");
         } else {
@@ -1023,22 +1029,6 @@ where
         }
     }
 
-    pub async fn create_sink(&self, sink: &Sink) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.database;
-        if !core.has_sink(sink) {
-            sink.insert(self.env.meta_store()).await?;
-            core.add_sink(sink);
-
-            let version = self
-                .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            bail!("sink already exists");
-        }
-    }
-
     pub async fn drop_sink(&self, sink_id: SinkId) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
         let sink = Sink::select(self.env.meta_store(), &sink_id).await?;
@@ -1056,7 +1046,7 @@ where
 
             Ok(version)
         } else {
-            bail!("sink doesn't exist");
+            Err(MetaError::catalog_not_found("sink", sink_id.to_string()))
         }
     }
 

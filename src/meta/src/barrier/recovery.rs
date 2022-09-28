@@ -83,7 +83,7 @@ where
         // table id.
         // TODO: replace this with batch support for stream jobs.
         to_drop_table_fragments
-            .sort_by(|f1, f2| f1.table_id().table_id.cmp(&f2.table_id().table_id));
+            .sort_by(|f1, f2| f2.table_id().table_id.cmp(&f1.table_id().table_id));
 
         for table_fragment in to_drop_table_fragments {
             debug!("clean dirty table fragments: {}", table_fragment.table_id());
