@@ -34,11 +34,11 @@ members = [
   "src/tests/sync_point",
   "src/tracing",
   "src/utils/async_stack_trace",
+  "src/utils/local_stats_alloc",
   "src/utils/memcomparable",
   "src/utils/pgwire",
   "src/utils/runtime",
   "src/utils/static-link",
-  "src/utils/stats_alloc",
   "src/utils/sync-point",
   "src/workspace-hack",
 ]

@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::ops::RangeBounds;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use bytes::Bytes;
+use parking_lot::RwLock;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc;
 
@@ -26,17 +27,17 @@ use super::{GetFutureTrait, IterFutureTrait, ReadOptions, StateStore};
 use crate::define_local_state_store_associated_type;
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
-use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::local_version::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockResult, HummockStateStoreIter};
 
-#[allow(unused)]
+#[expect(dead_code)]
 pub struct HummockStorageCore {
     /// Mutable memtable.
     memtable: Memtable,
 
     /// Read handle.
-    read_version: Mutex<HummockReadVersion>,
+    read_version: RwLock<HummockReadVersion>,
 
     /// Event sender.
     event_sender: mpsc::UnboundedSender<HummockEvent>,
@@ -51,13 +52,13 @@ pub struct HummockStorageCore {
     compaction_group_client: Arc<CompactionGroupClientImpl>,
 }
 
-#[allow(unused)]
+#[expect(dead_code)]
 #[derive(Clone)]
 pub struct HummockStorage {
     core: Arc<HummockStorageCore>,
 }
 
-#[allow(unused)]
+#[expect(unused_variables)]
 impl HummockStorageCore {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&mut self, info: VersionUpdate) -> HummockResult<()> {
@@ -65,7 +66,7 @@ impl HummockStorageCore {
     }
 }
 
-#[allow(unused)]
+#[expect(unused_variables)]
 impl StateStore for HummockStorage {
     type Iter = HummockStateStoreIter;
 

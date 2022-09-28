@@ -1590,7 +1590,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3495912c9c1ccf2e18976439f4443f3fee0fd61f424ff99fde6a66b15ecb448f"
 dependencies = [
  "cfg-if",
- "hashbrown 0.12.3",
+ "hashbrown",
  "lock_api",
  "parking_lot_core 0.9.3",
 ]
@@ -2172,6 +2172,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
+name = "global_stats_alloc"
+version = "0.1.11"
+dependencies = [
+ "stats_alloc",
+ "tikv-jemallocator",
+ "workspace-hack",
+]
+
+[[package]]
 name = "globset"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2215,17 +2224,8 @@ version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce69ed202df415a3d4a01e6f3341320ca88b9bd4f0bf37be6fa239cdea06d9bf"
 dependencies = [
- "hashbrown 0.12.3",
+ "hashbrown",
  "serde",
-]
-
-[[package]]
-name = "hashbrown"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
-dependencies = [
- "ahash",
 ]
 
 [[package]]
@@ -2444,7 +2444,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10a35a97730320ffe8e2d410b5d3b69279b98d2c14bdb8b70ea89ecf7888d41e"
 dependencies = [
  "autocfg",
- "hashbrown 0.12.3",
+ "hashbrown",
 ]
 
 [[package]]
@@ -2736,6 +2736,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
+name = "local_stats_alloc"
+version = "0.1.11"
+dependencies = [
+ "workspace-hack",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2757,9 +2764,9 @@ dependencies = [
 [[package]]
 name = "lru"
 version = "0.7.6"
-source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
+source = "git+https://github.com/risingwavelabs/lru-rs.git?branch=evict_by_timestamp#b972b4e486311c0eb3e4e48a849003bcc440224d"
 dependencies = [
- "hashbrown 0.11.2",
+ "hashbrown",
 ]
 
 [[package]]
@@ -2768,7 +2775,7 @@ version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e999beba7b6e8345721bd280141ed958096a2e4abdf74f67ff4ce49b4b54e47a"
 dependencies = [
- "hashbrown 0.12.3",
+ "hashbrown",
 ]
 
 [[package]]
@@ -3249,6 +3256,15 @@ checksum = "a8903e5a29a317527874d0402f867152a3d21c908bb0b933e416c65e301d4c36"
 dependencies = [
  "memchr",
  "minimal-lexical",
+]
+
+[[package]]
+name = "ntapi"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c28774a7fd2fbb4f0babd8237ce554b73af68021b5f695a3cebd6c59bac0980f"
+dependencies = [
+ "winapi",
 ]
 
 [[package]]
@@ -4401,6 +4417,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
+ "global_stats_alloc",
  "log",
  "madsim-tokio",
  "risingwave_compactor",
@@ -4409,6 +4426,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
+ "stats_alloc",
  "tikv-jemallocator",
  "tracing",
  "workspace-hack",
@@ -4421,6 +4439,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
+ "global_stats_alloc",
  "log",
  "madsim-tokio",
  "risedev",
@@ -4431,6 +4450,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
+ "stats_alloc",
  "sync-point",
  "tikv-jemallocator",
  "tracing",
@@ -4487,6 +4507,7 @@ dependencies = [
  "spin 0.9.4",
  "strum",
  "strum_macros",
+ "sysinfo",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -4702,7 +4723,6 @@ dependencies = [
  "dyn-clone",
  "either",
  "itertools",
- "lru 0.7.8",
  "madsim-tokio",
  "madsim-tonic",
  "md5",
@@ -5042,6 +5062,8 @@ dependencies = [
  "enum-as-inner",
  "farmhash",
  "futures",
+ "futures-async-stream",
+ "futures-concurrency",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5214,9 +5236,12 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "global_stats_alloc",
  "hyper",
  "iter-chunks",
  "itertools",
+ "local_stats_alloc",
+ "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -5851,10 +5876,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stats_alloc"
-version = "0.1.11"
-dependencies = [
- "workspace-hack",
-]
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
 
 [[package]]
 name = "str_stack"
@@ -6022,6 +6046,21 @@ dependencies = [
  "quote",
  "syn",
  "unicode-xid",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ae2421f3e16b3afd4aa692d23b83d0ba42ee9b0081d5deeb7d21428d7195fb1"
+dependencies = [
+ "cfg-if",
+ "core-foundation-sys",
+ "libc",
+ "ntapi",
+ "once_cell",
+ "rayon",
+ "winapi",
 ]
 
 [[package]]
@@ -6923,7 +6962,7 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
- "hashbrown 0.12.3",
+ "hashbrown",
  "hdrhistogram",
  "hyper",
  "indexmap",

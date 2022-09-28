@@ -18,13 +18,13 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use tokio::sync::{mpsc, oneshot};
 
 use super::memtable::Memtable;
-use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::HummockResult;
+use crate::store::SyncResult;
 
 // TODO: may use a different type
 pub type StateStoreId = u64;
 
-#[allow(unused)]
+#[expect(dead_code)]
 pub struct Batch {
     /// Immutable memtable.
     imm_mem: Arc<Memtable>,
@@ -45,13 +45,13 @@ pub enum HummockEvent {
     // TODO: may add more (e.g. event to add state store instance)
 }
 
-#[allow(unused)]
+#[expect(dead_code)]
 pub struct HummockEventHandler {
     receiver: mpsc::UnboundedReceiver<HummockEvent>,
     // TODO: may add more
 }
 
-#[allow(unused)]
+#[expect(dead_code)]
 impl HummockEventHandler {
     fn handle(&self) -> HummockResult<()> {
         unimplemented!()

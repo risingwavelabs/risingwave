@@ -32,7 +32,6 @@ use crate::hummock::iterator::{
     HummockIteratorDirection, HummockIteratorUnion, OrderedMergeIteratorInner,
     UnorderedMergeIteratorInner,
 };
-use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -40,6 +39,7 @@ use crate::hummock::state_store::HummockIteratorType;
 use crate::hummock::utils::{filter_single_sst, range_overlap};
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::store::SyncResult;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UncommittedData {
