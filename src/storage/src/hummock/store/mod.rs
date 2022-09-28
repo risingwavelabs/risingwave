@@ -77,7 +77,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn advance_write_epoch(&mut self, new_epoch: u64) -> StorageResult<()>;
 }
 
-#[allow(unused)]
+#[expect(dead_code)]
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.

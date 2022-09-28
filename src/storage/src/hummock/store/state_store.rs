@@ -47,7 +47,7 @@ use crate::hummock::{hit_sstable_bloom_filter, HummockResult, SstableIterator};
 use crate::monitor::StoreLocalStatistic;
 use crate::{define_local_state_store_associated_type, StateStoreIter};
 
-#[allow(unused)]
+#[expect(dead_code)]
 pub struct HummockStorageCore {
     /// Mutable memtable.
     memtable: Memtable,
@@ -68,13 +68,12 @@ pub struct HummockStorageCore {
     compaction_group_client: Arc<CompactionGroupClientImpl>,
 }
 
-#[allow(unused)]
 #[derive(Clone)]
 pub struct HummockStorage {
     core: Arc<HummockStorageCore>,
 }
 
-#[allow(unused)]
+#[expect(unused_variables)]
 impl HummockStorageCore {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&mut self, info: VersionUpdate) -> HummockResult<()> {
@@ -82,7 +81,7 @@ impl HummockStorageCore {
     }
 }
 
-#[allow(unused)]
+#[expect(unused_variables)]
 impl StateStore for HummockStorage {
     type Iter = HummockStorageIterator;
 

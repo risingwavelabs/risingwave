@@ -54,18 +54,7 @@ impl Binder {
         };
 
         // agg calls
-        let agg_kind = match function_name.as_str() {
-            "count" => Some(AggKind::Count),
-            "sum" => Some(AggKind::Sum),
-            "min" => Some(AggKind::Min),
-            "max" => Some(AggKind::Max),
-            "avg" => Some(AggKind::Avg),
-            "string_agg" => Some(AggKind::StringAgg),
-            "approx_count_distinct" => Some(AggKind::ApproxCountDistinct),
-            "array_agg" => Some(AggKind::ArrayAgg),
-            _ => None,
-        };
-        if let Some(kind) = agg_kind {
+        if let Ok(kind) = function_name.parse() {
             if f.over.is_some() {
                 return Err(ErrorCode::NotImplemented(
                     format!("aggregate function as over window function: {}", kind),

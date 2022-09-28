@@ -214,7 +214,7 @@ mod tests {
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         );
-        let col3 = Column::new(Arc::new(array.into()));
+        let col3 = array.into();
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
 

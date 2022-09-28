@@ -156,15 +156,15 @@ impl ToBatchProst for BatchLookupJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            build_side_key: self
+            outer_side_key: self
                 .eq_join_predicate
                 .left_eq_indexes()
                 .into_iter()
                 .map(|a| a as _)
                 .collect(),
-            probe_side_table_desc: Some(self.right_table_desc.to_protobuf()),
-            probe_side_vnode_mapping: vec![], // To be filled in at local.rs
-            probe_side_column_ids: self
+            inner_side_table_desc: Some(self.right_table_desc.to_protobuf()),
+            inner_side_vnode_mapping: vec![], // To be filled in at local.rs
+            inner_side_column_ids: self
                 .right_output_column_ids
                 .iter()
                 .map(ColumnId::get_id)
