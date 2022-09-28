@@ -142,8 +142,7 @@ mod tests {
         let chunk = DataChunk::from_rows(
             &[row1.clone(), row2.clone()],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
-        )
-        .unwrap();
+        );
         let order_pairs = vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Descending),

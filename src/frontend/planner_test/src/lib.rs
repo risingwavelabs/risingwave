@@ -19,6 +19,7 @@
 mod resolve_id;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -35,12 +36,16 @@ use risingwave_frontend::{
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
+
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TestCase {
     /// Id of the test case, used in before.
     pub id: Option<String>,
+
+    /// A brief description of the test case.
+    pub name: Option<String>,
 
     /// Before running the SQL statements, the test runner will execute the specified test cases
     pub before: Option<Vec<String>>,
@@ -170,6 +175,7 @@ impl TestCaseResult {
 
         let case = TestCase {
             id: original_test_case.id.clone(),
+            name: original_test_case.name.clone(),
             before: original_test_case.before.clone(),
             sql: original_test_case.sql.to_string(),
             before_statements: original_test_case.before_statements.clone(),
@@ -579,11 +585,23 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
     }
 }
 
-pub async fn run_test_file(file_name: &str, file_content: &str) -> Result<()> {
-    println!("-- running {} --", file_name);
+pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
+    let file_name = file_path.file_name().unwrap().to_str().unwrap();
+    println!("-- running {file_name} --");
 
     let mut failed_num = 0;
-    let cases: Vec<TestCase> = serde_yaml::from_str(file_content).unwrap();
+    let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
+        if let Some(loc) = e.location() {
+            anyhow!(
+                "failed to parse yaml: {e}, at {}:{}:{}",
+                file_path.display(),
+                loc.line(),
+                loc.column()
+            )
+        } else {
+            anyhow!("failed to parse yaml: {e}")
+        }
+    })?;
     let cases = resolve_testcase_id(cases).expect("failed to resolve");
 
     for (i, c) in cases.into_iter().enumerate() {

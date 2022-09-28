@@ -28,7 +28,7 @@ use risingwave_pb::stream_plan::{
     ActorMapping, AddMutation, Dispatcher, PauseMutation, ResumeMutation, StopMutation,
     UpdateMutation,
 };
-use risingwave_pb::stream_service::DropActorsRequest;
+use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
@@ -37,7 +37,7 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
 /// in some fragment, like scaling or migrating.
@@ -103,7 +103,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn checkpoint() -> Self {
+    pub fn barrier() -> Self {
         Self::Plain(None)
     }
 
@@ -146,6 +146,11 @@ impl Command {
         // previous checkpoint has been done.
         matches!(self, Self::Plain(Some(Mutation::Pause(_))))
     }
+
+    pub fn need_checkpoint(&self) -> bool {
+        // todo! Reviewing the flow of different command to reduce the amount of checkpoint
+        !matches!(self, Command::Plain(None | Some(Mutation::Resume(_))))
+    }
 }
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
@@ -163,6 +168,8 @@ pub struct CommandContext<S: MetaStore> {
     pub curr_epoch: Epoch,
 
     pub command: Command,
+
+    pub checkpoint: bool,
 }
 
 impl<S: MetaStore> CommandContext<S> {
@@ -173,6 +180,7 @@ impl<S: MetaStore> CommandContext<S> {
         prev_epoch: Epoch,
         curr_epoch: Epoch,
         command: Command,
+        checkpoint: bool,
     ) -> Self {
         Self {
             fragment_manager,
@@ -181,6 +189,7 @@ impl<S: MetaStore> CommandContext<S> {
             prev_epoch,
             curr_epoch,
             command,
+            checkpoint,
         }
     }
 }
@@ -365,7 +374,25 @@ where
     /// Do some stuffs after barriers are collected, for the given command.
     pub async fn post_collect(&self) -> MetaResult<()> {
         match &self.command {
-            Command::Plain(_) => {}
+            #[allow(clippy::single_match)]
+            Command::Plain(mutation) => match mutation {
+                // After the `Pause` barrier is collected and committed, we must ensure that the
+                // storage version with this epoch is synced to all compute nodes before the
+                // execution of the next command of `Update`, as some newly created operators may
+                // immediately initialize their states on that barrier.
+                Some(Mutation::Pause(..)) => {
+                    let futures = self.info.node_map.values().map(|worker_node| async {
+                        let client = self.client_pool.get(worker_node).await?;
+                        let request = WaitEpochCommitRequest {
+                            epoch: self.prev_epoch.0,
+                        };
+                        client.wait_epoch_commit(request).await
+                    });
+
+                    try_join_all(futures).await?;
+                }
+                _ => {}
+            },
 
             Command::DropMaterializedView(table_id) => {
                 // Tell compute nodes to drop actors.
@@ -380,9 +407,7 @@ where
                             request_id,
                             actor_ids: actors.to_owned(),
                         };
-                        client.drop_actors(request).await?;
-
-                        Ok::<_, MetaError>(())
+                        client.drop_actors(request).await
                     }
                 });
 
@@ -449,9 +474,7 @@ where
                                 request_id,
                                 actor_ids: actors.to_owned(),
                             };
-                            client.drop_actors(request).await?;
-
-                            Ok::<_, MetaError>(())
+                            client.drop_actors(request).await
                         }
                     });
 

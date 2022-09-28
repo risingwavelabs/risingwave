@@ -16,6 +16,7 @@
  */
 
 import { cloneDeep, max } from "lodash"
+import { TableFragments_Fragment } from "../proto/gen/meta"
 import { GraphNode } from "./algo"
 
 interface DagNode {
@@ -275,6 +276,7 @@ export interface ActorBox {
   width: number
   height: number
   parentIds: string[]
+  fragment?: TableFragments_Fragment
 }
 
 export interface ActorPoint {

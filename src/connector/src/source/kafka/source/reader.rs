@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use rdkafka::config::RDKafkaLogLevel;
@@ -73,7 +73,8 @@ impl SplitReader for KafkaSplitReader {
         let consumer: StreamConsumer = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(DefaultConsumerContext)
-            .map_err(|e| anyhow!("consumer creation failed {}", e))?;
+            .await
+            .context("failed to create kafka consumer")?;
 
         if let Some(splits) = state {
             tracing::debug!("Splits for kafka found! {:?}", splits);
@@ -87,15 +88,14 @@ impl SplitReader for KafkaSplitReader {
                             k.topic.as_str(),
                             k.partition,
                             Offset::Offset(offset),
-                        )
-                        .map_err(|e| anyhow!(e.to_string()))?;
+                        )?;
                     } else {
                         tpl.add_partition(k.topic.as_str(), k.partition);
                     }
                 }
             }
 
-            consumer.assign(&tpl).map_err(|e| anyhow!(e.to_string()))?;
+            consumer.assign(&tpl)?;
         }
 
         Ok(Self {

@@ -22,8 +22,8 @@
       |   └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], distribution: UpstreamHashShard(t2._row_id) }
       └─StreamExchange { dist: HashShard(t3.v5) }
         └─StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], distribution: UpstreamHashShard(t3._row_id) }
-- sql: |
-    /* self join */
+- name: self join 
+  sql: |
     create table t (v1 int, v2 int);
     select t1.v1 as t1v1, t2.v1 as t2v1 from t t1 join t t2 on t1.v1 = t2.v1;
   logical_plan: |
@@ -143,8 +143,8 @@
       |     └─BatchScan { table: bc, columns: [bc.b, bc.c], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(ca.c) }
         └─BatchScan { table: ca, columns: [ca.c, ca.a], distribution: SomeShard }
-- sql: |
-    /* Only push to left */
+- name: Only push to left 
+  sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
     select * from t1 left join t2 where t1.v2 > 100;
@@ -152,17 +152,17 @@
     LogicalJoin { type: LeftOuter, on: true, output: all }
     ├─LogicalScan { table: t1, output_columns: [t1.v1, t1.v2], required_columns: [v1, v2], predicate: (t1.v2 > 100:Int32) }
     └─LogicalScan { table: t2, columns: [t2.v1, t2.v2] }
-- sql: |
-    /* Only push to right */
+- name: Only push to right 
+  sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
     select * from t1 right join t2 where t2.v2 > 100;
   optimized_logical_plan: |
-    LogicalJoin { type: RightOuter, on: true, output: all }
-    ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2] }
-    └─LogicalScan { table: t2, output_columns: [t2.v1, t2.v2], required_columns: [v1, v2], predicate: (t2.v2 > 100:Int32) }
-- sql: |
-    /* Push to left, right and on */
+    LogicalJoin { type: LeftOuter, on: true, output: [t1.v1, t1.v2, t2.v1, t2.v2] }
+    ├─LogicalScan { table: t2, output_columns: [t2.v1, t2.v2], required_columns: [v1, v2], predicate: (t2.v2 > 100:Int32) }
+    └─LogicalScan { table: t1, columns: [t1.v1, t1.v2] }
+- name: Push to left, right and on 
+  sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
     select * from t1, t2 where t1.v1 > 100 and t2.v1 < 1000 and t1.v2 = t2.v2;
@@ -170,8 +170,8 @@
     LogicalJoin { type: Inner, on: (t1.v2 = t2.v2), output: all }
     ├─LogicalScan { table: t1, output_columns: [t1.v1, t1.v2], required_columns: [v1, v2], predicate: (t1.v1 > 100:Int32) }
     └─LogicalScan { table: t2, output_columns: [t2.v1, t2.v2], required_columns: [v1, v2], predicate: (t2.v1 < 1000:Int32) }
-- sql: |
-    /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
+- name: Left & right has same SomeShard distribution. There should still be exchanges below hash join 
+  sql: |
     create table t(x int);
     create index i on t(x);
     select i.x as ix, ii.x as iix from i join i as ii on i.x=ii.x;
@@ -189,8 +189,8 @@
       | └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
       └─StreamExchange { dist: HashShard(i.x) }
         └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
-- sql: |
-    /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
+- name: Left & right has same SomeShard distribution. There should still be exchanges below hash join 
+  sql: |
     create table t(x int);
     create index i on t(x);
     select i.x as ix, t.x as tx from i join t on i.x=t.x;
@@ -208,8 +208,8 @@
       | └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
       └─StreamExchange { dist: HashShard(t.x) }
         └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* Left & right has same HashShard distribution. There should be no exchange below hash join */
+- name: Left & right has same HashShard distribution. There should be no exchange below hash join 
+  sql: |
     create table t(x int);
     create index i on t(x);
     select * from
@@ -246,8 +246,8 @@
             | └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
             └─StreamExchange { dist: HashShard(i.x) }
               └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
-- sql: |
-    /* Use lookup join */
+- name: Use lookup join 
+  sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
     create materialized view t3 as select v1, count(v2) as v2 from t2 group by v1;
@@ -259,8 +259,8 @@
   with_config_map:
     QUERY_MODE: local
     RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'
-- sql: |
-    /* Ensure correct binding of join with USING clause */
+- name: Ensure correct binding of join with USING clause 
+  sql: |
     create table t1(v1 varchar);
     create table t2(v1 varchar);
     create table t3(v2 varchar);
@@ -272,8 +272,8 @@
       └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v1), output: all }
         ├─LogicalScan { table: t1, columns: [t1.v1, t1._row_id] }
         └─LogicalScan { table: t2, columns: [t2.v1, t2._row_id] }
-- sql: |
-    /* Ensure correct binding of join with ON clause */
+- name: Ensure correct binding of join with ON clause 
+  sql: |
     create table t1(v1 varchar);
     create table t2(v2 varchar);
     create table t3(v3 varchar);
@@ -285,8 +285,8 @@
       └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
         ├─LogicalScan { table: t1, columns: [t1.v1, t1._row_id] }
         └─LogicalScan { table: t2, columns: [t2.v2, t2._row_id] }
-- sql: |
-    /* Ensure correct binding with USING clause with left outer join */
+- name: Ensure correct binding with USING clause with left outer join 
+  sql: |
     create table t1(v1 varchar);
     create table t2(v1 varchar);
     create table t3(v2 varchar);
@@ -298,8 +298,8 @@
       └─LogicalJoin { type: LeftOuter, on: (t1.v1 = t2.v1), output: all }
         ├─LogicalScan { table: t1, columns: [t1.v1, t1._row_id] }
         └─LogicalScan { table: t2, columns: [t2.v1, t2._row_id] }
-- sql: |
-    /* Ensure correct binding with ON clause with left outer join */
+- name: Ensure correct binding with ON clause with left outer join 
+  sql: |
     create table t1(v1 varchar);
     create table t2(v2 varchar);
     create table t3(v3 varchar);
@@ -311,8 +311,8 @@
       └─LogicalJoin { type: LeftOuter, on: (t1.v1 = t2.v2), output: all }
         ├─LogicalScan { table: t1, columns: [t1.v1, t1._row_id] }
         └─LogicalScan { table: t2, columns: [t2.v2, t2._row_id] }
-- sql: |
-    /* Ensure that ON clause cannot reference correlated columns */
+- name: Ensure that ON clause cannot reference correlated columns 
+  sql: |
     create table a(a1 int);
     create table b(b1 int);
     create table c(c1 int);
@@ -325,8 +325,8 @@
   binder_error: |-
     Feature is not yet implemented: lateral subqueries are not yet supported
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3815
-- sql: |
-    /* Ensure that natural joins bind the correct columns */
+- name: Ensure that natural joins bind the correct columns 
+  sql: |
     create table a(x int);
     create table b(x int);
     create table c(y int);
@@ -338,8 +338,8 @@
       | ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       | └─LogicalScan { table: b, columns: [b.x, b._row_id] }
       └─LogicalScan { table: c, columns: [c.y, c._row_id] }
-- sql: |
-    /* Ensure that natural joins can disambiguate columns */
+- name: Ensure that natural joins can disambiguate columns 
+  sql: |
     create table a(x int);
     create table b(x int);
     select x, a.x, b.x from a natural join b;
@@ -348,8 +348,8 @@
     └─LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
       ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       └─LogicalScan { table: b, columns: [b.x, b._row_id] }
-- sql: |
-    /* Ensure that natural joins bind the correct columns */
+- name: Ensure that natural joins bind the correct columns 
+  sql: |
     create table a(x int);
     create table b(x int);
     create table c(y int);
@@ -361,8 +361,8 @@
       | ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       | └─LogicalScan { table: b, columns: [b.x, b._row_id] }
       └─LogicalScan { table: c, columns: [c.y, c._row_id] }
-- sql: |
-    /* Ensure that natural joins can disambiguate columns */
+- name: Ensure that natural joins can disambiguate columns 
+  sql: |
     create table a(x int);
     create table b(x int);
     select x, a.x, b.x from a natural join b;
@@ -371,8 +371,8 @@
     └─LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
       ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       └─LogicalScan { table: b, columns: [b.x, b._row_id] }
-- sql: |
-    /* Ensure that natural joins bind the correct columns */
+- name: Ensure that natural joins bind the correct columns 
+  sql: |
     create table a(x int);
     create table b(x int);
     create table c(y int);
@@ -384,8 +384,8 @@
       | ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       | └─LogicalScan { table: b, columns: [b.x, b._row_id] }
       └─LogicalScan { table: c, columns: [c.y, c._row_id] }
-- sql: |
-    /* Ensure that natural joins bind the correct columns */
+- name: Ensure that natural joins bind the correct columns 
+  sql: |
     create table a(x int);
     create table b(x int);
     select x from a natural join b;
@@ -394,8 +394,8 @@
     └─LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
       ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       └─LogicalScan { table: b, columns: [b.x, b._row_id] }
-- sql: |
-    /* Ensure that natural joins bind the correct columns */
+- name: Ensure that natural joins bind the correct columns 
+  sql: |
     create table a(x int);
     create table b(x int);
     select x from a natural left join b;
@@ -404,8 +404,8 @@
     └─LogicalJoin { type: LeftOuter, on: (a.x = b.x), output: all }
       ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       └─LogicalScan { table: b, columns: [b.x, b._row_id] }
-- sql: |
-    /* Ensure that natural joins bind the correct columns */
+- name: Ensure that natural joins bind the correct columns 
+  sql: |
     create table a(x int);
     create table b(x int);
     select x, a.x, b.x from a natural right join b;
@@ -414,8 +414,8 @@
     └─LogicalJoin { type: RightOuter, on: (a.x = b.x), output: all }
       ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       └─LogicalScan { table: b, columns: [b.x, b._row_id] }
-- sql: |
-    /* Ensure that natural joins bind the correct columns */
+- name: Ensure that natural joins bind the correct columns 
+  sql: |
     create table a(x int);
     create table b(x int);
     select x, a.x, b.x from a natural full join b;
@@ -424,8 +424,8 @@
     └─LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
       ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       └─LogicalScan { table: b, columns: [b.x, b._row_id] }
-- sql: |
-    /* Ensure that nested natural joins bind and disambiguate columns */
+- name: Ensure that nested natural joins bind and disambiguate columns 
+  sql: |
     create table a(x int, y int);
     create table b(x int, z int);
     create table c(x int, a int);
@@ -437,8 +437,8 @@
       | ├─LogicalScan { table: a, columns: [a.x, a.y, a._row_id] }
       | └─LogicalScan { table: b, columns: [b.x, b.z, b._row_id] }
       └─LogicalScan { table: c, columns: [c.x, c.a, c._row_id] }
-- sql: |
-    /* Ensure that nested natural joins bind and disambiguate columns */
+- name: Ensure that nested natural joins bind and disambiguate columns 
+  sql: |
     create table a(x int, y int);
     create table b(x int, z int);
     create table c(x int, a int);
@@ -459,8 +459,8 @@
       |   └─LogicalScan { table: b, columns: [b.x] }
       └─LogicalProject { exprs: [c.x, c.x] }
         └─LogicalScan { table: c, columns: [c.x] }
-- sql: |
-    /* Ensure that nested natural joins bind and disambiguate columns */
+- name: Ensure that nested natural joins bind and disambiguate columns 
+  sql: |
     create table a(a int, y int);
     create table b(x int, z int);
     create table c(x int, a int);
@@ -472,22 +472,22 @@
       | ├─LogicalScan { table: a, columns: [a.a, a.y, a._row_id] }
       | └─LogicalScan { table: b, columns: [b.x, b.z, b._row_id] }
       └─LogicalScan { table: c, columns: [c.x, c.a, c._row_id] }
-- sql: |
-    /* Ensure error on non-existent USING col */
+- name: Ensure error on non-existent USING col 
+  sql: |
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v3 int);
     select * from t1 join t2 using (v2);
   binder_error: 'Item not found: column "v2" specified in USING clause does not exist
     in right table'
-- sql: |
-    /* Ensure error on non-existent USING col */
+- name: Ensure error on non-existent USING col 
+  sql: |
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v3 int);
     select * from t1 join t2 using (v3);
   binder_error: 'Item not found: column "v3" specified in USING clause does not exist
     in left table'
-- sql: |
-    /* Ensure that we can correctly bind nested joins */
+- name: Ensure that we can correctly bind nested joins 
+  sql: |
     create table t1(v1 int, v2 int);
     create table t2(v3 int, v4 int);
     create table t3(v5 int, v6 int);
@@ -502,8 +502,8 @@
       └─LogicalJoin { type: Inner, on: (t3.v5 = t4.v7), output: all }
         ├─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
         └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
-- sql: |
-    /* Ensure that we can correctly bind nested joins with ambiguous column names */
+- name: Ensure that we can correctly bind nested joins with ambiguous column names 
+  sql: |
     create table t1(x int);
     create table t2(x int);
     create table t3(x int);
@@ -515,8 +515,8 @@
       └─LogicalJoin { type: FullOuter, on: (t2.x = t3.x), output: all }
         ├─LogicalScan { table: t2, columns: [t2.x, t2._row_id] }
         └─LogicalScan { table: t3, columns: [t3.x, t3._row_id] }
-- sql: |
-    /* Ensure that non-trivial ambiguous references can be resolved */
+- name: Ensure that non-trivial ambiguous references can be resolved 
+  sql: |
     create table a(x int);
     create table b(x int);
     select 2 * x as Y, x + x as Z from a natural full join b where 2 * x < 10 order by x + x;
@@ -574,8 +574,8 @@
               | └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
               └─BatchExchange { order: [], dist: HashShard(test2.a) }
                 └─BatchScan { table: test2, columns: [test2.a, test2.c], distribution: SomeShard }
-- sql: |
-    /* Use lookup join with predicate */
+- name: Use lookup join with predicate 
+  sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
     create materialized view t3 as select v1, count(v2) as v2 from t2 group by v1;
@@ -591,8 +591,8 @@
   with_config_map:
     QUERY_MODE: local
     RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'
-- sql: |
-    /* Use project to do the calculation */
+- name: Use project to do the calculation 
+  sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     select * from t1, t2 where t1.x + t1.y = t2.x + t2.y;
@@ -602,8 +602,8 @@
     | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalProject { exprs: [t2.x, t2.y, (t2.x + t2.y)] }
       └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
-- sql: |
-    /* Use project to align return types */
+- name: Use project to align return types 
+  sql: |
     create table t1(x int, y int);
     create table t2(x int, y decimal);
     select * from t1, t2 where t1.x = t2.y;

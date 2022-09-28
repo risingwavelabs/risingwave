@@ -227,7 +227,7 @@ async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Res
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();
-            let snapshot = client.flush().await?;
+            let snapshot = client.flush(true).await?;
             session
                 .env()
                 .hummock_snapshot_manager()

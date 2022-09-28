@@ -15,7 +15,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
@@ -506,16 +505,7 @@ where
         assert_eq!(table_ids_cnt, ctx.internal_table_ids().len() as u32);
 
         // 5. mark creating tables.
-        let mut creating_tables = ctx
-            .internal_table_id_map
-            .iter()
-            .map(|(id, table)| {
-                table.clone().unwrap_or(Table {
-                    id: *id,
-                    ..Default::default()
-                })
-            })
-            .collect_vec();
+        let mut creating_tables = ctx.internal_tables();
         match stream_job {
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
@@ -688,11 +678,18 @@ where
         source_id: SourceId,
         table_id: TableId,
     ) -> MetaResult<CatalogVersion> {
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id.into())
+            .await?;
+        let internal_table_ids = table_fragment.internal_table_ids();
+        assert!(internal_table_ids.len() == 1);
+
         // 1. Drop materialized source in catalog, source_id will be checked if it is
         // associated_source_id in mview.
         let version = self
             .catalog_manager
-            .drop_materialized_source(source_id, table_id)
+            .drop_materialized_source(source_id, table_id, internal_table_ids[0])
             .await?;
 
         // 2. Drop source and mv in table background deleter asynchronously.

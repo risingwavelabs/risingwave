@@ -131,9 +131,9 @@ impl Array for Utf8Array {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = Utf8ArrayBuilder::new(capacity);
-        Ok(ArrayBuilderImpl::Utf8(array_builder))
+        ArrayBuilderImpl::Utf8(array_builder)
     }
 }
 
