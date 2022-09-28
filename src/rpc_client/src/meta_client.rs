@@ -478,11 +478,11 @@ impl MetaClient {
         &self,
         threshold: WriteLimiterThreshold,
     ) -> Result<RiseCtlSetWriteLimiterThresholdResponse> {
-        let reuqest = RiseCtlSetWriteLimiterThresholdRequest {
+        let request = RiseCtlSetWriteLimiterThresholdRequest {
             threshold: Some(threshold),
         };
         self.inner
-            .rise_ctl_set_write_limiter_threshold(reuqest)
+            .rise_ctl_set_write_limiter_threshold(request)
             .await
     }
 }
