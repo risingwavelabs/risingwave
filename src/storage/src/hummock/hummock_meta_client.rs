@@ -15,10 +15,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId, LocalSstableInfo, SstIdRange};
+use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
-    HummockVersionDeltas, SubscribeCompactTasksResponse, VacuumTask,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
@@ -54,43 +54,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
         self.meta_client.get_current_version().await
-    }
-
-    async fn reset_current_version(&self) -> Result<HummockVersion> {
-        self.meta_client.reset_current_version().await
-    }
-
-    async fn replay_version_delta(
-        &self,
-        version_delta_id: HummockVersionId,
-    ) -> Result<(HummockVersionId, HummockEpoch, Vec<CompactionGroupId>)> {
-        self.meta_client
-            .replay_version_delta(version_delta_id)
-            .await
-    }
-
-    async fn list_version_deltas(
-        &self,
-        start_id: u64,
-        num_limit: u32,
-    ) -> Result<HummockVersionDeltas> {
-        self.meta_client
-            .list_version_deltas(start_id, num_limit)
-            .await
-    }
-
-    async fn trigger_compaction_deterministic(
-        &self,
-        version_id: HummockVersionId,
-        compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<(HummockVersionId, HummockEpoch)> {
-        self.meta_client
-            .trigger_compaction_deterministic(version_id, compaction_groups)
-            .await
-    }
-
-    async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
-        self.meta_client.disable_commit_epoch().await
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {

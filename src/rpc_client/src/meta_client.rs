@@ -474,6 +474,69 @@ impl MetaClient {
             .rise_ctl_get_pinned_snapshots_summary(request)
             .await
     }
+
+    pub async fn reset_current_version(&self) -> Result<HummockVersion> {
+        let req = ResetCurrentVersionRequest {};
+        Ok(self
+            .inner
+            .reset_current_version(req)
+            .await?
+            .old_version
+            .unwrap())
+    }
+
+    pub async fn replay_version_delta(
+        &self,
+        version_delta_id: HummockVersionId,
+    ) -> Result<(HummockVersionId, HummockEpoch, Vec<CompactionGroupId>)> {
+        let req = ReplayVersionDeltaRequest { version_delta_id };
+        let resp = self.inner.replay_version_delta(req).await?;
+        Ok((
+            resp.version_id,
+            resp.max_committed_epoch,
+            resp.modified_compaction_groups,
+        ))
+    }
+
+    pub async fn list_version_deltas(
+        &self,
+        start_id: u64,
+        num_limit: u32,
+    ) -> Result<HummockVersionDeltas> {
+        let req = ListVersionDeltasRequest {
+            start_id,
+            num_limit,
+        };
+        Ok(self
+            .inner
+            .list_version_deltas(req)
+            .await?
+            .version_deltas
+            .unwrap())
+    }
+
+    pub async fn trigger_compaction_deterministic(
+        &self,
+        version_id: HummockVersionId,
+        compaction_groups: Vec<CompactionGroupId>,
+    ) -> Result<(HummockVersionId, HummockEpoch)> {
+        let req = TriggerCompactionDeterministicRequest {
+            version_id,
+            compaction_groups,
+        };
+        let resp = self.inner.trigger_compaction_deterministic(req).await?;
+        Ok((resp.version_id, resp.max_committed_epoch))
+    }
+
+    pub async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
+        let req = DisableCommitEpochRequest {};
+        Ok(self
+            .inner
+            .disable_commit_epoch(req)
+            .await?
+            .current_version
+            .unwrap())
+    }
 }
 
 #[async_trait]
@@ -492,69 +555,6 @@ impl HummockMetaClient for MetaClient {
         Ok(self
             .inner
             .get_current_version(req)
-            .await?
-            .current_version
-            .unwrap())
-    }
-
-    async fn reset_current_version(&self) -> Result<HummockVersion> {
-        let req = ResetCurrentVersionRequest {};
-        Ok(self
-            .inner
-            .reset_current_version(req)
-            .await?
-            .old_version
-            .unwrap())
-    }
-
-    async fn replay_version_delta(
-        &self,
-        version_delta_id: HummockVersionId,
-    ) -> Result<(HummockVersionId, HummockEpoch, Vec<CompactionGroupId>)> {
-        let req = ReplayVersionDeltaRequest { version_delta_id };
-        let resp = self.inner.replay_version_delta(req).await?;
-        Ok((
-            resp.version_id,
-            resp.max_committed_epoch,
-            resp.modified_compaction_groups,
-        ))
-    }
-
-    async fn list_version_deltas(
-        &self,
-        start_id: u64,
-        num_limit: u32,
-    ) -> Result<HummockVersionDeltas> {
-        let req = ListVersionDeltasRequest {
-            start_id,
-            num_limit,
-        };
-        Ok(self
-            .inner
-            .list_version_deltas(req)
-            .await?
-            .version_deltas
-            .unwrap())
-    }
-
-    async fn trigger_compaction_deterministic(
-        &self,
-        version_id: HummockVersionId,
-        compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<(HummockVersionId, HummockEpoch)> {
-        let req = TriggerCompactionDeterministicRequest {
-            version_id,
-            compaction_groups,
-        };
-        let resp = self.inner.trigger_compaction_deterministic(req).await?;
-        Ok((resp.version_id, resp.max_committed_epoch))
-    }
-
-    async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
-        let req = DisableCommitEpochRequest {};
-        Ok(self
-            .inner
-            .disable_commit_epoch(req)
             .await?
             .current_version
             .unwrap())

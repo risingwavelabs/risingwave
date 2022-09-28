@@ -19,12 +19,12 @@ use async_trait::async_trait;
 use fail::fail_point;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId,
-    LocalSstableInfo, SstIdRange,
+    HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
+    SstIdRange,
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
-    HummockVersionDeltas, SubscribeCompactTasksResponse, VacuumTask,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::HummockMetaClient;
@@ -72,37 +72,6 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
         Ok(self.hummock_manager.get_current_version().await)
-    }
-
-    async fn reset_current_version(&self) -> Result<HummockVersion> {
-        unimplemented!()
-    }
-
-    async fn replay_version_delta(
-        &self,
-        _version_delta_id: HummockVersionId,
-    ) -> Result<(HummockVersionId, HummockEpoch, Vec<CompactionGroupId>)> {
-        unimplemented!()
-    }
-
-    async fn trigger_compaction_deterministic(
-        &self,
-        _version_id: HummockVersionId,
-        _compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<(HummockVersionId, HummockEpoch)> {
-        unimplemented!()
-    }
-
-    async fn list_version_deltas(
-        &self,
-        _start_id: u64,
-        _num_limit: u32,
-    ) -> Result<HummockVersionDeltas> {
-        unimplemented!()
-    }
-
-    async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
-        unimplemented!()
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {

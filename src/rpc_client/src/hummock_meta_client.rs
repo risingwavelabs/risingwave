@@ -14,12 +14,11 @@
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
-    SstIdRange,
+    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
-    HummockVersionDeltas, SubscribeCompactTasksResponse, VacuumTask,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use tonic::Streaming;
 
@@ -29,22 +28,6 @@ use crate::error::Result;
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
     async fn get_current_version(&self) -> Result<HummockVersion>;
-    async fn reset_current_version(&self) -> Result<HummockVersion>;
-    async fn replay_version_delta(
-        &self,
-        version_delta_id: HummockVersionId,
-    ) -> Result<(HummockVersionId, HummockEpoch, Vec<CompactionGroupId>)>;
-    async fn list_version_deltas(
-        &self,
-        start_id: u64,
-        num_limit: u32,
-    ) -> Result<HummockVersionDeltas>;
-    async fn disable_commit_epoch(&self) -> Result<HummockVersion>;
-    async fn trigger_compaction_deterministic(
-        &self,
-        version_id: HummockVersionId,
-        compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<(HummockVersionId, HummockEpoch)>;
     async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
     async fn unpin_snapshot(&self) -> Result<()>;
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_rpc_client::HummockMetaClient;
-
 use crate::common::MetaServiceOpts;
 
 pub async fn list_version_deltas(start_id: u64, num_epochs: u32) -> anyhow::Result<()> {
