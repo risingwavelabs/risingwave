@@ -1,11 +1,15 @@
 include ./create_sources.slt.part
 include ../tpch/create_tables.slt.part
+include ../tpch/insert_nation.slt.part
+include ../tpch/insert_region.slt.part
+include ../tpch/insert_supplier.slt.part
 
 # Ensure that the upstream data is fully consumed
 statement ok
 flush;
 
 # include ./q01.slt.part --> precision error
+include ./q02.slt.part
 include ./q13.slt.part
 include ./q16.slt.part
 
