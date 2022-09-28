@@ -47,6 +47,7 @@ struct Metrics {
 
 /// This tool will be started after we generate enough L0 SSTs to Hummock.
 /// Fetches and runs compaction tasks.
+#[cfg_attr(coverage, no_coverage)]
 pub async fn compaction_test_serve(
     _listen_addr: SocketAddr,
     client_addr: HostAddr,
