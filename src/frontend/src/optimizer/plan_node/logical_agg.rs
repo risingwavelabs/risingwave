@@ -314,6 +314,7 @@ pub enum AggCallState {
     ResultValueState,
     MaterializedInputState(MaterializedAggInputState),
 }
+
 impl AggCallState {
     pub fn to_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStateProst {
         AggCallStateProst {
@@ -341,6 +342,7 @@ pub struct MaterializedAggInputState {
     pub table: TableCatalog,
     pub column_mapping: Vec<usize>,
 }
+
 impl LogicalAgg {
     pub fn infer_result_table(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
         let out_fields = self.base.schema.fields();
