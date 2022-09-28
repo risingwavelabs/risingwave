@@ -20,6 +20,7 @@ use enum_as_inner::EnumAsInner;
 use futures::future::{select, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::bail;
 
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedMessageStream, Message, StreamChunk, StreamExecutorResult};
@@ -61,7 +62,7 @@ pub async fn barrier_align(
                     match msg? {
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(_) => {
-                            error!("right barrier received while left stream end");
+                            bail!("right barrier received while left stream end");
                         }
                     }
                 }
@@ -73,7 +74,7 @@ pub async fn barrier_align(
                     match msg? {
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(_) => {
-                            error!("left barrier received while right stream end");
+                            bail!("left barrier received while right stream end");
                         }
                     }
                 }
@@ -192,10 +193,11 @@ mod tests {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
         }
         .boxed();
-        let _output: Vec<_> = barrier_align_for_test(left, right)
+        let output: Vec<_> = barrier_align_for_test(left, right)
             .try_collect()
             .await
             .unwrap();
+        assert_eq!(output, vec![]);
     }
 
     #[tokio::test]
