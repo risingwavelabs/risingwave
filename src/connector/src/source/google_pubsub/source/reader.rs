@@ -1,6 +1,5 @@
 use std::error::Error;
 
-
 use anyhow::{anyhow, Ok, Result};
 use async_trait::async_trait;
 use google_cloud_pubsub::client::Client;

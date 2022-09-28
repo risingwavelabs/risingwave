@@ -2,14 +2,13 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::source::{SplitMetaData, SplitId};
+use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct PubsubSplit {
     pub(crate) topic: String,
     pub(crate) subscription: String,
     pub(crate) index: u32,
-
 }
 
 impl PubsubSplit {}
