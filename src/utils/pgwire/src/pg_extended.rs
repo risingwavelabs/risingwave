@@ -15,19 +15,21 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::vec::IntoIter;
 
 use bytes::Bytes;
+use futures::stream::FusedStream;
+use futures::{StreamExt, TryStreamExt};
 use itertools::zip_eq;
 use postgres_types::{FromSql, Type};
 use regex::Regex;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
-use crate::pg_protocol::cstr_to_str;
-use crate::pg_response::{PgResponse, StatementType};
-use crate::pg_server::{BoxedError, Session, SessionManager};
-use crate::types::Row;
+use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
+use crate::pg_protocol::{cstr_to_str, PgStream};
+use crate::pg_response::PgResponse;
+use crate::pg_server::{Session, SessionManager};
 
 #[derive(Default)]
 pub struct PgStatement {
@@ -64,22 +66,8 @@ impl PgStatement {
         self.row_description.clone()
     }
 
-    async fn infer_row_description<SM: SessionManager>(
-        session: Arc<SM::Session>,
-        sql: &str,
-    ) -> PsqlResult<Vec<PgFieldDescriptor>> {
-        if sql.len() > 6 && sql[0..6].eq_ignore_ascii_case("select") {
-            return session
-                .infer_return_type(sql)
-                .await
-                .map_err(|err| PsqlError::BindError(err));
-        }
-        Ok(vec![])
-    }
-
-    pub async fn instance<SM: SessionManager>(
+    pub fn instance(
         &self,
-        session: Arc<SM::Session>,
         portal_name: String,
         params: &[Bytes],
         result_format: bool,
@@ -87,18 +75,13 @@ impl PgStatement {
     ) -> PsqlResult<PgPortal> {
         let instance_query_string = self.prepared_statement.instance(params, param_format)?;
 
-        // Get row_description and return portal.
-        let row_description =
-            Self::infer_row_description::<SM>(session, instance_query_string.as_str()).await?;
-
         Ok(PgPortal {
             name: portal_name,
             query_string: instance_query_string,
-            result_cache: None,
-            stmt_type: None,
-            row_description,
             result_format,
             is_query: self.is_query,
+            row_description: self.row_description.clone(),
+            result: None,
         })
     }
 
@@ -113,11 +96,10 @@ impl PgStatement {
 pub struct PgPortal {
     name: String,
     query_string: String,
-    result_cache: Option<IntoIter<Row>>,
-    stmt_type: Option<StatementType>,
-    row_description: Vec<PgFieldDescriptor>,
     result_format: bool,
     is_query: bool,
+    row_description: Vec<PgFieldDescriptor>,
+    result: Option<PgResponse>,
 }
 
 impl PgPortal {
@@ -133,53 +115,78 @@ impl PgPortal {
         self.row_description.clone()
     }
 
-    pub async fn execute<SM: SessionManager>(
+    /// When exeute a query sql, execute will re-use the result if result will not be consumed
+    /// completely. Detail can refer:https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended.
+    pub async fn execute<SM: SessionManager, S: AsyncWrite + AsyncRead + Unpin>(
         &mut self,
         session: Arc<SM::Session>,
         row_limit: usize,
-    ) -> Result<PgResponse, BoxedError> {
-        if self.result_cache.is_none() {
-            let process_res = session
-                .run_statement(&self.query_string, self.result_format)
-                .await;
+        msg_stream: &mut PgStream<S>,
+    ) -> PsqlResult<()> {
+        // Check if there is a result cache
+        let result = if let Some(result) = &mut self.result {
+            result
+        } else {
+            let result = session
+                .run_statement(self.query_string.as_str(), self.result_format)
+                .await
+                .map_err(|err| PsqlError::ExecuteError(err))?;
+            self.result = Some(result);
+            self.result.as_mut().unwrap()
+        };
 
-            // Return result directly if
-            // - it's not a query result.
-            // - query result needn't cache. (row_limit == 0).
-            if !(process_res.is_ok() && process_res.as_ref().unwrap().is_query()) || row_limit == 0
-            {
-                return process_res;
-            }
-
-            // Return result need to cache.
-            self.stmt_type = Some(process_res.as_ref().unwrap().get_stmt_type());
-            self.result_cache = Some(process_res.unwrap().values().into_iter());
-        }
-
-        // Consume row_limit row.
-        let mut data_set = vec![];
-        let mut row_end = false;
-        for _ in 0..row_limit {
-            let data = self.result_cache.as_mut().unwrap().next();
-            match data {
-                Some(d) => {
-                    data_set.push(d);
-                }
-                None => {
-                    row_end = true;
-                    self.result_cache = None;
+        let mut query_end = false;
+        let mut query_row_count = 0;
+        if result.is_empty() {
+            msg_stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
+        } else if result.is_query() {
+            // fetch row data
+            // if row_limit is 0, fetch all rows
+            // if row_limit > 0, fetch row_limit rows
+            let stream = result.values_stream();
+            while row_limit == 0 || query_row_count < row_limit {
+                if let Some(row) = stream
+                    .try_next()
+                    .await
+                    .map_err(|err| PsqlError::ExecuteError(err))?
+                {
+                    msg_stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                    query_row_count += 1;
+                } else {
+                    query_end = true;
                     break;
                 }
             }
+            // Check if the result is consumed completely.
+            // If not, cache the result.
+            if stream.peekable().is_terminated() {
+                query_end = true;
+            }
+            if query_end {
+                msg_stream.write_no_flush(&BeMessage::CommandComplete(
+                    BeCommandCompleteMessage {
+                        stmt_type: result.get_stmt_type(),
+                        notice: result.get_notice(),
+                        rows_cnt: query_row_count as i32,
+                    },
+                ))?;
+            } else {
+                msg_stream.write_no_flush(&BeMessage::PortalSuspended)?;
+            }
+        } else {
+            msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                stmt_type: result.get_stmt_type(),
+                notice: result.get_notice(),
+                rows_cnt: result.get_effected_rows_cnt(),
+            }))?;
         }
 
-        Ok(PgResponse::new(
-            self.stmt_type.unwrap(),
-            data_set.len() as _,
-            data_set,
-            self.row_description.clone(),
-            row_end,
-        ))
+        // If the result is consumed completely or is not a query result, clear the cache.
+        if query_end || !self.result.as_ref().unwrap().is_query() {
+            self.result.take();
+        }
+
+        Ok(())
     }
 
     /// We define the statement start with ("select","values","show","with","describe") is query
@@ -455,11 +462,8 @@ impl PreparedStatement {
         Ok(params)
     }
 
-    /// default_params is to create default params:[String] from type_description:[TypeOid].
-    /// The params produced by this function will be used in the
-    /// PreparedStatement::instance_default.
-    ///
-    /// type_description is a list of type oids.
+    /// `default_params` creates default params from type oids for
+    /// [`PreparedStatement::instance_default`].
     fn default_params(type_description: &[TypeOid]) -> PsqlResult<Vec<String>> {
         let mut params: _ = Vec::new();
         for oid in type_description.iter() {
@@ -493,7 +497,7 @@ impl PreparedStatement {
     fn replace_params(&self, params: &[String]) -> String {
         let mut tmp = self.raw_statement.clone();
 
-        for (idx, generic_param) in self.param_tokens.iter() {
+        for (idx, generic_param) in &self.param_tokens {
             let param = &params[*idx - 1];
             tmp = tmp.replace(generic_param, param);
         }
@@ -505,10 +509,10 @@ impl PreparedStatement {
         self.param_types.clone()
     }
 
-    /// instance_default used in parse phase.
+    /// `instance_default` used in parse phase.
     /// At parse phase, user still do not provide params but we need to infer the sql result.(The
     /// session can't support infer the sql with generic param now). Hence to get a sql without
-    /// generic param, we used default_params() to generate default params according param_types
+    /// generic param, we used `default_params()` to generate default params according `param_types`
     /// and replace the generic param with them.
     pub fn instance_default(&self) -> PsqlResult<String> {
         let default_params = Self::default_params(&self.param_types)?;

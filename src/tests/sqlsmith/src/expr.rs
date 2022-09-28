@@ -150,7 +150,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates functions with variable arity:
-    /// CASE, COALESCE, CONCAT, CONCAT_WS
+    /// `CASE`, `COALESCE`, `CONCAT`, `CONCAT_WS`
     fn gen_variadic_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         use DataTypeName as T;
         match ret {
@@ -279,7 +279,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct))),
             A::Avg => Some(Expr::Function(make_agg_func("avg", exprs, distinct))),
             A::StringAgg => Some(Expr::Function(make_agg_func("string_agg", exprs, distinct))),
-            A::SingleValue => None,
             A::ApproxCountDistinct => {
                 if distinct {
                     None

@@ -80,10 +80,38 @@ pub enum Convention {
 
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
-    pub fn explain(&self, level: usize, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        writeln!(f, "{}{}", " ".repeat(level * 2), self)?;
-        for input in self.inputs() {
-            input.explain(level + 1, f)?;
+    pub fn explain(
+        &self,
+        is_last: &mut Vec<bool>,
+        level: usize,
+        f: &mut impl std::fmt::Write,
+    ) -> std::fmt::Result {
+        if level > 0 {
+            let mut last_iter = is_last.iter().peekable();
+            while let Some(last) = last_iter.next() {
+                // We are at the current level
+                if last_iter.peek().is_none() {
+                    if *last {
+                        writeln!(f, "└─{}", self)?;
+                    } else {
+                        writeln!(f, "├─{}", self)?;
+                    }
+                } else if *last {
+                    write!(f, "  ")?;
+                } else {
+                    write!(f, "| ")?;
+                }
+            }
+        } else {
+            writeln!(f, "{}", self)?;
+        }
+        let inputs = self.inputs();
+        let mut inputs_iter = inputs.iter().peekable();
+        while let Some(input) = inputs_iter.next() {
+            let last = inputs_iter.peek().is_none();
+            is_last.push(last);
+            input.explain(is_last, level + 1, f)?;
+            is_last.pop();
         }
         Ok(())
     }
@@ -91,7 +119,7 @@ impl dyn PlanNode {
     /// Explain the plan node and return a string.
     pub fn explain_to_string(&self) -> Result<String> {
         let mut output = String::new();
-        self.explain(0, &mut output)
+        self.explain(&mut vec![], 0, &mut output)
             .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
         Ok(output)
     }

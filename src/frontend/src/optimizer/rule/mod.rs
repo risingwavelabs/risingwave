@@ -65,7 +65,9 @@ mod index_selection;
 pub use index_selection::*;
 mod push_calculation_of_join;
 pub use push_calculation_of_join::*;
+mod join_commute;
 mod over_agg_to_topn;
+pub use join_commute::*;
 pub use over_agg_to_topn::*;
 
 #[macro_export]
@@ -92,6 +94,7 @@ macro_rules! for_all_rules {
             ,{PushCalculationOfJoinRule}
             ,{IndexSelectionRule}
             ,{OverAggToTopNRule}
+            ,{JoinCommuteRule}
         }
     };
 }

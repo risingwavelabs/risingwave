@@ -62,7 +62,7 @@ pub struct CreateMaterializedViewContext {
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
     /// Internal TableID to Table mapping
-    pub internal_table_id_map: HashMap<u32, Option<Table>>,
+    pub internal_table_id_map: HashMap<u32, Table>,
     /// The upstream tables of all fragments containing chain nodes.
     /// These fragments need to be colocated with their upstream tables.
     ///
@@ -79,11 +79,7 @@ pub struct CreateMaterializedViewContext {
 
 impl CreateMaterializedViewContext {
     pub fn internal_tables(&self) -> Vec<Table> {
-        self.internal_table_id_map
-            .values()
-            .flatten()
-            .cloned()
-            .collect()
+        self.internal_table_id_map.values().cloned().collect()
     }
 
     pub fn internal_table_ids(&self) -> Vec<u32> {
@@ -317,12 +313,31 @@ where
             let upstream_table_id = chain_fragment_upstream_table_map
                 .get(&fragment.fragment_id)
                 .unwrap();
-            fragment.vnode_mapping = env
+
+            let upstream_fragment_vnode_info = env
                 .upstream_fragment_vnode_info
                 .get(upstream_table_id)
-                .unwrap()
+                .unwrap();
+
+            let upstream_fragment_id = upstream_fragment_vnode_info
                 .vnode_mapping
-                .clone();
+                .as_ref()
+                .unwrap()
+                .fragment_id;
+
+            assert!(fragment.upstream_fragment_ids.is_empty());
+            fragment
+                .upstream_fragment_ids
+                .push(upstream_fragment_id as FragmentId);
+
+            let mut vnode_mapping = upstream_fragment_vnode_info.vnode_mapping.clone();
+            // The upstream vnode_mapping is cloned here,
+            // so the fragment id in the mapping needs to be changed to the id of this fragment
+            if let Some(mapping) = vnode_mapping.as_mut() {
+                assert_ne!(mapping.fragment_id, fragment.fragment_id);
+                mapping.fragment_id = fragment.fragment_id;
+            }
+            fragment.vnode_mapping = vnode_mapping;
         }
         Ok(())
     }
@@ -418,7 +433,6 @@ where
             chain_fragment_upstream_table_map,
         )
         .await?;
-
         let dispatchers = &*dispatchers;
         let upstream_worker_actors = &*upstream_worker_actors;
 
@@ -881,7 +895,6 @@ mod tests {
             _request: Request<BarrierCompleteRequest>,
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
             Ok(Response::new(BarrierCompleteResponse {
-                checkpoint: true,
                 ..Default::default()
             }))
         }
@@ -956,7 +969,7 @@ mod tests {
             );
 
             let (barrier_scheduler, scheduled_barriers) =
-                BarrierScheduler::new_pair(hummock_manager.clone());
+                BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
 
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await?);

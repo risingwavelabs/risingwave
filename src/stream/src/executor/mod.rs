@@ -23,7 +23,7 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use minitrace::prelude::*;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImpl, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
@@ -74,7 +74,7 @@ mod rearranged_chain;
 mod receiver;
 mod simple;
 mod sink;
-mod source;
+pub mod source;
 pub mod subtask;
 mod top_n;
 mod top_n_appendonly;
@@ -153,7 +153,7 @@ pub trait Executor: Send + 'static {
     /// Return the primary key indices of the OUTPUT of the executor.
     /// Schema is used by both OLAP and streaming, therefore
     /// pk indices are maintained independently.
-    fn pk_indices(&self) -> PkIndicesRef;
+    fn pk_indices(&self) -> PkIndicesRef<'_>;
 
     /// Identity of the executor.
     fn identity(&self) -> &str;

@@ -108,11 +108,11 @@ impl SharedContext {
     }
 
     #[inline]
-    fn lock_channel_map(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
+    fn lock_channel_map(&self) -> MutexGuard<'_, HashMap<UpDownActorIds, ConsumableChannelPair>> {
         self.channel_map.lock()
     }
 
-    pub fn lock_barrier_manager(&self) -> MutexGuard<LocalBarrierManager> {
+    pub fn lock_barrier_manager(&self) -> MutexGuard<'_, LocalBarrierManager> {
         self.barrier_manager.lock()
     }
 

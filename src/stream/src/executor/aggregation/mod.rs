@@ -41,7 +41,6 @@ use static_assertions::const_assert_eq;
 use super::{ActorContextRef, PkIndices};
 use crate::common::{InfallibleExpression, StateTableColumnMapping};
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
-use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::Executor;
@@ -51,7 +50,6 @@ mod agg_state;
 mod approx_count_distinct;
 mod foldable;
 mod row_count;
-mod single_value;
 
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R, I> =
@@ -227,55 +225,6 @@ pub fn create_streaming_agg_state(
                     (Max, float32, float32, StreamingMaxAgg::<F32Array>),
                     (Max, float64, float64, StreamingMaxAgg::<F64Array>),
                     (Max, interval, interval, StreamingMaxAgg::<IntervalArray>),
-                    // SingleValue
-                    (
-                        SingleValue,
-                        int16,
-                        int16,
-                        StreamingSingleValueAgg::<I16Array>
-                    ),
-                    (
-                        SingleValue,
-                        int32,
-                        int32,
-                        StreamingSingleValueAgg::<I32Array>
-                    ),
-                    (
-                        SingleValue,
-                        int64,
-                        int64,
-                        StreamingSingleValueAgg::<I64Array>
-                    ),
-                    (
-                        SingleValue,
-                        float32,
-                        float32,
-                        StreamingSingleValueAgg::<F32Array>
-                    ),
-                    (
-                        SingleValue,
-                        float64,
-                        float64,
-                        StreamingSingleValueAgg::<F64Array>
-                    ),
-                    (
-                        SingleValue,
-                        boolean,
-                        boolean,
-                        StreamingSingleValueAgg::<BoolArray>
-                    ),
-                    (
-                        SingleValue,
-                        decimal,
-                        decimal,
-                        StreamingSingleValueAgg::<DecimalArray>
-                    ),
-                    (
-                        SingleValue,
-                        varchar,
-                        varchar,
-                        StreamingSingleValueAgg::<Utf8Array>
-                    )
                 ]
             )
         }

@@ -56,7 +56,7 @@ pub struct SysRowSeqScanExecutorBuilder {}
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
@@ -118,8 +118,7 @@ impl SysRowSeqScanExecutor {
             })
             .collect_vec();
 
-        let chunk = DataChunk::from_rows(&filtered_rows, &self.schema.data_types())
-            .map_err(RwError::from)?;
+        let chunk = DataChunk::from_rows(&filtered_rows, &self.schema.data_types());
         yield chunk
     }
 }

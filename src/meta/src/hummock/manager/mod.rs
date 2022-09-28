@@ -52,7 +52,10 @@ use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
+use crate::hummock::metrics_utils::{
+    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_sst_stat,
+    trigger_version_stat,
+};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID};
 use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction};
@@ -446,16 +449,14 @@ where
                 min_pinned_id: INVALID_VERSION_ID,
             },
         );
-
         let version_id = versioning.current_version.id;
-
         let ret = Payload::PinnedVersion(versioning.current_version.clone());
-
         if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
             || context_pinned_version.min_pinned_id > version_id
         {
             context_pinned_version.min_pinned_id = version_id;
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
+            trigger_pin_unpin_version_state(&self.metrics, &versioning.pinned_versions);
         }
 
         #[cfg(test)]
@@ -487,9 +488,9 @@ where
                 min_pinned_id: 0,
             },
         );
-
         context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(self, Some(context_id), context_pinned_version)?;
+        trigger_pin_unpin_version_state(&self.metrics, &versioning.pinned_versions);
 
         #[cfg(test)]
         {
@@ -518,8 +519,8 @@ where
         if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
             context_pinned_snapshot.minimal_pinned_snapshot = max_committed_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+            trigger_pin_unpin_snapshot_state(&self.metrics, &guard.pinned_snapshots);
         }
-
         Ok(HummockSnapshot {
             committed_epoch: max_committed_epoch,
             current_epoch: max_current_epoch,
@@ -541,9 +542,9 @@ where
         let _timer = start_measure_real_process_timer!(self);
         let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning_guard.pinned_snapshots);
         let release_snapshot = pinned_snapshots.remove(context_id);
-
         if release_snapshot.is_some() {
             commit_multi_var!(self, Some(context_id), pinned_snapshots)?;
+            trigger_pin_unpin_snapshot_state(&self.metrics, &versioning_guard.pinned_snapshots);
         }
 
         #[cfg(test)]
@@ -591,6 +592,7 @@ where
         {
             context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+            trigger_pin_unpin_snapshot_state(&self.metrics, &versioning_guard.pinned_snapshots);
         }
 
         #[cfg(test)]
@@ -767,7 +769,7 @@ where
         task_status: TaskStatus,
     ) -> Result<bool> {
         compact_task.set_task_status(task_status);
-        fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStoreError(
+        fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore err")
         )));
         self.cancel_compact_task_impl(compact_task).await
@@ -783,7 +785,7 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<Option<CompactTask>> {
-        fail_point!("fp_get_compact_task", |_| Err(Error::MetaStoreError(
+        fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
         while let Some(task) = self
@@ -974,6 +976,8 @@ where
 
             current_version.apply_version_delta(&version_delta);
 
+            trigger_version_stat(&self.metrics, current_version);
+
             self.env
                 .notification_manager()
                 .notify_compute_asynchronously(
@@ -1010,7 +1014,7 @@ where
                     original_task_num: assigned_task_num,
                 });
             }
-            // Update compaaction task count.
+            // Update compaction task count.
             //
             // A corner case is that the compactor is deleted
             // immediately after it reports the task and before the meta node handles
@@ -1027,7 +1031,7 @@ where
                     .inc();
             }
         } else {
-            // Update compaaction task count. The task will be marked as `unassigned`.
+            // Update compaction task count. The task will be marked as `unassigned`.
             self.metrics
                 .compact_frequency
                 .with_label_values(&[
@@ -1215,8 +1219,8 @@ where
         versioning.current_version = new_hummock_version;
         self.max_committed_epoch.store(epoch, Ordering::Release);
         self.max_current_epoch.fetch_max(epoch, Ordering::Release);
-        // Update metrics
-        trigger_commit_stat(&self.metrics, &versioning.current_version);
+
+        trigger_version_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
                 &self.metrics,
@@ -1330,6 +1334,9 @@ where
             drop(versioning_guard);
             self.check_state_consistency().await;
         }
+        self.metrics
+            .checkpoint_version_id
+            .set(new_checkpoint_id as i64);
         Ok(new_checkpoint_id - old_checkpoint_id)
     }
 
@@ -1406,7 +1413,7 @@ where
     }
 
     #[named]
-    pub async fn get_read_guard(&self) -> RwLockReadGuard<Versioning> {
+    pub async fn get_read_guard(&self) -> RwLockReadGuard<'_, Versioning> {
         read_lock!(self, versioning).await
     }
 
@@ -1458,7 +1465,7 @@ where
         if let Some(sender) = self.compaction_request_channel.read().as_ref() {
             sender
                 .try_send(compaction_group)
-                .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))
+                .map_err(|e| Error::Internal(anyhow::anyhow!(e.to_string())))
         } else {
             Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
         }
@@ -1522,7 +1529,7 @@ where
                 .notification_manager()
                 .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(compact_task))
                 .await;
-            Err(Error::InternalError(anyhow::anyhow!(
+            Err(Error::Internal(anyhow::anyhow!(
                 "Failed to trigger_manual_compaction"
             )))
         };

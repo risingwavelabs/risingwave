@@ -46,7 +46,7 @@ pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
-    epoch: Option<u64>,
+    epoch: u64,
 
     auth_context: Arc<AuthContext>,
 }
@@ -56,19 +56,20 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
+        epoch: u64,
         auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {
             sql: sql.into(),
             query,
             front_env,
-            epoch: None,
+            epoch,
             auth_context,
         }
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    pub async fn run_inner(mut self) {
+    pub async fn run_inner(self) {
         debug!(
             "Starting to run query: {:?}, sql: '{}'",
             self.query.query_id, self.sql
@@ -77,24 +78,15 @@ impl LocalQueryExecution {
         let context =
             FrontendBatchTaskContext::new(self.front_env.clone(), self.auth_context.clone());
 
-        let query_id = self.query.query_id().clone();
-
         let task_id = TaskId {
             query_id: self.query.query_id.id.clone(),
             stage_id: 0,
             task_id: 0,
         };
 
-        let epoch = self
-            .front_env
-            .hummock_snapshot_manager()
-            .get_epoch(query_id)
-            .await?
-            .committed_epoch;
-        self.epoch = Some(epoch);
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
-        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, epoch);
+        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.epoch);
         let executor = executor.build().await?;
 
         #[for_await]
@@ -228,9 +220,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan =  LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: self.epoch.expect(
-                                "Local execution mode has not acquired the epoch when generating the plan.",
-                            ),
+                            epoch: self.epoch,
                             };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
@@ -259,9 +249,7 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                     plan: Some(second_stage_plan_fragment),
-                    epoch: self.epoch.expect(
-                        "Local execution mode has not acquired the epoch when generating the plan.",
-                    ),
+                    epoch: self.epoch,
                     };
 
                     let workers = if second_stage.parallelism == 1 {
@@ -323,10 +311,10 @@ impl LocalQueryExecution {
                 match &mut node_body {
                     NodeBody::LookupJoin(node) => {
                         let side_table_desc = node
-                            .probe_side_table_desc
+                            .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        node.probe_side_vnode_mapping = self
+                        node.inner_side_vnode_mapping = self
                             .front_env
                             .catalog_reader()
                             .read_guard()

@@ -90,7 +90,7 @@ async fn create_tables(
         .map(create_table_statement_to_table)
         .collect_vec();
 
-    for s in statements.into_iter() {
+    for s in statements {
         let create_sql = s.to_string();
         handle(session.clone(), s, &create_sql).await?;
     }

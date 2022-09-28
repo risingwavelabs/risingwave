@@ -418,6 +418,8 @@ mod tests {
                     file_size: input_file_size,
                     table_ids: vec![],
                     meta_offset: 0,
+                    stale_key_count: 0,
+                    total_key_count: 0,
                 }],
             }],
             splits: vec![],
