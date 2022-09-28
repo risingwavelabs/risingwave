@@ -398,7 +398,10 @@ impl LocalVersion {
     }
 
     pub fn need_cache(&self) -> bool {
-        for (_, levels) in &self.local_related_version.version.levels {
+        for (group, levels) in &self.local_related_version.version.levels {
+            if self.committed_cache.iter().any(|cache| cache.compaction_group_id() == *group) {
+                continue;
+            }
             let mut overlapping_count = 0;
             for sub_level in levels.l0.as_ref().unwrap().sub_levels.iter().rev() {
                 if sub_level.level_type != LevelType::Overlapping as i32
