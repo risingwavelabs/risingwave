@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use futures::future::try_join_all;
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use futures_concurrency::prelude::*;
-use futures_util::stream::BoxStream;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};

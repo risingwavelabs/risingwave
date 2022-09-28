@@ -5005,7 +5005,6 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "futures-concurrency",
- "futures-util",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",

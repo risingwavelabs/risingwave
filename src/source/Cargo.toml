@@ -19,7 +19,6 @@ farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 futures-concurrency = "3"
-futures-util = "0.3"
 itertools = "0.10"
 maplit = "1"
 memcomparable = { path = "../utils/memcomparable" }
