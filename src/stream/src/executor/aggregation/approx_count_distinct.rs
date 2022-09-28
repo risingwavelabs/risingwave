@@ -395,7 +395,8 @@ mod tests {
                 &[Op::Insert, Op::Insert, Op::Insert],
                 None,
                 &[&array_nonnull!(I64Array, [i, i, i]).into()],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         let estimation = agg.get_output().unwrap().unwrap().into_int64();
