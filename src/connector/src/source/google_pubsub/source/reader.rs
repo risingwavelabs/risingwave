@@ -62,6 +62,10 @@ impl SplitReader for PubsubSplitReader {
         }
 
         // TODO: acks go here?
+        let ack_ids: Vec<String> = next_batch.iter().map(|m| m.ack_id().into()).collect();
+
+        // ? is this the right way to handle an ack failure
+        self.subscription.ack(ack_ids).await.map_err(to_anyhow)?;
 
         let source_message_batch: Vec<SourceMessage> =
             next_batch.into_iter().map(|rm| rm.into()).collect();

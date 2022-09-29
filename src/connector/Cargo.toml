@@ -30,7 +30,7 @@ futures-async-stream = "0.2"
 futures-concurrency = "3"
 globset = "0.4.8"
 google-cloud-googleapis = { version = "0.5.1", features = ["pubsub"] }
-google-cloud-pubsub = "0.5.1"
+google-cloud-pubsub = "0.6.0"
 http = "0.2"
 http-serde = "1.1.0"
 humantime = "2.1"

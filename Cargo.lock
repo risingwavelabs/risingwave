@@ -2433,9 +2433,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-pubsub"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b74b40f88790c66fcde9dbe463b0e3006529929f24d63c54e86e7d2f66a6d2f9"
+checksum = "34c009f82a9f6b2d7b5a828fc6b3ee2d209d991c902542dd547580b3f8d61b51"
 dependencies = [
  "async-channel",
  "async-stream",
