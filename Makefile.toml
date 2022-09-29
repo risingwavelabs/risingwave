@@ -573,7 +573,10 @@ category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
 script = """
 #!/bin/bash
-echo "If command 'typos' is not found, run './risedev install-tools'."
+if ! [ -x "$(command -v typos)" ]; then
+  echo "Error: 'typos-cli' is not installed, please run './risedev install-tools'." >&2
+  exit 1
+fi
 typos
 """
 
