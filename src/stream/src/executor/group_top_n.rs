@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::hash_map::Entry::Vacant;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -193,47 +193,42 @@ where
         let mut res_rows = Vec::with_capacity(self.limit);
 
         for (op, row_ref) in chunk.rows() {
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
+            // The pk without group by
+            let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
+            let ordered_pk_row = OrderedRow::new(
+                pk_row,
+                &self.internal_key_order_types[self.group_by.len()..],
+            );
+
             let row = row_ref.to_owned_row();
+
             let mut group_key = Vec::with_capacity(self.group_by.len());
             for &col_id in &self.group_by {
                 group_key.push(row[col_id].clone());
             }
+            let pk_prefix = Row::new(group_key.clone());
 
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
-            let pk_prefix = Row::new(group_key.clone());
-            let entry = self.caches.entry(group_key);
-            match entry {
-                Occupied(_) => {}
-                Vacant(entry) => {
-                    let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
-                    self.managed_state
-                        .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
-                        .await?;
-                    entry.insert(topn_cache);
-                }
+            if let Vacant(entry) = self.caches.entry(group_key) {
+                let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
+                self.managed_state
+                    .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
+                    .await?;
+                entry.insert(topn_cache);
             }
+            let cache = self.caches.get_mut(&pk_prefix.0).unwrap();
 
             // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone());
-                    self.caches.get_mut(&pk_prefix.0).unwrap().insert(
-                        ordered_pk_row,
-                        row,
-                        &mut res_ops,
-                        &mut res_rows,
-                    );
+                    self.managed_state.insert(row.clone());
+                    cache.insert(ordered_pk_row, row, &mut res_ops, &mut res_rows);
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state.delete(&ordered_pk_row, row.clone());
-                    self.caches
-                        .get_mut(&pk_prefix.0)
-                        .unwrap()
+                    self.managed_state.delete(row.clone());
+                    cache
                         .delete(
                             Some(&pk_prefix),
                             &mut self.managed_state,
@@ -280,8 +275,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -325,11 +318,11 @@ mod tests {
         let chunk1 = StreamChunk::from_pretty(
             "  I I I
             - 10 9 1
-            - 8 8 2
+            -  8 8 2
             - 10 1 1",
         );
         let chunk2 = StreamChunk::from_pretty(
-            "  I I I
+            " I I I
             - 7 8 2
             - 8 1 3
             - 9 1 1",
@@ -364,34 +357,6 @@ mod tests {
         ))
     }
 
-    fn compare_stream_chunk(lhs_chunk: &StreamChunk, rhs_chunk: &StreamChunk) {
-        let mut lhs_message = HashSet::new();
-        let mut rhs_message = HashSet::new();
-        for (op, row_ref) in lhs_chunk.rows() {
-            let row = row_ref.to_owned_row();
-            let op_code = match op {
-                Op::Insert => 1,
-                Op::Delete => 2,
-                Op::UpdateDelete => 3,
-                Op::UpdateInsert => 4,
-            };
-            lhs_message.insert((op_code, row.clone()));
-        }
-
-        for (op, row_ref) in rhs_chunk.rows() {
-            let row = row_ref.to_owned_row();
-            let op_code = match op {
-                Op::Insert => 1,
-                Op::Delete => 2,
-                Op::UpdateDelete => 3,
-                Op::UpdateInsert => 4,
-            };
-            rhs_message.insert((op_code, row.clone()));
-        }
-
-        assert_eq!(lhs_message, rhs_message);
-    }
-
     #[tokio::test]
     async fn test_without_offset_and_with_limits() {
         let order_types = create_order_pairs();
@@ -423,15 +388,16 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
+                + 10 9 1
+                +  8 8 2
+                +  7 8 2
                 +  9 1 1
                 + 10 1 1
-                +  7 8 2
-                +  8 8 2
-                + 10 9 1",
+                ",
             ),
         );
 
@@ -441,14 +407,15 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
-                - 10 1 1
-                - 8 8 2
                 - 10 9 1
-                +  8 1 3",
+                -  8 8 2
+                - 10 1 1
+                +  8 1 3
+                ",
             ),
         );
 
@@ -458,28 +425,30 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
-                "  I I I
-                - 9 1 1
-                - 8 1 3
-                - 7 8 2",
-            ),
-        );
-
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 " I I I
+                - 7 8 2
+                - 8 1 3
+                - 9 1 1
+                ",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                " I I I
+                + 5 1 1
                 + 2 1 1
-                + 5 1 1",
+                ",
             ),
         );
     }
@@ -515,13 +484,14 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
+                +  8 8 2
                 + 10 1 1
                 +  8 1 3
-                +  8 8 2",
+                ",
             ),
         );
 
@@ -531,12 +501,13 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
+                -  8 8 2
                 - 10 1 1
-                - 8 8 2",
+                ",
             ),
         );
 
@@ -546,10 +517,10 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I I
+                " I I I
                 - 8 1 3",
             ),
         );
@@ -560,12 +531,13 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 " I I I
+                + 5 1 1
                 + 3 1 2
-                + 5 1 1",
+                ",
             ),
         );
     }
@@ -600,7 +572,7 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
@@ -619,12 +591,12 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
                 - 10 9 1
-                - 8 8 2
+                -  8 8 2
                 - 10 1 1",
             ),
         );
@@ -635,7 +607,7 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
@@ -651,7 +623,7 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
