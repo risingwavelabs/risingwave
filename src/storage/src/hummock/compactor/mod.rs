@@ -233,7 +233,7 @@ impl Compactor {
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
         let task_progress_guard =
-            TaskProgressGuard::new(compact_task.task_id, context.task_progress.clone());
+            TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let filter = multi_filter.clone();
@@ -367,7 +367,7 @@ impl Compactor {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
-        let task_progress = compactor_context.context.task_progress.clone();
+        let task_progress = compactor_context.context.task_progress_manager.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();

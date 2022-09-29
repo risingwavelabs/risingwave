@@ -50,7 +50,7 @@ pub struct Context {
 
     pub sstable_id_manager: SstableIdManagerRef,
 
-    pub task_progress: TaskProgressManagerRef,
+    pub task_progress_manager: TaskProgressManagerRef,
 }
 
 #[derive(Clone)]
