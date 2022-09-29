@@ -26,6 +26,7 @@ use risingwave_common::types::DataType;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
+use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
 
 use crate::monitor::SourceMetrics;
 use crate::table::TableSource;
@@ -50,6 +51,9 @@ pub trait SourceManager: Debug + Sync + Send {
 
     /// Clear sources, this is used when failover happens.
     fn clear_sources(&self) -> Result<()>;
+
+    fn metrics(&self) -> Arc<SourceMetrics>;
+    fn msg_buf_size(&self) -> usize;
 }
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
@@ -261,6 +265,14 @@ impl SourceManager for MemSourceManager {
         sources.clear();
         Ok(())
     }
+
+    fn metrics(&self) -> Arc<SourceMetrics> {
+        self.metrics.clone()
+    }
+
+    fn msg_buf_size(&self) -> usize {
+        self.connector_message_buffer_size
+    }
 }
 
 impl Default for MemSourceManager {
@@ -284,6 +296,94 @@ impl MemSourceManager {
 
     fn get_sources(&self) -> Result<MutexGuard<'_, HashMap<TableId, SourceDesc>>> {
         Ok(self.sources.lock())
+    }
+}
+
+pub struct SourceDescBuilder {
+    id: TableId,
+    info: ProstSourceInfo,
+    mgr: SourceManagerRef,
+}
+
+impl SourceDescBuilder {
+    pub fn new(id: TableId, info: &ProstSourceInfo, mgr: &SourceManagerRef) -> Self {
+        Self {
+            id,
+            info: info.clone(),
+            mgr: mgr.clone(),
+        }
+    }
+
+    pub async fn build(&self) -> Result<SourceDesc> {
+        let Self { id, info, mgr } = self;
+        let source_desc = match &info {
+            ProstSourceInfo::TableSource(_) => mgr.get_source(id).unwrap(),
+            ProstSourceInfo::StreamSource(info) => {
+                Self::build_stream_source(mgr, info.clone()).await?
+            }
+        };
+        Ok(source_desc)
+    }
+
+    async fn build_stream_source(
+        mgr: &SourceManagerRef,
+        info: StreamSourceInfo,
+    ) -> Result<SourceDesc> {
+        let format = match info.get_row_format()? {
+            RowFormatType::Json => SourceFormat::Json,
+            RowFormatType::Protobuf => SourceFormat::Protobuf,
+            RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
+            RowFormatType::Avro => SourceFormat::Avro,
+            RowFormatType::RowUnspecified => unreachable!(),
+        };
+
+        if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {
+            return Err(RwError::from(ProtocolError(
+                "protobuf file location not provided".to_string(),
+            )));
+        }
+        let source_parser_rs =
+            SourceParserImpl::create(&format, &info.properties, info.row_schema_location.as_str())
+                .await;
+        let parser = if let Ok(source_parser) = source_parser_rs {
+            source_parser
+        } else {
+            return Err(source_parser_rs.err().unwrap());
+        };
+
+        let mut columns: Vec<_> = info
+            .columns
+            .into_iter()
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.unwrap())))
+            .collect();
+        let row_id_index = info.row_id_index.map(|row_id_index| {
+            columns[row_id_index.index as usize].skip_parse = true;
+            row_id_index.index as usize
+        });
+        let pk_column_ids = info.pk_column_ids;
+        assert!(
+            !pk_column_ids.is_empty(),
+            "source should have at least one pk column"
+        );
+
+        let config = ConnectorProperties::extract(info.properties)
+            .map_err(|e| RwError::from(ConnectorError(e.into())))?;
+
+        let source = SourceImpl::Connector(ConnectorSource {
+            config,
+            columns: columns.clone(),
+            parser,
+            connector_message_buffer_size: mgr.msg_buf_size(),
+        });
+
+        Ok(SourceDesc {
+            source: Arc::new(source),
+            format,
+            columns,
+            row_id_index,
+            pk_column_ids,
+            metrics: mgr.metrics(),
+        })
     }
 }
 

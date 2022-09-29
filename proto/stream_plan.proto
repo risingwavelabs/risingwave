@@ -116,6 +116,10 @@ message SourceNode {
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
   catalog.Table state_table = 4;
+  oneof info {
+    catalog.StreamSourceInfo stream_source = 5;
+    catalog.TableSourceInfo table_source = 6;
+  }
 }
 
 message SinkNode {

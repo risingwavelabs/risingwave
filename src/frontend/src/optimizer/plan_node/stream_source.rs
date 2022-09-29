@@ -14,10 +14,12 @@
 
 use std::fmt;
 
+use risingwave_pb::stream_plan::source_node::Info;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
 use super::{LogicalSource, PlanBase, StreamNode};
+use crate::catalog::source_catalog::SourceCatalogInfo;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -82,6 +84,10 @@ impl StreamNode for StreamSource {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
+            info: Some(match &self.logical.source_catalog.info {
+                SourceCatalogInfo::StreamSource(info) => Info::StreamSource(info.to_owned()),
+                SourceCatalogInfo::TableSource(info) => Info::TableSource(info.to_owned()),
+            }),
         })
     }
 }

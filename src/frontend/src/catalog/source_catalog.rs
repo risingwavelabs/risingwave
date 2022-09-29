@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::Source as ProstSource;
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, TableSourceInfo};
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::column_catalog::ColumnCatalog;
@@ -21,6 +21,12 @@ use super::{ColumnId, SourceId};
 use crate::WithOptions;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
+
+#[derive(Clone, Debug)]
+pub enum SourceCatalogInfo {
+    StreamSource(StreamSourceInfo),
+    TableSource(TableSourceInfo),
+}
 
 /// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
@@ -33,13 +39,14 @@ pub struct SourceCatalog {
     pub source_type: SourceType,
     pub append_only: bool,
     pub owner: u32,
+    pub info: SourceCatalogInfo,
 }
 
 impl From<&ProstSource> for SourceCatalog {
     fn from(prost: &ProstSource) -> Self {
         let id = prost.id;
         let name = prost.name.clone();
-        let (source_type, prost_columns, pk_col_ids, with_options) = match &prost.info {
+        let (source_type, prost_columns, pk_col_ids, with_options, info) = match &prost.info {
             Some(Info::StreamSource(source)) => (
                 SourceType::Source,
                 source.columns.clone(),
@@ -50,6 +57,7 @@ impl From<&ProstSource> for SourceCatalog {
                     .map(Into::into)
                     .collect(),
                 WithOptions::new(source.properties.clone()),
+                SourceCatalogInfo::StreamSource(source.clone()),
             ),
             Some(Info::TableSource(source)) => (
                 SourceType::Table,
@@ -61,6 +69,7 @@ impl From<&ProstSource> for SourceCatalog {
                     .map(Into::into)
                     .collect(),
                 WithOptions::new(source.properties.clone()),
+                SourceCatalogInfo::TableSource(source.clone()),
             ),
             None => unreachable!(),
         };
@@ -77,6 +86,7 @@ impl From<&ProstSource> for SourceCatalog {
             source_type,
             append_only,
             owner,
+            info,
         }
     }
 }

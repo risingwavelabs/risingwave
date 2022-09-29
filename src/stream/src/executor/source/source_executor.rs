@@ -15,6 +15,7 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -44,7 +45,8 @@ pub struct SourceExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
     source_id: TableId,
-    source_desc: SourceDesc,
+    source_builder: SourceDescBuilder,
+    row_id_index: Option<usize>,
 
     /// Row id generator for this source executor.
     row_id_generator: RowIdGenerator,
@@ -80,8 +82,8 @@ impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
+        source_builder: SourceDescBuilder,
         source_id: TableId,
-        source_desc: SourceDesc,
         vnodes: Bitmap,
         state_table: SourceStateTableHandler<S>,
         column_ids: Vec<ColumnId>,
@@ -99,7 +101,8 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(Self {
             ctx,
             source_id,
-            source_desc,
+            source_builder,
+            row_id_index: None,
             row_id_generator: RowIdGenerator::with_epoch(
                 vnode_id as u32,
                 *UNIX_SINGULARITY_DATE_EPOCH,
@@ -150,26 +153,17 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
-        let row_id_index = self.source_desc.row_id_index;
-
-        // if row_id_index is None, pk is not row_id, so no need to gen row_id and refill chunk
-        if let Some(row_id_index) = row_id_index {
-            let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
-            if let Some(idx) = self
-                .column_ids
-                .iter()
-                .position(|column_id| *column_id == row_id_column_id)
-            {
-                let (ops, mut columns, bitmap) = chunk.into_inner();
-                if append_only {
-                    columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
-                } else {
-                    columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
-                }
-                return StreamChunk::new(ops, columns, bitmap);
+        if let Some(idx) = self.row_id_index {
+            let (ops, mut columns, bitmap) = chunk.into_inner();
+            if append_only {
+                columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
+            } else {
+                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
             }
+            StreamChunk::new(ops, columns, bitmap)
+        } else {
+            chunk
         }
-        chunk
     }
 }
 
@@ -217,9 +211,10 @@ impl<S: StateStore> SourceExecutor<S> {
 
     async fn build_stream_source_reader(
         &mut self,
+        source_desc: &SourceDesc,
         state: ConnectorState,
     ) -> StreamExecutorResult<Box<SourceStreamReaderImpl>> {
-        let reader = match self.source_desc.source.as_ref() {
+        let reader = match source_desc.source.as_ref() {
             SourceImpl::Table(t) => t
                 .stream_reader(self.column_ids.clone())
                 .await
@@ -228,7 +223,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .stream_reader(
                     state,
                     self.column_ids.clone(),
-                    self.source_desc.metrics.clone(),
+                    source_desc.metrics.clone(),
                     SourceContext::new(self.ctx.id as u32, self.source_id),
                 )
                 .await
@@ -247,6 +242,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .stack_trace("source_recv_first_barrier")
             .await
             .unwrap();
+
+        let source_desc = self
+            .source_builder
+            .build()
+            .await
+            .map_err(|_| anyhow!("build source desc failed"))?;
+        self.row_id_index = source_desc.row_id_index;
 
         // If the first barrier is configuration change, then the source executor must be newly
         // created, and we should start with the paused state.
@@ -283,7 +285,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // todo: use epoch from msg to restore state from state store
         let source_chunk_reader = self
-            .build_stream_source_reader(recover_state)
+            .build_stream_source_reader(&source_desc, recover_state)
             .stack_trace("source_build_reader")
             .await?;
 
@@ -316,7 +318,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                         // Replace the source reader with a new one of the new
                                         // state.
                                         let reader = self
-                                            .build_stream_source_reader(Some(target_state.clone()))
+                                            .build_stream_source_reader(
+                                                &source_desc,
+                                                Some(target_state.clone()),
+                                            )
                                             .await?;
                                         stream.replace_source_chunk_reader(reader);
 
@@ -383,7 +388,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     // Refill row id column for source.
-                    chunk = match self.source_desc.source.as_ref() {
+                    chunk = match source_desc.source.as_ref() {
                         SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true).await,
                         SourceImpl::Table(_) => self.refill_row_id_column(chunk, false).await,
                     };
@@ -448,6 +453,7 @@ mod tests {
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
         RowFormatType as ProstRowFormatType,
     };
+    use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
     use risingwave_source::*;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
@@ -487,12 +493,16 @@ mod tests {
         ];
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
-        let source_manager = MemSourceManager::default();
+        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
         source_manager
             .create_table_source(&table_id, table_columns, row_id_index, pk_column_ids)
             .unwrap();
         let source_desc = source_manager.get_source(&table_id).unwrap();
-        let source = source_desc.clone().source;
+        let source_builder = SourceDescBuilder::new(
+            table_id,
+            &ProstSourceInfo::TableSource(Default::default()),
+            &source_manager,
+        );
 
         let chunk1 = StreamChunk::from_pretty(
             " I i T
@@ -527,8 +537,8 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::create(0x3f3f3f),
+            source_builder,
             table_id,
-            source_desc,
             vnodes,
             state_table,
             column_ids,
@@ -545,7 +555,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table().unwrap();
+            let table_source = source_desc.source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
@@ -619,12 +629,16 @@ mod tests {
         ];
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
-        let source_manager = MemSourceManager::default();
+        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
         source_manager
             .create_table_source(&table_id, table_columns, row_id_index, pk_column_ids)
             .unwrap();
         let source_desc = source_manager.get_source(&table_id).unwrap();
-        let source = source_desc.clone().source;
+        let source_builder = SourceDescBuilder::new(
+            table_id,
+            &ProstSourceInfo::TableSource(Default::default()),
+            &source_manager,
+        );
 
         // Prepare test data chunks
         let chunk = StreamChunk::from_pretty(
@@ -654,8 +668,8 @@ mod tests {
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
         let executor = SourceExecutor::new(
             ActorContext::create(0x3f3f3f),
+            source_builder,
             table_id,
-            source_desc,
             vnodes,
             state_table,
             column_ids,
@@ -672,7 +686,7 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let table_source = source.as_table().unwrap();
+            let table_source = source_desc.source.as_table().unwrap();
             table_source.write_chunk(chunk).unwrap();
         };
 
@@ -745,10 +759,10 @@ mod tests {
     async fn test_split_change_mutation() {
         let stream_source_info = mock_stream_source_info();
         let source_table_id = TableId::default();
-        let source_manager = Arc::new(MemSourceManager::default());
+        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
 
         source_manager
-            .create_source(&source_table_id, stream_source_info)
+            .create_source(&source_table_id, stream_source_info.clone())
             .await
             .unwrap();
 
@@ -766,6 +780,11 @@ mod tests {
         };
 
         let source_desc = source_manager.get_source(&source_table_id).unwrap();
+        let source_builder = SourceDescBuilder::new(
+            source_table_id,
+            &ProstSourceInfo::StreamSource(stream_source_info),
+            &source_manager,
+        );
         let mem_state_store = MemoryStateStore::new();
 
         let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
@@ -780,8 +799,8 @@ mod tests {
 
         let source_exec = SourceExecutor::new(
             ActorContext::create(0),
+            source_builder,
             source_table_id,
-            source_desc,
             vnodes,
             source_state_handler.clone(),
             column_ids.clone(),
