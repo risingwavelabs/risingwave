@@ -157,7 +157,7 @@ struct CheckpointControl<S: MetaStore> {
     metrics: Arc<MetaMetrics>,
 
     /// Get notified when we finished Create MV and collect a barrier(checkpoint = true)
-    finished_notifiers: Vec<Notifier>,
+    finished_commands: Vec<TrackingCommand<S>>,
 }
 
 impl<S> CheckpointControl<S>
@@ -172,20 +172,32 @@ where
             adding_actors: Default::default(),
             removing_actors: Default::default(),
             metrics,
-            finished_notifiers: Default::default(),
+            finished_commands: Default::default(),
         }
     }
 
-    /// To add `finished_notifiers`, we need an barrier(checkpoint = true) to handle it
-    fn add_finished_notifiers(&mut self, finished_notifiers: Vec<Notifier>) {
-        self.finished_notifiers.extend(finished_notifiers);
+    /// Stash a command to finish later.
+    fn stash_command_to_finish(&mut self, finished_command: TrackingCommand<S>) {
+        self.finished_commands.push(finished_command);
     }
 
-    /// Process `finished_notifiers`, send success message
-    fn post_finished_notifiers(&mut self) {
-        self.finished_notifiers
-            .drain(..)
-            .for_each(Notifier::notify_finished);
+    /// Finish stashed commands. If the current barrier is not a `checkpoint`, we will not finish
+    /// the commands that requires a checkpoint, else we will finish all the commands.
+    ///
+    /// Returns whether there are still remaining stashed commands to finish.
+    fn finish_commands(&mut self, checkpoint: bool) -> bool {
+        if checkpoint {
+            self.finished_commands
+                .drain(..)
+                .flat_map(|c| c.notifiers)
+                .for_each(Notifier::notify_finished);
+        } else {
+            self.finished_commands
+                .drain_filter(|c| !c.context.checkpoint)
+                .flat_map(|c| c.notifiers)
+                .for_each(Notifier::notify_finished);
+        }
+        !self.finished_commands.is_empty()
     }
 
     /// Before resolving the actors to be sent or collected, we should first record the newly
@@ -838,27 +850,26 @@ where
                     }) {
                         commands.push(command);
                     }
-                    for progress in resps.iter().flat_map(|r| r.create_mview_progress.clone()) {
-                        if let Some(command) = tracker.update(&progress) {
+                    for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
+                        if let Some(command) = tracker.update(progress) {
                             commands.push(command);
                         }
                     }
                     commands
                 };
 
-                // Force checkpoint in next barrier to finish creating mv.
-                if !finished_commands.is_empty() && !checkpoint {
-                    self.scheduled_barriers.force_checkpoint_in_next_barrier();
-                }
-                for TrackingCommand { context, notifiers } in finished_commands {
-                    // The command is ready to finish. Call `pre_finish` here.
-                    context.pre_finish().await?;
-                    checkpoint_control.add_finished_notifiers(notifiers);
+                for command in finished_commands {
+                    // The command is ready to finish. We can now call `pre_finish`.
+                    command.context.pre_finish().await?;
+                    checkpoint_control.stash_command_to_finish(command);
                 }
 
-                // Notify about collected with a barrier(checkpoint = true).
-                if checkpoint {
-                    checkpoint_control.post_finished_notifiers();
+                let remaining = checkpoint_control.finish_commands(checkpoint);
+                // If there are remaining commands (that requires checkpoint to finish), we force
+                // the next barrier to be a checkpoint.
+                if remaining {
+                    assert!(!checkpoint);
+                    self.scheduled_barriers.force_checkpoint_in_next_barrier();
                 }
 
                 node.timer.take().unwrap().observe_duration();
