@@ -27,6 +27,7 @@
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(once_cell)]
+#![recursion_limit = "256"]
 
 #[macro_use]
 mod catalog;
