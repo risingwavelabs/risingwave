@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_rpc_client::error::RpcError;

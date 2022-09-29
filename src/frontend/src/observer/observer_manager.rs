@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{ErrorCode, Result};
@@ -78,7 +79,7 @@ impl ObserverState for FrontendObserverNode {
         }
     }
 
-    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+    async fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         let mut catalog_guard = self.catalog.write();
         let mut user_guard = self.user_info_manager.write();
         catalog_guard.clear();
