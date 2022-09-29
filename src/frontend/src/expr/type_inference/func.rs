@@ -190,13 +190,8 @@ fn infer_type_for_special(
                     } else if left_type == **right_elem_type {
                         Some(right_type.clone())
                     } else {
-                        let mut array_idx = 0;
-                        let mut element_idx = 1;
-                        if !lhs_is_more_nested(inputs[0].return_type(), inputs[1].return_type()) {
-                            array_idx = 1;
-                            element_idx = 0;
-                        }
-                        let common_type = align_array_and_element(array_idx, element_idx, inputs);
+                        let common_type = align_array_and_element(0, 1, inputs)
+                            .or_else(|_| align_array_and_element(1, 0, inputs));
                         match common_type {
                             Ok(casted) => Some(casted),
                             Err(err) => return Err(err.into()),
