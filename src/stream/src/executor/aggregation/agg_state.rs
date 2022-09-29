@@ -30,13 +30,13 @@ pub struct AggState<S: StateStore> {
     pub managed_states: Vec<ManagedStateImpl<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
-    pub prev_states: Option<Vec<Datum>>,
+    pub prev_outputs: Option<Vec<Datum>>,
 }
 
 impl<S: StateStore> Debug for AggState<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AggState")
-            .field("prev_states", &self.prev_states)
+            .field("prev_outputs", &self.prev_outputs)
             .finish()
     }
 }
@@ -54,7 +54,7 @@ impl<S: StateStore> AggState<S> {
     }
 
     pub fn prev_row_count(&self) -> i64 {
-        match &self.prev_states {
+        match &self.prev_outputs {
             Some(states) => states[ROW_COUNT_COLUMN]
                 .as_ref()
                 .map(|x| *x.as_int64())
@@ -65,7 +65,7 @@ impl<S: StateStore> AggState<S> {
 
     /// Returns whether `prev_states` is filled.
     pub fn is_dirty(&self) -> bool {
-        self.prev_states.is_some()
+        self.prev_outputs.is_some()
     }
 
     /// Used for recording the output of current states as previous states, before applying new
@@ -84,7 +84,7 @@ impl<S: StateStore> AggState<S> {
         for (state, state_table) in self.managed_states.iter_mut().zip_eq(state_tables.iter()) {
             outputs.push(state.get_output(state_table).await?);
         }
-        self.prev_states = Some(outputs);
+        self.prev_outputs = Some(outputs);
         Ok(())
     }
 
@@ -143,7 +143,7 @@ impl<S: StateStore> AggState<S> {
 
                 for (builder, state) in builders
                     .iter_mut()
-                    .zip_eq(self.prev_states.as_ref().unwrap().iter())
+                    .zip_eq(self.prev_outputs.as_ref().unwrap().iter())
                 {
                     trace!("append_datum (N -> 0): {:?}", &state);
                     builder.append_datum(state);
@@ -159,7 +159,7 @@ impl<S: StateStore> AggState<S> {
 
                 for (builder, prev_state, cur_state, state_table) in itertools::multizip((
                     builders.iter_mut(),
-                    self.prev_states.as_ref().unwrap().iter(),
+                    self.prev_outputs.as_ref().unwrap().iter(),
                     self.managed_states.iter_mut(),
                     state_tables.iter(),
                 )) {
@@ -178,7 +178,7 @@ impl<S: StateStore> AggState<S> {
             }
         };
 
-        self.prev_states = None;
+        self.prev_outputs = None;
 
         Ok(appended)
     }

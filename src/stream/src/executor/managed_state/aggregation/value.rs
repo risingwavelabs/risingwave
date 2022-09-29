@@ -39,31 +39,17 @@ pub struct ManagedValueState {
 
     /// Primary key to look up in relational table. For value state, there is only one row.
     /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
-    group_key: Option<Row>,
+    group_key: Option<Row>, // TODO(rc): to be removed
 }
 
 impl ManagedValueState {
     /// Create a single-value managed state based on `AggCall` and `Keyspace`.
-    pub async fn new<S: StateStore>(
+    pub fn new(
         agg_call: AggCall,
         row_count: Option<usize>,
         group_key: Option<&Row>,
-        state_table: &StateTable<S>,
+        prev_output: Option<Datum>,
     ) -> StreamExecutorResult<Self> {
-        let data = if row_count != Some(0) {
-            // View the state table as single-value table, and get the value via empty primary key
-            // or group key.
-            let raw_data = state_table
-                .get_row(group_key.unwrap_or_else(Row::empty))
-                .await?;
-
-            // According to row layout, the last field of the row is value and we sure the row is
-            // not empty.
-            raw_data.map(|row| row.0.last().unwrap().clone())
-        } else {
-            None
-        };
-
         // Create the internal state based on the value we get.
         Ok(Self {
             arg_indices: agg_call.args.val_indices().to_vec(),
@@ -71,7 +57,7 @@ impl ManagedValueState {
                 agg_call.args.arg_types(),
                 &agg_call.kind,
                 &agg_call.return_type,
-                data,
+                prev_output,
             )?,
             is_dirty: false,
             group_key: group_key.cloned(),
@@ -106,6 +92,7 @@ impl ManagedValueState {
 
     /// Check if this state needs a flush.
     pub fn is_dirty(&self) -> bool {
+        warn!("[rc] may need to remove this");
         self.is_dirty
     }
 
@@ -113,6 +100,7 @@ impl ManagedValueState {
         &mut self,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
+        warn!("[rc] may need to remove this");
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
         // cause incorrect result: it will only produce more I/O.
         debug_assert!(self.is_dirty());

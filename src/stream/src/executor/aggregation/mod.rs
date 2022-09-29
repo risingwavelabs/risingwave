@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::any::Any;
-use std::sync::Arc;
 
 pub use agg_call::*;
 pub use agg_state::*;
@@ -40,7 +39,7 @@ pub use row_count::*;
 use static_assertions::const_assert_eq;
 
 use super::{ActorContextRef, PkIndices};
-use crate::common::{InfallibleExpression, StateTableColumnMapping};
+use crate::common::InfallibleExpression;
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
@@ -279,44 +278,56 @@ pub fn generate_agg_schema(
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
 pub async fn generate_managed_agg_state<S: StateStore>(
-    key: Option<&Row>,
+    group_key: Option<&Row>,
     agg_calls: &[AggCall],
+    agg_state_tables: &[Option<AggStateTable<S>>],
+    result_table: &StateTable<S>,
     pk_indices: PkIndices,
     extreme_cache_size: usize,
-    state_tables: &[StateTable<S>],
-    state_table_col_mappings: &[Arc<StateTableColumnMapping>],
 ) -> StreamExecutorResult<AggState<S>> {
-    let mut managed_states = vec![];
+    let group_key_len = group_key.map_or(0, |row| row.size());
+
+    let prev_result: Option<Row> = result_table
+        .get_row(group_key.unwrap_or(&Row::empty()))
+        .await?;
+    let prev_outputs: Option<Vec<_>> =
+        prev_result.map(|row| row.0.into_iter().skip(group_key_len).collect());
+    if let Some(prev_outputs) = prev_outputs.as_ref() {
+        assert_eq!(prev_outputs.len(), agg_calls.len());
+    }
 
     // Currently the loop here only works if `ROW_COUNT_COLUMN` is 0.
     const_assert_eq!(ROW_COUNT_COLUMN, 0);
-    let mut row_count = None;
+    let row_count = prev_outputs
+        .as_ref()
+        .map(|outputs| {
+            outputs[ROW_COUNT_COLUMN]
+                .clone()
+                .map(|x| x.into_int64() as usize)
+        })
+        .flatten()
+        .unwrap_or(0);
 
-    for (idx, agg_call) in agg_calls.iter().enumerate() {
-        let mut managed_state = ManagedStateImpl::create_managed_state(
-            agg_call.clone(),
-            row_count,
-            pk_indices.clone(),
-            idx == ROW_COUNT_COLUMN,
-            key,
-            extreme_cache_size,
-            &state_tables[idx],
-            state_table_col_mappings[idx].clone(),
-        )
-        .await?;
-
-        if idx == ROW_COUNT_COLUMN {
-            // For the rowcount state, we should record the rowcount.
-            let output = managed_state.get_output(&state_tables[idx]).await?;
-            row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
-        }
-
-        managed_states.push(managed_state);
-    }
+    let managed_states = agg_calls
+        .iter()
+        .enumerate()
+        .map(|(idx, agg_call)| {
+            ManagedStateImpl::create_managed_state(
+                agg_call.clone(),
+                agg_state_tables[idx].as_ref(),
+                Some(row_count), // TODO(rc): may remove the `Some`
+                prev_outputs.as_ref().map(|outputs| outputs[idx].clone()),
+                pk_indices.clone(),
+                idx == ROW_COUNT_COLUMN,
+                group_key,
+                extreme_cache_size,
+            )
+        })
+        .try_collect()?;
 
     Ok(AggState {
         managed_states,
-        prev_states: None,
+        prev_outputs,
     })
 }
 

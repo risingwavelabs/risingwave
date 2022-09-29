@@ -82,8 +82,8 @@ pub fn build_agg_call_from_prost(
 /// Parse from stream proto plan agg call states, generate state tables and column mappings.
 /// The `vnodes` is generally `Some` for Hash Agg and `None` for Simple Agg.
 pub fn build_agg_state_tables_from_proto<S: StateStore>(
-    store: S,
     agg_call_states: &[risingwave_pb::stream_plan::AggCallState],
+    store: S,
     vnodes: Option<Arc<Bitmap>>,
 ) -> Vec<Option<AggStateTable<S>>> {
     use risingwave_pb::stream_plan::agg_call_state;

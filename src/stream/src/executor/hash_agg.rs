@@ -29,6 +29,7 @@ use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, AggStateTable};
@@ -84,6 +85,11 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// `None` means the agg call need not to maintain a state table by itself.
     agg_state_tables: Vec<Option<AggStateTable<S>>>,
 
+    /// State table for the previous result of all agg calls.
+    /// The outputs of all managed agg states are collected and stored in this
+    /// table when `flush_data` is called.
+    result_table: StateTable<S>,
+
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
@@ -127,6 +133,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         mut agg_state_tables: Vec<Option<AggStateTable<S>>>,
+        mut result_table: StateTable<S>,
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
@@ -143,6 +150,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 state_table.table.disable_sanity_check();
             }
         });
+        result_table.disable_sanity_check();
 
         Ok(Self {
             input,
@@ -155,6 +163,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 _input_schema: input_info.schema,
                 agg_calls,
                 agg_state_tables,
+                result_table,
                 key_indices,
                 group_by_key_cache_size,
                 extreme_cache_size,
@@ -224,6 +233,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref key_indices,
             ref agg_calls,
             ref agg_state_tables,
+            ref result_table,
             ref input_pk_indices,
             group_by_key_cache_size: _,
             ref extreme_cache_size,
@@ -276,10 +286,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 generate_managed_agg_state(
                                     Some(&key.clone().deserialize(key_data_types.iter())?),
                                     agg_calls,
+                                    agg_state_tables,
+                                    result_table,
                                     input_pk_indices.clone(),
                                     *extreme_cache_size,
-                                    state_tables,
-                                    state_table_col_mappings,
                                 )
                                 .await?,
                             )
@@ -337,7 +347,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref ctx,
             ref key_indices,
             ref schema,
-            ref mut state_tables,
+            ref mut agg_state_tables,
+            ref mut result_table,
             ref lookup_miss_count,
             ref total_lookup_count,
             ref metrics,
@@ -455,9 +466,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        for state_table in &mut extra.state_tables {
-            state_table.init_epoch(barrier.epoch);
-        }
+        extra.agg_state_tables.iter_mut().for_each(|state_table| {
+            if let Some(state_table) = state_table {
+                state_table.table.init_epoch(barrier.epoch);
+            }
+        });
+        extra.result_table.init_epoch(barrier.epoch);
 
         yield Message::Barrier(barrier);
 
@@ -476,9 +490,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(extra.ctx.id) {
-                        for state_table in &mut extra.state_tables {
-                            state_table.update_vnode_bitmap(vnode_bitmap.clone());
-                        }
+                        extra.agg_state_tables.iter_mut().for_each(|state_table| {
+                            if let Some(state_table) = state_table {
+                                state_table.table.update_vnode_bitmap(vnode_bitmap.clone());
+                            }
+                        });
                     }
 
                     yield Message::Barrier(barrier);

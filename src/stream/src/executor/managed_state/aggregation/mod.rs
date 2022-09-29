@@ -15,7 +15,6 @@
 //! Aggregators with state store support
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 pub use extreme::*;
 use risingwave_common::array::stream_chunk::Ops;
@@ -27,8 +26,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use value::*;
 
-use crate::common::StateTableColumnMapping;
-use crate::executor::aggregation::AggCall;
+use crate::executor::aggregation::{AggCall, AggStateTable};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::array_agg::ManagedArrayAggState;
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
@@ -179,15 +177,15 @@ impl<S: StateStore> ManagedStateImpl<S> {
 
     /// Create a managed state from `agg_call`.
     #[allow(clippy::too_many_arguments)]
-    pub async fn create_managed_state(
+    pub fn create_managed_state(
         agg_call: AggCall,
-        row_count: Option<usize>,
+        agg_state_table: Option<&AggStateTable<S>>,
+        row_count: Option<usize>, // TODO(rc): may be `usize` directly
+        prev_output: Option<Datum>,
         pk_indices: PkIndices,
         is_row_count: bool,
         group_key: Option<&Row>,
         extreme_cache_size: usize,
-        state_table: &StateTable<S>,
-        state_table_col_mapping: Arc<StateTableColumnMapping>,
     ) -> StreamExecutorResult<Self> {
         assert!(
             is_row_count || row_count.is_some(),
@@ -195,19 +193,25 @@ impl<S: StateStore> ManagedStateImpl<S> {
         );
         match agg_call.kind {
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
-                Ok(Self::Value(
-                    ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
-                ))
+                Ok(Self::Value(ManagedValueState::new(
+                    agg_call,
+                    row_count,
+                    group_key,
+                    prev_output,
+                )?))
             }
             // optimization: use single-value state for append-only min/max
             AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
+                ManagedValueState::new(agg_call, row_count, group_key, prev_output)?,
             )),
             AggKind::Max | AggKind::Min => Ok(Self::Table(Box::new(GenericExtremeState::new(
                 agg_call,
                 group_key,
                 pk_indices,
-                state_table_col_mapping,
+                agg_state_table
+                    .expect("non-append-only min/max must have state table")
+                    .mapping
+                    .clone(),
                 row_count.unwrap(),
                 extreme_cache_size,
             )))),
@@ -215,14 +219,20 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 agg_call,
                 group_key,
                 pk_indices,
-                state_table_col_mapping,
+                agg_state_table
+                    .expect("non-append-only min/max must have state table")
+                    .mapping
+                    .clone(),
                 row_count.unwrap(),
             )))),
             AggKind::ArrayAgg => Ok(Self::Table(Box::new(ManagedArrayAggState::new(
                 agg_call,
                 group_key,
                 pk_indices,
-                state_table_col_mapping,
+                agg_state_table
+                    .expect("non-append-only min/max must have state table")
+                    .mapping
+                    .clone(),
                 row_count.unwrap(),
             )))),
         }

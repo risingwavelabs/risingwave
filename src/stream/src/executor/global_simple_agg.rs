@@ -23,7 +23,6 @@ use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, AggStateTable};
 use super::*;
-use crate::common::StateTableColumnMapping;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{
     generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -67,6 +66,11 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// `None` means the agg call need not to maintain a state table by itself.
     agg_state_tables: Vec<Option<AggStateTable<S>>>,
 
+    /// State table for the previous result of all agg calls.
+    /// The outputs of all managed agg states are collected and stored in this
+    /// table when `flush_data` is called.
+    result_table: StateTable<S>,
+
     extreme_cache_size: usize,
 }
 
@@ -95,6 +99,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         mut agg_state_tables: Vec<Option<AggStateTable<S>>>,
+        mut result_table: StateTable<S>,
         pk_indices: PkIndices,
         executor_id: u64,
         extreme_cache_size: usize,
@@ -108,6 +113,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 state_table.table.disable_sanity_check();
             }
         });
+        result_table.disable_sanity_check();
 
         Ok(Self {
             ctx,
@@ -122,6 +128,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             states: None,
             agg_calls,
             agg_state_tables,
+            result_table,
             extreme_cache_size,
         })
     }
@@ -131,13 +138,13 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         ctx: &ActorContextRef,
         identity: &str,
         agg_calls: &[AggCall],
+        agg_state_tables: &mut [Option<AggStateTable<S>>],
+        result_table: &mut StateTable<S>,
         input_pk_indices: &[usize],
         _input_schema: &Schema,
         states: &mut Option<AggState<S>>,
         chunk: StreamChunk,
         extreme_cache_size: usize,
-        state_tables: &mut [StateTable<S>],
-        state_table_col_mappings: &[Arc<StateTableColumnMapping>],
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
@@ -149,10 +156,10 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let state = generate_managed_agg_state(
                 None,
                 agg_calls,
+                agg_state_tables,
+                result_table,
                 input_pk_indices.to_vec(),
                 extreme_cache_size,
-                state_tables,
-                state_table_col_mappings,
             )
             .await?;
             *states = Some(state);
@@ -163,11 +170,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         states.may_mark_as_dirty(state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for ((agg_state, agg_call), state_table) in states
+        for ((agg_state, agg_call), agg_state_table) in states
             .managed_states
             .iter_mut()
             .zip_eq(agg_calls.iter())
-            .zip_eq(state_tables.iter_mut())
+            .zip_eq(agg_state_tables.iter_mut())
         {
             let vis_map = agg_call_filter_res(
                 ctx,
@@ -178,7 +185,12 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 capacity,
             )?;
             agg_state
-                .apply_chunk(&ops, vis_map.as_ref(), &column_refs, state_table)
+                .apply_chunk(
+                    &ops,
+                    vis_map.as_ref(),
+                    &column_refs,
+                    &mut agg_state_table.table,
+                )
                 .await?;
         }
 
@@ -189,7 +201,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         schema: &Schema,
         states: &mut Option<AggState<S>>,
         epoch: EpochPair,
-        state_tables: &mut [StateTable<S>],
+        agg_state_tables: &mut [Option<AggStateTable<S>>],
+        result_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
@@ -251,15 +264,18 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             mut states,
             agg_calls,
             extreme_cache_size,
-            mut state_tables,
-            state_table_col_mappings,
+            mut agg_state_tables,
+            mut result_table,
         } = self;
         let mut input = input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        for table in &mut state_tables {
-            table.init_epoch(barrier.epoch);
-        }
+        agg_state_tables.iter_mut().for_each(|state_table| {
+            if let Some(state_table) = state_table {
+                state_table.table.init_epoch(barrier.epoch);
+            }
+        });
+        result_table.init_epoch(barrier.epoch);
 
         yield Message::Barrier(barrier);
 
@@ -272,13 +288,13 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         &ctx,
                         &info.identity,
                         &agg_calls,
+                        &mut agg_state_tables,
+                        &mut result_table,
                         &input_pk_indices,
                         &input_schema,
                         &mut states,
                         chunk,
                         extreme_cache_size,
-                        &mut state_tables,
-                        &state_table_col_mappings,
                     )
                     .await?;
                 }
@@ -287,7 +303,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         &info.schema,
                         &mut states,
                         barrier.epoch,
-                        &mut state_tables,
+                        &mut agg_state_tables,
+                        &mut result_table,
                     )
                     .await?
                     {

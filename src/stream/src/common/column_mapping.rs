@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct StateTableColumnMapping {
     /// index: state table column index, value: upstream column index
     upstream_columns: Vec<usize>,

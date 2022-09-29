@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::agg_common::{build_agg_call_from_prost, build_agg_state_tables_from_proto};
 use super::*;
@@ -32,6 +33,7 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     input: BoxedExecutor,
     agg_calls: Vec<AggCall>,
     agg_state_tables: Vec<Option<AggStateTable<S>>>,
+    result_table: StateTable<S>,
     key_indices: Vec<usize>,
     pk_indices: PkIndices,
     group_by_cache_size: usize,
@@ -50,6 +52,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.input,
             args.agg_calls,
             args.agg_state_tables,
+            args.result_table,
             args.pk_indices,
             args.executor_id,
             args.key_indices,
@@ -89,15 +92,23 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
 
-        let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash agg"));
-        let agg_state_tables =
-            build_agg_state_tables_from_proto(store, node.get_agg_call_states(), Some(vnodes));
+        let vnodes = Some(Arc::new(
+            params.vnode_bitmap.expect("vnodes not set for hash agg"),
+        ));
+        let agg_state_tables = build_agg_state_tables_from_proto(
+            node.get_agg_call_states(),
+            store.clone(),
+            vnodes.clone(),
+        );
+        let result_table =
+            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, vnodes);
 
         let args = HashAggExecutorDispatcherArgs {
             ctx: params.actor_context,
             input,
             agg_calls,
             agg_state_tables,
+            result_table,
             key_indices,
             pk_indices: params.pk_indices,
             group_by_cache_size: stream.config.developer.unsafe_hash_agg_cache_size,

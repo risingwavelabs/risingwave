@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
@@ -49,7 +48,7 @@ pub struct GenericExtremeState<S: StateStore> {
     group_key: Option<Row>,
 
     /// Contains the column mapping between upstream schema and state table.
-    state_table_col_mapping: Arc<StateTableColumnMapping>,
+    state_table_col_mapping: StateTableColumnMapping, // TODO(rc): may not need this later
 
     // The column to aggregate in input chunk.
     upstream_agg_col_idx: usize,
@@ -110,7 +109,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         agg_call: AggCall,
         group_key: Option<&Row>,
         pk_indices: PkIndices,
-        col_mapping: Arc<StateTableColumnMapping>,
+        col_mapping: StateTableColumnMapping,
         row_count: usize,
         cache_capacity: usize,
     ) -> Self {

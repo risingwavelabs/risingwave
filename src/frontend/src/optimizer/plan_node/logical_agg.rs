@@ -330,7 +330,11 @@ impl AggCallState {
                                     .with_id(state.gen_table_id_wrapped())
                                     .to_internal_table_prost(),
                             ),
-                            column_mapping: s.column_mapping.into_iter().map(|x| x as _).collect(),
+                            upstream_column_indices: s
+                                .column_mapping
+                                .into_iter()
+                                .map(|x| x as _)
+                                .collect(),
                         },
                     )
                 }
