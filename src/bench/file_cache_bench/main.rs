@@ -24,9 +24,6 @@ mod rate;
 #[cfg(target_os = "linux")]
 mod utils;
 
-use clap::Parser;
-use tokio::sync::oneshot;
-
 #[derive(Parser, Debug, Clone)]
 pub struct Args {
     #[clap(short, long)]
@@ -78,6 +75,9 @@ pub struct Args {
 
 #[cfg(target_os = "linux")]
 async fn main_okk() {
+    use clap::Parser;
+    use tokio::sync::oneshot;
+
     let args = Args::parse();
 
     if args.enable_tracing {

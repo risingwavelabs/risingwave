@@ -296,7 +296,7 @@ int filemap_write_and_wait_range_leave(struct pt_regs *ctx, struct address_space
 "#;
 
     // HINT: Kernel should be built with CONFIG_KALLSYMS_ALL.
-    // HINT: Shoud run with sudo.
+    // HINT: Should run with sudo.
     let syms = read_to_string("/proc/kallsyms").await.unwrap();
     let ext4sym = syms
         .split('\n')
