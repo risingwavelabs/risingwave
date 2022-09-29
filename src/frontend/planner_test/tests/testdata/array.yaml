@@ -112,8 +112,8 @@
   logical_plan: |
     LogicalProject { exprs: [ArrayPrepend(Array(233:Int32), Array(Array(66:Int32)))] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- sql: |
-    /* string from/to varchar[] in implicit context */
+- name: string from/to varchar[] in implicit context
+  sql: |
     values (array['a', 'b']), ('{c,' || 'd}');
   binder_error:
     "Bind error: types List { datatype: Varchar } and Varchar cannot be

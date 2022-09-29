@@ -39,12 +39,16 @@ pub struct LogicalTopN {
     input: PlanRef,
     limit: usize,
     offset: usize,
+    with_ties: bool,
     order: Order,
     group_key: Vec<usize>,
 }
 
 impl LogicalTopN {
-    pub fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
+    pub fn new(input: PlanRef, limit: usize, offset: usize, with_ties: bool, order: Order) -> Self {
+        if with_ties {
+            assert!(offset == 0, "WITH TIES is not supported with OFFSET");
+        }
         let ctx = input.ctx();
         let schema = input.schema().clone();
         let pk_indices = input.logical_pk().to_vec();
@@ -55,6 +59,7 @@ impl LogicalTopN {
             input,
             limit,
             offset,
+            with_ties,
             order,
             group_key: vec![],
         }
@@ -64,16 +69,30 @@ impl LogicalTopN {
         input: PlanRef,
         limit: usize,
         offset: usize,
+        with_ties: bool,
         order: Order,
         group_key: Vec<usize>,
     ) -> Self {
-        let mut topn = Self::new(input, limit, offset, order);
+        let mut topn = Self::new(input, limit, offset, with_ties, order);
         topn.group_key = group_key;
         topn
     }
 
-    pub fn create(input: PlanRef, limit: usize, offset: usize, order: Order) -> PlanRef {
-        Self::new(input, limit, offset, order).into()
+    pub fn create(
+        input: PlanRef,
+        limit: usize,
+        offset: usize,
+        order: Order,
+        with_ties: bool,
+    ) -> Result<PlanRef> {
+        if with_ties && offset > 0 {
+            return Err(ErrorCode::NotImplemented(
+                "WITH TIES is not supported with OFFSET".to_string(),
+                None.into(),
+            )
+            .into());
+        }
+        Ok(Self::new(input, limit, offset, with_ties, order).into())
     }
 
     pub fn limit(&self) -> usize {
@@ -82,6 +101,10 @@ impl LogicalTopN {
 
     pub fn offset(&self) -> usize {
         self.offset
+    }
+
+    pub fn with_ties(&self) -> bool {
+        self.with_ties
     }
 
     /// `topn_order` returns the order of the Top-N operator. This naming is because `order()`
@@ -115,6 +138,9 @@ impl LogicalTopN {
         builder
             .field("limit", &format_args!("{}", self.limit()))
             .field("offset", &format_args!("{}", self.offset()));
+        if self.with_ties {
+            builder.field("with_ties", &format_args!("{}", true));
+        }
         if !self.group_key.is_empty() {
             builder.field("group_key", &self.group_key);
         }
@@ -223,6 +249,7 @@ impl LogicalTopN {
                 project.into(),
                 self.limit + self.offset,
                 0,
+                self.with_ties,
                 self.order.clone(),
                 vec![vnode_col_idx],
             ),
@@ -234,6 +261,7 @@ impl LogicalTopN {
             exchange,
             self.limit,
             self.offset,
+            self.with_ties,
             self.order.clone(),
         ));
 
@@ -254,6 +282,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
             input,
             self.limit,
             self.offset,
+            self.with_ties,
             self.order.clone(),
             self.group_key.clone(),
         )
@@ -270,6 +299,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
                 input,
                 self.limit,
                 self.offset,
+                self.with_ties,
                 input_col_change
                     .rewrite_required_order(&self.order)
                     .unwrap(),
@@ -330,7 +360,14 @@ impl ColPrunable for LogicalTopN {
                 .collect(),
         };
         let new_input = self.input.prune_col(&input_required_cols);
-        let top_n = Self::new(new_input, self.limit, self.offset, new_order).into();
+        let top_n = Self::new(
+            new_input,
+            self.limit,
+            self.offset,
+            self.with_ties,
+            new_order,
+        )
+        .into();
 
         if input_required_cols == required_cols {
             top_n
@@ -361,6 +398,13 @@ impl ToBatch for LogicalTopN {
             return Err(ErrorCode::NotImplemented(
                 "Group TopN in batch mode".to_string(),
                 4847.into(),
+            )
+            .into());
+        }
+        if self.with_ties {
+            return Err(ErrorCode::NotImplemented(
+                "TopN with ties in batch mode".to_string(),
+                5302.into(),
             )
             .into());
         }

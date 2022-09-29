@@ -31,41 +31,41 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))] }
       └─BatchScan { table: t, columns: [], distribution: SomeShard }
-- name: bind between 
+- name: bind between
   sql: |
     SELECT 1 between 2 and 3
   logical_plan: |
     LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32))] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- name: bind is distinct from 
+- name: bind is distinct from
   sql: |
     SELECT 1 IS DISTINCT FROM 2
   logical_plan: |
     LogicalProject { exprs: [IsDistinctFrom(1:Int32, 2:Int32)] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- name: bind is not distinct from 
+- name: bind is not distinct from
   sql: |
     SELECT 1 IS NOT DISTINCT FROM 2
   logical_plan: |
     LogicalProject { exprs: [IsNotDistinctFrom(1:Int32, 2:Int32)] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- name: in-list with aligned types 
+- name: in-list with aligned types
   sql: |
     SELECT 1::real in (3, 1.0, 2);
   batch_plan: |
     BatchProject { exprs: [In(1:Int32::Float32, 3:Int32::Float32, 1.0:Decimal::Float32, 2:Int32::Float32)] }
     └─BatchValues { rows: [[]] }
-- name: not in-list with aligned types 
+- name: not in-list with aligned types
   sql: |
     SELECT 1::real not in (3, 1.0, 2);
   batch_plan: |
     BatchProject { exprs: [Not(In(1:Int32::Float32, 3:Int32::Float32, 1.0:Decimal::Float32, 2:Int32::Float32))] }
     └─BatchValues { rows: [[]] }
-- name: in-list with misaligned types 
+- name: in-list with misaligned types
   sql: |
     SELECT true in (3, 1.0, 2);
   binder_error: 'Bind error: types Boolean and Int32 cannot be matched'
-- name: in-list with non-const - agg 
+- name: in-list with non-const - agg
   sql: |
     create table t (v1 int);
     SELECT 1 in (3, 0.5*2, min(v1)) from t;
@@ -75,7 +75,7 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [min(t.v1)] }
           └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
-- name: in-list with non-const - scalar subquery 
+- name: in-list with non-const - scalar subquery
   sql: |
     create table t (v1 int);
     create table b (b1 int, b2 int);
@@ -90,7 +90,7 @@
           └─BatchExchange { order: [], dist: Single }
             └─BatchSimpleAgg { aggs: [min(t.v1)] }
               └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
-- name: in-list with non-const - correlated ref 
+- name: in-list with non-const - correlated ref
   sql: |
     create table t (v1 int);
     create table b (b1 int, b2 int);
@@ -159,7 +159,7 @@
     BatchProject { exprs: [Position(Replace('1':Varchar, '1':Varchar, '2':Varchar), '123':Varchar)] }
     └─BatchFilter { predicate: Like('12':Varchar, '%1':Varchar) }
       └─BatchValues { rows: [[]] }
-- name: case searched form with else 
+- name: case searched form with else
   sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) as expr from t;
@@ -171,7 +171,7 @@
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- name: case searched form without else 
+- name: case searched form without else
   sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2.1 end) from t;
@@ -179,7 +179,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2:Int32), 2.1:Decimal)] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
-- name: case simple form 
+- name: case simple form
   sql: |
     create table t (v1 int);
     select (case v1 when 1 then 1 when 2.0 then 2 else 0.0 end) from t;
@@ -187,12 +187,12 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2.0:Decimal), 2:Int32::Decimal, 0.0:Decimal)] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
-- name: case misaligned result types 
+- name: case misaligned result types
   sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else true end) from t;
   binder_error: 'Bind error: types Int32 and Boolean cannot be matched'
-- name: case misaligned value types 
+- name: case misaligned value types
   sql: |
     create table t (v1 int);
     select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
