@@ -39,7 +39,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 #[derive(Debug, Clone)]
 pub struct LogicalScan {
     pub base: PlanBase,
-    data: generic::Scan,
+    core: generic::Scan,
 }
 
 impl LogicalScan {
@@ -99,7 +99,7 @@ impl LogicalScan {
 
         Self {
             base,
-            data: generic::Scan {
+            core: generic::Scan {
                 table_name,
                 is_sys_table,
                 required_col_idx,
@@ -173,16 +173,16 @@ impl LogicalScan {
     }
 
     pub fn table_name(&self) -> &str {
-        &self.data.table_name
+        &self.core.table_name
     }
 
     pub fn is_sys_table(&self) -> bool {
-        self.data.is_sys_table
+        self.core.is_sys_table
     }
 
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
-        self.data.table_desc.as_ref()
+        self.core.table_desc.as_ref()
     }
 
     /// Get the descs of the output columns.
@@ -202,17 +202,17 @@ impl LogicalScan {
     }
 
     pub fn output_column_indices(&self) -> &[usize] {
-        &self.data.output_col_idx
+        &self.core.output_col_idx
     }
 
     /// Get all indexes on this table
     pub fn indexes(&self) -> &[Rc<IndexCatalog>] {
-        &self.data.indexes
+        &self.core.indexes
     }
 
     /// Get the logical scan's filter predicate
     pub fn predicate(&self) -> &Condition {
-        &self.data.predicate
+        &self.core.predicate
     }
 
     /// get the Mapping of columnIndex from internal column index to output column index
@@ -354,7 +354,7 @@ impl LogicalScan {
             self.table_name().to_string(),
             self.is_sys_table(),
             self.required_col_idx().to_vec(),
-            self.data.table_desc.clone(),
+            self.core.table_desc.clone(),
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
@@ -372,7 +372,7 @@ impl LogicalScan {
             self.table_name().to_string(),
             self.is_sys_table(),
             self.output_col_idx().to_vec(),
-            self.data.table_desc.clone(),
+            self.core.table_desc.clone(),
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             predicate,
@@ -384,7 +384,7 @@ impl LogicalScan {
             self.table_name().to_string(),
             self.is_sys_table(),
             output_col_idx,
-            self.data.table_desc.clone(),
+            self.core.table_desc.clone(),
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             self.predicate().clone(),
@@ -392,11 +392,11 @@ impl LogicalScan {
     }
 
     pub fn output_col_idx(&self) -> &Vec<usize> {
-        &self.data.output_col_idx
+        &self.core.output_col_idx
     }
 
     pub fn required_col_idx(&self) -> &Vec<usize> {
-        &self.data.required_col_idx
+        &self.core.required_col_idx
     }
 }
 
@@ -478,7 +478,7 @@ impl LogicalScan {
             required_order.enforce_if_not_satisfies(BatchSeqScan::new(self.clone(), vec![]).into())
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
-                self.data.table_desc.clone(),
+                self.core.table_desc.clone(),
                 self.base
                     .ctx
                     .inner()
@@ -487,7 +487,7 @@ impl LogicalScan {
                     .get_max_split_range_gap(),
             )?;
             let mut scan = self.clone();
-            scan.data.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
+            scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
             if predicate.always_false() {

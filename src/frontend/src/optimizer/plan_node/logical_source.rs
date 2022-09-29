@@ -36,7 +36,7 @@ use crate::TableCatalog;
 #[derive(Debug, Clone)]
 pub struct LogicalSource {
     pub base: PlanBase,
-    pub data: generic::Source,
+    pub core: generic::Source,
 }
 
 impl LogicalSource {
@@ -68,7 +68,7 @@ impl LogicalSource {
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalSource {
             base,
-            data: generic::Source(source_catalog),
+            core: generic::Source(source_catalog),
         }
     }
 
@@ -81,7 +81,7 @@ impl LogicalSource {
     }
 
     pub fn source_catalog(&self) -> Rc<SourceCatalog> {
-        self.data.0.clone()
+        self.core.0.clone()
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {

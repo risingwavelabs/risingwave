@@ -36,7 +36,7 @@ use crate::TableCatalog;
 #[derive(Debug, Clone)]
 pub struct LogicalTopN {
     pub base: PlanBase,
-    data: generic::TopN<PlanRef>,
+    core: generic::TopN<PlanRef>,
 }
 
 impl LogicalTopN {
@@ -48,7 +48,7 @@ impl LogicalTopN {
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalTopN {
             base,
-            data: generic::TopN {
+            core: generic::TopN {
                 input,
                 limit,
                 offset,
@@ -66,7 +66,7 @@ impl LogicalTopN {
         group_key: Vec<usize>,
     ) -> Self {
         let mut topn = Self::new(input, limit, offset, order);
-        topn.data.group_key = group_key;
+        topn.core.group_key = group_key;
         topn
     }
 
@@ -75,11 +75,11 @@ impl LogicalTopN {
     }
 
     pub fn limit(&self) -> usize {
-        self.data.limit
+        self.core.limit
     }
 
     pub fn offset(&self) -> usize {
-        self.data.offset
+        self.core.offset
     }
 
     /// `topn_order` returns the order of the Top-N operator. This naming is because `order()`
@@ -89,11 +89,11 @@ impl LogicalTopN {
     /// implies the output ordering of an operator, is never guaranteed; while `topn_order()` must
     /// be non-null because it's a critical information for Top-N operators to work
     pub fn topn_order(&self) -> &Order {
-        &self.data.order
+        &self.core.order
     }
 
     pub fn group_key(&self) -> &[usize] {
-        &self.data.group_key
+        &self.core.group_key
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -244,7 +244,7 @@ impl LogicalTopN {
 
 impl PlanTreeNodeUnary for LogicalTopN {
     fn input(&self) -> PlanRef {
-        self.data.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {

@@ -78,12 +78,14 @@ impl LogicalProjectBuilder {
         LogicalProject::new(input, self.exprs)
     }
 }
+
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
     pub base: PlanBase,
-    data: generic::Project<PlanRef>,
+    core: generic::Project<PlanRef>,
 }
+
 impl LogicalProject {
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
         let ctx = input.ctx();
@@ -107,7 +109,7 @@ impl LogicalProject {
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalProject {
             base,
-            data: generic::Project::new(exprs, input),
+            core: generic::Project::new(exprs, input),
         }
     }
 
@@ -237,7 +239,7 @@ impl LogicalProject {
     }
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {
-        &self.data.exprs
+        &self.core.exprs
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -245,12 +247,12 @@ impl LogicalProject {
         builder.field(
             "exprs",
             &self
-                .data
+                .core
                 .exprs
                 .iter()
                 .map(|expr| ExprDisplay {
                     expr,
-                    input_schema: self.data.input.schema(),
+                    input_schema: self.core.input.schema(),
                 })
                 .collect_vec(),
         );
@@ -281,13 +283,13 @@ impl LogicalProject {
     }
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
-        self.data.decompose()
+        self.core.decompose()
     }
 }
 
 impl PlanTreeNodeUnary for LogicalProject {
     fn input(&self) -> PlanRef {
-        self.data.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
