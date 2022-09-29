@@ -341,7 +341,7 @@ impl DispatcherImpl {
 }
 
 macro_rules! impl_dispatcher {
-    ([], $( { $variant_name:ident } ),*) => {
+    ($( { $variant_name:ident } ),*) => {
         impl DispatcherImpl {
             pub async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
                 match self {
@@ -383,9 +383,8 @@ macro_rules! impl_dispatcher {
 }
 
 macro_rules! for_all_dispatcher_variants {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x), *],
             { Hash },
             { Broadcast },
             { Simple },
