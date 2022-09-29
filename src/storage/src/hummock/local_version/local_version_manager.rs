@@ -36,7 +36,8 @@ use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version::flush_controller::{BufferTracker, FlushController};
+use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventHandler};
+use crate::hummock::event_handler::{BufferWriteRequest, HummockEvent};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::local_version::{LocalVersion, ReadVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
@@ -44,7 +45,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, Shar
 use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
 };
-use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
+use crate::hummock::shared_buffer::OrderIndex;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
@@ -69,14 +70,14 @@ struct WorkerContext {
 /// the worker.
 pub struct LocalVersionManagerExternalHolder {
     local_version_manager: Arc<LocalVersionManager>,
-    shutdown_sender: mpsc::UnboundedSender<SharedBufferEvent>,
+    event_sender: mpsc::UnboundedSender<HummockEvent>,
 }
 
 impl Drop for LocalVersionManagerExternalHolder {
     fn drop(&mut self) {
         let _ = self
-            .shutdown_sender
-            .send(SharedBufferEvent::Shutdown)
+            .event_sender
+            .send(HummockEvent::Shutdown)
             .inspect_err(|e| {
                 error!("unable to send shutdown. Err: {}", e);
             });
@@ -88,6 +89,12 @@ impl Deref for LocalVersionManagerExternalHolder {
 
     fn deref(&self) -> &Self::Target {
         self.local_version_manager.deref()
+    }
+}
+
+impl LocalVersionManagerExternalHolder {
+    pub fn event_sender(&self) -> mpsc::UnboundedSender<HummockEvent> {
+        self.event_sender.clone()
     }
 }
 
@@ -128,7 +135,7 @@ impl LocalVersionManager {
             ..Default::default()
         };
 
-        let (buffer_event_sender, buffer_event_receiver) = mpsc::unbounded_channel();
+        let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
         let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
 
@@ -137,7 +144,7 @@ impl LocalVersionManager {
             // TODO: enable setting the ratio with config
             capacity * 4 / 5,
             capacity,
-            buffer_event_sender.clone(),
+            event_sender.clone(),
         );
 
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
@@ -172,19 +179,19 @@ impl LocalVersionManager {
             hummock_meta_client,
         ));
 
-        let flush_controller = FlushController::new(
+        let hummock_event_handler = HummockEventHandler::new(
             local_version_manager.clone(),
             buffer_tracker,
             sstable_id_manager,
-            buffer_event_receiver,
+            event_receiver,
         );
 
         // Buffer size manager.
-        tokio::spawn(flush_controller.start_flush_controller_worker());
+        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
         let observer_manager = ObserverManager::new(
             notification_client,
-            HummockObserverNode::new(filter_key_extractor_manager, local_version_manager.clone()),
+            HummockObserverNode::new(filter_key_extractor_manager, event_sender.clone()),
         )
         .await;
         let _ = observer_manager
@@ -199,7 +206,7 @@ impl LocalVersionManager {
 
         Arc::new(LocalVersionManagerExternalHolder {
             local_version_manager,
-            shutdown_sender: buffer_event_sender,
+            event_sender,
         })
     }
 
@@ -380,11 +387,11 @@ impl LocalVersionManager {
         let batch_size = batch.size();
         if self.buffer_tracker.try_write(batch_size) {
             self.write_shared_buffer_inner(batch.epoch(), batch);
-            self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
+            self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);
         } else {
             let (tx, rx) = oneshot::channel();
             self.buffer_tracker
-                .send_event(SharedBufferEvent::WriteRequest(WriteRequest {
+                .send_event(HummockEvent::BufferWriteRequest(BufferWriteRequest {
                     epoch: batch.epoch(),
                     batch,
                     grant_sender: tx,
@@ -427,7 +434,7 @@ impl LocalVersionManager {
         shared_buffer.write_batch(batch);
 
         // Notify the buffer tracker after the batch has been added to shared buffer.
-        self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
+        self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);
     }
 
     /// Issue a concurrent upload task to flush some local shared buffer batch to object store.
@@ -491,11 +498,10 @@ impl LocalVersionManager {
 
         // Wait all epochs' task that less than epoch.
         let (tx, rx) = oneshot::channel();
-        self.buffer_tracker
-            .send_event(SharedBufferEvent::SyncEpoch {
-                new_sync_epoch: epoch,
-                sync_result_sender: tx,
-            });
+        self.buffer_tracker.send_event(HummockEvent::SyncEpoch {
+            new_sync_epoch: epoch,
+            sync_result_sender: tx,
+        });
 
         // TODO: re-enable it when conflict detector has enough information to do conflict detection
         // if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
@@ -548,7 +554,7 @@ impl LocalVersionManager {
                 Err(e)
             }
         };
-        self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
+        self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);
         ret
     }
 
@@ -577,7 +583,7 @@ impl LocalVersionManager {
 impl LocalVersionManager {
     pub async fn clear_shared_buffer(&self) {
         let (tx, rx) = oneshot::channel();
-        self.buffer_tracker.send_event(SharedBufferEvent::Clear(tx));
+        self.buffer_tracker.send_event(HummockEvent::Clear(tx));
         rx.await.unwrap();
     }
 }

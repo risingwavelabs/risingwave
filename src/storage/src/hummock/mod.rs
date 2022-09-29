@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::*;
+use risingwave_hummock_sdk::{HummockEpoch, *};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 
@@ -48,6 +48,7 @@ pub mod test_utils;
 pub mod utils;
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
+pub mod event_handler;
 pub mod local_version;
 pub mod observer_manager;
 pub mod store;

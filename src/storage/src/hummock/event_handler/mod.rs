@@ -55,5 +55,5 @@ pub enum HummockEvent {
 
     Shutdown,
 
-    VersionUpdate((pin_version_response::Payload, oneshot::Sender<()>)),
+    VersionUpdate(pin_version_response::Payload),
 }

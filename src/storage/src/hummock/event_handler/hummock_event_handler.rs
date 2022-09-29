@@ -106,7 +106,7 @@ impl BufferTracker {
     }
 }
 
-pub(crate) struct FlushController {
+pub(crate) struct HummockEventHandler {
     local_version_manager: Arc<LocalVersionManager>,
     buffer_tracker: BufferTracker,
     sstable_id_manager: SstableIdManagerRef,
@@ -116,7 +116,7 @@ pub(crate) struct FlushController {
     pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
 }
 
-impl FlushController {
+impl HummockEventHandler {
     pub(crate) fn new(
         local_version_manager: Arc<LocalVersionManager>,
         buffer_tracker: BufferTracker,
@@ -178,7 +178,7 @@ impl FlushController {
 }
 
 // Handler for different events
-impl FlushController {
+impl HummockEventHandler {
     fn handle_epoch_finished(&mut self, epoch: HummockEpoch) {
         // TODO: in some case we may only need the read guard.
         let mut local_version_guard = self.local_version_manager.local_version.write();
@@ -355,8 +355,8 @@ impl FlushController {
     }
 }
 
-impl FlushController {
-    pub(crate) async fn start_flush_controller_worker(mut self) {
+impl HummockEventHandler {
+    pub(crate) async fn start_hummock_event_handler_worker(mut self) {
         loop {
             let select_result = match select(
                 self.upload_handle_manager.next_finished_epoch(),
@@ -400,10 +400,9 @@ impl FlushController {
                         break;
                     }
 
-                    HummockEvent::VersionUpdate((version_payload, grant_sender)) => {
+                    HummockEvent::VersionUpdate(version_payload) => {
                         self.local_version_manager
                             .try_update_pinned_version(version_payload);
-                        grant_sender.send(()).unwrap();
                     }
                 },
                 Either::Right(None) => {
