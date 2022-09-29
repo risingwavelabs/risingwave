@@ -23,9 +23,7 @@ use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, Result, RwError};
-use risingwave_common::hash::{
-    calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
-};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::types::{
     DataType, Datum, ParallelUnitId, ToOwnedDatum, VirtualNode, VnodeMapping,
 };
@@ -590,8 +588,6 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
         let vnode_mapping = lookup_join_node.get_inner_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
-        let hash_key_kind = calc_hash_key_kind(&inner_side_key_types);
-
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
             vnode_mapping,
@@ -606,47 +602,64 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             pu_to_scan_range_mapping: HashMap::new(),
         };
 
-        Ok(LookupJoinExecutor::dispatch_by_kind(
-            hash_key_kind,
-            LookupJoinExecutor::new(
-                join_type,
-                condition,
-                outer_side_input,
-                outer_side_data_types,
-                outer_side_key_idxs,
-                Box::new(inner_side_builder),
-                inner_side_key_types,
-                inner_side_key_idxs,
-                null_safe,
-                DataChunkBuilder::with_default_size(original_schema.data_types()),
-                actual_schema,
-                output_indices,
-                source.plan_node().get_identity().clone(),
-            ),
-        ))
+        Ok(LookupJoinExecutorArgs {
+            join_type,
+            condition,
+            outer_side_input,
+            outer_side_data_types,
+            outer_side_key_idxs,
+            inner_side_builder: Box::new(inner_side_builder),
+            inner_side_key_types,
+            inner_side_key_idxs,
+            null_safe,
+            chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
+            schema: actual_schema,
+            output_indices,
+            identity: source.plan_node().get_identity().clone(),
+        }
+        .dispatch())
     }
 }
 
-impl HashKeyDispatcher for LookupJoinExecutor<()> {
-    type Input = Self;
+struct LookupJoinExecutorArgs {
+    join_type: JoinType,
+    condition: Option<BoxedExpression>,
+    outer_side_input: BoxedExecutor,
+    outer_side_data_types: Vec<DataType>,
+    outer_side_key_idxs: Vec<usize>,
+    inner_side_builder: Box<dyn LookupExecutorBuilder>,
+    inner_side_key_types: Vec<DataType>,
+    inner_side_key_idxs: Vec<usize>,
+    null_safe: Vec<bool>,
+    chunk_builder: DataChunkBuilder,
+    schema: Schema,
+    output_indices: Vec<usize>,
+    identity: String,
+}
+
+impl HashKeyDispatcher for LookupJoinExecutorArgs {
     type Output = BoxedExecutor;
 
-    fn dispatch<K: HashKey>(input: Self::Input) -> Self::Output {
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Box::new(LookupJoinExecutor::<K>::new(
-            input.join_type,
-            input.condition,
-            input.outer_side_input,
-            input.outer_side_data_types,
-            input.outer_side_key_idxs,
-            input.inner_side_builder,
-            input.inner_side_key_types,
-            input.inner_side_key_idxs,
-            input.null_safe,
-            input.chunk_builder,
-            input.schema,
-            input.output_indices,
-            input.identity,
+            self.join_type,
+            self.condition,
+            self.outer_side_input,
+            self.outer_side_data_types,
+            self.outer_side_key_idxs,
+            self.inner_side_builder,
+            self.inner_side_key_types,
+            self.inner_side_key_idxs,
+            self.null_safe,
+            self.chunk_builder,
+            self.schema,
+            self.output_indices,
+            self.identity,
         ))
+    }
+
+    fn data_types(&self) -> &[DataType] {
+        &self.inner_side_key_types
     }
 }
 
@@ -654,7 +667,7 @@ impl HashKeyDispatcher for LookupJoinExecutor<()> {
 mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::hash::{calc_hash_key_kind, HashKeyDispatcher};
+    use risingwave_common::hash::HashKeyDispatcher;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -662,11 +675,12 @@ mod tests {
     use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
     use risingwave_pb::expr::expr_node::Type;
 
+    use super::LookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
     };
-    use crate::executor::{BoxedExecutor, LookupJoinExecutor, OrderByExecutor};
+    use crate::executor::{BoxedExecutor, OrderByExecutor};
 
     pub struct MockGatherExecutor {
         chunks: Vec<DataChunk>,
@@ -724,26 +738,22 @@ mod tests {
         let inner_side_data_types = inner_side_schema.data_types();
         let outer_side_data_types = outer_side_input.schema().data_types();
 
-        let hash_key_kind = calc_hash_key_kind(&inner_side_data_types);
-
-        LookupJoinExecutor::dispatch_by_kind(
-            hash_key_kind,
-            LookupJoinExecutor::new(
-                join_type,
-                condition,
-                outer_side_input,
-                outer_side_data_types,
-                vec![0],
-                Box::new(FakeInnerSideExecutorBuilder::new(inner_side_schema)),
-                vec![inner_side_data_types[0].clone()],
-                vec![0],
-                vec![null_safe],
-                DataChunkBuilder::with_default_size(original_schema.data_types()),
-                original_schema.clone(),
-                (0..original_schema.len()).into_iter().collect(),
-                "TestLookupJoinExecutor".to_string(),
-            ),
-        )
+        LookupJoinExecutorArgs {
+            join_type,
+            condition,
+            outer_side_input,
+            outer_side_data_types,
+            outer_side_key_idxs: vec![0],
+            inner_side_builder: Box::new(FakeInnerSideExecutorBuilder::new(inner_side_schema)),
+            inner_side_key_types: vec![inner_side_data_types[0].clone()],
+            inner_side_key_idxs: vec![0],
+            null_safe: vec![null_safe],
+            chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
+            schema: original_schema.clone(),
+            output_indices: (0..original_schema.len()).into_iter().collect(),
+            identity: "TestLookupJoinExecutor".to_string(),
+        }
+        .dispatch()
     }
 
     fn create_order_by_executor(child: BoxedExecutor) -> BoxedExecutor {

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -101,7 +102,7 @@ async fn test_update_pinned_version() {
             epoch,
             unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
-            0,
+            TableId::from(0),
         )
     };
 

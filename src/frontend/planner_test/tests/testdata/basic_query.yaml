@@ -39,7 +39,7 @@
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamFilter { predicate: (t.v1 < 1:Int32) }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- name: test boolean expression common factor extraction 
+- name: test boolean expression common factor extraction
   sql: |
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
     select * from t where v1 AND v2 AND ((v1 AND v2) OR (v2 AND v3));
@@ -47,7 +47,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: t.v1 AND t.v2 AND (t.v1 OR t.v3) }
       └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
-- name: test boolean expression simplification 
+- name: test boolean expression simplification
   sql: |
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
     select * from t where v1 AND NOT(v1 OR v2 Or NOT(v1 AND v2 AND true));
@@ -55,7 +55,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: t.v1 AND Not(t.v1) AND Not(t.v2) AND t.v2 }
       └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
-- name: test boolean expression simplification 
+- name: test boolean expression simplification
   sql: |
     create table t (v1 Boolean, v2 Boolean);
     select * from t where (v1 AND v2) OR (v1 AND v2);
@@ -71,7 +71,7 @@
     LogicalProject { exprs: [t.a] }
     └─LogicalFilter { predicate: t.a }
       └─LogicalScan { table: t, columns: [t.a, t._row_id] }
-- name: constant folding for IS NOT TRUE, IS NOT FALSE 
+- name: constant folding for IS NOT TRUE, IS NOT FALSE
   sql: |
     create table t(a Boolean);
     select * from t where (NULL IS NOT TRUE) IS NOT FALSE AND a IS NOT TRUE;
@@ -79,7 +79,7 @@
     LogicalProject { exprs: [t.a] }
     └─LogicalFilter { predicate: IsNotTrue(t.a) }
       └─LogicalScan { table: t, columns: [t.a, t._row_id] }
-- name: constant folding IS NOT NULL 
+- name: constant folding IS NOT NULL
   sql: |
     create table t(a double precision);
     select * from t where (a IS NOT NULL AND 3.14 IS NOT NULL) OR (NULL IS NOT NULL);
@@ -151,13 +151,13 @@
   logical_plan: |
     LogicalProject { exprs: [] }
     └─LogicalScan { table: t, columns: [t._row_id] }
-- name: disallow subquery in values 
+- name: disallow subquery in values
   sql: |
     values(1, (select 1));
   binder_error: |-
     Feature is not yet implemented: Subquery in VALUES
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- name: disallow correlated_input_ref in values 
+- name: disallow correlated_input_ref in values
   sql: |
     create table t(v1 int);
     select v1 from t where exists (values(v1));
