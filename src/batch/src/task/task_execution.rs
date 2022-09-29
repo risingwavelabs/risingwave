@@ -111,7 +111,7 @@ pub struct TaskOutput {
 }
 
 impl TaskOutput {
-    /// Writes the data in serialized format to `ExchangeWriter`.
+    /// Write the data in serialized format to `ExchangeWriter`.
     /// Return whether the data stream is finished.
     async fn take_data_inner(
         &mut self,
@@ -119,10 +119,10 @@ impl TaskOutput {
         at_most_num: Option<usize>,
     ) -> Result<bool> {
         let mut cnt: usize = 0;
-        let unlimited = at_most_num.is_none();
-        let at_most_num = at_most_num.unwrap_or(0);
+        let limited = at_most_num.is_some();
+        let at_most_num = at_most_num.unwrap_or(usize::MAX);
         loop {
-            if !unlimited && cnt >= at_most_num {
+            if limited && cnt >= at_most_num {
                 return Ok(false);
             }
             match self.receiver.recv().await {
@@ -161,7 +161,7 @@ impl TaskOutput {
         Ok(true)
     }
 
-    /// Take at most num data and writes the data in serialized format to `ExchangeWriter`.
+    /// Take at most num data and write the data in serialized format to `ExchangeWriter`.
     /// Return whether the data stream is finished.
     pub async fn take_data_with_num(
         &mut self,
@@ -171,7 +171,7 @@ impl TaskOutput {
         self.take_data_inner(writer, Some(num)).await
     }
 
-    /// Take all data and writes the data in serialized format to `ExchangeWriter`.
+    /// Take all data and write the data in serialized format to `ExchangeWriter`.
     pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
         let finish = self.take_data_inner(writer, None).await?;
         assert!(finish);
