@@ -25,10 +25,10 @@ use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
+use crate::hummock::event_handler::{BufferWriteRequest, HummockEvent};
 use crate::hummock::local_version::local_version_manager::LocalVersionManager;
 use crate::hummock::local_version::upload_handle_manager::UploadHandleManager;
 use crate::hummock::local_version::SyncUncommittedDataStage;
-use crate::hummock::shared_buffer::{SharedBufferEvent, WriteRequest};
 use crate::hummock::{HummockError, HummockResult, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
@@ -39,14 +39,14 @@ pub(crate) struct BufferTracker {
     global_buffer_size: Arc<AtomicUsize>,
     pub(crate) global_upload_task_size: Arc<AtomicUsize>,
 
-    pub(crate) buffer_event_sender: mpsc::UnboundedSender<SharedBufferEvent>,
+    pub(crate) buffer_event_sender: mpsc::UnboundedSender<HummockEvent>,
 }
 
 impl BufferTracker {
     pub fn new(
         flush_threshold: usize,
         block_write_threshold: usize,
-        buffer_event_sender: mpsc::UnboundedSender<SharedBufferEvent>,
+        buffer_event_sender: mpsc::UnboundedSender<HummockEvent>,
     ) -> Self {
         assert!(
             flush_threshold <= block_write_threshold,
@@ -101,7 +101,7 @@ impl BufferTracker {
         self.get_buffer_size() > self.flush_threshold + self.get_upload_task_size()
     }
 
-    pub fn send_event(&self, event: SharedBufferEvent) {
+    pub fn send_event(&self, event: HummockEvent) {
         self.buffer_event_sender.send(event).unwrap();
     }
 }
@@ -110,9 +110,9 @@ pub(crate) struct FlushController {
     local_version_manager: Arc<LocalVersionManager>,
     buffer_tracker: BufferTracker,
     sstable_id_manager: SstableIdManagerRef,
-    shared_buffer_event_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
+    shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
     upload_handle_manager: UploadHandleManager,
-    pending_write_requests: VecDeque<WriteRequest>,
+    pending_write_requests: VecDeque<BufferWriteRequest>,
     pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
 }
 
@@ -121,7 +121,7 @@ impl FlushController {
         local_version_manager: Arc<LocalVersionManager>,
         buffer_tracker: BufferTracker,
         sstable_id_manager: SstableIdManagerRef,
-        shared_buffer_event_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
+        shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
     ) -> Self {
         Self {
             local_version_manager,
@@ -149,8 +149,8 @@ impl FlushController {
         }
     }
 
-    fn grant_write_request(&mut self, request: WriteRequest) {
-        let WriteRequest {
+    fn grant_write_request(&mut self, request: BufferWriteRequest) {
+        let BufferWriteRequest {
             batch,
             epoch,
             grant_sender: sender,
@@ -228,7 +228,7 @@ impl FlushController {
         }
     }
 
-    fn handle_write_request(&mut self, request: WriteRequest) {
+    fn handle_write_request(&mut self, request: BufferWriteRequest) {
         if self.buffer_tracker.can_write() {
             self.grant_write_request(request);
             self.try_flush_shared_buffer();
@@ -375,29 +375,35 @@ impl FlushController {
                     self.handle_epoch_finished(epoch);
                 }
                 Either::Right(Some(event)) => match event {
-                    SharedBufferEvent::WriteRequest(request) => {
+                    HummockEvent::BufferWriteRequest(request) => {
                         self.handle_write_request(request);
                     }
-                    SharedBufferEvent::MayFlush => {
+                    HummockEvent::BufferMayFlush => {
                         // Only check and flush shared buffer after batch has been added to shared
                         // buffer.
                         self.try_flush_shared_buffer();
                     }
-                    SharedBufferEvent::BufferRelease(size) => {
+                    HummockEvent::BufferRelease(size) => {
                         self.handle_buffer_release(size);
                     }
-                    SharedBufferEvent::SyncEpoch {
+                    HummockEvent::SyncEpoch {
                         new_sync_epoch,
                         sync_result_sender,
                     } => {
                         self.handle_sync_epoch(new_sync_epoch, sync_result_sender);
                     }
-                    SharedBufferEvent::Clear(notifier) => {
+                    HummockEvent::Clear(notifier) => {
                         self.handle_clear(notifier).await;
                     }
-                    SharedBufferEvent::Shutdown => {
+                    HummockEvent::Shutdown => {
                         info!("buffer tracker shutdown");
                         break;
+                    }
+
+                    HummockEvent::VersionUpdate((version_payload, grant_sender)) => {
+                        self.local_version_manager
+                            .try_update_pinned_version(version_payload);
+                        grant_sender.send(()).unwrap();
                     }
                 },
                 Either::Right(None) => {
