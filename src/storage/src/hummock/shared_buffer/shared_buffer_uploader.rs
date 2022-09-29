@@ -132,15 +132,18 @@ impl SharedBufferUploader {
     pub async fn compact_l0_to_cache(
         &self,
         version: Arc<HummockVersion>,
+        groups: Vec<u64>,
     ) -> HummockResult<Vec<InMemorySstableData>> {
         let sstable_store = self.sstable_store.clone();
         let max_cache_size =
             (self.compactor_context.options.shared_buffer_capacity_mb as u64 / 4) << 20;
+        let stats = self.stats.clone();
         let ret = self
             .compaction_executor
             .spawn(async move {
                 let mut ret = vec![];
-                for (group, levels) in &version.levels {
+                for group in groups {
+                    let levels = version.levels.get(&group).unwrap();
                     let mut cache_size = 0;
                     let mut iters = vec![];
                     let mut sst_ids = vec![];
@@ -153,7 +156,7 @@ impl SharedBufferUploader {
                             break;
                         }
                         if level.level_type != (LevelType::Overlapping as i32) {
-                            if level.table_infos.len() > 1 {
+                            if level.table_infos.len() > 1 || level.total_file_size > cache_size {
                                 break;
                             }
 
@@ -180,18 +183,20 @@ impl SharedBufferUploader {
                         cache_size += level.total_file_size;
                     }
                     if iters.len() > MIN_CACHE_COMPACT_NUMBER {
+                        stats.compact_preload_count.inc();
                         let timer = Instant::now();
                         let iter = UnorderedMergeIteratorInner::new(iters);
                         let data = InMemorySstableData::build(
                             iter,
                             key_count as usize,
-                            *group,
+                            group,
                             sst_ids.clone(),
                         )
                         .await?;
                         tracing::info!(
-                            "preload sstable files [{:?}] to memory for group: {} in {}ms",
+                            "preload sstable files [{:?}] ({} MB) to memory for group: {} in {}ms",
                             sst_ids,
+                            cache_size >> 20,
                             group,
                             timer.elapsed().as_millis()
                         );

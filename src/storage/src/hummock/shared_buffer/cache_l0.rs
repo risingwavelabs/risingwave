@@ -112,7 +112,8 @@ impl InMemorySstableData {
             Ok(idx) => idx,
             Err(idx) => idx,
         };
-        if key::user_key(&self.data[idx].0).eq(key::user_key(internal_key)) {
+        if idx < self.data.len() && key::user_key(&self.data[idx].0).eq(key::user_key(internal_key))
+        {
             return Some(self.data[idx].1.clone());
         }
         None

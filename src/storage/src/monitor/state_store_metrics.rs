@@ -63,11 +63,12 @@ macro_rules! for_all_metrics {
             shared_buffer_to_sstable_size: Histogram,
 
             compaction_upload_sst_counts: GenericCounter<AtomicU64>,
-            compact_write_bytes: GenericCounterVec<AtomicU64>,
+            compact_preload_count: GenericCounter<AtomicU64>,
             compact_read_current_level: GenericCounterVec<AtomicU64>,
             compact_read_next_level: GenericCounterVec<AtomicU64>,
             compact_read_sstn_current_level: GenericCounterVec<AtomicU64>,
             compact_read_sstn_next_level: GenericCounterVec<AtomicU64>,
+            compact_write_bytes: GenericCounterVec<AtomicU64>,
             compact_write_sstn: GenericCounterVec<AtomicU64>,
             compact_sst_duration: Histogram,
             compact_task_duration: HistogramVec,
@@ -390,7 +391,12 @@ impl StateStoreMetrics {
             registry
         )
         .unwrap();
-
+        let compact_preload_count = register_int_counter_with_registry!(
+            "state_store_preload_counts",
+            "Total number of operation to preload",
+            registry
+        )
+        .unwrap();
         let opts = histogram_opts!(
             "state_store_sstable_bloom_filter_size",
             "Total bytes gotten from sstable_bloom_filter, for observing bloom_filter size",
@@ -463,6 +469,7 @@ impl StateStoreMetrics {
             compact_sst_duration,
             compact_task_duration,
             compact_task_pending_num,
+            compact_preload_count,
 
             get_table_id_total_time_duration,
             remote_read_time,

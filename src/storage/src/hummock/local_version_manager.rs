@@ -337,7 +337,7 @@ impl LocalVersionManager {
         }
 
         let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version, version_deltas);
-        let need_cache = new_version.need_cache();
+        let groups_for_caches = new_version.get_group_for_cache();
         let version = new_version.local_version();
         RwLockWriteGuard::unlock_fair(new_version);
         for cleaned_epoch in cleaned_epochs {
@@ -348,15 +348,19 @@ impl LocalVersionManager {
             .version_update_notifier_tx
             .send(new_version_id)
             .ok();
-        if need_cache {
+        if !groups_for_caches.is_empty() {
             let local_version = self.local_version.clone();
             let shared_buffer_uploader = self.shared_buffer_uploader.clone();
             tokio::spawn(async move {
-                match shared_buffer_uploader.compact_l0_to_cache(version).await {
+                match shared_buffer_uploader
+                    .compact_l0_to_cache(version, groups_for_caches)
+                    .await
+                {
                     Ok(ret) => {
                         local_version.write().set_cache_data_for_l0(ret);
                     }
                     Err(e) => {
+                        local_version.write().cancel_cache_generate();
                         tracing::error!("failed to preload L0 data, error: {:?}", e);
                     }
                 }

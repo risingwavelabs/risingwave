@@ -325,6 +325,11 @@ def section_compaction(outer_panels):
                     "sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_count[$__rate_interval]))", "avg_value_size - {{job}} @ {{instance}}"
                 ),
             ]),
+            panels.timeseries_ops("Preload Ops", [
+                panels.target(
+                    "sum(rate(state_store_preload_counts[$__rate_interval])) by (instance)", "iter keys flow - {{instance}} "
+                ),
+            ]),
         ])
     ]
 
@@ -839,7 +844,7 @@ def section_hummock(panels):
 
         panels.timeseries_count("Read Merged SSTs", [
             *quantile(lambda quantile, legend: panels.target(
-                f"histogram_quantile({quantile}, sum(rate(state_store_iter_merge_sstable_counts_bucket[$__rate_interval])) by (le, job, instance))", f"# merged ssts p{legend}" + " - {{job}} @ {{instance}}"
+                f"histogram_quantile({quantile}, sum(rate(state_store_iter_merge_sstable_counts_bucket[$__rate_interval])) by (le, job, type))", f"# merged ssts p{legend}" + " - {{job}} @ {{type}}"
             ), [90, 99, "max"]),
             panels.target(
                 "sum by(le, job, instance)(rate(state_store_iter_merge_sstable_counts_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_iter_merge_sstable_counts_count[$__rate_interval]))", "# merged ssts avg  - {{job}} @ {{instance}}"

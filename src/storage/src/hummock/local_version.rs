@@ -50,6 +50,7 @@ pub struct LocalVersion {
     /// key when we find it
     pub sync_uncommitted_data: BTreeMap<HummockEpoch, SyncUncommittedData>,
     committed_cache: Vec<Arc<InMemorySstableData>>,
+    pending_cache_generate: bool,
     max_sync_epoch: HummockEpoch,
     /// The max readable epoch, and epochs smaller than it will not be written again.
     sealed_epoch: HummockEpoch,
@@ -223,6 +224,7 @@ impl LocalVersion {
             committed_cache: vec![],
             max_sync_epoch: 0,
             sealed_epoch: 0,
+            pending_cache_generate: false,
         }
     }
 
@@ -397,9 +399,17 @@ impl LocalVersion {
             .or_insert_with(|| SharedBuffer::new(global_upload_task_size))
     }
 
-    pub fn need_cache(&self) -> bool {
+    pub fn get_group_for_cache(&mut self) -> Vec<u64> {
+        let mut groups = vec![];
+        if self.pending_cache_generate {
+            return groups;
+        }
         for (group, levels) in &self.local_related_version.version.levels {
-            if self.committed_cache.iter().any(|cache| cache.compaction_group_id() == *group) {
+            if self
+                .committed_cache
+                .iter()
+                .any(|cache| cache.compaction_group_id() == *group)
+            {
                 continue;
             }
             let mut overlapping_count = 0;
@@ -412,13 +422,19 @@ impl LocalVersion {
                 overlapping_count += sub_level.table_infos.len();
             }
             if overlapping_count > MIN_CACHE_COMPACT_NUMBER {
-                return true;
+                groups.push(*group);
+                self.pending_cache_generate = true;
             }
         }
-        false
+        groups
+    }
+
+    pub fn cancel_cache_generate(&mut self) {
+        self.pending_cache_generate = false;
     }
 
     pub fn set_cache_data_for_l0(&mut self, data: Vec<InMemorySstableData>) {
+        self.pending_cache_generate = false;
         for group in data {
             let ssts = group.get_ssts();
             let group_id = group.compaction_group_id();
@@ -446,6 +462,7 @@ impl LocalVersion {
             }
 
             if cache_valid {
+                tracing::info!("set cache for table [{:?}]", ssts);
                 self.committed_cache.push(Arc::new(group));
                 let mut new_version = self.local_related_version.version.as_ref().clone();
                 let levels = new_version.get_compaction_group_levels_mut(group_id);

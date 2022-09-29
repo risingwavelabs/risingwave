@@ -147,6 +147,10 @@ impl HummockStorage {
                 .await?,
             ))
         }
+        self.stats
+            .iter_merge_sstable_counts
+            .with_label_values(&["memory-iter"])
+            .observe(overlapped_iters.len() as f64);
         for data in committed_l0_cache {
             if compaction_group_id
                 .as_ref()
@@ -155,11 +159,6 @@ impl HummockStorage {
                 overlapped_iters.push(HummockIteratorUnion::First(data.iter::<T::Direction>()));
             }
         }
-        self.stats
-            .iter_merge_sstable_counts
-            .with_label_values(&["memory-iter"])
-            .observe(overlapped_iters.len() as f64);
-
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
 
