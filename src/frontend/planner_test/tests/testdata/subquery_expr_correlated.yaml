@@ -208,8 +208,8 @@
     create table t2(x int, y int);
     select x from t1 where y in (select y, x from t2 where t1.x > t2.x + 1000);
   binder_error: 'Bind error: Subquery must return only one column'
-- sql: |
-    /* correlated outer subquery with an uncorrelated inner subquery */
+- name: correlated outer subquery with an uncorrelated inner subquery 
+  sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     create table t3(x int, y int);
@@ -233,8 +233,8 @@
       ├─LogicalScan { table: t2, columns: [t2.x, t2.y] }
       └─LogicalAgg { aggs: [min(t3.x)] }
         └─LogicalScan { table: t3, columns: [t3.x] }
-- sql: |
-    /* correlated inner subquery with depth = 2 */
+- name: correlated inner subquery with depth = 2 
+  sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     create table t3(x int, y int);
@@ -249,8 +249,8 @@
           └─LogicalProject { exprs: [t3.y] }
             └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t3.y) }
               └─LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id] }
-- sql: |
-    /* uncorrelated outer subquery with a correlated inner subquery */
+- name: uncorrelated outer subquery with a correlated inner subquery 
+  sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     create table t3(x int, y int);
@@ -272,50 +272,50 @@
       ├─LogicalScan { table: t2, columns: [t2.x, t2.y] }
       └─LogicalProject { exprs: [t3.y, t3.y] }
         └─LogicalScan { table: t3, columns: [t3.y] }
-- sql: |
-    /* correlated agg column in SELECT */
+- name: correlated agg column in SELECT 
+  sql: |
     create table t (v1 int, v2 int);
     select min(v1), (select max(v2)) from t;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-- sql: |
-    /* correlated group column in SELECT */
+- name: correlated group column in SELECT 
+  sql: |
     create table t (v1 int, v2 int);
     select min(v1), (select v2) from t group by v2;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-- sql: |
-    /* correlated non-group column in SELECT */
+- name: correlated non-group column in SELECT 
+  sql: |
     create table t (v1 int, v2 int);
     select min(v1), (select v2) from t;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-- sql: |
-    /* correlated agg column in HAVING */
+- name: correlated agg column in HAVING 
+  sql: |
     create table t (v1 int, v2 int);
     select 1 from t having min(v1) > (select max(v2));
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-- sql: |
-    /* correlated group column in HAVING */
+- name: correlated group column in HAVING 
+  sql: |
     create table t (v1 int, v2 int);
     select 1 from t group by v2 having min(v1) > (select v2);
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-- sql: |
-    /* correlated non-group column in HAVING */
+- name: correlated non-group column in HAVING 
+  sql: |
     create table t (v1 int, v2 int);
     select 1 from t having min(v1) > (select v2);
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-- sql: |
-    /* correlated agg column belongs to outer query */
+- name: correlated agg column belongs to outer query 
+  sql: |
     create table t (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
     select
@@ -325,8 +325,8 @@
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-- sql: |
-    /* uncorrelated subquery in HAVING */
+- name: uncorrelated subquery in HAVING 
+  sql: |
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);
     create table c (c1 int, c2 int);
@@ -346,8 +346,8 @@
           ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 2 }] }
             └─LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id] }
-- sql: |
-    /* correlated column with depth=2 in HAVING */
+- name: correlated column with depth=2 in HAVING 
+  sql: |
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);
     create table c (c1 int, c2 int);
@@ -359,8 +359,8 @@
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-- sql: |
-    /* correlated column with depth>1 in HAVING */
+- name: correlated column with depth>1 in HAVING 
+  sql: |
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);
     create table c (c1 int, c2 int);

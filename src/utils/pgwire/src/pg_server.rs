@@ -168,7 +168,7 @@ mod tests {
 
             Ok(PgResponse::new(
                 StatementType::SELECT,
-                1,
+                Some(1),
                 vec![Row::new(res)],
                 // NOTE: Extended mode don't need.
                 vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar); len],

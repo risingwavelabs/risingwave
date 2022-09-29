@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(type_ascription)]
 use std::collections::hash_map::{Entry, HashMap};
 use std::ops::Div;
 use std::str::FromStr;
@@ -20,7 +19,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
-use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::Client;
 use aws_smithy_http::body::SdkBody;
 use bytesize::ByteSize;
@@ -235,7 +233,7 @@ async fn multi_part_upload(
             let part_t = Instant::now();
             let result = a.send().await.unwrap();
             let part_ttl = part_t.elapsed();
-            Ok((result, part_ttl)): Result<(UploadPartOutput, Duration), RwError>
+            Ok::<_, RwError>((result, part_ttl))
         })
         .collect_vec();
     let ttfb = t.elapsed();
