@@ -406,7 +406,7 @@ impl ToBatch for LogicalTopN {
         if self.with_ties {
             return Err(ErrorCode::NotImplemented(
                 "TopN with ties in batch mode".to_string(),
-                4848.into(),
+                5302.into(),
             )
             .into());
         }

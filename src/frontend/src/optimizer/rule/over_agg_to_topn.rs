@@ -70,7 +70,7 @@ impl Rule for OverAggToTopNRule {
         let with_ties = match function_type {
             WindowFunctionType::RowNumber => false,
             WindowFunctionType::Rank => true,
-            WindowFunctionType::DenseRank => unreachable!("Not implemented. Banned in planenr."),
+            WindowFunctionType::DenseRank => unreachable!("Not implemented. Banned in planner."),
         };
 
         let (rank_pred, other_pred) = {
