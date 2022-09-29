@@ -282,6 +282,10 @@ impl DataType {
         )
     }
 
+    pub fn is_scalar(&self) -> bool {
+        DataTypeName::from(self).is_scalar()
+    }
+
     pub fn is_int(&self) -> bool {
         matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
