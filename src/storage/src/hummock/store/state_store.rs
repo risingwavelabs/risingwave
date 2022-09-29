@@ -27,7 +27,7 @@ use super::{GetFutureTrait, IterFutureTrait, ReadOptions, StateStore};
 use crate::define_local_state_store_associated_type;
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
-use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::local_version::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockResult, HummockStateStoreIter};
 

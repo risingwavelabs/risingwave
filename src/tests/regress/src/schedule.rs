@@ -357,12 +357,12 @@ fn compare_results(actual: &[String], expected: &[String]) -> bool {
             + actual[al_start..]
                 .iter()
                 .position(|s| s == "\n")
-                .unwrap_or(len);
+                .unwrap_or(len - al_start);
         let ed_end = ed_start
             + expected[ed_start..]
                 .iter()
                 .position(|s| s == "\n")
-                .unwrap_or(len);
+                .unwrap_or(len - ed_start);
         if al_end != ed_end {
             error!(
                 "Different number of lines:\nactual:{:?}\nexpected:{:?}",

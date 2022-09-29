@@ -227,10 +227,13 @@ impl Hash for SerializedKey {
     }
 }
 
-/// A special hasher designed our hashmap, which just stores precomputed hash key.
+/// A special hasher designed for [`HashKey`], which stores a hash key from `HashKey::hash()` and
+/// outputs it on `finish()`.
 ///
 /// We need this because we compute hash keys in vectorized fashion, and we store them in this
 /// hasher.
+///
+/// WARN: This should ONLY be used along with [`HashKey`].
 #[derive(Default)]
 pub struct PrecomputedHasher {
     hash_code: u64,
@@ -242,7 +245,12 @@ impl Hasher for PrecomputedHasher {
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        self.hash_code = u64::from_ne_bytes(bytes.try_into().unwrap());
+        assert_eq!(self.hash_code, 0);
+        self.hash_code = u64::from_ne_bytes(
+            bytes
+                .try_into()
+                .expect("must writes from HashKey with write_u64"),
+        );
     }
 }
 

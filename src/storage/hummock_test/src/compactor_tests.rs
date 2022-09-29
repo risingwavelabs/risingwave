@@ -216,8 +216,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -321,8 +322,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -613,8 +615,9 @@ mod tests {
         // 3. pick compactor and assign
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -781,8 +784,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -956,8 +960,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
