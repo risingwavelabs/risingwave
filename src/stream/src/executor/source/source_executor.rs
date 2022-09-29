@@ -761,11 +761,6 @@ mod tests {
         let source_table_id = TableId::default();
         let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
 
-        source_manager
-            .create_source(&source_table_id, stream_source_info.clone())
-            .await
-            .unwrap();
-
         let get_schema = |column_ids: &[ColumnId], source_desc: &SourceDesc| {
             let mut fields = Vec::with_capacity(column_ids.len());
             for &column_id in column_ids {
@@ -779,12 +774,12 @@ mod tests {
             Schema::new(fields)
         };
 
-        let source_desc = source_manager.get_source(&source_table_id).unwrap();
         let source_builder = SourceDescBuilder::new(
             source_table_id,
             &ProstSourceInfo::StreamSource(stream_source_info),
             &source_manager,
         );
+        let source_desc = source_builder.clone().build().await.unwrap();
         let mem_state_store = MemoryStateStore::new();
 
         let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];

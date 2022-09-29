@@ -37,7 +37,6 @@ pub type SourceRef = Arc<SourceImpl>;
 /// The local source manager on the compute node.
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
-    async fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
     fn create_table_source(
         &self,
         table_id: &TableId,
@@ -137,74 +136,6 @@ pub struct MemSourceManager {
 
 #[async_trait]
 impl SourceManager for MemSourceManager {
-    async fn create_source(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
-        let format = match info.get_row_format()? {
-            RowFormatType::Json => SourceFormat::Json,
-            RowFormatType::Protobuf => SourceFormat::Protobuf,
-            RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
-            RowFormatType::Avro => SourceFormat::Avro,
-            RowFormatType::RowUnspecified => unreachable!(),
-        };
-
-        if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {
-            return Err(RwError::from(ProtocolError(
-                "protobuf file location not provided".to_string(),
-            )));
-        }
-        let source_parser_rs =
-            SourceParserImpl::create(&format, &info.properties, info.row_schema_location.as_str())
-                .await;
-        let parser = if let Ok(source_parser) = source_parser_rs {
-            source_parser
-        } else {
-            return Err(source_parser_rs.err().unwrap());
-        };
-
-        let mut columns: Vec<_> = info
-            .columns
-            .into_iter()
-            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.unwrap())))
-            .collect();
-        let row_id_index = info.row_id_index.map(|row_id_index| {
-            columns[row_id_index.index as usize].skip_parse = true;
-            row_id_index.index as usize
-        });
-        let pk_column_ids = info.pk_column_ids;
-        assert!(
-            !pk_column_ids.is_empty(),
-            "source should have at least one pk column"
-        );
-
-        let config = ConnectorProperties::extract(info.properties)
-            .map_err(|e| RwError::from(ConnectorError(e.into())))?;
-
-        let source = SourceImpl::Connector(ConnectorSource {
-            config,
-            columns: columns.clone(),
-            parser,
-            connector_message_buffer_size: self.connector_message_buffer_size,
-        });
-
-        let desc = SourceDesc {
-            source: Arc::new(source),
-            format,
-            columns,
-            row_id_index,
-            pk_column_ids,
-            metrics: self.metrics.clone(),
-        };
-
-        let mut tables = self.get_sources()?;
-        ensure!(
-            !tables.contains_key(source_id),
-            "Source id already exists: {:?}",
-            source_id
-        );
-        tables.insert(*source_id, desc);
-
-        Ok(())
-    }
-
     fn create_table_source(
         &self,
         table_id: &TableId,
@@ -299,6 +230,7 @@ impl MemSourceManager {
     }
 }
 
+#[derive(Clone)]
 pub struct SourceDescBuilder {
     id: TableId,
     info: ProstSourceInfo,
@@ -389,12 +321,15 @@ impl SourceDescBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_connector::source::kinesis::config::kinesis_demo_properties;
     use risingwave_pb::catalog::{ColumnIndex, StreamSourceInfo};
     use risingwave_pb::plan_common::ColumnCatalog;
+    use risingwave_pb::stream_plan::source_node::Info;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::Keyspace;
 
@@ -424,8 +359,10 @@ mod tests {
         };
         let source_id = TableId::default();
 
-        let mem_source_manager = MemSourceManager::default();
-        let source = mem_source_manager.create_source(&source_id, info).await;
+        let mem_source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_builder =
+            SourceDescBuilder::new(source_id, &Info::StreamSource(info), &mem_source_manager);
+        let source = source_builder.build().await;
 
         assert!(source.is_ok());
 
