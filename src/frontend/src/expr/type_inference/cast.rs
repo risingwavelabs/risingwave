@@ -12,7 +12,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::ops::IndexMut;
 use std::sync::LazyLock;
 
 use itertools::Itertools as _;
