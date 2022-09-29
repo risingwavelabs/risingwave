@@ -111,7 +111,8 @@ pub struct TaskOutput {
 }
 
 impl TaskOutput {
-    /// Return whether finish taking data.
+    /// Writes the data in serialized format to `ExchangeWriter`.
+    /// Return whether the data stream is finished.
     async fn take_data_inner(
         &mut self,
         writer: &mut dyn ExchangeWriter,
@@ -160,7 +161,8 @@ impl TaskOutput {
         Ok(true)
     }
 
-    /// Return whether finish taking data.
+    /// Take at most num data and writes the data in serialized format to `ExchangeWriter`.
+    /// Return whether the data stream is finished.
     pub async fn take_data_with_num(
         &mut self,
         writer: &mut dyn ExchangeWriter,
@@ -169,10 +171,10 @@ impl TaskOutput {
         self.take_data_inner(writer, Some(num)).await
     }
 
-    /// Writes the data in serialized format to `ExchangeWriter`.
+    /// Take all data and writes the data in serialized format to `ExchangeWriter`.
     pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
         let finish = self.take_data_inner(writer, None).await?;
-        assert_eq!(finish, true);
+        assert!(finish);
         Ok(())
     }
 
