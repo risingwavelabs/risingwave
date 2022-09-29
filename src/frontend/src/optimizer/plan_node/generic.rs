@@ -41,6 +41,16 @@ pub struct Source(pub Rc<SourceCatalog>);
 /// [`Project`] computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct Project<PlanRef> {
-    exprs: Vec<ExprImpl>,
-    input: PlanRef,
+    pub exprs: Vec<ExprImpl>,
+    pub input: PlanRef,
+}
+
+impl<PlanRef> Project<PlanRef> {
+    pub fn new(exprs: Vec<ExprImpl>, input: PlanRef) -> Self {
+        Project { exprs, input }
+    }
+
+    pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
+        (self.exprs, self.input)
+    }
 }
