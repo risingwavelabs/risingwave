@@ -152,6 +152,13 @@ pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
+/// Cache for [`ManagedTopNState`].
+///
+/// The key in the maps is `[ order_by + remaining columns of pk ]`. `group_key` is not
+/// included.
+///
+/// # `WITH_TIES`
+///
 /// `WITH_TIES` supports the semantic of `FETCH FIRST n ROWS WITH TIES` and `RANK() <= n`.
 ///
 /// `OFFSET m FETCH FIRST n ROWS WITH TIES` and `m <= RANK() <= n` are not supported now,
@@ -201,12 +208,12 @@ pub(super) trait TopNCacheTrait {
     /// used to generate messages to be sent to downstream operators.
     ///
     /// Because we may need to add data from the state table to `self.high` during the delete
-    /// operation, we need to pass in `pk_prefix`, `epoch` and `managed_state` to do a prefix
+    /// operation, we need to pass in `group_key`, `epoch` and `managed_state` to do a prefix
     /// scan of the state table.
     #[allow(clippy::too_many_arguments)]
     async fn delete<S: StateStore>(
         &mut self,
-        pk_prefix: Option<&Row>,
+        group_key: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
         ordered_pk_row: OrderedRow,
         row: Row,
@@ -340,7 +347,7 @@ impl TopNCacheTrait for TopNCache<false> {
     #[allow(clippy::too_many_arguments)]
     async fn delete<S: StateStore>(
         &mut self,
-        pk_prefix: Option<&Row>,
+        group_key: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
         ordered_pk_row: OrderedRow,
         row: Row,
@@ -359,7 +366,7 @@ impl TopNCacheTrait for TopNCache<false> {
             if self.high.is_empty() {
                 managed_state
                     .fill_high_cache(
-                        pk_prefix,
+                        group_key,
                         self,
                         &self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
@@ -393,7 +400,7 @@ impl TopNCacheTrait for TopNCache<false> {
                 if self.high.is_empty() {
                     managed_state
                         .fill_high_cache(
-                            pk_prefix,
+                            group_key,
                             self,
                             &self.middle.last_key_value().unwrap().0.clone(),
                             self.high_capacity,
@@ -440,23 +447,28 @@ impl TopNCacheTrait for TopNCache<true> {
 
         let sort_key = elem_to_compare_with_middle.0.prefix(self.order_by_len);
         let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_sort_key = middle_last.0.prefix(self.order_by_len);
+        let middle_last_order_by = middle_last.0.prefix(self.order_by_len);
 
-        match sort_key.cmp(&middle_last_sort_key) {
+        match sort_key.cmp(&middle_last_order_by) {
             Ordering::Less => {
-                // The row is in middle, and need to evict the last row in middle and also its ties.
-                while let Some(middle_last) = self.middle.last_entry()
-                    && middle_last.key().starts_with(&middle_last_sort_key) {
-                    let middle_last = middle_last.remove_entry();
-                    res_ops.push(Op::Delete);
-                    res_rows.push(middle_last.1.clone());
-                    self.high.insert(middle_last.0, middle_last.1);
+                // The row is in middle.
+                let num_ties = self.middle.range(middle_last_order_by.clone()..).count();
+                // We evict the last row and its ties only if the number of remaining rows still is
+                // still larger than limit.
+                if self.middle.len() - num_ties + 1 >= self.limit {
+                    while let Some(middle_last) = self.middle.last_entry()
+                    && middle_last.key().starts_with(&middle_last_order_by) {
+                        let middle_last = middle_last.remove_entry();
+                        res_ops.push(Op::Delete);
+                        res_rows.push(middle_last.1.clone());
+                        self.high.insert(middle_last.0, middle_last.1);
+                    }
                 }
                 if self.high.len() >= self.high_capacity {
                     let high_last = self.high.pop_last().unwrap();
-                    let high_last_sort_key = high_last.0.prefix(self.order_by_len);
+                    let high_last_order_by = high_last.0.prefix(self.order_by_len);
                     self.high
-                        .drain_filter(|k, _| k.starts_with(&high_last_sort_key));
+                        .drain_filter(|k, _| k.starts_with(&high_last_order_by));
                 }
 
                 res_ops.push(Op::Insert);
@@ -465,7 +477,7 @@ impl TopNCacheTrait for TopNCache<true> {
                     .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
             }
             Ordering::Equal => {
-                // The row is in middle.
+                // The row is in middle and is a tie with the last row.
                 res_ops.push(Op::Insert);
                 res_rows.push(elem_to_compare_with_middle.1.clone());
                 self.middle
@@ -492,7 +504,7 @@ impl TopNCacheTrait for TopNCache<true> {
     #[allow(clippy::too_many_arguments)]
     async fn delete<S: StateStore>(
         &mut self,
-        pk_prefix: Option<&Row>,
+        group_key: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
         ordered_pk_row: OrderedRow,
         row: Row,
@@ -502,10 +514,10 @@ impl TopNCacheTrait for TopNCache<true> {
         // Since low cache is always empty for WITH_TIES, this unwrap is safe.
 
         let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_sort_key = middle_last.0.prefix(self.order_by_len);
+        let middle_last_order_by = middle_last.0.prefix(self.order_by_len);
 
         let sort_key = ordered_pk_row.prefix(self.order_by_len);
-        if sort_key > middle_last_sort_key {
+        if sort_key > middle_last_order_by {
             // The row is in high.
             self.high.remove(&ordered_pk_row);
         } else {
@@ -522,7 +534,7 @@ impl TopNCacheTrait for TopNCache<true> {
             if self.high.is_empty() {
                 managed_state
                     .fill_high_cache(
-                        pk_prefix,
+                        group_key,
                         self,
                         &self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
@@ -533,20 +545,20 @@ impl TopNCacheTrait for TopNCache<true> {
             // Bring elements with the same sort key, if any, from high cache to middle cache.
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
-                let high_first_sort_key = high_first.0.prefix(self.order_by_len);
-                assert!(high_first_sort_key > middle_last_sort_key);
+                let high_first_order_by = high_first.0.prefix(self.order_by_len);
+                assert!(high_first_order_by > middle_last_order_by);
 
                 res_ops.push(Op::Insert);
                 res_rows.push(high_first.1.clone());
                 self.middle.insert(high_first.0, high_first.1);
 
-                // We need to trigger insert for all rows with prefix `high_first_sort_key`
+                // We need to trigger insert for all rows with prefix `high_first_order_by`
                 // in high cache.
                 for (ordered_pk_row, row) in self
                     .high
-                    .drain_filter(|k, _| k.starts_with(&high_first_sort_key))
+                    .drain_filter(|k, _| k.starts_with(&high_first_order_by))
                 {
-                    if !ordered_pk_row.starts_with(&high_first_sort_key) {
+                    if !ordered_pk_row.starts_with(&high_first_order_by) {
                         break;
                     }
                     res_ops.push(Op::Insert);
@@ -648,15 +660,14 @@ where
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
-                    self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone());
+                    self.managed_state.insert(row.clone());
                     self.cache
                         .insert(ordered_pk_row, row, &mut res_ops, &mut res_rows)
                 }
 
                 Op::Delete | Op::UpdateDelete => {
                     // First remove the row from state store
-                    self.managed_state.delete(&ordered_pk_row, row.clone());
+                    self.managed_state.delete(row.clone());
                     self.cache
                         .delete(
                             None,

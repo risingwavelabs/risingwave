@@ -95,15 +95,12 @@ impl HummockStorage {
         T: HummockIteratorType,
     {
         let epoch = read_options.epoch;
-        let compaction_group_id = match read_options.table_id.as_ref() {
-            None => None,
-            Some(table_id) => Some(
-                self.get_compaction_group_id(*table_id)
-                    .in_span(Span::enter_with_local_parent("get_compaction_group_id"))
-                    .stack_trace("store_get_compaction_group_id")
-                    .await?,
-            ),
-        };
+        let table_id = read_options.table_id;
+        let compaction_group_id = self
+            .get_compaction_group_id(table_id)
+            .in_span(Span::enter_with_local_parent("get_compaction_group_id"))
+            .stack_trace("store_get_compaction_group_id")
+            .await?;
         let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
@@ -163,6 +160,7 @@ impl HummockStorage {
         // would contain tables from different compaction_group, even for those in L0.
         //
         // When adopting dynamic compaction group in the future, be sure to revisit this assumption.
+        assert!(pinned_version.is_valid());
         for level in pinned_version.levels(compaction_group_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
@@ -287,10 +285,8 @@ impl HummockStorage {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let epoch = read_options.epoch;
-        let compaction_group_id = match read_options.table_id.as_ref() {
-            None => None,
-            Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
-        };
+        let table_id = read_options.table_id;
+        let compaction_group_id = self.get_compaction_group_id(table_id).await?;
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
             shared_buffer_data,
@@ -338,6 +334,7 @@ impl HummockStorage {
 
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
         // read/write path.
+        assert!(pinned_version.is_valid());
         for level in pinned_version.levels(compaction_group_id) {
             if level.table_infos.is_empty() {
                 continue;

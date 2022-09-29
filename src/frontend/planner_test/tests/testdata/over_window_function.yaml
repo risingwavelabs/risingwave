@@ -120,6 +120,18 @@
 - sql: |
     create table t(x int, y int);
     select x, y from
+      (select *, rank() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank<=3;
+  stream_plan: |
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
+    └─StreamExchange { dist: HashShard(t._row_id) }
+      └─StreamProject { exprs: [t.x, t.y, t._row_id] }
+        └─StreamGroupTopN { order: "[t.x ASC]", limit: 3, offset: 0, group_key: [1], with_ties: true }
+          └─StreamExchange { dist: HashShard(t.y) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t(x int, y int);
+    select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank>3;
   optimized_logical_plan: |
