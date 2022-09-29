@@ -95,15 +95,12 @@ impl HummockStorage {
         T: HummockIteratorType,
     {
         let epoch = read_options.epoch;
-        let compaction_group_id = match read_options.table_id.as_ref() {
-            None => None,
-            Some(table_id) => Some(
-                self.get_compaction_group_id(*table_id)
-                    .in_span(Span::enter_with_local_parent("get_compaction_group_id"))
-                    .stack_trace("store_get_compaction_group_id")
-                    .await?,
-            ),
-        };
+        let table_id = read_options.table_id;
+        let compaction_group_id = self
+            .get_compaction_group_id(table_id)
+            .in_span(Span::enter_with_local_parent("get_compaction_group_id"))
+            .stack_trace("store_get_compaction_group_id")
+            .await?;
         let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
@@ -163,81 +160,85 @@ impl HummockStorage {
         // would contain tables from different compaction_group, even for those in L0.
         //
         // When adopting dynamic compaction group in the future, be sure to revisit this assumption.
-        for level in pinned_version.levels(compaction_group_id) {
-            let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
-            if table_infos.is_empty() {
-                continue;
-            }
-            if level.level_type == LevelType::Nonoverlapping as i32 {
-                debug_assert!(can_concat(&table_infos));
-                let start_table_idx = match key_range.start_bound() {
-                    Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
-                    _ => 0,
-                };
-                let end_table_idx = match key_range.end_bound() {
-                    Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
-                    _ => table_infos.len().saturating_sub(1),
-                };
-                assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
-                let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
+        if pinned_version.is_valid() {
+            for level in pinned_version.levels(compaction_group_id) {
+                let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
+                if table_infos.is_empty() {
+                    continue;
+                }
+                if level.level_type == LevelType::Nonoverlapping as i32 {
+                    debug_assert!(can_concat(&table_infos));
+                    let start_table_idx = match key_range.start_bound() {
+                        Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
+                        _ => 0,
+                    };
+                    let end_table_idx = match key_range.end_bound() {
+                        Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
+                        _ => table_infos.len().saturating_sub(1),
+                    };
+                    assert!(
+                        start_table_idx < table_infos.len() && end_table_idx < table_infos.len()
+                    );
+                    let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
 
-                let pruned_sstables = match T::Direction::direction() {
-                    DirectionEnum::Backward => matched_table_infos.iter().rev().collect_vec(),
-                    DirectionEnum::Forward => matched_table_infos.iter().collect_vec(),
-                };
+                    let pruned_sstables = match T::Direction::direction() {
+                        DirectionEnum::Backward => matched_table_infos.iter().rev().collect_vec(),
+                        DirectionEnum::Forward => matched_table_infos.iter().collect_vec(),
+                    };
 
-                let mut sstables = vec![];
-                for sstable_info in pruned_sstables {
-                    if let Some(bloom_filter_key) = prefix_hint.as_ref() {
-                        let sstable = self
-                            .sstable_store
-                            .sstable(sstable_info, &mut local_stats)
-                            .in_span(Span::enter_with_local_parent("get_sstable"))
-                            .await?;
+                    let mut sstables = vec![];
+                    for sstable_info in pruned_sstables {
+                        if let Some(bloom_filter_key) = prefix_hint.as_ref() {
+                            let sstable = self
+                                .sstable_store
+                                .sstable(sstable_info, &mut local_stats)
+                                .in_span(Span::enter_with_local_parent("get_sstable"))
+                                .await?;
 
-                        if hit_sstable_bloom_filter(
-                            sstable.value(),
-                            bloom_filter_key,
-                            &mut local_stats,
-                        ) {
+                            if hit_sstable_bloom_filter(
+                                sstable.value(),
+                                bloom_filter_key,
+                                &mut local_stats,
+                            ) {
+                                sstables.push((*sstable_info).clone());
+                            }
+                        } else {
                             sstables.push((*sstable_info).clone());
                         }
-                    } else {
-                        sstables.push((*sstable_info).clone());
                     }
-                }
 
-                overlapped_iters.push(HummockIteratorUnion::Third(ConcatIteratorInner::<
-                    T::SstableIteratorType,
-                >::new(
-                    sstables,
-                    self.sstable_store(),
-                    iter_read_options.clone(),
-                )));
-            } else {
-                for table_info in table_infos.into_iter().rev() {
-                    let sstable = self
-                        .sstable_store
-                        .sstable(table_info, &mut local_stats)
-                        .in_span(Span::enter_with_local_parent("get_sstable"))
-                        .await?;
-                    if let Some(bloom_filter_key) = prefix_hint.as_ref() {
-                        if !hit_sstable_bloom_filter(
-                            sstable.value(),
-                            bloom_filter_key,
-                            &mut local_stats,
-                        ) {
-                            continue;
+                    overlapped_iters.push(HummockIteratorUnion::Third(ConcatIteratorInner::<
+                        T::SstableIteratorType,
+                    >::new(
+                        sstables,
+                        self.sstable_store(),
+                        iter_read_options.clone(),
+                    )));
+                } else {
+                    for table_info in table_infos.into_iter().rev() {
+                        let sstable = self
+                            .sstable_store
+                            .sstable(table_info, &mut local_stats)
+                            .in_span(Span::enter_with_local_parent("get_sstable"))
+                            .await?;
+                        if let Some(bloom_filter_key) = prefix_hint.as_ref() {
+                            if !hit_sstable_bloom_filter(
+                                sstable.value(),
+                                bloom_filter_key,
+                                &mut local_stats,
+                            ) {
+                                continue;
+                            }
                         }
-                    }
 
-                    overlapped_iters.push(HummockIteratorUnion::Fourth(
-                        T::SstableIteratorType::create(
-                            sstable,
-                            self.sstable_store(),
-                            iter_read_options.clone(),
-                        ),
-                    ));
+                        overlapped_iters.push(HummockIteratorUnion::Fourth(
+                            T::SstableIteratorType::create(
+                                sstable,
+                                self.sstable_store(),
+                                iter_read_options.clone(),
+                            ),
+                        ));
+                    }
                 }
             }
         }
@@ -287,10 +288,8 @@ impl HummockStorage {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let epoch = read_options.epoch;
-        let compaction_group_id = match read_options.table_id.as_ref() {
-            None => None,
-            Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
-        };
+        let table_id = read_options.table_id;
+        let compaction_group_id = self.get_compaction_group_id(table_id).await?;
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
             shared_buffer_data,
@@ -338,17 +337,60 @@ impl HummockStorage {
 
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
         // read/write path.
-        for level in pinned_version.levels(compaction_group_id) {
-            if level.table_infos.is_empty() {
-                continue;
-            }
-            match level.level_type() {
-                LevelType::Overlapping | LevelType::Unspecified => {
-                    let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
-                    for table_info in table_infos {
+        if pinned_version.is_valid() {
+            for level in pinned_version.levels(compaction_group_id) {
+                if level.table_infos.is_empty() {
+                    continue;
+                }
+                match level.level_type() {
+                    LevelType::Overlapping | LevelType::Unspecified => {
+                        let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+                        for table_info in table_infos {
+                            let table = self
+                                .sstable_store
+                                .sstable(table_info, &mut local_stats)
+                                .await?;
+                            table_counts += 1;
+                            if let Some(v) = get_from_table(
+                                self.sstable_store.clone(),
+                                table,
+                                &internal_key,
+                                check_bloom_filter,
+                                &mut local_stats,
+                            )
+                            .await?
+                            {
+                                local_stats.report(self.stats.as_ref());
+                                return Ok(v.into_user_value());
+                            }
+                        }
+                    }
+                    LevelType::Nonoverlapping => {
+                        let mut table_info_idx = level.table_infos.partition_point(|table| {
+                            let ord =
+                                user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+                            ord == Ordering::Less || ord == Ordering::Equal
+                        });
+                        if table_info_idx == 0 {
+                            continue;
+                        }
+                        table_info_idx = table_info_idx.saturating_sub(1);
+                        let ord = user_key(
+                            &level.table_infos[table_info_idx]
+                                .key_range
+                                .as_ref()
+                                .unwrap()
+                                .right,
+                        )
+                        .cmp(key.as_ref());
+                        // the case that the key falls into the gap between two ssts
+                        if ord == Ordering::Less {
+                            continue;
+                        }
+
                         let table = self
                             .sstable_store
-                            .sstable(table_info, &mut local_stats)
+                            .sstable(&level.table_infos[table_info_idx], &mut local_stats)
                             .await?;
                         table_counts += 1;
                         if let Some(v) = get_from_table(
@@ -363,47 +405,6 @@ impl HummockStorage {
                             local_stats.report(self.stats.as_ref());
                             return Ok(v.into_user_value());
                         }
-                    }
-                }
-                LevelType::Nonoverlapping => {
-                    let mut table_info_idx = level.table_infos.partition_point(|table| {
-                        let ord =
-                            user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
-                        ord == Ordering::Less || ord == Ordering::Equal
-                    });
-                    if table_info_idx == 0 {
-                        continue;
-                    }
-                    table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = user_key(
-                        &level.table_infos[table_info_idx]
-                            .key_range
-                            .as_ref()
-                            .unwrap()
-                            .right,
-                    )
-                    .cmp(key.as_ref());
-                    // the case that the key falls into the gap between two ssts
-                    if ord == Ordering::Less {
-                        continue;
-                    }
-
-                    let table = self
-                        .sstable_store
-                        .sstable(&level.table_infos[table_info_idx], &mut local_stats)
-                        .await?;
-                    table_counts += 1;
-                    if let Some(v) = get_from_table(
-                        self.sstable_store.clone(),
-                        table,
-                        &internal_key,
-                        check_bloom_filter,
-                        &mut local_stats,
-                    )
-                    .await?
-                    {
-                        local_stats.report(self.stats.as_ref());
-                        return Ok(v.into_user_value());
                     }
                 }
             }
