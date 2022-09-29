@@ -52,6 +52,15 @@ pub struct LocalQueryStream {
     format: bool,
 }
 
+impl LocalQueryStream {
+    pub fn new(data_stream: BoxedDataChunkStream, format: bool) -> Self {
+        Self {
+            data_stream,
+            format,
+        }
+    }
+}
+
 impl Stream for LocalQueryStream {
     type Item = Result<Vec<Row>, BoxedError>;
 
