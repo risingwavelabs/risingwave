@@ -5044,6 +5044,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_simulation_scale"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap 3.2.17",
+ "futures",
+ "glob",
+ "madsim",
+ "madsim-tokio",
+ "rand 0.8.5",
+ "risingwave_compactor",
+ "risingwave_compute",
+ "risingwave_frontend",
+ "risingwave_meta",
+ "sqllogictest",
+ "tempfile",
+ "tokio-postgres",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_source"
 version = "0.1.11"
 dependencies = [

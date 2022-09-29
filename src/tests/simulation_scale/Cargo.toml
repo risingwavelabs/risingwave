@@ -1,0 +1,26 @@
+[package]
+name = "risingwave_simulation_scale"
+version = "0.1.0"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+clap = "3"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+glob = "0.3"
+madsim = "0.2.7"
+rand = "0.8"
+risingwave_compactor = { path = "../../storage/compactor" }
+risingwave_compute = { path = "../../compute" }
+risingwave_frontend = { path = "../../frontend" }
+risingwave_meta = { path = "../../meta" }
+sqllogictest = "0.6.4"
+tempfile = "3"
+tokio = { version = "0.2", package = "madsim-tokio" }
+tokio-postgres = "0.7.7"
+tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
