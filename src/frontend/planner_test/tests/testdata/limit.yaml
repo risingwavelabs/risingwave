@@ -52,7 +52,7 @@
       └─LogicalScan { table: t, columns: [t.v, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: TopN with ties in batch mode
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4848
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/5302
 - sql: |
     -- Should be equivalent to above
     create table t (v int);

@@ -63,7 +63,7 @@
     create table t(x int);
     select sum(x) filter (where row_number() over () > 1) from t;
   binder_error: 'Invalid input syntax: window functions are not allowed in FILTER'
-- name: TopN with rank output 
+- name: TopN with rank output
   sql: |
     create table t(x int);
     select * from
@@ -81,7 +81,7 @@
     └─LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
       └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-- name: TopN without rank output 
+- name: TopN without rank output
   sql: |
     create table t(x int, y int);
     select x, y from
@@ -232,7 +232,7 @@
           └─StreamExchange { dist: HashShard(TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)) }
             └─StreamProject { exprs: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id, TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)] }
               └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
-- name: Deduplication 
+- name: Deduplication
   sql: |
     create table t(x int, y int);
     select x, y from

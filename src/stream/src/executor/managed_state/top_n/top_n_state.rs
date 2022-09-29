@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::array::Row;
+use risingwave_common::array::{Row, RowRef};
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -67,10 +68,12 @@ impl<S: StateStore> ManagedTopNState<S> {
     }
 
     fn get_topn_row(&self, row: Row, group_key_len: usize) -> TopNStateRow {
-        let mut datums = Vec::with_capacity(self.state_table.pk_indices().len());
-        for pk_index in self.state_table.pk_indices().iter().skip(group_key_len) {
-            datums.push(row[*pk_index].clone());
-        }
+        let datums = self
+            .state_table
+            .pk_indices()
+            .iter()
+            .map(|pk_index| row[*pk_index].clone())
+            .collect();
         let pk = Row::new(datums);
         let pk_ordered = OrderedRow::new(
             pk,
