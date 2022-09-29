@@ -94,12 +94,6 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
 
     /// Get the output of the state. Must flush before getting output.
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
-
-    /// Check if this state needs a flush.
-    fn is_dirty(&self) -> bool;
-
-    /// Flush the internal state to a write batch.
-    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()>;
 }
 
 impl<S: StateStore> GenericExtremeState<S> {
@@ -265,17 +259,6 @@ impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
 
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
         self.get_output_inner(state_table).await
-    }
-
-    /// Check if this state needs a flush.
-    /// TODO: Remove this. #4035
-    fn is_dirty(&self) -> bool {
-        unreachable!("Should not call this function anymore, check state table for dirty data");
-    }
-
-    /// TODO: Remove this. #4035
-    fn flush(&mut self, _state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
-        Ok(())
     }
 }
 

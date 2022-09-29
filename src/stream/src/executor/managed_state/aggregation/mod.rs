@@ -159,22 +159,6 @@ impl<S: StateStore> ManagedStateImpl<S> {
         }
     }
 
-    /// Check if this state needs a flush.
-    pub fn is_dirty(&self) -> bool {
-        match self {
-            Self::Value(state) => state.is_dirty(),
-            Self::Table(state) => state.is_dirty(),
-        }
-    }
-
-    /// Flush the internal state to a write batch.
-    pub fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
-        match self {
-            Self::Value(state) => state.flush(state_table),
-            Self::Table(state) => state.flush(state_table),
-        }
-    }
-
     /// Create a managed state from `agg_call`.
     #[allow(clippy::too_many_arguments)]
     pub fn create_managed_state(

@@ -198,14 +198,6 @@ impl<S: StateStore> ManagedTableState<S> for ManagedArrayAggState<S> {
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
         self.get_output_inner(state_table).await
     }
-
-    fn is_dirty(&self) -> bool {
-        false
-    }
-
-    fn flush(&mut self, _state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
-        Ok(())
-    }
 }
 
 #[cfg(test)]
