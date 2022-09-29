@@ -21,7 +21,6 @@ use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, SstableInfo};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{filter_single_sst, range_overlap};
-use crate::hummock::HummockResult;
 
 pub type ImmutableMemtable = SharedBufferBatch;
 
@@ -137,7 +136,7 @@ impl Default for HummockReadVersion {
 impl HummockReadVersion {
     /// Updates the read version with `VersionUpdate`.
     /// A `OrderIdx` that can uniquely identify the newly added entry will be returned.
-    pub fn update(&mut self, info: VersionUpdate) -> HummockResult<()> {
+    pub fn update(&mut self, info: VersionUpdate) {
         match info {
             VersionUpdate::Staging(staging) => match staging {
                 StagingData::ImmMem(imm) => self.staging.imm.push_front(imm),
@@ -161,8 +160,6 @@ impl HummockReadVersion {
                 self.committed = committed_version;
             }
         }
-
-        Ok(())
     }
 
     pub fn staging(&self) -> &StagingVersion {

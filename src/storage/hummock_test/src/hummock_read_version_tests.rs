@@ -59,9 +59,7 @@ async fn test_read_version_basic() {
             TableId::from(table_id),
         );
 
-        read_version
-            .update(VersionUpdate::Staging(StagingData::ImmMem(imm)))
-            .unwrap();
+        read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
         let key = iterator_test_key_of_epoch(0, epoch);
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
@@ -92,9 +90,7 @@ async fn test_read_version_basic() {
                 TableId::from(table_id),
             );
 
-            read_version
-                .update(VersionUpdate::Staging(StagingData::ImmMem(imm)))
-                .unwrap();
+            read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
         let key = iterator_test_key_of_epoch(0, epoch);
@@ -150,9 +146,7 @@ async fn test_read_version_basic() {
         );
 
         {
-            read_version
-                .update(VersionUpdate::Staging(StagingData::Sst(dummy_sst)))
-                .unwrap();
+            read_version.update(VersionUpdate::Staging(StagingData::Sst(dummy_sst)));
         }
     }
 

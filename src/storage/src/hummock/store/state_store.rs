@@ -22,7 +22,6 @@ use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::LevelType;
@@ -35,13 +34,10 @@ use super::{
 };
 use crate::define_local_state_store_associated_type;
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
-// use super::monitor::StateStoreMetrics;
-use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
-use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version::local_version_manager::{
-    LocalVersionManager, LocalVersionManagerRef,
+use crate::hummock::compaction_group_client::{
+    CompactionGroupClientImpl, DummyCompactionGroupClient,
 };
+use crate::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::{
@@ -50,6 +46,8 @@ use crate::hummock::{
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
+
+pub type UploaderRef = LocalVersionManagerRef;
 
 #[expect(dead_code)]
 pub struct HummockStorageCore {
@@ -63,7 +61,7 @@ pub struct HummockStorageCore {
     // event_sender: mpsc::UnboundedSender<HummockEvent>,
 
     // TODO: use a dedicated uploader implementation to replace `LocalVersionManager`
-    uploader: LocalVersionManagerRef,
+    uploader: UploaderRef,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
@@ -93,7 +91,7 @@ impl HummockStorageCore {
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        uploader: UploaderRef,
     ) -> HummockResult<Self> {
         Self::new(
             options,
@@ -103,7 +101,7 @@ impl HummockStorageCore {
             Arc::new(CompactionGroupClientImpl::Dummy(
                 DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
             )),
-            filter_key_extractor_manager,
+            uploader,
         )
     }
 
@@ -114,31 +112,21 @@ impl HummockStorageCore {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
         compaction_group_client: Arc<CompactionGroupClientImpl>,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        uploader: UploaderRef,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
-        let write_conflict_detector = ConflictDetector::new_from_config(options.clone());
         let sstable_id_manager = Arc::new(SstableIdManager::new(
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
         ));
-        let local_version_manager = LocalVersionManager::new(
-            options.clone(),
-            sstable_store.clone(),
-            stats.clone(),
-            hummock_meta_client.clone(),
-            write_conflict_detector,
-            sstable_id_manager.clone(),
-            filter_key_extractor_manager,
-        );
 
         let read_version = HummockReadVersion::default();
 
         let instance = Self {
             options,
             read_version: RwLock::new(read_version),
-            uploader: local_version_manager,
+            uploader,
             hummock_meta_client,
             sstable_store,
             stats,
@@ -151,7 +139,7 @@ impl HummockStorageCore {
     }
 
     /// See `HummockReadVersion::update` for more details.
-    pub fn update(&self, info: VersionUpdate) -> HummockResult<()> {
+    pub fn update(&self, info: VersionUpdate) {
         self.read_version.write().update(info)
     }
 
@@ -215,67 +203,65 @@ impl HummockStorageCore {
         }
 
         // 2. read from committed_version sst file
-        if committed_version.is_valid() {
-            for level in committed_version.levels(compaction_group_id) {
-                if level.table_infos.is_empty() {
-                    continue;
-                }
-                match level.level_type() {
-                    LevelType::Overlapping | LevelType::Unspecified => {
-                        let sstable_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
-                        for sstable_info in sstable_infos {
-                            table_counts += 1;
-                            if let Some(v) = get_from_sstable_info(
-                                self.sstable_store.clone(),
-                                sstable_info,
-                                &internal_key,
-                                read_options.check_bloom_filter,
-                                &mut local_stats,
-                            )
-                            .await?
-                            {
-                                // todo add global stat to report
-                                local_stats.report(self.stats.as_ref());
-                                return Ok(v.into_user_value());
-                            }
-                        }
-                    }
-                    LevelType::Nonoverlapping => {
-                        let mut table_info_idx = level.table_infos.partition_point(|table| {
-                            let ord =
-                                user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
-                            ord == Ordering::Less || ord == Ordering::Equal
-                        });
-                        if table_info_idx == 0 {
-                            continue;
-                        }
-                        table_info_idx = table_info_idx.saturating_sub(1);
-                        let ord = user_key(
-                            &level.table_infos[table_info_idx]
-                                .key_range
-                                .as_ref()
-                                .unwrap()
-                                .right,
-                        )
-                        .cmp(key.as_ref());
-                        // the case that the key falls into the gap between two ssts
-                        if ord == Ordering::Less {
-                            continue;
-                        }
-
+        for level in committed_version.levels(compaction_group_id) {
+            if level.table_infos.is_empty() {
+                continue;
+            }
+            match level.level_type() {
+                LevelType::Overlapping | LevelType::Unspecified => {
+                    let sstable_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+                    for sstable_info in sstable_infos {
                         table_counts += 1;
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
-                            &level.table_infos[table_info_idx],
+                            sstable_info,
                             &internal_key,
                             read_options.check_bloom_filter,
                             &mut local_stats,
                         )
                         .await?
                         {
+                            // todo add global stat to report
                             local_stats.report(self.stats.as_ref());
                             return Ok(v.into_user_value());
                         }
+                    }
+                }
+                LevelType::Nonoverlapping => {
+                    let mut table_info_idx = level.table_infos.partition_point(|table| {
+                        let ord =
+                            user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+                        ord == Ordering::Less || ord == Ordering::Equal
+                    });
+                    if table_info_idx == 0 {
+                        continue;
+                    }
+                    table_info_idx = table_info_idx.saturating_sub(1);
+                    let ord = user_key(
+                        &level.table_infos[table_info_idx]
+                            .key_range
+                            .as_ref()
+                            .unwrap()
+                            .right,
+                    )
+                    .cmp(key.as_ref());
+                    // the case that the key falls into the gap between two ssts
+                    if ord == Ordering::Less {
+                        continue;
+                    }
+
+                    table_counts += 1;
+                    if let Some(v) = get_from_sstable_info(
+                        self.sstable_store.clone(),
+                        &level.table_infos[table_info_idx],
+                        &internal_key,
+                        read_options.check_bloom_filter,
+                        &mut local_stats,
+                    )
+                    .await?
+                    {
+                        local_stats.report(self.stats.as_ref());
+                        return Ok(v.into_user_value());
                     }
                 }
             }
@@ -359,7 +345,7 @@ impl StateStore for HummockStorage {
                 uploader.build_shared_buffer_batch(epoch, compaction_group_id, kv_pairs, table_id);
             let imm_size = imm.size();
             self.core
-                .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())))?;
+                .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
             // insert imm to uploader
             uploader.blocking_write_shared_buffer_batch(imm).await;
@@ -374,14 +360,10 @@ impl HummockStorage {
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        uploader: UploaderRef,
     ) -> HummockResult<Self> {
-        let storage_core = HummockStorageCore::for_test(
-            options,
-            sstable_store,
-            hummock_meta_client,
-            filter_key_extractor_manager,
-        )?;
+        let storage_core =
+            HummockStorageCore::for_test(options, sstable_store, hummock_meta_client, uploader)?;
 
         let instance = Self {
             core: Arc::new(storage_core),
@@ -396,7 +378,7 @@ impl HummockStorage {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
         compaction_group_client: Arc<CompactionGroupClientImpl>,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        uploader: UploaderRef,
     ) -> HummockResult<Self> {
         let storage_core = HummockStorageCore::new(
             options,
@@ -404,12 +386,21 @@ impl HummockStorage {
             hummock_meta_client,
             stats,
             compaction_group_client,
-            filter_key_extractor_manager,
+            uploader,
         )?;
 
         let instance = Self {
             core: Arc::new(storage_core),
         };
         Ok(instance)
+    }
+
+    pub fn uploader(&self) -> &UploaderRef {
+        &self.core.uploader
+    }
+
+    /// See `HummockReadVersion::update` for more details.
+    pub fn update(&self, info: VersionUpdate) {
+        self.core.update(info)
     }
 }
