@@ -220,7 +220,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 group_key,
                 pk_indices,
                 agg_state_table
-                    .expect("non-append-only min/max must have state table")
+                    .expect("string_agg must have state table")
                     .mapping
                     .clone(),
                 row_count.unwrap(),
@@ -230,7 +230,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 group_key,
                 pk_indices,
                 agg_state_table
-                    .expect("non-append-only min/max must have state table")
+                    .expect("array_agg must have state table")
                     .mapping
                     .clone(),
                 row_count.unwrap(),
