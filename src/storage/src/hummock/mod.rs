@@ -208,7 +208,7 @@ pub async fn get_from_table(
         Arc::new(SstableIteratorReadOptions::default()),
     );
     iter.seek(internal_key).await?;
-    // Iterator has seeked passed the borders.
+    // Iterator has sought passed the borders.
     if !iter.is_valid() {
         return Ok(None);
     }
