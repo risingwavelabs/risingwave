@@ -22,7 +22,7 @@ use crate::hummock::iterator::{
     BackwardUserIterator, ConcatIteratorInner, Forward, HummockIterator, HummockIteratorDirection,
     HummockIteratorUnion,
 };
-use crate::hummock::local_version::PinnedVersion;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::SharedBufferIteratorType;
 use crate::hummock::value::HummockValue;
@@ -232,11 +232,11 @@ impl UserIterator {
                     // Deleted kv and the previous versions (if any) of the key should not be
                     // returned to user.
                     HummockValue::Delete => {
-                        self.stats.skip_key_count += 1;
+                        self.stats.skip_delete_key_count += 1;
                     }
                 }
             } else {
-                self.stats.skip_key_count += 1;
+                self.stats.skip_multi_version_key_count += 1;
             }
 
             self.iterator.next().await?;

@@ -12,18 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
@@ -36,11 +24,13 @@ mod meta_client;
 
 #[cfg(madsim)]
 use std::collections::HashMap;
+use std::iter::repeat;
 use std::sync::Arc;
 
 #[cfg(not(madsim))]
 use anyhow::anyhow;
 use async_trait::async_trait;
+use futures::future::try_join_all;
 pub use meta_client::{GrpcMetaClient, MetaClient};
 #[cfg(not(madsim))]
 use moka::future::Cache;
@@ -50,6 +40,7 @@ mod hummock_meta_client;
 pub use hummock_meta_client::HummockMetaClient;
 pub mod error;
 mod stream_client;
+use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
@@ -57,17 +48,23 @@ pub use stream_client::*;
 #[cfg(madsim)]
 use tokio::sync::Mutex;
 
-use crate::error::Result;
+use crate::error::{Result, RpcError};
 
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr) -> Result<Self>;
+
+    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Vec<Self>> {
+        try_join_all(repeat(host_addr).take(size).map(Self::new_client)).await
+    }
 }
 
 #[derive(Clone)]
 pub struct RpcClientPool<S> {
+    connection_pool_size: u16,
+
     #[cfg(not(madsim))]
-    clients: Cache<HostAddr, S>,
+    clients: Cache<HostAddr, Vec<S>>,
 
     // moka::Cache internally uses system thread, so we can't use it in simulation
     #[cfg(madsim)]
@@ -79,7 +76,7 @@ where
     S: RpcClient,
 {
     fn default() -> Self {
-        Self::new(u64::MAX)
+        Self::new(1)
     }
 }
 
@@ -87,10 +84,11 @@ impl<S> RpcClientPool<S>
 where
     S: RpcClient,
 {
-    pub fn new(cache_capacity: u64) -> Self {
+    pub fn new(connection_pool_size: u16) -> Self {
         Self {
+            connection_pool_size,
             #[cfg(not(madsim))]
-            clients: Cache::new(cache_capacity),
+            clients: Cache::new(u64::MAX),
             #[cfg(madsim)]
             clients: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -107,10 +105,17 @@ where
     /// new client will be created and returned.
     #[cfg(not(madsim))]
     pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
-        self.clients
-            .try_get_with(addr.clone(), S::new_client(addr))
+        Ok(self
+            .clients
+            .try_get_with(
+                addr.clone(),
+                S::new_clients(addr, self.connection_pool_size as usize),
+            )
             .await
-            .map_err(|e| anyhow!("failed to create RPC client: {:?}", e).into())
+            .map_err(|e| -> RpcError { anyhow!("failed to create RPC client: {:?}", e).into() })?
+            .choose(&mut rand::thread_rng())
+            .unwrap()
+            .clone())
     }
 
     #[cfg(madsim)]

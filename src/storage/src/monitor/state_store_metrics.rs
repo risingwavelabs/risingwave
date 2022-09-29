@@ -76,7 +76,10 @@ macro_rules! for_all_metrics {
             remote_read_time: Histogram,
 
             sstable_bloom_filter_size: Histogram,
-            sstable_meta_size: Histogram,
+            sstable_file_size: Histogram,
+
+            sstable_avg_key_size: Histogram,
+            sstable_avg_value_size: Histogram,
         }
     };
 }
@@ -397,12 +400,28 @@ impl StateStoreMetrics {
         let sstable_bloom_filter_size = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
-            "state_store_sstable_meta_size",
-            "Total bytes gotten from sstable_meta_size, for observing sstable_meta_size",
+            "state_store_sstable_file_size",
+            "Total bytes gotten from sstable_file_size, for observing sstable_file_size",
+            exponential_buckets(1.0, 2.0, 31).unwrap() // max 1G
+        );
+
+        let sstable_file_size = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_sstable_avg_key_size",
+            "Total bytes gotten from sstable_avg_key_size, for observing sstable_avg_key_size",
             exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
         );
 
-        let sstable_meta_size = register_histogram_with_registry!(opts, registry).unwrap();
+        let sstable_avg_key_size = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_sstable_avg_value_size",
+            "Total bytes gotten from sstable_avg_value_size, for observing sstable_avg_value_size",
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+        );
+
+        let sstable_avg_value_size = register_histogram_with_registry!(opts, registry).unwrap();
 
         Self {
             get_duration,
@@ -449,7 +468,10 @@ impl StateStoreMetrics {
             remote_read_time,
 
             sstable_bloom_filter_size,
-            sstable_meta_size,
+            sstable_file_size,
+
+            sstable_avg_key_size,
+            sstable_avg_value_size,
         }
     }
 

@@ -41,7 +41,6 @@ use static_assertions::const_assert_eq;
 use super::{ActorContextRef, PkIndices};
 use crate::common::{InfallibleExpression, StateTableColumnMapping};
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
-use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::Executor;
@@ -51,7 +50,6 @@ mod agg_state;
 mod approx_count_distinct;
 mod foldable;
 mod row_count;
-mod single_value;
 
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R, I> =
@@ -136,14 +134,14 @@ pub fn create_streaming_agg_state(
             ) {
                 $(
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
-                        Box::new(<$state_impl>::new_with_datum(datum)?)
+                        Box::new(<$state_impl>::with_datum(datum)?)
                     }
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
                         Box::new(<$state_impl>::new())
                     }
                 )*
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new_with_datum(datum))
+                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_datum(datum))
                 }
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, None) => {
                     Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new())
@@ -227,55 +225,6 @@ pub fn create_streaming_agg_state(
                     (Max, float32, float32, StreamingMaxAgg::<F32Array>),
                     (Max, float64, float64, StreamingMaxAgg::<F64Array>),
                     (Max, interval, interval, StreamingMaxAgg::<IntervalArray>),
-                    // SingleValue
-                    (
-                        SingleValue,
-                        int16,
-                        int16,
-                        StreamingSingleValueAgg::<I16Array>
-                    ),
-                    (
-                        SingleValue,
-                        int32,
-                        int32,
-                        StreamingSingleValueAgg::<I32Array>
-                    ),
-                    (
-                        SingleValue,
-                        int64,
-                        int64,
-                        StreamingSingleValueAgg::<I64Array>
-                    ),
-                    (
-                        SingleValue,
-                        float32,
-                        float32,
-                        StreamingSingleValueAgg::<F32Array>
-                    ),
-                    (
-                        SingleValue,
-                        float64,
-                        float64,
-                        StreamingSingleValueAgg::<F64Array>
-                    ),
-                    (
-                        SingleValue,
-                        boolean,
-                        boolean,
-                        StreamingSingleValueAgg::<BoolArray>
-                    ),
-                    (
-                        SingleValue,
-                        decimal,
-                        decimal,
-                        StreamingSingleValueAgg::<DecimalArray>
-                    ),
-                    (
-                        SingleValue,
-                        varchar,
-                        varchar,
-                        StreamingSingleValueAgg::<Utf8Array>
-                    )
                 ]
             )
         }
@@ -331,7 +280,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
     pk_indices: PkIndices,
-    epoch: u64,
+    extreme_cache_size: usize,
     state_tables: &[StateTable<S>],
     state_table_col_mappings: &[Arc<StateTableColumnMapping>],
 ) -> StreamExecutorResult<AggState<S>> {
@@ -348,6 +297,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
             pk_indices.clone(),
             idx == ROW_COUNT_COLUMN,
             key,
+            extreme_cache_size,
             &state_tables[idx],
             state_table_col_mappings[idx].clone(),
         )
@@ -355,7 +305,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
 
         if idx == ROW_COUNT_COLUMN {
             // For the rowcount state, we should record the rowcount.
-            let output = managed_state.get_output(epoch, &state_tables[idx]).await?;
+            let output = managed_state.get_output(&state_tables[idx]).await?;
             row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
         }
 

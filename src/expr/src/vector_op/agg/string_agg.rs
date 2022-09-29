@@ -103,9 +103,8 @@ impl Aggregator for StringAggUnordered {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
             let res = self.get_result_and_reset();
-            builder
-                .append(res.as_ref().map(|x| x.as_scalar_ref()))
-                .map_err(Into::into)
+            builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+            Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
         }
@@ -142,7 +141,7 @@ impl StringAggOrdered {
         }
     }
 
-    fn push_row(&mut self, value: &str, delim: &str, row: RowRef) {
+    fn push_row(&mut self, value: &str, delim: &str, row: RowRef<'_>) {
         let key = OrderedRow::new(
             row.row_by_indices(&self.order_col_indices),
             &self.order_types,
@@ -185,7 +184,7 @@ impl Aggregator for StringAggOrdered {
             if let Some(value) = agg_col.value_at(row_id) {
                 // only need to save rows with non-empty string value to aggregate
                 let delim = delim_col.value_at(row_id).unwrap_or("");
-                let (row_ref, vis) = input.row_at(row_id)?;
+                let (row_ref, vis) = input.row_at(row_id);
                 assert!(vis);
                 self.push_row(value, delim, row_ref);
             }
@@ -213,7 +212,7 @@ impl Aggregator for StringAggOrdered {
                 .take(end_row_id - start_row_id)
                 .filter(|(_, (v, _))| v.is_some())
             {
-                let (row_ref, vis) = input.row_at(row_id)?;
+                let (row_ref, vis) = input.row_at(row_id);
                 assert!(vis);
                 self.push_row(value.unwrap(), delim.unwrap_or(""), row_ref);
             }
@@ -226,9 +225,8 @@ impl Aggregator for StringAggOrdered {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
             let res = self.get_result_and_reset();
-            builder
-                .append(res.as_ref().map(|x| x.as_scalar_ref()))
-                .map_err(Into::into)
+            builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+            Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
         }

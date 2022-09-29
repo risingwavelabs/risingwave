@@ -32,7 +32,7 @@ use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
 use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
-use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
+use risingwave_storage::{dispatch_state_store, StateStore};
 
 use super::BatchTaskMetrics;
 use crate::executor::{
@@ -131,7 +131,7 @@ fn get_scan_bound(
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
@@ -160,24 +160,20 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .collect();
 
         let pk_types = table_desc
-            .order_key
+            .pk
             .iter()
             .map(|order| column_descs[order.index as usize].clone().data_type)
             .collect_vec();
-        let pk_len = table_desc.order_key.len();
+        let pk_len = table_desc.pk.len();
         let order_types: Vec<OrderType> = table_desc
-            .order_key
+            .pk
             .iter()
             .map(|order| {
                 OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
             })
             .collect();
 
-        let pk_indices = table_desc
-            .order_key
-            .iter()
-            .map(|k| k.index as usize)
-            .collect_vec();
+        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices
@@ -201,7 +197,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 None
             },
         };
-
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let metrics = source.context().get_task_metrics();
             let table = StorageTable::new_partial(
@@ -213,8 +213,8 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 pk_indices,
                 distribution,
                 table_option,
+                value_indices,
             );
-            let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 
             if seq_scan_node.scan_ranges.is_empty() {
                 let iter = table
@@ -234,7 +234,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 let scan_type = async {
                     let pk_types = pk_types.clone();
                     let mut table = table.clone();
-                    let keyspace = keyspace.clone();
 
                     let (pk_prefix_value, next_col_bounds) =
                         get_scan_bound(scan_range.clone(), pk_types.into_iter());
@@ -244,11 +243,12 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             unreachable!()
                         } else if pk_prefix_value.size() == pk_len {
                             let row = {
-                                keyspace
-                                    .state_store()
-                                    .try_wait_epoch(HummockReadEpoch::Committed(source.epoch))
-                                    .await?;
-                                table.get_row(&pk_prefix_value, source.epoch).await?
+                                table
+                                    .get_row(
+                                        &pk_prefix_value,
+                                        HummockReadEpoch::Committed(source.epoch),
+                                    )
+                                    .await?
                             };
                             ScanType::PointGet(row)
                         } else {
@@ -370,7 +370,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             }
             ScanType::PointGet(row) => {
                 if let Some(row) = row {
-                    yield DataChunk::from_rows(&[row], &schema.data_types())?;
+                    yield DataChunk::from_rows(&[row], &schema.data_types());
                 }
             }
         }

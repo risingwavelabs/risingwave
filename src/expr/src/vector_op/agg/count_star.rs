@@ -40,7 +40,7 @@ impl Aggregator for CountStar {
     }
 
     fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        if let (_, true) = input.row_at(row_id)? {
+        if let (_, true) = input.row_at(row_id) {
             self.result += 1;
         }
         Ok(())
@@ -54,7 +54,7 @@ impl Aggregator for CountStar {
     ) -> Result<()> {
         if let Some(visibility) = input.visibility() {
             for row_id in start_row_id..end_row_id {
-                if visibility.is_set(row_id)? {
+                if visibility.is_set(row_id) {
                     self.result += 1;
                 }
             }
@@ -67,7 +67,10 @@ impl Aggregator for CountStar {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         let res = std::mem::replace(&mut self.result, 0) as i64;
         match builder {
-            ArrayBuilderImpl::Int64(b) => b.append(Some(res)).map_err(Into::into),
+            ArrayBuilderImpl::Int64(b) => {
+                b.append(Some(res));
+                Ok(())
+            }
             _ => bail!("Unexpected builder for count(*)."),
         }
     }

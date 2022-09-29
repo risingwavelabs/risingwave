@@ -12,18 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(generic_associated_types)]
@@ -84,6 +72,10 @@ pub struct ComputeNodeOpts {
     /// Left empty to disable file cache.
     #[clap(long, default_value = "")]
     pub file_cache_dir: String,
+
+    /// Enable managed lru cache, or use local lru cache.
+    #[clap(long)]
+    pub enable_managed_cache: bool,
 }
 
 use std::future::Future;

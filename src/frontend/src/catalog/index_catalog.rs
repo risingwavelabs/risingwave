@@ -87,11 +87,11 @@ impl IndexCatalog {
         }
     }
 
-    pub fn primary_table_order_key_ref_to_index_table(&self) -> Vec<FieldOrder> {
+    pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<FieldOrder> {
         let mapping = self.primary_to_secondary_mapping();
 
         self.primary_table
-            .order_key
+            .pk
             .iter()
             .map(|x| FieldOrder {
                 index: *mapping.get(&x.index).unwrap(),

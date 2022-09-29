@@ -15,19 +15,7 @@
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(backtrace)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
 #![feature(iterator_try_collect)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(generic_associated_types)]
@@ -47,11 +35,15 @@
 #![feature(result_option_inspect)]
 #![feature(never_type)]
 #![feature(btreemap_alloc)]
+#![feature(once_cell)]
+#![feature(btree_drain_filter)]
 
 #[macro_use]
 extern crate tracing;
 
+pub mod cache;
 mod common;
+pub mod error;
 pub mod executor;
 mod from_proto;
 pub mod task;

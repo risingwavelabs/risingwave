@@ -22,7 +22,7 @@ macro_rules! array {
             let mut builder = <$array as Array>::Builder::new(0);
             for value in [$($value),*] {
                 let value: Option<<$array as Array>::RefItem<'_>> = value.map(Into::into);
-                builder.append(value).unwrap();
+                builder.append(value);
             }
             builder.finish()
         }
@@ -49,7 +49,7 @@ macro_rules! array_nonnull {
             let mut builder = <$array as Array>::Builder::new(0);
             for value in [$($value),*] {
                 let value: <$array as Array>::RefItem<'_> = value.into();
-                builder.append(Some(value)).unwrap();
+                builder.append(Some(value));
             }
             builder.finish()
         }
@@ -63,7 +63,8 @@ macro_rules! column {
         {
             use $crate::array::column::Column;
             let arr = $crate::array! { $array, [ $( $value ),* ] };
-            Column::new(std::sync::Arc::new(arr.into()))
+            let col: Column = arr.into();
+            col
         }
     };
 }
@@ -75,7 +76,8 @@ macro_rules! column_nonnull {
         {
             use $crate::array::column::Column;
             let arr = $crate::array_nonnull! { $array, [ $( $value ),* ] };
-            Column::new(std::sync::Arc::new(arr.into()))
+            let col: Column = arr.into();
+            col
         }
     };
 }

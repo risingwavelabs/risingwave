@@ -31,7 +31,6 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_pb::catalog::Table;
 use tracing::trace;
 
 use super::iter_utils;
@@ -112,6 +111,7 @@ impl<S: StateStore> StorageTable<S> {
         pk_indices: Vec<usize>,
         distribution: Distribution,
         table_options: TableOption,
+        value_indices: Vec<usize>,
     ) -> Self {
         Self::new_inner(
             store,
@@ -122,10 +122,11 @@ impl<S: StateStore> StorageTable<S> {
             pk_indices,
             distribution,
             table_options,
+            value_indices,
         )
     }
 
-    pub fn new_for_test(
+    pub fn for_test(
         store: S,
         table_id: TableId,
         columns: Vec<ColumnDesc>,
@@ -133,6 +134,7 @@ impl<S: StateStore> StorageTable<S> {
         pk_indices: Vec<usize>,
     ) -> Self {
         let column_ids = columns.iter().map(|c| c.column_id).collect();
+        let value_indices = (0..columns.len()).collect_vec();
         Self::new_inner(
             store,
             table_id,
@@ -142,63 +144,12 @@ impl<S: StateStore> StorageTable<S> {
             pk_indices,
             Distribution::fallback(),
             Default::default(),
+            value_indices,
         )
     }
 }
 
 impl<S: StateStore> StorageTable<S> {
-    /// Create storage table from table catalog and store.
-    pub fn from_table_catalog(
-        table_catalog: &Table,
-        store: S,
-        vnodes: Option<Arc<Bitmap>>,
-    ) -> Self {
-        let table_columns: Vec<ColumnDesc> = table_catalog
-            .columns
-            .iter()
-            .map(|col| col.column_desc.as_ref().unwrap().into())
-            .collect();
-        let order_types = table_catalog
-            .order_key
-            .iter()
-            .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
-            })
-            .collect();
-        let dist_key_indices = table_catalog
-            .distribution_key
-            .iter()
-            .map(|dist_index| *dist_index as usize)
-            .collect();
-        let pk_indices = table_catalog
-            .order_key
-            .iter()
-            .map(|col_order| col_order.index as usize)
-            .collect();
-        let distribution = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices,
-                vnodes,
-            },
-            None => Distribution::fallback(),
-        };
-        Self::new_inner(
-            store,
-            TableId::new(table_catalog.id),
-            table_columns.clone(),
-            table_columns
-                .iter()
-                .map(|table_column| table_column.column_id)
-                .collect(),
-            order_types,
-            pk_indices,
-            distribution,
-            TableOption::build_table_option(table_catalog.get_properties()),
-        )
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn new_inner(
         store: S,
@@ -212,9 +163,10 @@ impl<S: StateStore> StorageTable<S> {
             vnodes,
         }: Distribution,
         table_option: TableOption,
+        value_indices: Vec<usize>,
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
-        let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
+        let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids, &value_indices);
         let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
@@ -268,7 +220,16 @@ impl<S: StateStore> StorageTable<S> {
     }
 
     /// Get a single row by point get
-    pub async fn get_row(&mut self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
+    pub async fn get_row(
+        &mut self,
+        pk: &Row,
+        wait_epoch: HummockReadEpoch,
+    ) -> StorageResult<Option<Row>> {
+        let epoch = wait_epoch.get_epoch();
+        self.keyspace
+            .state_store()
+            .try_wait_epoch(wait_epoch)
+            .await?;
         let serialized_pk =
             serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
         let read_options = self.get_read_option(epoch);
@@ -544,9 +505,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        if !matches!(epoch, HummockReadEpoch::NoWait(_)) {
-            keyspace.state_store().try_wait_epoch(epoch).await?;
-        }
+        keyspace.state_store().try_wait_epoch(epoch).await?;
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;

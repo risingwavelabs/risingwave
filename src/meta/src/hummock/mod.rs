@@ -112,8 +112,7 @@ where
                             tracing::info!("Released hummock context {}", worker_node.id);
                             sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
                         },
-                        Some(LocalNotification::CompactionTaskNeedCancel(mut compact_task)) => {
-                            compact_task.set_task_status(risingwave_pb::hummock::compact_task::TaskStatus::Canceled);
+                        Some(LocalNotification::CompactionTaskNeedCancel(compact_task)) => {
                             tokio_retry::RetryIf::spawn(
                                 retry_strategy.clone(),
                                 || async {
@@ -151,6 +150,7 @@ where
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         compaction_scheduler.start(shutdown_rx).await;
+        tracing::info!("Compaction scheduler is stopped");
     });
 
     (join_handle, shutdown_tx)

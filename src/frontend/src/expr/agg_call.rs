@@ -108,10 +108,6 @@ impl AggCall {
                 datatype: Box::new(input.clone()),
             },
             (AggKind::ArrayAgg, _) => return invalid(),
-
-            // SingleValue
-            (AggKind::SingleValue, [input]) => input.clone(),
-            (AggKind::SingleValue, _) => return invalid(),
         };
 
         Ok(return_type)

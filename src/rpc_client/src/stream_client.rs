@@ -63,6 +63,7 @@ macro_rules! for_all_stream_rpc {
             ,{ 0, sync_sources, SyncSourcesRequest, SyncSourcesResponse }
             ,{ 0, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ 0, barrier_complete, BarrierCompleteRequest, BarrierCompleteResponse }
+            ,{ 0, wait_epoch_commit, WaitEpochCommitRequest, WaitEpochCommitResponse }
         }
     };
 }

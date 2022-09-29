@@ -1,8 +1,8 @@
 [package]
-name = "stats_alloc"
+name = "local_stats_alloc"
 version = "0.1.11"
 edition = "2021"
-description = "Allocator with statistics"
+description = "Local allocator with statistics"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [target.'cfg(not(madsim))'.dependencies]

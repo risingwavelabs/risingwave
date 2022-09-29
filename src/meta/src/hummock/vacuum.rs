@@ -149,7 +149,7 @@ where
                         err
                     );
                     self.compactor_manager
-                        .remove_compactor(compactor.context_id());
+                        .pause_compactor(compactor.context_id());
                 }
             }
         }
@@ -327,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_vacuum() {
         let (env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
-        let compactor_manager = Arc::new(CompactorManager::new_for_test());
+        let compactor_manager = Arc::new(CompactorManager::for_test());
         let vacuum = Arc::new(VacuumManager::new(env, hummock_manager, compactor_manager));
         let (join_handle, shutdown_sender) =
             start_vacuum_scheduler(vacuum, Duration::from_secs(60));

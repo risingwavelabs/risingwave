@@ -16,7 +16,6 @@
 #![feature(generic_associated_types)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
-
-extern crate core;
+#![feature(once_cell)]
 
 pub mod object;

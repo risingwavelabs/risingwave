@@ -155,7 +155,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             .iter()
             .enumerate()
             // skip invisible
-            .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true))
             // skip null input
             .filter(|(i, _)| columns[self.upstream_agg_col_idx].datum_at(*i).is_some())
         {
@@ -189,12 +189,10 @@ impl<S: StateStore> ManagedStringAggState<S> {
 
     async fn get_output_inner(
         &mut self,
-        epoch: u64,
         state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         if !self.cache_synced {
-            let all_data_iter =
-                iter_state_table(state_table, epoch, self.group_key.as_ref()).await?;
+            let all_data_iter = iter_state_table(state_table, self.group_key.as_ref()).await?;
             pin_mut!(all_data_iter);
 
             self.cache.clear();
@@ -226,18 +224,13 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl], // contains all upstream columns
-        _epoch: u64,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         self.apply_chunk_inner(ops, visibility, columns, state_table)
     }
 
-    async fn get_output(
-        &mut self,
-        epoch: u64,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Datum> {
-        self.get_output_inner(epoch, state_table).await
+    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
+        self.get_output_inner(state_table).await
     }
 
     fn is_dirty(&self) -> bool {
@@ -256,6 +249,7 @@ mod tests {
     use risingwave_common::array::{Row, StreamChunk, StreamChunkTestExt};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
@@ -307,7 +301,9 @@ mod tests {
             0,
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
+        state_table.init_epoch(epoch);
+        epoch.inc();
 
         let chunk = StreamChunk::from_pretty(
             " T T i i I
@@ -319,20 +315,14 @@ mod tests {
         let (ops, columns, visibility) = chunk.into_inner();
         let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
         agg_state
-            .apply_chunk(
-                &ops,
-                visibility.as_ref(),
-                &column_refs,
-                epoch,
-                &mut state_table,
-            )
+            .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
             .await?;
 
-        epoch += 1;
+        epoch.inc();
         agg_state.flush(&mut state_table)?;
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
 
-        let res = agg_state.get_output(epoch, &state_table).await?;
+        let res = agg_state.get_output(&state_table).await?;
         match res {
             Some(ScalarImpl::Utf8(s)) => {
                 // should be "a,c" or "c,a"
@@ -387,7 +377,9 @@ mod tests {
             0,
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
+        state_table.init_epoch(epoch);
+        epoch.inc();
 
         let chunk = StreamChunk::from_pretty(
             " T T I
@@ -399,20 +391,14 @@ mod tests {
         let (ops, columns, visibility) = chunk.into_inner();
         let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
         agg_state
-            .apply_chunk(
-                &ops,
-                visibility.as_ref(),
-                &column_refs,
-                epoch,
-                &mut state_table,
-            )
+            .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
             .await?;
 
-        epoch += 1;
+        epoch.inc();
         agg_state.flush(&mut state_table)?;
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
 
-        let res = agg_state.get_output(epoch, &state_table).await?;
+        let res = agg_state.get_output(&state_table).await?;
         match res {
             Some(ScalarImpl::Utf8(s)) => {
                 // should be something like "ac4d"
@@ -476,7 +462,9 @@ mod tests {
             0,
         );
 
-        let mut epoch = 0;
+        let epoch = EpochPair::new_test_epoch(1);
+        state_table.init_epoch(epoch);
+        epoch.inc();
 
         {
             let chunk = StreamChunk::from_pretty(
@@ -489,20 +477,14 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             agg_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            state_table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
 
-            let res = agg_state.get_output(epoch, &state_table).await?;
+            let res = agg_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "c,a".to_string());
@@ -520,20 +502,13 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             agg_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            state_table.commit_for_test(epoch).await.unwrap();
 
-            let res = agg_state.get_output(epoch, &state_table).await?;
+            let res = agg_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "d_c,a+e".to_string());
@@ -592,8 +567,9 @@ mod tests {
             0,
         );
 
-        let mut epoch = 0;
-
+        let epoch = EpochPair::new_test_epoch(1);
+        state_table.init_epoch(epoch);
+        epoch.inc();
         {
             let chunk = StreamChunk::from_pretty(
                 " T T i i I
@@ -604,20 +580,14 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             agg_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            state_table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
 
-            let res = agg_state.get_output(epoch, &state_table).await?;
+            let res = agg_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "a_b".to_string());
@@ -635,20 +605,13 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_chunk(
-                    &ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    epoch,
-                    &mut state_table,
-                )
+                .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
             agg_state.flush(&mut state_table)?;
-            state_table.commit(epoch).await.unwrap();
-            epoch += 1;
+            state_table.commit_for_test(epoch).await.unwrap();
 
-            let res = agg_state.get_output(epoch, &state_table).await?;
+            let res = agg_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "a,e_b".to_string());

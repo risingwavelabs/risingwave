@@ -18,10 +18,10 @@ use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use futures_async_stream::for_await;
 use parking_lot::RwLock;
-use pgwire::error::PsqlResult;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
     IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
@@ -73,11 +73,7 @@ impl SessionManager for LocalFrontend {
         Ok(self.session_ref())
     }
 
-    fn connect_for_cancel(
-        &self,
-        _process_id: i32,
-        _secret_key: i32,
-    ) -> PsqlResult<Arc<Self::Session>> {
+    fn cancel_queries_in_session(&self, _session_id: SessionId) {
         todo!()
     }
 }
@@ -111,12 +107,15 @@ impl LocalFrontend {
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
-        self.run_sql(sql)
-            .await
-            .unwrap()
-            .iter()
-            .map(|row| format!("{:?}", row))
-            .collect()
+        let mut rsp = self.run_sql(sql).await.unwrap();
+        let mut res = vec![];
+        #[for_await]
+        for row_set in rsp.values_stream() {
+            for row in row_set.unwrap() {
+                res.push(format!("{:?}", row))
+            }
+        }
+        res
     }
 
     /// Convert a sql (must be an `Query`) into an unoptimized batch plan.
@@ -615,7 +614,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
-    async fn flush(&self) -> RpcResult<HummockSnapshot> {
+    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot {
             committed_epoch: 0,
             current_epoch: 0,

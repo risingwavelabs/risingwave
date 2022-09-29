@@ -20,6 +20,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use futures::future::try_join_all;
 use futures::{pin_mut, Future, StreamExt};
+use risingwave_common::util::epoch::EpochPair;
 use size::Size;
 use tokio::task::JoinHandle;
 
@@ -86,9 +87,13 @@ pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
                 let hummock = hummock.clone();
                 let handler = spawn_okk(async move {
                     tracing::info!(thread = i, "starting scan");
-                    let state_table = make_state_table(hummock, &table);
+                    let state_table = {
+                        let mut tb = make_state_table(hummock, &table);
+                        tb.init_epoch(EpochPair::new_test_epoch(u64::MAX));
+                        tb
+                    };
                     loop {
-                        let stream = state_table.iter(u64::MAX).await?;
+                        let stream = state_table.iter().await?;
                         pin_mut!(stream);
                         iter_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         while let Some(item) = stream.next().await {

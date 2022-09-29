@@ -286,7 +286,7 @@ If you want to see the coverage report, run this command:
 
 ### Planner tests
 
-RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/plan_test/README.md).
+RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/planner_test/README.md).
 
 ### End-to-end tests
 
@@ -376,7 +376,7 @@ In RisingWave, deterministic simulation is supported in both unit test and end-t
 # run deterministic unit test
 ./risedev stest
 # run deterministic end-to-end test
-./risedev sslt './e2e_test/path/to/directory/**/*.slt'
+./risedev sslt -- './e2e_test/path/to/directory/**/*.slt'
 ```
 
 When your program panics, the simulator will print the random seed of this run:

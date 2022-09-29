@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -59,10 +56,9 @@ impl TableFunctionExecutor {
         let mut len = 0;
         for array in self.table_function.eval(&dummy_chunk)? {
             len += array.len();
-            builder.append_array(&array)?;
+            builder.append_array(&array);
         }
-        let array = Arc::new(builder.finish());
-        let ret = DataChunk::new(vec![Column::new(array)], len);
+        let ret = DataChunk::new(vec![builder.finish().into()], len);
         yield ret
     }
 }
@@ -74,7 +70,7 @@ impl TableFunctionExecutorBuilder {}
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(

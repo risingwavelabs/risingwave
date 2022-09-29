@@ -101,21 +101,25 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     fn with_meta(capacity: usize, meta: ArrayMeta) -> Self;
 
     /// Append a value to builder.
-    fn append(
-        &mut self,
-        value: Option<<<Self as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>,
-    ) -> ArrayResult<()>;
+    fn append(&mut self, value: Option<<<Self as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>);
 
-    fn append_null(&mut self) -> ArrayResult<()> {
+    fn append_null(&mut self) {
         self.append(None)
     }
 
     /// Append an array to builder.
-    fn append_array(&mut self, other: &Self::ArrayType) -> ArrayResult<()>;
+    fn append_array(&mut self, other: &Self::ArrayType);
+
+    /// Pop an element from the builder.
+    ///
+    /// # Returns
+    ///
+    /// Returns `None` if there is no elements in the builder.
+    fn pop(&mut self) -> Option<()>;
 
     /// Append an element in another array into builder.
-    fn append_array_element(&mut self, other: &Self::ArrayType, idx: usize) -> ArrayResult<()> {
-        self.append(other.value_at(idx))
+    fn append_array_element(&mut self, other: &Self::ArrayType, idx: usize) {
+        self.append(other.value_at(idx));
     }
 
     /// Finish build and return a new array.
@@ -180,7 +184,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     /// Check if an element is `null` or not.
     fn is_null(&self, idx: usize) -> bool {
-        self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
+        !self.null_bitmap().is_set(idx)
     }
 
     /// # Safety
@@ -206,7 +210,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
         self.len() == 0
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl>;
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl;
 
     fn array_meta(&self) -> ArrayMeta {
         ArrayMeta::Simple
@@ -241,19 +245,19 @@ impl From<&DataType> for ArrayMeta {
 trait CompactableArray: Array {
     /// Select some elements from `Array` based on `visibility` bitmap.
     /// `cardinality` is only used to decide capacity of the new `Array`.
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> ArrayResult<Self>;
+    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self;
 }
 
 impl<A: Array> CompactableArray for A {
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> ArrayResult<Self> {
+    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         use itertools::Itertools;
         let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
         for (elem, visible) in self.iter().zip_eq(visibility.iter()) {
             if visible {
-                builder.append(elem)?;
+                builder.append(elem);
             }
         }
-        Ok(builder.finish())
+        builder.finish()
     }
 }
 
@@ -410,36 +414,36 @@ for_all_variants! { array_builder_impl_enum }
 macro_rules! impl_array_builder {
     ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         impl ArrayBuilderImpl {
-            pub fn append_array(&mut self, other: &ArrayImpl) -> ArrayResult<()> {
+            pub fn append_array(&mut self, other: &ArrayImpl) {
                 match self {
                     $( Self::$variant_name(inner) => inner.append_array(other.into()), )*
                 }
             }
 
-            pub fn append_null(&mut self) -> ArrayResult<()> {
+            pub fn append_null(&mut self) {
                 match self {
                     $( Self::$variant_name(inner) => inner.append(None), )*
                 }
             }
 
             /// Append a datum, return error while type not match.
-            pub fn append_datum(&mut self, datum: &Datum) -> ArrayResult<()> {
+            pub fn append_datum(&mut self, datum: &Datum) {
                 match datum {
                     None => self.append_null(),
                     Some(ref scalar) => match (self, scalar) {
                         $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
-                        _ => bail!("Invalid datum type".to_string()),
+                        _ => panic!("Invalid datum type"),
                     },
                 }
             }
 
             /// Append a datum ref, return error while type not match.
-            pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) -> ArrayResult<()> {
+            pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) {
                 match datum_ref {
                     None => self.append_null(),
                     Some(scalar_ref) => match (self, scalar_ref) {
                         $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
-                        (this_builder, this_scalar_ref) => bail!(
+                        (this_builder, this_scalar_ref) => panic!(
                             "Failed to append datum, array builder type: {}, scalar ref type: {}",
                             this_builder.get_ident(),
                             this_scalar_ref.get_ident()
@@ -448,9 +452,15 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) -> ArrayResult<()> {
+            pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
                 match self {
                     $( Self::$variant_name(inner) => inner.append_array_element(other.into(), idx), )*
+                };
+            }
+
+            pub fn pop(&mut self) -> Option<()> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.pop(), )*
                 }
             }
 
@@ -518,9 +528,9 @@ macro_rules! impl_array {
             }
 
             /// Select some elements from `Array` based on `visibility` bitmap.
-            pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> ArrayResult<Self> {
+            pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
                 match self {
-                    $( Self::$variant_name(inner) => Ok(inner.compact(visibility, cardinality)?.into()), )*
+                    $( Self::$variant_name(inner) => inner.compact(visibility, cardinality).into(), )*
                 }
             }
 
@@ -570,7 +580,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+            pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
                 match self {
                     $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
                 }
@@ -640,7 +650,7 @@ mod tests {
         let mut builder = A::Builder::with_meta(data.len(), data.array_meta());
         for i in 0..data.len() {
             if pred(data.value_at(i)) {
-                builder.append(data.value_at(i))?;
+                builder.append(data.value_at(i));
             }
         }
         Ok(builder.finish())
@@ -650,7 +660,7 @@ mod tests {
     fn test_filter() {
         let mut builder = PrimitiveArrayBuilder::<i32>::new(0);
         for i in 0..=60 {
-            builder.append(Some(i as i32)).unwrap();
+            builder.append(Some(i as i32));
         }
         let array = filter(&builder.finish(), |x| x.unwrap_or(0) >= 60).unwrap();
         assert_eq!(array.iter().collect::<Vec<Option<i32>>>(), vec![Some(60)]);
@@ -674,7 +684,7 @@ mod tests {
                 (Some(a), Some(b)) => Some(a.as_() + b.as_()),
                 _ => None,
             };
-            builder.append(item)?;
+            builder.append(item);
         }
         Ok(builder.finish())
     }
@@ -683,13 +693,13 @@ mod tests {
     fn test_vectorized_add() {
         let mut builder = PrimitiveArrayBuilder::<i32>::new(0);
         for i in 0..=60 {
-            builder.append(Some(i as i32)).unwrap();
+            builder.append(Some(i as i32));
         }
         let array1 = builder.finish();
 
         let mut builder = PrimitiveArrayBuilder::<i16>::new(0);
         for i in 0..=60 {
-            builder.append(Some(i as i16)).unwrap();
+            builder.append(Some(i as i16));
         }
         let array2 = builder.finish();
 

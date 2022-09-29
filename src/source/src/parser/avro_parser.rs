@@ -260,7 +260,7 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
 }
 
 impl SourceParser for AvroParser {
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter) -> Result<WriteGuard> {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         match Reader::with_schema(&self.schema, payload) {
             Ok(mut reader) => match reader.next() {
                 Some(Ok(Value::Record(fields))) => writer.insert(|column| {
@@ -490,7 +490,7 @@ mod test {
             let writer = builder.row_writer();
             avro_parser.parse(&input_data[..], writer).unwrap();
         }
-        let chunk = builder.finish().unwrap();
+        let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
         let row = row.to_owned_row();
@@ -603,7 +603,7 @@ mod test {
         ]
     }
 
-    fn build_avro_data(schema: &Schema) -> Record {
+    fn build_avro_data(schema: &Schema) -> Record<'_> {
         let mut record = Record::new(schema).unwrap();
         if let Schema::Record {
             name: _, fields, ..

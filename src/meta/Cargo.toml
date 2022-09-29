@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 assert_matches = "1"
-async-recursion = "1.0.0"
 async-stream = "0.3"
 async-trait = "0.1"
 byteorder = "1"
@@ -23,7 +22,6 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
-lazy_static = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -67,6 +65,7 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+maplit = "1.0.2"
 rand = "0.8"
 risingwave_test_runner = { path = "../test_runner" }
 static_assertions = "1"

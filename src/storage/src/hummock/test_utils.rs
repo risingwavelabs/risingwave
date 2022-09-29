@@ -38,7 +38,7 @@ use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {
-        sstable_size_mb: 256,
+        sstable_size_mb: 4,
         block_size_kb: 64,
         bloom_false_positive: 0.1,
         share_buffers_sync_parallelism: 2,
@@ -65,9 +65,22 @@ pub fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, StorageValue)> {
     )]
 }
 
+pub fn gen_dummy_batch_several_keys(epoch: u64, n: usize) -> Vec<(Bytes, StorageValue)> {
+    let mut kvs = vec![];
+    let v = Bytes::from(b"value1".to_vec().repeat(100));
+    for idx in 0..n {
+        kvs.push((
+            Bytes::from(iterator_test_key_of_epoch(idx, epoch)),
+            StorageValue::new_put(v.clone()),
+        ));
+    }
+    kvs
+}
+
 pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
     let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
     let mut max_key: Vec<u8> = batches[0].end_key().to_vec();
+    let mut file_size = 0;
     for batch in batches.iter().skip(1) {
         if min_key.as_slice() > batch.start_key() {
             min_key = batch.start_key().to_vec();
@@ -75,6 +88,7 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
         if max_key.as_slice() < batch.end_key() {
             max_key = batch.end_key().to_vec();
         }
+        file_size += batch.size() as u64;
     }
     SstableInfo {
         id,
@@ -83,9 +97,11 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
             right: max_key,
             inf: false,
         }),
-        file_size: batches.len() as u64,
+        file_size,
         table_ids: vec![],
         meta_offset: 0,
+        stale_key_count: 0,
+        total_key_count: 0,
     }
 }
 
@@ -115,15 +131,15 @@ pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> InMemWriter {
 }
 
 /// Generates sstable data and metadata from given `kv_iter`
-pub fn gen_test_sstable_data(
+pub async fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta) {
-    let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opts), opts);
+    let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice()).unwrap();
+        b.add(&key, value.as_slice(), true).await.unwrap();
     }
-    let output = b.finish().unwrap();
+    let output = b.finish().await.unwrap();
     output.writer_output
 }
 
@@ -140,7 +156,9 @@ pub async fn put_sst(
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
-        writer.write_block(&data[offset..end_offset], block_meta)?;
+        writer
+            .write_block(&data[offset..end_offset], block_meta)
+            .await?;
     }
     meta.meta_offset = writer.data_len() as u64;
     let sst = SstableInfo {
@@ -153,8 +171,10 @@ pub async fn put_sst(
         file_size: meta.estimated_size as u64,
         table_ids: vec![],
         meta_offset: meta.meta_offset,
+        stale_key_count: 0,
+        total_key_count: 0,
     };
-    let writer_output = writer.finish(meta)?;
+    let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;
     Ok(sst)
 }
@@ -173,11 +193,11 @@ pub async fn gen_test_sstable_inner(
         policy,
     };
     let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
-    let mut b = SstableBuilder::new_for_test(sst_id, writer, opts);
+    let mut b = SstableBuilder::for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice()).unwrap();
+        b.add(&key, value.as_slice(), true).await.unwrap();
     }
-    let output = b.finish().unwrap();
+    let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
     let table = sstable_store
         .sstable(&output.sst_info, &mut StoreLocalStatistic::default())

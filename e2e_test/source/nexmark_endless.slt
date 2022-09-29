@@ -5,7 +5,10 @@ include ../nexmark/create_sources.slt.part
 include ../streaming/nexmark/views/q7.slt.part
 include ../streaming/nexmark/views/q5.slt.part
 
-sleep 10s
+sleep 15s
+
+statement ok
+flush;
 
 query I
 select count(*) > 0 as has_results from nexmark_q7;

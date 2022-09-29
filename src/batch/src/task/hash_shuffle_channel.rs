@@ -21,12 +21,12 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::batch_plan::exchange_info::HashInfo;
 use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
-use crate::error::BatchError::{Array, SenderError};
+use crate::error::BatchError::SenderError;
 use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
@@ -52,7 +52,7 @@ pub struct HashShuffleReceiver {
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> BatchResult<Vec<usize>> {
     let output_count = hash_info.output_count as usize;
 
-    let hasher_builder = CRC32FastBuilder {};
+    let hasher_builder = Crc32FastBuilder {};
 
     let hash_values = chunk
         .get_hash_values(
@@ -63,7 +63,6 @@ fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> BatchResult<
                 .collect::<Vec<_>>(),
             hasher_builder,
         )
-        .map_err(Array)?
         .iter_mut()
         .map(|hash_value| hash_value.hash_code() as usize % output_count)
         .collect::<Vec<_>>();

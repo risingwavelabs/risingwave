@@ -22,7 +22,8 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::{Barrier, Epoch, Mutation};
+use risingwave_storage::dispatch_state_store;
+use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
@@ -116,21 +117,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<ForceStopActorsRequest>,
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
-        let epoch = req.epoch.unwrap();
-
-        let barrier = &Barrier {
-            epoch: Epoch {
-                curr: epoch.curr,
-                prev: epoch.prev,
-            },
-            mutation: Some(Arc::new(Mutation::Stop(
-                req.actor_ids.into_iter().collect(),
-            ))),
-            checkpoint: true,
-            passed_actors: vec![],
-        };
-
-        self.mgr.stop_all_actors(barrier).await?;
+        self.mgr.stop_all_actors().await?;
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -143,8 +130,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<InjectBarrierRequest>,
     ) -> Result<Response<InjectBarrierResponse>, Status> {
         let req = request.into_inner();
-        let barrier =
-            Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
+        let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
 
         self.mgr
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
@@ -161,18 +147,21 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let collect_result = self
+        let (collect_result, checkpoint) = self
             .mgr
             .collect_barrier(req.prev_epoch)
             .stack_trace(format!("collect_barrier (epoch {})", req.prev_epoch))
-            .await;
-        // Must finish syncing data written in the epoch before respond back to ensure persistency
-        // of the state.
-        let (synced_sstables, sync_succeed) = self
-            .mgr
-            .sync_epoch(req.prev_epoch)
-            .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
             .await?;
+        // Must finish syncing data written in the epoch before respond back to ensure persistence
+        // of the state.
+        let synced_sstables = if checkpoint {
+            self.mgr
+                .sync_epoch(req.prev_epoch)
+                .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
+                .await?
+        } else {
+            vec![]
+        };
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
@@ -185,9 +174,29 @@ impl StreamService for StreamServiceImpl {
                     sst: Some(sst),
                 })
                 .collect_vec(),
-            checkpoint: sync_succeed,
             worker_id: self.env.worker_id(),
         }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn wait_epoch_commit(
+        &self,
+        request: Request<WaitEpochCommitRequest>,
+    ) -> Result<Response<WaitEpochCommitResponse>, Status> {
+        let epoch = request.into_inner().epoch;
+
+        dispatch_state_store!(self.env.state_store(), store, {
+            use risingwave_hummock_sdk::HummockReadEpoch;
+            use risingwave_storage::StateStore;
+
+            store
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .stack_trace(format!("wait_epoch_commit (epoch {})", epoch))
+                .await
+                .map_err(tonic_err)?;
+        });
+
+        Ok(Response::new(WaitEpochCommitResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]

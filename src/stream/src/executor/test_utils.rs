@@ -99,7 +99,7 @@ impl MockSource {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
-        let mut epoch = 0;
+        let mut epoch = 1;
 
         while let Some(msg) = self.rx.recv().await {
             epoch += 1;
@@ -121,7 +121,7 @@ impl Executor for MockSource {
         &self.schema
     }
 
-    fn pk_indices(&self) -> super::PkIndicesRef {
+    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -219,7 +219,6 @@ pub mod agg_executor {
             | AggKind::Sum
             | AggKind::Count
             | AggKind::Avg
-            | AggKind::SingleValue
             | AggKind::ApproxCountDistinct => {
                 add_column_desc(agg_call.return_type.clone());
             }
@@ -270,6 +269,7 @@ pub mod agg_executor {
                 agg_calls,
                 pk_indices,
                 executor_id,
+                1 << 10,
                 state_tables,
                 state_table_col_mappings,
             )

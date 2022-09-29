@@ -21,6 +21,7 @@ use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
+use crate::cache::LruManagerRef;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};
@@ -32,8 +33,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+        stream: &mut LocalStreamManagerCore,
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
@@ -86,7 +87,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 fn create_hash_join_executor<S: StateStore>(
                     typ: JoinTypeProto, kind: HashKeyKind,
                     args: HashJoinExecutorDispatcherArgs<S>,
-                ) -> Result<BoxedExecutor> {
+                ) -> StreamResult<BoxedExecutor> {
                     match typ {
                         $( JoinTypeProto::$join_type_proto => HashJoinExecutorDispatcher::<_, {JoinType::$join_type}>::dispatch_by_kind(kind, args), )*
                         JoinTypeProto::Unspecified => unreachable!(),
@@ -141,10 +142,12 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
+            cache_size: stream.config.developer.unsafe_join_cache_size,
             state_table_l,
             degree_state_table_l,
             state_table_r,
             degree_state_table_r,
+            lru_manager: stream.context.lru_manager.clone(),
             is_append_only,
             metrics: params.executor_stats,
         };
@@ -169,10 +172,12 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     cond: Option<BoxedExpression>,
     op_info: String,
+    cache_size: usize,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
     degree_state_table_r: StateTable<S>,
+    lru_manager: Option<LruManagerRef>,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
 }
@@ -181,7 +186,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
     for HashJoinExecutorDispatcher<S, T>
 {
     type Input = HashJoinExecutorDispatcherArgs<S>;
-    type Output = Result<BoxedExecutor>;
+    type Output = StreamResult<BoxedExecutor>;
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Ok(Box::new(HashJoinExecutor::<K, S, T>::new(
@@ -196,10 +201,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.executor_id,
             args.cond,
             args.op_info,
+            args.cache_size,
             args.state_table_l,
             args.degree_state_table_l,
             args.state_table_r,
             args.degree_state_table_r,
+            args.lru_manager,
             args.is_append_only,
             args.metrics,
         )))

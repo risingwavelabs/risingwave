@@ -22,7 +22,7 @@ use crate::hummock::iterator::{
     Backward, DirectedUserIterator, DirectedUserIteratorBuilder, HummockIterator,
     UserIteratorPayloadType,
 };
-use crate::hummock::local_version::PinnedVersion;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BackwardSstableIterator, HummockResult};
 use crate::monitor::StoreLocalStatistic;
@@ -183,7 +183,7 @@ impl BackwardUserIterator {
                         }
                     }
                 } else {
-                    self.stats.skip_key_count += 1;
+                    self.stats.skip_multi_version_key_count += 1;
                 }
                 // TODO: Since the real world workload may follow power law or 20/80 rule, or
                 // whatever name. We may directly seek to the next key if we have

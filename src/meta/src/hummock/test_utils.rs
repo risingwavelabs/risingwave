@@ -79,14 +79,15 @@ where
             .add_compactor(context_id, u64::MAX);
         temp_compactor = true;
     }
+    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()
         .unwrap();
     compact_task.target_level = 6;
-    let compactor = hummock_manager
-        .assign_compaction_task(&compact_task)
+    hummock_manager
+        .assign_compaction_task(&compact_task, compactor.context_id())
         .await
         .unwrap();
     if temp_compactor {
@@ -145,6 +146,8 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
             file_size: 2,
             table_ids: vec![(i + 1) as u32, (i + 2) as u32],
             meta_offset: 0,
+            stale_key_count: 0,
+            total_key_count: 0,
         });
     }
     sst_info
@@ -248,12 +251,12 @@ pub async fn setup_compute_env_with_config(
     );
 
     let compaction_group_manager = Arc::new(
-        CompactionGroupManager::new_with_config(env.clone(), config.clone())
+        CompactionGroupManager::with_config(env.clone(), config.clone())
             .await
             .unwrap(),
     );
 
-    let compactor_manager = Arc::new(CompactorManager::new_for_test());
+    let compactor_manager = Arc::new(CompactorManager::for_test());
 
     let hummock_manager = Arc::new(
         HummockManager::new(

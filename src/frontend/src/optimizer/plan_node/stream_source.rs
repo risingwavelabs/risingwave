@@ -53,7 +53,7 @@ impl StreamSource {
 impl_plan_tree_node_for_leaf! { StreamSource }
 
 impl fmt::Display for StreamSource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamSource");
         builder
             .field("source", &self.logical.source_catalog.name)
@@ -77,7 +77,12 @@ impl StreamNode for StreamSource {
                 .map(|c| c.column_id().into())
                 .collect(),
             source_type: self.logical.source_catalog.source_type as i32,
-            state_table_id: state.gen_table_id(),
+            state_table: Some(
+                self.logical
+                    .infer_internal_table_catalog()
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ),
         })
     }
 }

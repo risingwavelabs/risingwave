@@ -16,7 +16,7 @@ use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::StreamExt;
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
@@ -38,7 +38,7 @@ use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
-use crate::executor::PROCESSING_WINDOW_SIZE;
+use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
 
 pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
@@ -83,7 +83,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
-            range_cache: RangeCache::new(state_table_l, 0, usize::MAX),
+            range_cache: RangeCache::new(state_table_l, usize::MAX),
             right_table: state_table_r,
             is_right_table_writer,
             metrics,
@@ -250,7 +250,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
         let mut current_epoch_row = None;
-        let mut epoch: u64 = 0;
 
         let aligned_stream = barrier_align(
             input_l.execute(),
@@ -258,6 +257,15 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             self.ctx.id,
             self.metrics.clone(),
         );
+
+        pin_mut!(aligned_stream);
+
+        let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
+        self.right_table.init_epoch(barrier.epoch);
+        self.range_cache.init(barrier.epoch);
+
+        // The first barrier message should be propagated.
+        yield Message::Barrier(barrier);
 
         let mut stream_chunk_builder =
             StreamChunkBuilder::new(PROCESSING_WINDOW_SIZE, &self.schema.data_types(), 0, 0)?;
@@ -267,7 +275,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             match msg? {
                 AlignedMessage::Left(chunk) => {
                     // Reuse the logic from `FilterExecutor`
-                    let chunk = chunk.compact()?; // Is this unnecessary work?
+                    let chunk = chunk.compact(); // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
                     let right_val = prev_epoch_value.clone().flatten();
@@ -288,7 +296,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 }
                 AlignedMessage::Right(chunk) => {
                     // Record the latest update to the right value
-                    let chunk = chunk.compact()?; // Is this unnecessary work?
+                    let chunk = chunk.compact(); // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
                     let mut last_is_insert = true;
@@ -335,18 +343,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     if self.is_right_table_writer {
                         if let Some(row) = current_epoch_row.take() {
-                            assert_eq!(epoch, barrier.epoch.prev);
                             self.right_table.insert(row);
-                            self.right_table.commit(epoch).await?;
+                            self.right_table.commit(barrier.epoch).await?;
+                        } else {
+                            self.right_table.commit_no_data_expected(barrier.epoch);
                         }
                     }
 
-                    self.range_cache.flush().await?;
-
-                    // We have flushed all the state for the prev epoch. We can now update the
-                    // epochs.
-                    epoch = barrier.epoch.curr;
-                    self.range_cache.update_epoch(barrier.epoch.curr);
+                    self.range_cache.flush(barrier.epoch).await?;
 
                     prev_epoch_value = Some(curr);
 
@@ -373,7 +377,7 @@ impl<S: StateStore> Executor for DynamicFilterExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -500,7 +504,7 @@ mod tests {
         tx_l.push_chunk(chunk_l2);
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact().unwrap(),
+            chunk.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I
                 + 4
@@ -604,7 +608,7 @@ mod tests {
         tx_l.push_chunk(chunk_l2);
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact().unwrap(),
+            chunk.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I
                 + 4
@@ -707,7 +711,7 @@ mod tests {
         tx_l.push_chunk(chunk_l2);
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact().unwrap(),
+            chunk.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I
                 + 1
@@ -811,7 +815,7 @@ mod tests {
         tx_l.push_chunk(chunk_l2);
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact().unwrap(),
+            chunk.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I
                 + 1

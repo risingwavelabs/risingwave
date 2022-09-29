@@ -94,9 +94,7 @@ impl Rule for PushCalculationOfJoinRule {
             right = new_input(right, right_exprs);
         }
 
-        Some(
-            LogicalJoin::new_with_output_indices(left, right, join_type, on, output_indices).into(),
-        )
+        Some(LogicalJoin::with_output_indices(left, right, join_type, on, output_indices).into())
     }
 }
 

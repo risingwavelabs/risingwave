@@ -93,7 +93,7 @@ impl InsertExecutor {
             if let Some(row_id_index) = row_id_index {
                 let mut builder = I64ArrayBuilder::new(len);
                 for _ in 0..len {
-                    builder.append_null()?
+                    builder.append_null();
                 }
                 columns.insert(row_id_index, Column::from(builder.finish()))
             }
@@ -114,7 +114,7 @@ impl InsertExecutor {
         // create ret value
         {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
-            array_builder.append(Some(rows_inserted as i64))?;
+            array_builder.append(Some(rows_inserted as i64));
 
             let array = array_builder.finish();
             let ret_chunk = DataChunk::new(vec![array.into()], 1);
@@ -127,7 +127,7 @@ impl InsertExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for InsertExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -213,10 +213,8 @@ mod tests {
                 array! { I32Array, [Some(3),None,None,None,None] }.into(),
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
-        )
-        .map(|x| Arc::new(x.into()))
-        .unwrap();
-        let col3 = Column::new(array);
+        );
+        let col3 = array.into();
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
 
@@ -292,7 +290,6 @@ mod tests {
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
-        .unwrap()
         .into();
         assert_eq!(*chunk.columns()[2].array(), array);
 

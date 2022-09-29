@@ -46,7 +46,7 @@ pub struct TopNExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for TopNExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -137,7 +137,7 @@ impl TopNExecutor {
 
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = Arc::new(chunk?.compact()?);
+            let chunk = Arc::new(chunk?.compact());
             for (row_id, encoded_row) in encode_chunk(&chunk, &self.order_pairs)
                 .into_iter()
                 .enumerate()
@@ -161,12 +161,12 @@ impl TopNExecutor {
             .take(self.limit)
         {
             if let Some(spilled) =
-                chunk_builder.append_one_row_ref(chunk.row_at_unchecked_vis(row_id))?
+                chunk_builder.append_one_row_ref(chunk.row_at_unchecked_vis(row_id))
             {
                 yield spilled
             }
         }
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield spilled
         }
     }

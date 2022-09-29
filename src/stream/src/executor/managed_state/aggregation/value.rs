@@ -51,13 +51,10 @@ impl ManagedValueState {
         state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let data = if row_count != Some(0) {
-            // TODO: use the correct epoch
-            let epoch = u64::MAX;
-
             // View the state table as single-value table, and get the value via empty primary key
             // or group key.
             let raw_data = state_table
-                .get_row(group_key.unwrap_or_else(Row::empty), epoch)
+                .get_row(group_key.unwrap_or_else(Row::empty))
                 .await?;
 
             // According to row layout, the last field of the row is value and we sure the row is
@@ -101,9 +98,10 @@ impl ManagedValueState {
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
-    pub fn get_output(&self) -> StreamExecutorResult<Datum> {
-        debug_assert!(!self.is_dirty());
-        self.state.get_output()
+    pub fn get_output(&self) -> Datum {
+        self.state
+            .get_output()
+            .expect("agg call throw an error in streamAgg")
     }
 
     /// Check if this state needs a flush.
@@ -122,11 +120,17 @@ impl ManagedValueState {
         // Persist value into relational table. The inserted row should concat with pk (pk is in
         // front of value). In this case, the pk is just group key.
 
-        let mut v = vec![];
-        v.extend_from_slice(&self.group_key.as_ref().unwrap_or_else(Row::empty).0);
-        v.push(self.state.get_output()?);
-
-        state_table.insert(Row::new(v));
+        let output = self.state.get_output()?;
+        let row = Row::new(
+            self.group_key
+                .as_ref()
+                .unwrap_or_else(Row::empty)
+                .values()
+                .cloned()
+                .chain(std::iter::once(output))
+                .collect(),
+        );
+        state_table.upsert(row);
 
         self.is_dirty = false;
         Ok(())
@@ -138,6 +142,7 @@ mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::streaming_table::state_table::StateTable;
 
@@ -164,6 +169,10 @@ mod tests {
             vec![],
             vec![],
         );
+        let epoch = EpochPair::new_test_epoch(1);
+        state_table.init_epoch(epoch);
+        epoch.inc();
+
         let mut managed_state =
             ManagedValueState::new(create_test_count_state(), Some(0), None, &state_table)
                 .await
@@ -181,25 +190,18 @@ mod tests {
         assert!(managed_state.is_dirty());
 
         // write to state store
-        let epoch: u64 = 0;
         managed_state.flush(&mut state_table).unwrap();
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
 
         // get output
-        assert_eq!(
-            managed_state.get_output().unwrap(),
-            Some(ScalarImpl::Int64(3))
-        );
+        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(3)));
 
         // reload the state and check the output
         let managed_state =
             ManagedValueState::new(create_test_count_state(), None, None, &state_table)
                 .await
                 .unwrap();
-        assert_eq!(
-            managed_state.get_output().unwrap(),
-            Some(ScalarImpl::Int64(3))
-        );
+        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(3)));
     }
 
     fn create_test_max_agg_append_only() -> AggCall {
@@ -223,6 +225,10 @@ mod tests {
             vec![],
             pk_index,
         );
+        let epoch = EpochPair::new_test_epoch(1);
+        state_table.init_epoch(epoch);
+        epoch.inc();
+
         let mut managed_state = ManagedValueState::new(
             create_test_max_agg_append_only(),
             Some(0),
@@ -244,24 +250,17 @@ mod tests {
         assert!(managed_state.is_dirty());
 
         // write to state store
-        let epoch: u64 = 0;
         managed_state.flush(&mut state_table).unwrap();
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
 
         // get output
-        assert_eq!(
-            managed_state.get_output().unwrap(),
-            Some(ScalarImpl::Int64(2))
-        );
+        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(2)));
 
         // reload the state and check the output
         let managed_state =
             ManagedValueState::new(create_test_max_agg_append_only(), None, None, &state_table)
                 .await
                 .unwrap();
-        assert_eq!(
-            managed_state.get_output().unwrap(),
-            Some(ScalarImpl::Int64(2))
-        );
+        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(2)));
     }
 }

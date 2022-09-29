@@ -36,7 +36,7 @@ chmod +x ./target/debug/risingwave
 chmod +x ./target/debug/risedev-dev
 
 echo "--- Generate RiseDev CI config"
-cp ci/risedev-components.ci.env risedev-components.user.env
+cp ci/risedev-components.ci.source.env risedev-components.user.env
 
 echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
@@ -47,3 +47,6 @@ cargo make clean-data
 cargo make ci-start ci-kafka
 ./scripts/source/prepare_ci_kafka.sh
 sqllogictest -p 4566 -d dev  './e2e_test/source/**/*.slt'
+
+echo "--- Run CH-benCHmark"
+./risedev slt -p 4566 -d dev ./e2e_test/ch-benchmark/ch_benchmark.slt

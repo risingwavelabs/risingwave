@@ -35,6 +35,7 @@ mod top_n;
 mod trace;
 mod union;
 mod update;
+mod utils;
 mod values;
 
 use async_recursion::async_recursion;
@@ -65,6 +66,7 @@ pub use top_n::*;
 pub use trace::*;
 pub use union::*;
 pub use update::*;
+pub use utils::*;
 pub use values::*;
 
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
@@ -105,7 +107,7 @@ impl std::fmt::Debug for BoxedExecutor {
 #[async_trait::async_trait]
 pub trait BoxedExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor>;
 }
@@ -230,7 +232,7 @@ mod tests {
         let builder = ExecutorBuilder::new(
             &plan_node,
             task_id,
-            ComputeNodeContext::new_for_test(),
+            ComputeNodeContext::for_test(),
             u64::MAX,
         );
         let child_plan = &PlanNode {

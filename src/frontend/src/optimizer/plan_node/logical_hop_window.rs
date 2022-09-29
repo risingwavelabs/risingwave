@@ -104,13 +104,20 @@ impl LogicalHopWindow {
             }
             fd_set
         };
-        let pk_indices = match pk_indices {
-            Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
-                functional_dependency.minimize_key(&pk_indices)
-            }
-            _ => pk_indices.unwrap_or_default(),
-        };
-        let base = PlanBase::new_logical(ctx, actual_schema, pk_indices, functional_dependency);
+        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
+        // key.
+        // let pk_indices = match pk_indices {
+        //     Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
+        //         functional_dependency.minimize_key(&pk_indices)
+        //     }
+        //     _ => pk_indices.unwrap_or_default(),
+        // };
+        let base = PlanBase::new_logical(
+            ctx,
+            actual_schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
         LogicalHopWindow {
             base,
             input,
@@ -189,7 +196,7 @@ impl LogicalHopWindow {
         )
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(
             f,
             "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
@@ -303,7 +310,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
 impl_plan_tree_node_for_unary! {LogicalHopWindow}
 
 impl fmt::Display for LogicalHopWindow {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalHopWindow")
     }
 }

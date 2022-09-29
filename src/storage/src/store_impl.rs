@@ -24,7 +24,9 @@ use risingwave_object_store::object::{
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
+use crate::hummock::compaction_group_client::{
+    CompactionGroupClientImpl, MetaCompactionGroupClient,
+};
 use crate::hummock::{HummockStorage, SstableStore, TieredCache, TieredCacheMetricsBuilder};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
@@ -53,6 +55,12 @@ impl StateStoreImpl {
     pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
         Self::MemoryStateStore(MemoryStateStore::shared().monitored(state_store_metrics))
     }
+
+    pub fn for_test() -> Self {
+        StateStoreImpl::MemoryStateStore(
+            MemoryStateStore::new().monitored(Arc::new(StateStoreMetrics::unused())),
+        )
+    }
 }
 
 impl Debug for StateStoreImpl {
@@ -66,7 +74,9 @@ impl Debug for StateStoreImpl {
 
 #[macro_export]
 macro_rules! dispatch_state_store {
-    ($impl:expr, $store:ident, $body:tt) => {
+    ($impl:expr, $store:ident, $body:tt) => {{
+        use $crate::store_impl::StateStoreImpl;
+
         match $impl {
             StateStoreImpl::MemoryStateStore($store) => {
                 // WARNING: don't change this. Enabling memory backend will cause monomorphization
@@ -83,20 +93,21 @@ macro_rules! dispatch_state_store {
             }
             StateStoreImpl::HummockStateStore($store) => $body,
         }
-    };
+    }};
 }
 
 impl StateStoreImpl {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
+    #[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
     pub async fn new(
         s: &str,
-        #[allow(unused)] file_cache_dir: &str,
+        file_cache_dir: &str,
         config: Arc<StorageConfig>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-        #[allow(unused)] tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
+        tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
     ) -> StorageResult<Self> {
         #[cfg(not(target_os = "linux"))]
         let tiered_cache = TieredCache::none();
@@ -137,8 +148,7 @@ impl StateStoreImpl {
                     let local_object_store = parse_local_object_store(
                         config.local_object_store.as_str(),
                         object_store_metrics.clone(),
-                    )
-                    .await;
+                    );
                     ObjectStoreImpl::hybrid(local_object_store, remote_object_store)
                 } else {
                     remote_object_store
@@ -151,8 +161,9 @@ impl StateStoreImpl {
                     config.meta_cache_capacity_mb * (1 << 20),
                     tiered_cache,
                 ));
-                let compaction_group_client =
-                    Arc::new(CompactionGroupClientImpl::new(hummock_meta_client.clone()));
+                let compaction_group_client = Arc::new(CompactionGroupClientImpl::Meta(Arc::new(
+                    MetaCompactionGroupClient::new(hummock_meta_client.clone()),
+                )));
                 let inner = HummockStorage::new(
                     config.clone(),
                     sstable_store,

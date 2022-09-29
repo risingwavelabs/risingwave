@@ -18,14 +18,11 @@ pub mod lookup_join;
 pub mod nested_loop_join;
 mod sort_merge_join;
 
-use std::sync::Arc;
-
 pub use chunked_data::*;
 pub use hash_join::*;
 use itertools::Itertools;
 pub use lookup_join::*;
 pub use nested_loop_join::*;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, RowRef, Vis};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, DatumRef};
@@ -154,14 +151,14 @@ fn convert_datum_refs_to_chunk(
         .collect();
     for _i in 0..num_tuples {
         for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
-            builder.append_datum_ref(*datum_ref)?;
+            builder.append_datum_ref(*datum_ref);
         }
     }
 
     // Finish each array builder and get Column.
     let result_columns = output_array_builders
         .into_iter()
-        .map(|builder| Column::new(Arc::new(builder.finish())))
+        .map(|b| b.finish().into())
         .collect();
 
     Ok(DataChunk::new(result_columns, num_tuples))
@@ -179,9 +176,7 @@ fn convert_row_to_chunk(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Vis};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarRefImpl};
@@ -196,10 +191,10 @@ mod tests {
         for i in 0..num_of_columns {
             let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
-                builder.append(Some(i as i32)).unwrap();
+                builder.append(Some(i as i32));
             }
             let arr = builder.finish();
-            columns.push(Column::new(Arc::new(arr.into())))
+            columns.push(arr.into())
         }
         let chunk1: DataChunk = DataChunk::new(columns.clone(), length);
         let bool_vec = vec![true, false, true, false, false];
@@ -228,7 +223,7 @@ mod tests {
             convert_datum_refs_to_chunk(&row, 5, &probe_side_schema.data_types()).unwrap();
         assert_eq!(const_row_chunk.capacity(), 5);
         assert_eq!(
-            const_row_chunk.row_at(2).unwrap().0.value_at(0),
+            const_row_chunk.row_at(2).0.value_at(0),
             Some(ScalarRefImpl::Int32(3))
         );
     }

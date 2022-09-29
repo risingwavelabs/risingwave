@@ -34,10 +34,6 @@ use crate::executor::managed_state::aggregation::array_agg::ManagedArrayAggState
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
 use crate::executor::PkIndices;
 
-/// Limit number of the cached entries in an extreme aggregation call
-// TODO: estimate a good cache size instead of hard-coding
-const EXTREME_CACHE_SIZE: usize = 1024;
-
 mod array_agg;
 mod extreme;
 mod string_agg;
@@ -145,28 +141,23 @@ impl<S: StateStore> ManagedStateImpl<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        epoch: u64,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_chunk(ops, visibility, columns),
             Self::Table(state) => {
                 state
-                    .apply_chunk(ops, visibility, columns, epoch, state_table)
+                    .apply_chunk(ops, visibility, columns, state_table)
                     .await
             }
         }
     }
 
     /// Get the output of the state. Must flush before getting output.
-    pub async fn get_output(
-        &mut self,
-        epoch: u64,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
         match self {
-            Self::Value(state) => state.get_output(),
-            Self::Table(state) => state.get_output(epoch, state_table).await,
+            Self::Value(state) => Ok(state.get_output()),
+            Self::Table(state) => state.get_output(state_table).await,
         }
     }
 
@@ -187,12 +178,14 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Create a managed state from `agg_call`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_managed_state(
         agg_call: AggCall,
         row_count: Option<usize>,
         pk_indices: PkIndices,
         is_row_count: bool,
         group_key: Option<&Row>,
+        extreme_cache_size: usize,
         state_table: &StateTable<S>,
         state_table_col_mapping: Arc<StateTableColumnMapping>,
     ) -> StreamExecutorResult<Self> {
@@ -201,13 +194,11 @@ impl<S: StateStore> ManagedStateImpl<S> {
             "should set row_count for value states other than row count agg call"
         );
         match agg_call.kind {
-            AggKind::Avg
-            | AggKind::Count
-            | AggKind::Sum
-            | AggKind::ApproxCountDistinct
-            | AggKind::SingleValue => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
-            )),
+            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
+                Ok(Self::Value(
+                    ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
+                ))
+            }
             // optimization: use single-value state for append-only min/max
             AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
                 ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
@@ -218,7 +209,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 pk_indices,
                 state_table_col_mapping,
                 row_count.unwrap(),
-                EXTREME_CACHE_SIZE,
+                extreme_cache_size,
             )))),
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
                 agg_call,

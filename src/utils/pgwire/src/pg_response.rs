@@ -14,11 +14,16 @@
 
 use std::fmt::Formatter;
 
+use futures::stream::BoxStream;
+use futures::{stream, StreamExt};
+
 use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_server::BoxedError;
 use crate::types::Row;
 
+pub type PgResultSet = BoxStream<'static, Result<Vec<Row>, BoxedError>>;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[expect(non_camel_case_types)]
+#[expect(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum StatementType {
     INSERT,
     DELETE,
@@ -61,6 +66,8 @@ pub enum StatementType {
     // EMPTY is used when query statement is empty (e.g. ";").
     EMPTY,
     BEGIN,
+    COMMIT,
+    ROLLBACK,
 }
 
 impl std::fmt::Display for StatementType {
@@ -69,15 +76,25 @@ impl std::fmt::Display for StatementType {
     }
 }
 
-#[derive(Debug)]
 pub struct PgResponse {
     stmt_type: StatementType,
-    row_cnt: i32,
+    // row count of effected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
+    // don't return rows.
+    row_cnt: Option<i32>,
     notice: Option<String>,
-    values: Vec<Row>,
-    // Used for row_limit mode to indicate whether run out of data
-    row_end: bool,
+    values_stream: PgResultSet,
     row_desc: Vec<PgFieldDescriptor>,
+}
+
+impl std::fmt::Debug for PgResponse {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PgResponse")
+            .field("stmt_type", &self.stmt_type)
+            .field("row_cnt", &self.row_cnt)
+            .field("notice", &self.notice)
+            .field("row_desc", &self.row_desc)
+            .finish()
+    }
 }
 
 impl StatementType {
@@ -100,37 +117,61 @@ impl StatementType {
             StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE
         )
     }
+
+    pub fn is_query(&self) -> bool {
+        matches!(
+            self,
+            StatementType::SELECT
+                | StatementType::EXPLAIN
+                | StatementType::SHOW_COMMAND
+                | StatementType::DESCRIBE_TABLE
+        )
+    }
 }
 
 impl PgResponse {
     pub fn new(
         stmt_type: StatementType,
-        row_cnt: i32,
+        row_cnt: Option<i32>,
         values: Vec<Row>,
         row_desc: Vec<PgFieldDescriptor>,
-        row_end: bool,
     ) -> Self {
         Self {
             stmt_type,
             row_cnt,
-            values,
+            notice: None,
+            values_stream: futures::stream::iter(vec![Ok(values)]).boxed(),
             row_desc,
-            row_end,
+        }
+    }
+
+    pub fn new_for_stream(
+        stmt_type: StatementType,
+        row_cnt: Option<i32>,
+        values_stream: BoxStream<'static, Result<Vec<Row>, BoxedError>>,
+        row_desc: Vec<PgFieldDescriptor>,
+    ) -> Self {
+        Self {
+            stmt_type,
+            row_cnt,
+            values_stream,
+            row_desc,
             notice: None,
         }
     }
 
     pub fn empty_result(stmt_type: StatementType) -> Self {
-        Self::new(stmt_type, 0, vec![], vec![], true)
+        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
+        Self::new_for_stream(stmt_type, row_cnt, stream::empty().boxed(), vec![])
     }
 
     pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
+        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
         Self {
             stmt_type,
-            row_cnt: 0,
-            values: vec![],
+            row_cnt,
+            values_stream: stream::empty().boxed(),
             row_desc: vec![],
-            row_end: true,
             notice: Some(notice),
         }
     }
@@ -143,37 +184,23 @@ impl PgResponse {
         self.notice.clone()
     }
 
-    pub fn get_effected_rows_cnt(&self) -> i32 {
+    pub fn get_effected_rows_cnt(&self) -> Option<i32> {
         self.row_cnt
     }
 
     pub fn is_query(&self) -> bool {
-        matches!(
-            self.stmt_type,
-            StatementType::SELECT
-                | StatementType::EXPLAIN
-                | StatementType::SHOW_COMMAND
-                | StatementType::DESCRIBE_TABLE
-        )
+        self.stmt_type.is_query()
     }
 
     pub fn is_empty(&self) -> bool {
         self.stmt_type == StatementType::EMPTY
     }
 
-    pub fn is_row_end(&self) -> bool {
-        self.row_end
-    }
-
     pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {
         self.row_desc.clone()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Row> + '_ {
-        self.values.iter()
-    }
-
-    pub fn values(&self) -> Vec<Row> {
-        self.values.clone()
+    pub fn values_stream(&mut self) -> &mut PgResultSet {
+        &mut self.values_stream
     }
 }

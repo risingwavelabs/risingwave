@@ -87,7 +87,7 @@ where
 
     pub(super) fn output_concrete(&mut self, builder: &mut R::Builder) -> Result<()> {
         let res = std::mem::replace(&mut self.result, self.init_result.clone());
-        builder.append(res.as_ref().map(|x| x.as_scalar_ref()))?;
+        builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
         Ok(())
     }
 }
@@ -203,46 +203,6 @@ mod tests {
     }
 
     #[test]
-    fn single_value_int32() -> Result<()> {
-        let test_case = |numbers: &[Option<i32>], result: &[Option<i32>]| -> Result<()> {
-            let input = I32Array::from_slice(numbers);
-            let agg_kind = AggKind::SingleValue;
-            let input_type = DataType::Int32;
-            let return_type = DataType::Int32;
-            let actual = eval_agg(
-                input_type,
-                Arc::new(input.into()),
-                agg_kind,
-                return_type,
-                ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)),
-            );
-            if !result.is_empty() {
-                let actual = actual?;
-                let actual = actual.as_int32().iter().collect::<Vec<_>>();
-                assert_eq!(actual, result);
-            } else {
-                assert!(actual.is_err());
-            }
-            Ok(())
-        };
-
-        // zero row
-        test_case(&[], &[None])?;
-
-        // one row
-        test_case(&[Some(1)], &[Some(1)])?;
-        test_case(&[None], &[None])?;
-
-        // more than one row
-        test_case(&[Some(1), Some(2)], &[])?;
-        test_case(&[Some(1), None], &[])?;
-        test_case(&[None, Some(1)], &[])?;
-        test_case(&[None, None], &[])?;
-        test_case(&[None, Some(1), None], &[])?;
-        test_case(&[None, None, Some(1)], &[])
-    }
-
-    #[test]
     fn vec_sum_int32() -> Result<()> {
         let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]);
         let agg_kind = AggKind::Sum;
@@ -329,7 +289,7 @@ mod tests {
                 Some(array! { I32Array, [Some(2)] }.into()),
             ],
             DataType::Int32,
-        )?;
+        );
         let agg_type = AggKind::Min;
         let input_type = DataType::List {
             datatype: Box::new(DataType::Int32),

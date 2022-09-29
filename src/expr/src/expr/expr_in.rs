@@ -76,9 +76,9 @@ impl Expression for InExpression {
         for (data, vis) in input_array.iter().zip_eq(input.vis().iter()) {
             if vis {
                 let ret = self.exists(&data.to_owned_datum());
-                output_array.append(ret)?;
+                output_array.append(ret);
             } else {
-                output_array.append(None)?;
+                output_array.append(None);
             }
         }
         Ok(Arc::new(output_array.finish().into()))
@@ -225,8 +225,7 @@ mod tests {
             let res = search_expr
                 .eval(&data_chunks[i])
                 .unwrap()
-                .compact(vis.unwrap(), expected[i].len())
-                .unwrap();
+                .compact(vis.unwrap(), expected[i].len());
 
             for (i, expect) in expected[i].iter().enumerate() {
                 assert_eq!(res.datum_at(i), expect.map(ScalarImpl::Bool));

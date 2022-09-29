@@ -16,7 +16,7 @@ use std::hash::{Hash, Hasher};
 
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
@@ -35,7 +35,7 @@ impl BoolArray {
     pub fn from_slice(data: &[Option<bool>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i).unwrap();
+            builder.append(*i);
         }
         builder.finish()
     }
@@ -104,15 +104,15 @@ impl Array for BoolArray {
     #[inline(always)]
     fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
         if !self.is_null(idx) {
-            self.data.is_set(idx).unwrap().hash(state);
+            self.data.is_set(idx).hash(state);
         } else {
             NULL_VAL_FOR_HASH.hash(state);
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = BoolArrayBuilder::new(capacity);
-        Ok(ArrayBuilderImpl::Bool(array_builder))
+        ArrayBuilderImpl::Bool(array_builder)
     }
 }
 
@@ -133,7 +133,7 @@ impl ArrayBuilder for BoolArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<bool>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<bool>) {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -144,10 +144,9 @@ impl ArrayBuilder for BoolArrayBuilder {
                 self.data.append(bool::default());
             }
         }
-        Ok(())
     }
 
-    fn append_array(&mut self, other: &BoolArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &BoolArray) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -155,8 +154,10 @@ impl ArrayBuilder for BoolArrayBuilder {
         for bit in other.data.iter() {
             self.data.append(bit);
         }
+    }
 
-        Ok(())
+    fn pop(&mut self) -> Option<()> {
+        self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
     fn finish(self) -> BoolArray {
@@ -177,7 +178,7 @@ mod tests {
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
         let mut builder = BoolArrayBuilder::new(data.len());
         for d in data {
-            builder.append(d).unwrap();
+            builder.append(d);
         }
         builder.finish()
     }

@@ -94,7 +94,7 @@ impl LogicalExpand {
         &self.column_subsets
     }
 
-    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay>> {
+    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
         self.column_subsets()
             .iter()
             .map(|subset| {

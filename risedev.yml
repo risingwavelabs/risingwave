@@ -20,7 +20,6 @@ risedev:
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
     - use: compute-node
-      enable-in-memory-kv-state-backend: true
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
@@ -515,6 +514,9 @@ template:
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
 
+    # Whether to use a managed lru cache (evict by epoch)
+    enable-managed-cache: false
+    
     # Minio instances used by this compute node
     provide-minio: "minio*"
 
@@ -566,6 +568,9 @@ template:
 
     # Whether to enable dashboard-v2
     enable-dashboard-v2: false
+
+    # Maximum allowed heartbeat interval in seconds.
+    max-heartbeat-interval-secs: 600
 
     # Whether to disable recovery mode
     unsafe-disable-recovery: false

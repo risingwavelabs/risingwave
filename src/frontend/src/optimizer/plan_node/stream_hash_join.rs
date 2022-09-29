@@ -30,7 +30,6 @@ use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ColIndexMapping;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
@@ -61,9 +60,7 @@ impl StreamHashJoin {
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &logical
-                .l2i_col_mapping()
-                .composite(&logical.i2o_col_mapping()),
+            &logical,
         );
 
         // TODO: derive from input
@@ -97,12 +94,32 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        l2o_mapping: &ColIndexMapping,
+        logical: &LogicalJoin,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                l2o_mapping.rewrite_provided_distribution(left)
+                // we can not derive the hash distribution from the side where outer join can
+                // generate a NULL row
+                match logical.join_type() {
+                    JoinType::Unspecified => unreachable!(),
+                    JoinType::FullOuter => Distribution::SomeShard,
+                    JoinType::Inner
+                    | JoinType::LeftOuter
+                    | JoinType::LeftSemi
+                    | JoinType::LeftAnti => {
+                        let l2o = logical
+                            .l2i_col_mapping()
+                            .composite(&logical.i2o_col_mapping());
+                        l2o.rewrite_provided_distribution(left)
+                    }
+                    JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => {
+                        let r2o = logical
+                            .r2i_col_mapping()
+                            .composite(&logical.i2o_col_mapping());
+                        r2o.rewrite_provided_distribution(right)
+                    }
+                }
             }
             (_, _) => unreachable!(
                 "suspicious distribution: left: {:?}, right: {:?}",
@@ -118,7 +135,7 @@ impl StreamHashJoin {
 }
 
 impl fmt::Display for StreamHashJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = if self.is_append_only {
             f.debug_struct("StreamAppendOnlyHashJoin")
         } else {
@@ -250,8 +267,6 @@ fn infer_internal_and_degree_table_catalog(
     let base = input.plan_base();
     let schema = &base.schema;
 
-    let append_only = input.append_only();
-
     let internal_table_dist_keys = base.dist.dist_column_indices().to_vec();
 
     // Find the dist key position in join key.
@@ -273,7 +288,8 @@ fn infer_internal_and_degree_table_catalog(
     pk_indices.extend(&base.logical_pk);
 
     // Build internal table
-    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    let mut internal_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
     let internal_columns_fields = schema.fields().to_vec();
 
     internal_columns_fields.iter().for_each(|field| {
@@ -285,7 +301,8 @@ fn infer_internal_and_degree_table_catalog(
     });
 
     // Build degree table.
-    let mut degree_table_catalog_builder = TableCatalogBuilder::new();
+    let mut degree_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
 
     let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
@@ -294,14 +311,11 @@ fn infer_internal_and_degree_table_catalog(
         degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
     });
     degree_table_catalog_builder.add_column(&degree_column_field);
-
-    internal_table_catalog_builder
-        .set_properties(base.ctx.inner().with_options.internal_table_subset());
     degree_table_catalog_builder
-        .set_properties(base.ctx.inner().with_options.internal_table_subset());
+        .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
     (
-        internal_table_catalog_builder.build(internal_table_dist_keys, append_only, None),
-        degree_table_catalog_builder.build(degree_table_dist_keys, append_only, None),
+        internal_table_catalog_builder.build(internal_table_dist_keys),
+        degree_table_catalog_builder.build(degree_table_dist_keys),
     )
 }

@@ -19,6 +19,7 @@
 mod resolve_id;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -29,7 +30,9 @@ use risingwave_frontend::handler::{
 };
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
-use risingwave_frontend::{Binder, FrontendOpts, PlanRef, Planner, WithOptions};
+use risingwave_frontend::{
+    build_graph, explain_stream_graph, Binder, FrontendOpts, PlanRef, Planner, WithOptions,
+};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
@@ -40,6 +43,9 @@ use serde::{Deserialize, Serialize};
 pub struct TestCase {
     /// Id of the test case, used in before.
     pub id: Option<String>,
+
+    /// A brief description of the test case.
+    pub name: Option<String>,
 
     /// Before running the SQL statements, the test runner will execute the specified test cases
     pub before: Option<Vec<String>>,
@@ -68,6 +74,9 @@ pub struct TestCase {
 
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
+
+    /// Create MV fragments plan
+    pub stream_dist_plan: Option<String>,
 
     // TODO: uncomment for Proto JSON of generated stream plan
     //  was: "stream_plan_proto": Option<String>
@@ -129,6 +138,9 @@ pub struct TestCaseResult {
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
+    /// Create MV fragments plan
+    pub stream_dist_plan: Option<String>,
+
     /// Error of binder
     pub binder_error: Option<String>,
 
@@ -150,7 +162,7 @@ pub struct TestCaseResult {
 
 impl TestCaseResult {
     /// Convert a result to test case
-    pub fn as_test_case(self, original_test_case: &TestCase) -> Result<TestCase> {
+    pub fn into_test_case(self, original_test_case: &TestCase) -> Result<TestCase> {
         if original_test_case.binder_error.is_none() && let Some(ref err) = self.binder_error {
             return Err(anyhow!("unexpected binder error: {}", err));
         }
@@ -163,6 +175,7 @@ impl TestCaseResult {
 
         let case = TestCase {
             id: original_test_case.id.clone(),
+            name: original_test_case.name.clone(),
             before: original_test_case.before.clone(),
             sql: original_test_case.sql.to_string(),
             before_statements: original_test_case.before_statements.clone(),
@@ -180,6 +193,7 @@ impl TestCaseResult {
             binder_error: self.binder_error,
             create_source: original_test_case.create_source.clone(),
             with_config_map: original_test_case.with_config_map.clone(),
+            stream_dist_plan: self.stream_dist_plan,
         };
         Ok(case)
     }
@@ -427,7 +441,10 @@ impl TestCase {
         }
 
         'stream: {
-            if self.stream_plan.is_some() || self.stream_error.is_some() {
+            if self.stream_plan.is_some()
+                || self.stream_error.is_some()
+                || self.stream_dist_plan.is_some()
+            {
                 let q = if let Statement::Query(q) = stmt {
                     q.as_ref().clone()
                 } else {
@@ -439,8 +456,9 @@ impl TestCase {
                     context,
                     q,
                     ObjectName(vec!["test".into()]),
+                    false,
                 ) {
-                    Ok((stream_plan, _table)) => stream_plan,
+                    Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {
                         ret.stream_error = Some(err.to_string());
                         break 'stream;
@@ -450,6 +468,12 @@ impl TestCase {
                 // Only generate stream_plan if it is specified in test case
                 if self.stream_plan.is_some() {
                     ret.stream_plan = Some(explain_plan(&stream_plan));
+                }
+
+                // Only generate stream_dist_plan if it is specified in test case
+                if self.stream_dist_plan.is_some() {
+                    let graph = build_graph(stream_plan);
+                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, false).unwrap());
                 }
             }
         }
@@ -489,6 +513,11 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &actual.batch_local_plan,
     )?;
     check_option_plan_eq("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
+    check_option_plan_eq(
+        "stream_dist_plan",
+        &expected.stream_dist_plan,
+        &actual.stream_dist_plan,
+    )?;
     check_option_plan_eq(
         "batch_plan_proto",
         &expected.batch_plan_proto,
@@ -556,11 +585,23 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
     }
 }
 
-pub async fn run_test_file(file_name: &str, file_content: &str) -> Result<()> {
-    println!("-- running {} --", file_name);
+pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
+    let file_name = file_path.file_name().unwrap().to_str().unwrap();
+    println!("-- running {file_name} --");
 
     let mut failed_num = 0;
-    let cases: Vec<TestCase> = serde_yaml::from_str(file_content).unwrap();
+    let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
+        if let Some(loc) = e.location() {
+            anyhow!(
+                "failed to parse yaml: {e}, at {}:{}:{}",
+                file_path.display(),
+                loc.line(),
+                loc.column()
+            )
+        } else {
+            anyhow!("failed to parse yaml: {e}")
+        }
+    })?;
     let cases = resolve_testcase_id(cases).expect("failed to resolve");
 
     for (i, c) in cases.into_iter().enumerate() {

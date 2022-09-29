@@ -41,17 +41,17 @@ pub struct LogicalMultiJoin {
     on: Condition,
     output_indices: Vec<usize>,
     inner2output: ColIndexMapping,
-    // XXX(st1page): these fields will be used in prune_col and
+    // NOTE(st1page): these fields will be used in prune_col and
     // pk_derive soon.
     /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
     /// not consider output_indices**
-    #[allow(unused)]
+    #[expect(dead_code)]
     inner_o2i_mapping: Vec<(usize, usize)>,
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }
 
 impl fmt::Display for LogicalMultiJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "LogicalMultiJoin {{ on: {} }}", {
             let fields = self
                 .inputs

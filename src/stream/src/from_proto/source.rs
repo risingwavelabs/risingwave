@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
+use crate::executor::state_table_handler::SourceStateTableHandler;
 use crate::executor::SourceExecutor;
 
 pub struct SourceExecutorBuilder;
@@ -26,7 +28,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         node: &StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Source)?;
         let (sender, barrier_receiver) = unbounded_channel();
         stream
@@ -35,7 +37,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let source_id = TableId::new(node.source_id);
-        let source_desc = params.env.source_manager().get_source(&source_id)?;
+        let source_desc = params
+            .env
+            .source_manager()
+            .get_source(&source_id)
+            .map_err(|_| anyhow!("source {source_id} not found"))?;
 
         let column_ids: Vec<_> = node
             .get_column_ids()
@@ -52,17 +58,20 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             Field::with_name(column_desc.data_type.clone(), column_desc.name.clone())
         }));
         let schema = Schema::new(fields);
-        let keyspace = Keyspace::table_root(store, &TableId::new(node.state_table_id));
+
         let vnodes = params
             .vnode_bitmap
             .expect("vnodes not set for source executor");
+
+        let state_table_handler =
+            SourceStateTableHandler::from_table_catalog(node.state_table.as_ref().unwrap(), store);
 
         Ok(Box::new(SourceExecutor::new(
             params.actor_context,
             source_id,
             source_desc,
             vnodes,
-            keyspace,
+            state_table_handler,
             column_ids,
             schema,
             params.pk_indices,
@@ -71,7 +80,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.operator_id,
             params.op_info,
             params.executor_stats,
-            stream.config.checkpoint_interval_ms as u64,
+            stream.config.barrier_interval_ms as u64,
         )?))
     }
 }

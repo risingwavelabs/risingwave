@@ -53,9 +53,7 @@ mod tests {
     use risingwave_storage::store::{ReadOptions, WriteOptions};
     use risingwave_storage::{Keyspace, StateStore};
 
-    async fn get_hummock_storage(
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> HummockStorage {
+    fn get_hummock_storage(hummock_meta_client: Arc<dyn HummockMetaClient>) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_string();
         let options = Arc::new(StorageConfig {
             sstable_size_mb: 1,
@@ -76,7 +74,7 @@ mod tests {
         .unwrap()
     }
 
-    async fn get_hummock_storage_with_filter_key_extractor_manager(
+    fn get_hummock_storage_with_filter_key_extractor_manager(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> HummockStorage {
@@ -114,10 +112,7 @@ mod tests {
             new_val.extend_from_slice(&epoch.to_be_bytes());
             storage
                 .ingest_batch(
-                    vec![(
-                        key.clone(),
-                        StorageValue::new_default_put(Bytes::from(new_val)),
-                    )],
+                    vec![(key.clone(), StorageValue::new_put(Bytes::from(new_val)))],
                     WriteOptions {
                         epoch,
                         table_id: Default::default(),
@@ -125,7 +120,11 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
     }
@@ -178,7 +177,7 @@ mod tests {
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
+        let storage = get_hummock_storage(hummock_meta_client.clone());
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables
@@ -217,8 +216,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -294,7 +294,7 @@ mod tests {
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
+        let storage = get_hummock_storage(hummock_meta_client.clone());
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables with 1MB value
@@ -322,8 +322,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -416,8 +417,7 @@ mod tests {
         let storage = get_hummock_storage_with_filter_key_extractor_manager(
             hummock_meta_client.clone(),
             filter_key_extractor_manager.clone(),
-        )
-        .await;
+        );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
@@ -448,10 +448,14 @@ mod tests {
             });
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
-            local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
+            local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
 
-            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -538,8 +542,7 @@ mod tests {
         let storage = get_hummock_storage_with_filter_key_extractor_manager(
             hummock_meta_client.clone(),
             filter_key_extractor_manager.clone(),
-        )
-        .await;
+        );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
@@ -574,10 +577,14 @@ mod tests {
             });
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
-            local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
+            local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
 
-            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -608,8 +615,9 @@ mod tests {
         // 3. pick compactor and assign
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -698,8 +706,7 @@ mod tests {
         let storage = get_hummock_storage_with_filter_key_extractor_manager(
             hummock_meta_client.clone(),
             filter_key_extractor_manager.clone(),
-        )
-        .await;
+        );
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
             &hummock_meta_client,
@@ -738,9 +745,14 @@ mod tests {
             });
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
-            local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
+            local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
-            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -772,8 +784,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -873,8 +886,7 @@ mod tests {
         let storage = get_hummock_storage_with_filter_key_extractor_manager(
             hummock_meta_client.clone(),
             filter_key_extractor_manager.clone(),
-        )
-        .await;
+        );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
@@ -906,9 +918,13 @@ mod tests {
             });
 
             let ramdom_key = [key_prefix, &rand::thread_rng().gen::<[u8; 32]>()].concat();
-            local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
+            local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
-            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -944,8 +960,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);

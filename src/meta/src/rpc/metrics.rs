@@ -42,8 +42,10 @@ pub struct MetaMetrics {
 
     /// Max committed epoch
     pub max_committed_epoch: IntGauge,
-    /// The number of uncommitted SSTs,
-    pub uncommitted_sst_num: IntGauge,
+    /// The smallest epoch that has not been GCed.
+    pub safe_epoch: IntGauge,
+    /// The smallest epoch that is being pinned.
+    pub min_pinned_epoch: IntGauge,
     /// The number of SSTs in each level
     pub level_sst_num: IntGaugeVec,
     /// The number of SSTs to be merged to next level in each level
@@ -54,6 +56,12 @@ pub struct MetaMetrics {
     pub level_file_size: IntGaugeVec,
     /// Hummock version size
     pub version_size: IntGauge,
+    /// The version Id of current version.
+    pub current_version_id: IntGauge,
+    /// The version id of checkpoint version.
+    pub checkpoint_version_id: IntGauge,
+    /// The smallest version id that is being pinned.
+    pub min_pinned_version_id: IntGauge,
 
     /// Latency for hummock manager to acquire lock
     pub hummock_manager_lock_time: HistogramVec,
@@ -62,6 +70,9 @@ pub struct MetaMetrics {
     pub hummock_manager_real_process_time: HistogramVec,
 
     pub time_after_last_observation: AtomicU64,
+
+    /// The number of workers in the cluster.
+    pub worker_num: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -78,14 +89,14 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_duration_seconds",
             "barrier latency",
-            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
             "meta_barrier_wait_commit_duration_seconds",
             "barrier_wait_commit_latency",
-            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
         let barrier_wait_commit_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -93,7 +104,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_send_duration_seconds",
             "barrier send latency",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
+            exponential_buckets(0.001, 2.0, 19).unwrap() // max 262s
         );
         let barrier_send_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -117,9 +128,13 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let uncommitted_sst_num = register_int_gauge_with_registry!(
-            "storage_uncommitted_sst_num",
-            "num of uncommitted SSTs",
+        let safe_epoch =
+            register_int_gauge_with_registry!("storage_safe_epoch", "safe epoch", registry)
+                .unwrap();
+
+        let min_pinned_epoch = register_int_gauge_with_registry!(
+            "storage_min_pinned_epoch",
+            "min pinned epoch",
             registry
         )
         .unwrap();
@@ -149,7 +164,29 @@ impl MetaMetrics {
         .unwrap();
 
         let version_size =
-            register_int_gauge_with_registry!("version_size", "version size", registry).unwrap();
+            register_int_gauge_with_registry!("storage_version_size", "version size", registry)
+                .unwrap();
+
+        let current_version_id = register_int_gauge_with_registry!(
+            "storage_current_version_id",
+            "current version id",
+            registry
+        )
+        .unwrap();
+
+        let checkpoint_version_id = register_int_gauge_with_registry!(
+            "storage_checkpoint_version_id",
+            "checkpoint version id",
+            registry
+        )
+        .unwrap();
+
+        let min_pinned_version_id = register_int_gauge_with_registry!(
+            "storage_min_pinned_version_id",
+            "min pinned version id",
+            registry
+        )
+        .unwrap();
 
         let level_file_size = register_int_gauge_vec_with_registry!(
             "storage_level_total_file_size",
@@ -175,6 +212,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let worker_num = register_int_gauge_vec_with_registry!(
+            "worker_num",
+            "number of nodes in the cluster",
+            &["worker_type"],
+            registry,
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -186,15 +231,21 @@ impl MetaMetrics {
             in_flight_barrier_nums,
 
             max_committed_epoch,
-            uncommitted_sst_num,
+            safe_epoch,
+            min_pinned_epoch,
             level_sst_num,
             level_compact_cnt,
             compact_frequency,
             level_file_size,
             version_size,
+            current_version_id,
+            checkpoint_version_id,
+            min_pinned_version_id,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
+
+            worker_num,
         }
     }
 

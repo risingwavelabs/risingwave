@@ -30,7 +30,7 @@ pub type Notification = Result<SubscribeResponse, Status>;
 pub type NotificationManagerRef = Arc<NotificationManager>;
 pub type NotificationVersion = u64;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum LocalNotification {
     WorkerNodeIsDeleted(WorkerNode),
     CompactionTaskNeedCancel(CompactTask),
@@ -140,8 +140,8 @@ impl NotificationManager {
     pub async fn delete_sender(&self, worker_type: WorkerType, worker_key: WorkerKey) {
         let mut core_guard = self.core.lock().await;
         match worker_type {
-            WorkerType::Frontend => core_guard.compute_senders.remove(&worker_key),
-            WorkerType::ComputeNode => core_guard.frontend_senders.remove(&worker_key),
+            WorkerType::Frontend => core_guard.frontend_senders.remove(&worker_key),
+            WorkerType::ComputeNode => core_guard.compute_senders.remove(&worker_key),
             WorkerType::Compactor => core_guard.compactor_senders.remove(&worker_key),
             WorkerType::RiseCtl => core_guard.risectl_senders.remove(&worker_key),
             _ => unreachable!(),

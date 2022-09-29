@@ -19,7 +19,6 @@ fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
-lazy_static = "1"
 memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"
 num-traits = "0.2"
@@ -27,7 +26,6 @@ parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }

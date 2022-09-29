@@ -380,17 +380,6 @@ export interface TopNNode {
   table: Table | undefined;
 }
 
-export interface AppendOnlyTopNNode {
-  columnOrders: ColumnOrder[];
-  /** 0 means no limit as limit of 0 means this node should be optimized away */
-  limit: number;
-  offset: number;
-  distributionKey: number[];
-  /** Used for internal table states */
-  tableIdL: number;
-  tableIdH: number;
-}
-
 export interface GroupTopNNode {
   /** 0 means no limit as limit of 0 means this node should be optimized away */
   limit: number;
@@ -414,14 +403,22 @@ export interface HashJoinNode {
   rightTable:
     | Table
     | undefined;
+  /** Used for internal table states. */
+  leftDegreeTable:
+    | Table
+    | undefined;
+  /** Used for internal table states. */
+  rightDegreeTable:
+    | Table
+    | undefined;
+  /** The output indices of current node */
+  outputIndices: number[];
+  nullSafe: boolean[];
   /**
    * Whether to optimize for append only stream.
    * It is true when the input is append-only
    */
   isAppendOnly: boolean;
-  /** The output indices of current node */
-  outputIndices: number[];
-  nullSafe: boolean[];
 }
 
 export interface DynamicFilterNode {
@@ -475,6 +472,11 @@ export interface HopWindowNode {
 export interface MergeNode {
   upstreamActorId: number[];
   upstreamFragmentId: number;
+  /**
+   * Type of the upstream dispatcher. If there's always one upstream according to this
+   * type, the compute node may use the `ReceiverExecutor` as an optimization.
+   */
+  upstreamDispatcherType: DispatcherType;
   /** The schema of input columns. TODO: remove this field. */
   fields: Field[];
 }
@@ -606,7 +608,7 @@ export interface StreamNode {
     | { $case: "localSimpleAgg"; localSimpleAgg: SimpleAggNode }
     | { $case: "globalSimpleAgg"; globalSimpleAgg: SimpleAggNode }
     | { $case: "hashAgg"; hashAgg: HashAggNode }
-    | { $case: "appendOnlyTopN"; appendOnlyTopN: AppendOnlyTopNNode }
+    | { $case: "appendOnlyTopN"; appendOnlyTopN: TopNNode }
     | { $case: "hashJoin"; hashJoin: HashJoinNode }
     | { $case: "topN"; topN: TopNNode }
     | { $case: "hopWindow"; hopWindow: HopWindowNode }
@@ -1855,57 +1857,6 @@ export const TopNNode = {
   },
 };
 
-function createBaseAppendOnlyTopNNode(): AppendOnlyTopNNode {
-  return { columnOrders: [], limit: 0, offset: 0, distributionKey: [], tableIdL: 0, tableIdH: 0 };
-}
-
-export const AppendOnlyTopNNode = {
-  fromJSON(object: any): AppendOnlyTopNNode {
-    return {
-      columnOrders: Array.isArray(object?.columnOrders)
-        ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
-        : [],
-      limit: isSet(object.limit) ? Number(object.limit) : 0,
-      offset: isSet(object.offset) ? Number(object.offset) : 0,
-      distributionKey: Array.isArray(object?.distributionKey)
-        ? object.distributionKey.map((e: any) => Number(e))
-        : [],
-      tableIdL: isSet(object.tableIdL) ? Number(object.tableIdL) : 0,
-      tableIdH: isSet(object.tableIdH) ? Number(object.tableIdH) : 0,
-    };
-  },
-
-  toJSON(message: AppendOnlyTopNNode): unknown {
-    const obj: any = {};
-    if (message.columnOrders) {
-      obj.columnOrders = message.columnOrders.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
-    } else {
-      obj.columnOrders = [];
-    }
-    message.limit !== undefined && (obj.limit = Math.round(message.limit));
-    message.offset !== undefined && (obj.offset = Math.round(message.offset));
-    if (message.distributionKey) {
-      obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
-    } else {
-      obj.distributionKey = [];
-    }
-    message.tableIdL !== undefined && (obj.tableIdL = Math.round(message.tableIdL));
-    message.tableIdH !== undefined && (obj.tableIdH = Math.round(message.tableIdH));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<AppendOnlyTopNNode>, I>>(object: I): AppendOnlyTopNNode {
-    const message = createBaseAppendOnlyTopNNode();
-    message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
-    message.limit = object.limit ?? 0;
-    message.offset = object.offset ?? 0;
-    message.distributionKey = object.distributionKey?.map((e) => e) || [];
-    message.tableIdL = object.tableIdL ?? 0;
-    message.tableIdH = object.tableIdH ?? 0;
-    return message;
-  },
-};
-
 function createBaseGroupTopNNode(): GroupTopNNode {
   return { limit: 0, offset: 0, groupKey: [], table: undefined };
 }
@@ -1951,9 +1902,11 @@ function createBaseHashJoinNode(): HashJoinNode {
     condition: undefined,
     leftTable: undefined,
     rightTable: undefined,
-    isAppendOnly: false,
+    leftDegreeTable: undefined,
+    rightDegreeTable: undefined,
     outputIndices: [],
     nullSafe: [],
+    isAppendOnly: false,
   };
 }
 
@@ -1966,9 +1919,11 @@ export const HashJoinNode = {
       condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
       leftTable: isSet(object.leftTable) ? Table.fromJSON(object.leftTable) : undefined,
       rightTable: isSet(object.rightTable) ? Table.fromJSON(object.rightTable) : undefined,
-      isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
+      leftDegreeTable: isSet(object.leftDegreeTable) ? Table.fromJSON(object.leftDegreeTable) : undefined,
+      rightDegreeTable: isSet(object.rightDegreeTable) ? Table.fromJSON(object.rightDegreeTable) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
       nullSafe: Array.isArray(object?.nullSafe) ? object.nullSafe.map((e: any) => Boolean(e)) : [],
+      isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
     };
   },
 
@@ -1991,7 +1946,10 @@ export const HashJoinNode = {
       (obj.leftTable = message.leftTable ? Table.toJSON(message.leftTable) : undefined);
     message.rightTable !== undefined &&
       (obj.rightTable = message.rightTable ? Table.toJSON(message.rightTable) : undefined);
-    message.isAppendOnly !== undefined && (obj.isAppendOnly = message.isAppendOnly);
+    message.leftDegreeTable !== undefined &&
+      (obj.leftDegreeTable = message.leftDegreeTable ? Table.toJSON(message.leftDegreeTable) : undefined);
+    message.rightDegreeTable !== undefined &&
+      (obj.rightDegreeTable = message.rightDegreeTable ? Table.toJSON(message.rightDegreeTable) : undefined);
     if (message.outputIndices) {
       obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
     } else {
@@ -2002,6 +1960,7 @@ export const HashJoinNode = {
     } else {
       obj.nullSafe = [];
     }
+    message.isAppendOnly !== undefined && (obj.isAppendOnly = message.isAppendOnly);
     return obj;
   },
 
@@ -2019,9 +1978,15 @@ export const HashJoinNode = {
     message.rightTable = (object.rightTable !== undefined && object.rightTable !== null)
       ? Table.fromPartial(object.rightTable)
       : undefined;
-    message.isAppendOnly = object.isAppendOnly ?? false;
+    message.leftDegreeTable = (object.leftDegreeTable !== undefined && object.leftDegreeTable !== null)
+      ? Table.fromPartial(object.leftDegreeTable)
+      : undefined;
+    message.rightDegreeTable = (object.rightDegreeTable !== undefined && object.rightDegreeTable !== null)
+      ? Table.fromPartial(object.rightDegreeTable)
+      : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     message.nullSafe = object.nullSafe?.map((e) => e) || [];
+    message.isAppendOnly = object.isAppendOnly ?? false;
     return message;
   },
 };
@@ -2193,7 +2158,7 @@ export const HopWindowNode = {
 };
 
 function createBaseMergeNode(): MergeNode {
-  return { upstreamActorId: [], upstreamFragmentId: 0, fields: [] };
+  return { upstreamActorId: [], upstreamFragmentId: 0, upstreamDispatcherType: DispatcherType.UNSPECIFIED, fields: [] };
 }
 
 export const MergeNode = {
@@ -2201,6 +2166,9 @@ export const MergeNode = {
     return {
       upstreamActorId: Array.isArray(object?.upstreamActorId) ? object.upstreamActorId.map((e: any) => Number(e)) : [],
       upstreamFragmentId: isSet(object.upstreamFragmentId) ? Number(object.upstreamFragmentId) : 0,
+      upstreamDispatcherType: isSet(object.upstreamDispatcherType)
+        ? dispatcherTypeFromJSON(object.upstreamDispatcherType)
+        : DispatcherType.UNSPECIFIED,
       fields: Array.isArray(object?.fields) ? object.fields.map((e: any) => Field.fromJSON(e)) : [],
     };
   },
@@ -2213,6 +2181,8 @@ export const MergeNode = {
       obj.upstreamActorId = [];
     }
     message.upstreamFragmentId !== undefined && (obj.upstreamFragmentId = Math.round(message.upstreamFragmentId));
+    message.upstreamDispatcherType !== undefined &&
+      (obj.upstreamDispatcherType = dispatcherTypeToJSON(message.upstreamDispatcherType));
     if (message.fields) {
       obj.fields = message.fields.map((e) => e ? Field.toJSON(e) : undefined);
     } else {
@@ -2225,6 +2195,7 @@ export const MergeNode = {
     const message = createBaseMergeNode();
     message.upstreamActorId = object.upstreamActorId?.map((e) => e) || [];
     message.upstreamFragmentId = object.upstreamFragmentId ?? 0;
+    message.upstreamDispatcherType = object.upstreamDispatcherType ?? DispatcherType.UNSPECIFIED;
     message.fields = object.fields?.map((e) => Field.fromPartial(e)) || [];
     return message;
   },
@@ -2668,7 +2639,7 @@ export const StreamNode = {
         : isSet(object.hashAgg)
         ? { $case: "hashAgg", hashAgg: HashAggNode.fromJSON(object.hashAgg) }
         : isSet(object.appendOnlyTopN)
-        ? { $case: "appendOnlyTopN", appendOnlyTopN: AppendOnlyTopNNode.fromJSON(object.appendOnlyTopN) }
+        ? { $case: "appendOnlyTopN", appendOnlyTopN: TopNNode.fromJSON(object.appendOnlyTopN) }
         : isSet(object.hashJoin)
         ? { $case: "hashJoin", hashJoin: HashJoinNode.fromJSON(object.hashJoin) }
         : isSet(object.topN)
@@ -2735,7 +2706,7 @@ export const StreamNode = {
     message.nodeBody?.$case === "hashAgg" &&
       (obj.hashAgg = message.nodeBody?.hashAgg ? HashAggNode.toJSON(message.nodeBody?.hashAgg) : undefined);
     message.nodeBody?.$case === "appendOnlyTopN" && (obj.appendOnlyTopN = message.nodeBody?.appendOnlyTopN
-      ? AppendOnlyTopNNode.toJSON(message.nodeBody?.appendOnlyTopN)
+      ? TopNNode.toJSON(message.nodeBody?.appendOnlyTopN)
       : undefined);
     message.nodeBody?.$case === "hashJoin" &&
       (obj.hashJoin = message.nodeBody?.hashJoin ? HashJoinNode.toJSON(message.nodeBody?.hashJoin) : undefined);
@@ -2860,7 +2831,7 @@ export const StreamNode = {
     ) {
       message.nodeBody = {
         $case: "appendOnlyTopN",
-        appendOnlyTopN: AppendOnlyTopNNode.fromPartial(object.nodeBody.appendOnlyTopN),
+        appendOnlyTopN: TopNNode.fromPartial(object.nodeBody.appendOnlyTopN),
       };
     }
     if (
