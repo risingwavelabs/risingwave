@@ -25,7 +25,6 @@ use tokio::sync::{oneshot, watch, RwLock};
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
-use crate::manager::META_NODE_ID;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -54,9 +53,10 @@ struct Inner {
 pub struct BarrierScheduler<S: MetaStore> {
     inner: Arc<Inner>,
 
-    /// Used for pinning the snapshot when creating a materialized view.
+    /// Used for getting the latest snapshot after `FLUSH`.
     hummock_manager: HummockManagerRef<S>,
 }
+
 impl<S: MetaStore> BarrierScheduler<S> {
     /// Create a pair of [`BarrierScheduler`] and [`ScheduledBarriers`], for scheduling barriers
     /// from different managers, and executing them in the barrier manager, respectively.
@@ -97,7 +97,8 @@ impl<S: MetaStore> BarrierScheduler<S> {
     }
 
     /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
-    /// default checkpoint barrier will be created.
+    /// default barrier will be created. If `new_checkpoint` is true, the barrier will become a
+    /// checkpoint.
     async fn attach_notifiers(&self, new_notifiers: Vec<Notifier>, new_checkpoint: bool) {
         let mut queue = self.inner.queue.write().await;
         match queue.front_mut() {
@@ -116,9 +117,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
                     command: Command::barrier(),
                     checkpoint: new_checkpoint,
                 });
-                if queue.len() == 1 {
-                    self.inner.changed_tx.send(()).ok();
-                }
+                self.inner.changed_tx.send(()).ok();
             }
         }
     }
@@ -141,7 +140,6 @@ impl<S: MetaStore> BarrierScheduler<S> {
         struct Context {
             collect_rx: oneshot::Receiver<MetaResult<()>>,
             finish_rx: oneshot::Receiver<()>,
-            is_create_mv: bool,
         }
 
         let mut contexts = Vec::with_capacity(commands.len());
@@ -150,12 +148,10 @@ impl<S: MetaStore> BarrierScheduler<S> {
         for command in commands {
             let (collect_tx, collect_rx) = oneshot::channel();
             let (finish_tx, finish_rx) = oneshot::channel();
-            let is_create_mv = matches!(command, Command::CreateMaterializedView { .. });
 
             contexts.push(Context {
                 collect_rx,
                 finish_rx,
-                is_create_mv,
             });
             scheduleds.push(Scheduled {
                 checkpoint: command.need_checkpoint(),
@@ -174,7 +170,6 @@ impl<S: MetaStore> BarrierScheduler<S> {
         for Context {
             collect_rx,
             finish_rx,
-            is_create_mv,
         } in contexts
         {
             // Throw the error if it occurs when collecting this barrier.
@@ -182,21 +177,10 @@ impl<S: MetaStore> BarrierScheduler<S> {
                 .await
                 .map_err(|e| anyhow!("failed to collect barrier: {}", e))??;
 
-            // TODO: refactor this
-            if is_create_mv {
-                // The snapshot ingestion may last for several epochs, we should pin the epoch here.
-                // TODO: this should be done in `post_collect`
-                let _snapshot = self.hummock_manager.pin_snapshot(META_NODE_ID).await?;
-                // Wait for this command to be finished.
-                let res = finish_rx.await;
-                self.hummock_manager.unpin_snapshot(META_NODE_ID).await?;
-                res.map_err(|e| anyhow!("failed to finish command: {}", e))?;
-            } else {
-                // Wait for this command to be finished.
-                finish_rx
-                    .await
-                    .map_err(|e| anyhow!("failed to finish command: {}", e))?;
-            }
+            // Wait for this command to be finished.
+            finish_rx
+                .await
+                .map_err(|e| anyhow!("failed to finish command: {}", e))?;
         }
 
         Ok(())

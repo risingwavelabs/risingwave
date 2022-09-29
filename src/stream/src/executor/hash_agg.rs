@@ -287,7 +287,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
                             Box::new(
                                 generate_managed_agg_state(
-                                    Some(&key.clone().deserialize(key_data_types.iter())?),
+                                    Some(&key.clone().deserialize(key_data_types)?),
                                     agg_calls,
                                     input_pk_indices.clone(),
                                     *extreme_cache_size,
@@ -410,6 +410,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
             // --- Produce the stream chunk ---
             let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
+            let key_data_types = &schema.data_types()[..key_indices.len()];
             while let Some(batch) = batches.next() {
                 // --- Create array builders ---
                 // As the datatype is retrieved from schema, it contains both group key and
@@ -430,8 +431,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .await?;
 
                     for _ in 0..appended {
-                        key.clone()
-                            .deserialize_to_builders(&mut builders[..key_indices.len()])?;
+                        key.clone().deserialize_to_builders(
+                            &mut builders[..key_indices.len()],
+                            key_data_types,
+                        )?;
                     }
                 }
 
