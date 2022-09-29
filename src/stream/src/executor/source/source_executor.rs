@@ -215,12 +215,13 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         source_desc: &SourceDesc,
         state: ConnectorState,
-    ) -> StreamExecutorResult<Box<SourceStreamReaderImpl>> {
+    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         let reader = match source_desc.source.as_ref() {
             SourceImpl::Table(t) => t
                 .stream_reader(self.column_ids.clone())
                 .await
-                .map(SourceStreamReaderImpl::Table),
+                .map_err(StreamExecutorError::connector_error)?
+                .into_stream(),
             SourceImpl::Connector(c) => c
                 .stream_reader(
                     state,
@@ -229,11 +230,10 @@ impl<S: StateStore> SourceExecutor<S> {
                     SourceContext::new(self.ctx.id as u32, self.source_id),
                 )
                 .await
-                .map(SourceStreamReaderImpl::Connector),
-        }
-        .map_err(StreamExecutorError::connector_error)?;
-
-        Ok(Box::new(reader))
+                .map_err(StreamExecutorError::connector_error)?
+                .into_stream(),
+        };
+        Ok(reader)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -331,7 +331,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                                 Some(target_state.clone()),
                                             )
                                             .await?;
-                                        stream.replace_source_chunk_reader(reader);
+                                        stream.replace_source_stream(reader);
 
                                         self.stream_source_splits = target_state;
                                     }
