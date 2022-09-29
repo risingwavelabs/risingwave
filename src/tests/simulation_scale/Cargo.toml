@@ -14,6 +14,7 @@ madsim = "0.2.7"
 rand = "0.8"
 risingwave_compactor = { path = "../../storage/compactor" }
 risingwave_compute = { path = "../../compute" }
+risingwave_ctl = { path = "../../ctl" }
 risingwave_frontend = { path = "../../frontend" }
 risingwave_meta = { path = "../../meta" }
 sqllogictest = "0.6.4"

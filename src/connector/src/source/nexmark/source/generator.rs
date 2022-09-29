@@ -15,6 +15,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Ok, Result};
+use futures::future::pending;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
 
@@ -43,7 +44,12 @@ impl NexmarkEventGenerator {
     #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(mut self) {
         loop {
-            yield self.next().await?
+            let chunk = self.next().await?;
+            if chunk.is_empty() {
+                yield pending().await;
+            } else {
+                yield chunk;
+            }
         }
     }
 

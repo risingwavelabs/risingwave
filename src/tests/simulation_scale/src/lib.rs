@@ -20,6 +20,8 @@ use std::time::Duration;
 use clap::Parser;
 
 pub mod cluster;
+pub mod nexmark_ext;
+pub mod utils;
 
 #[cfg(not(madsim))]
 fn main() {
@@ -38,7 +40,7 @@ fn main() {
 #[derive(Debug, Parser)]
 pub struct Args {
     /// The number of frontend nodes.
-    #[clap(long, default_value = "2")]
+    #[clap(long, default_value = "1")]
     frontend_nodes: usize,
 
     /// The number of compute nodes.
@@ -79,11 +81,11 @@ impl Risingwave {
     }
 }
 
-impl Drop for Risingwave {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
+// impl Drop for Risingwave {
+//     fn drop(&mut self) {
+//         self.task.abort();
+//     }
+// }
 
 #[async_trait::async_trait]
 impl sqllogictest::AsyncDB for Risingwave {
