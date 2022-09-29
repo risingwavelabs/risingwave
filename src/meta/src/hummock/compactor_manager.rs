@@ -284,15 +284,11 @@ impl CompactorManager {
 
     pub fn remove_task_heartbeat(&self, context_id: HummockContextId, task_id: u64) {
         let mut guard = self.task_heartbeats.write();
-        let mut garbage_collect = false;
         if let Some(heartbeats) = guard.get_mut(&context_id) {
             heartbeats.remove(&task_id);
             if heartbeats.is_empty() {
-                garbage_collect = true;
+                guard.remove(&context_id);
             }
-        }
-        if garbage_collect {
-            guard.remove(&context_id);
         }
     }
 
