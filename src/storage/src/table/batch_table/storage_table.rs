@@ -257,7 +257,7 @@ impl<S: StateStore> StorageTable<S> {
     fn get_read_option(&self, epoch: u64) -> ReadOptions {
         ReadOptions {
             epoch,
-            table_id: Some(self.keyspace.table_id()),
+            table_id: self.keyspace.table_id(),
             retention_seconds: self.table_option.retention_seconds,
         }
     }

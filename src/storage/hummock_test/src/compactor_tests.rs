@@ -1019,7 +1019,7 @@ mod tests {
                 None,
                 ReadOptions {
                     epoch,
-                    table_id: Some(TableId::from(existing_table_id)),
+                    table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                 },
             )

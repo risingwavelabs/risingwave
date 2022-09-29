@@ -127,19 +127,15 @@ impl PinnedVersion {
         self.version.id != INVALID_VERSION_ID
     }
 
-    pub fn levels(&self, compaction_group_id: Option<CompactionGroupId>) -> Vec<&Level> {
-        match compaction_group_id {
-            None => self.version.get_combined_levels(),
-            Some(compaction_group_id) => {
-                let levels = self
-                    .version
-                    .get_compaction_group_levels(compaction_group_id);
-                let mut ret = vec![];
-                ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
-                ret.extend(levels.levels.iter());
-                ret
-            }
-        }
+    pub fn levels(&self, compaction_group_id: CompactionGroupId) -> Vec<&Level> {
+        // if compaction_group_id not found, it will panic when `get_compaction_group_levels`
+        let levels = self
+            .version
+            .get_compaction_group_levels(compaction_group_id);
+        let mut ret = vec![];
+        ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
+        ret.extend(levels.levels.iter());
+        ret
     }
 
     pub fn max_committed_epoch(&self) -> u64 {
