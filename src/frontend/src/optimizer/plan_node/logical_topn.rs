@@ -269,7 +269,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
                 self.limit(),
                 self.offset(),
                 input_col_change
-                    .rewrite_required_order(&self.order())
+                    .rewrite_required_order(self.order())
                     .unwrap(),
                 self.group_key()
                     .iter()
