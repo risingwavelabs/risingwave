@@ -660,15 +660,14 @@ where
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
-                    self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone());
+                    self.managed_state.insert(row.clone());
                     self.cache
                         .insert(ordered_pk_row, row, &mut res_ops, &mut res_rows)
                 }
 
                 Op::Delete | Op::UpdateDelete => {
                     // First remove the row from state store
-                    self.managed_state.delete(&ordered_pk_row, row.clone());
+                    self.managed_state.delete(row.clone());
                     self.cache
                         .delete(
                             None,

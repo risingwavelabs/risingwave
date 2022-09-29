@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::array::{Row, RowRef};
-use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::array::Row;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -59,11 +58,11 @@ impl<S: StateStore> ManagedTopNState<S> {
         }
     }
 
-    pub fn insert(&mut self, _key: OrderedRow, value: Row) {
+    pub fn insert(&mut self, value: Row) {
         self.state_table.insert(value);
     }
 
-    pub fn delete(&mut self, _key: &OrderedRow, value: Row) {
+    pub fn delete(&mut self, value: Row) {
         self.state_table.delete(value);
     }
 
@@ -72,6 +71,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             .state_table
             .pk_indices()
             .iter()
+            .skip(group_key_len)
             .map(|pk_index| row[*pk_index].clone())
             .collect();
         let pk = Row::new(datums);
@@ -288,7 +288,7 @@ mod tests {
             .map(|row| OrderedRow::new(row, &order_types))
             .collect::<Vec<_>>();
 
-        managed_state.insert(ordered_rows[3].clone(), rows[3].clone());
+        managed_state.insert(rows[3].clone());
 
         // now ("ab", 4)
         let valid_rows = managed_state.find_range(None, 0, Some(1)).await.unwrap();
@@ -296,12 +296,12 @@ mod tests {
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
 
-        managed_state.insert(ordered_rows[2].clone(), rows[2].clone());
+        managed_state.insert(rows[2].clone());
         let valid_rows = managed_state.find_range(None, 1, Some(1)).await.unwrap();
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[2].clone());
 
-        managed_state.insert(ordered_rows[1].clone(), rows[1].clone());
+        managed_state.insert(rows[1].clone());
 
         let valid_rows = managed_state.find_range(None, 1, Some(2)).await.unwrap();
         assert_eq!(valid_rows.len(), 2);
@@ -315,10 +315,10 @@ mod tests {
         );
 
         // delete ("abc", 3)
-        managed_state.delete(&ordered_rows[1].clone(), rows[1].clone());
+        managed_state.delete(rows[1].clone());
 
         // insert ("abc", 2)
-        managed_state.insert(ordered_rows[0].clone(), rows[0].clone());
+        managed_state.insert(rows[0].clone());
 
         let valid_rows = managed_state.find_range(None, 0, Some(3)).await.unwrap();
 
@@ -360,10 +360,10 @@ mod tests {
             .map(|row| OrderedRow::new(row, &order_types))
             .collect::<Vec<_>>();
 
-        managed_state.insert(ordered_rows[3].clone(), rows[3].clone());
-        managed_state.insert(ordered_rows[1].clone(), rows[1].clone());
-        managed_state.insert(ordered_rows[2].clone(), rows[2].clone());
-        managed_state.insert(ordered_rows[4].clone(), rows[4].clone());
+        managed_state.insert(rows[3].clone());
+        managed_state.insert(rows[1].clone());
+        managed_state.insert(rows[2].clone());
+        managed_state.insert(rows[4].clone());
 
         managed_state
             .fill_high_cache(None, &mut cache, &ordered_rows[3], 2)

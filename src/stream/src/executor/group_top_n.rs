@@ -193,8 +193,13 @@ where
         let mut res_rows = Vec::with_capacity(self.limit);
 
         for (op, row_ref) in chunk.rows() {
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
+            // The pk without group by
+            let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
+            let ordered_pk_row = OrderedRow::new(
+                pk_row,
+                &self.internal_key_order_types[self.group_by.len()..],
+            );
+
             let row = row_ref.to_owned_row();
 
             let mut group_key = Vec::with_capacity(self.group_by.len());
@@ -217,23 +222,17 @@ where
             // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone());
-                    cache.insert(
-                        ordered_pk_row.skip(pk_prefix.size()),
-                        row,
-                        &mut res_ops,
-                        &mut res_rows,
-                    );
+                    self.managed_state.insert(row.clone());
+                    cache.insert(ordered_pk_row, row, &mut res_ops, &mut res_rows);
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state.delete(&ordered_pk_row, row.clone());
+                    self.managed_state.delete(row.clone());
                     cache
                         .delete(
                             Some(&pk_prefix),
                             &mut self.managed_state,
-                            ordered_pk_row.skip(pk_prefix.size()),
+                            ordered_pk_row,
                             row,
                             &mut res_ops,
                             &mut res_rows,
