@@ -225,6 +225,7 @@ fn generator_from_data_type(
 mod tests {
     use std::sync::Arc;
 
+    use futures::stream::TryStreamExt;
     use maplit::{convert_args, hashmap};
     use risingwave_common::types::struct_type::StructType;
 
@@ -315,22 +316,20 @@ mod tests {
             rows_per_second: 10,
             fields: HashMap::new(),
         };
-        let mut reader =
-            DatagenSplitReader::new(properties.clone(), state, Some(mock_datum.clone()))
-                .await?
-                .into_stream();
-        let _ = reader.next().await;
-        let v1 = reader.next().await.unwrap()?;
+        let stream = DatagenSplitReader::new(properties.clone(), state, Some(mock_datum.clone()))
+            .await?
+            .into_stream();
+        let v1 = stream.skip(10).take(10).try_collect::<Vec<_>>().await?;
 
         let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
             split_index: 0,
             split_num: 1,
             start_offset: Some(9),
         })]);
-        let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum))
+        let stream = DatagenSplitReader::new(properties, state, Some(mock_datum))
             .await?
             .into_stream();
-        let v2 = reader.next().await.unwrap()?;
+        let v2 = stream.take(10).try_collect::<Vec<_>>().await?;
 
         assert_eq!(v1, v2);
         Ok(())

@@ -12,88 +12,74 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow::Result;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use risingwave_common::field_generator::FieldGeneratorImpl;
-use serde_json::{Map, Value};
-use tokio::time::Instant;
+use serde_json::Value;
 
-use super::DEFAULT_DATAGEN_INTERVAL;
 use crate::source::{SourceMessage, SplitId};
 
 pub struct DatagenEventGenerator {
-    pub fields_map: HashMap<String, FieldGeneratorImpl>,
-    pub events_so_far: u64,
-    pub rows_per_second: u64,
-    pub split_id: SplitId,
-    pub partition_size: u64,
+    fields_map: HashMap<String, FieldGeneratorImpl>,
+    offset: u64,
+    split_id: SplitId,
+    partition_rows_per_second: u64,
 }
 
 impl DatagenEventGenerator {
     pub fn new(
         fields_map: HashMap<String, FieldGeneratorImpl>,
         rows_per_second: u64,
-        events_so_far: u64,
+        offset: u64,
         split_id: SplitId,
         split_num: u64,
         split_index: u64,
     ) -> Result<Self> {
-        let partition_size = if rows_per_second % split_num > split_index {
+        let partition_rows_per_second = if rows_per_second % split_num > split_index {
             rows_per_second / split_num + 1
         } else {
             rows_per_second / split_num
         };
         Ok(Self {
             fields_map,
-            events_so_far,
-            rows_per_second,
+            offset,
             split_id,
-            partition_size,
+            partition_rows_per_second,
         })
     }
 
     #[try_stream(ok = SourceMessage, error = anyhow::Error)]
     pub async fn into_stream(mut self) {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
-            let now = Instant::now();
-            let mut generated_count: u64 = 0;
-            // if generating data time beyond 1s then just return the result
-            for i in 0..self.partition_size {
-                if now.elapsed() >= DEFAULT_DATAGEN_INTERVAL {
-                    break;
-                }
-                let offset = self.events_so_far + i;
-                let map: Map<String, Value> = self
-                    .fields_map
-                    .iter_mut()
-                    .map(|(name, field_generator)| {
-                        (name.to_string(), field_generator.generate(offset))
-                    })
-                    .collect();
-
-                let value = Value::Object(map);
-                let msg = SourceMessage {
+            // generate `partition_rows_per_second` rows per second
+            interval.tick().await;
+            for _ in 0..self.partition_rows_per_second {
+                let value = Value::Object(
+                    self.fields_map
+                        .iter_mut()
+                        .map(|(name, field_generator)| {
+                            (name.to_string(), field_generator.generate(self.offset))
+                        })
+                        .collect(),
+                );
+                yield SourceMessage {
                     payload: Some(Bytes::from(value.to_string())),
-                    offset: offset.to_string(),
+                    offset: self.offset.to_string(),
                     split_id: self.split_id.clone(),
                 };
-                generated_count += 1;
-                yield msg;
+                self.offset += 1;
             }
-
-            self.events_so_far += generated_count;
-
-            // if left time < 1s then wait
-            tokio::time::sleep_until(now + DEFAULT_DATAGEN_INTERVAL).await;
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use futures::stream::TryStreamExt;
+    use futures::stream::StreamExt;
 
     use super::*;
 
@@ -139,8 +125,16 @@ mod tests {
         )
         .unwrap();
 
-        let chunk: Vec<SourceMessage> = generator.into_stream().try_collect().await.unwrap();
-        assert_eq!(expected_length, chunk.len());
+        // collect messages in the first second
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let chunk = generator
+            .into_stream()
+            .boxed()
+            .ready_chunks(100)
+            .next()
+            .await
+            .unwrap();
+        assert_eq!(chunk.len(), expected_length);
     }
 
     #[tokio::test]
