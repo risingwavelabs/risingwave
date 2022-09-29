@@ -21,11 +21,12 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 humantime = "2.1"
 itertools = "0.10"
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "e0e9ddaf8e4a51c244a03676734437e68a336b30" }
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
 memcomparable = { path = "../utils/memcomparable" }
 more-asserts = "0.3"
 num-traits = "0.2"
 parking_lot = "0.12"
+parse-display = "0.6"
 paste = "1"
 pin-project = "1"
 postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
@@ -42,6 +43,7 @@ smallvec = "1"
 spin = "0.9"
 strum = "0.24"
 strum_macros = "0.24"
+sysinfo = "0.26"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"

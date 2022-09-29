@@ -16,8 +16,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures_async_stream::{for_await, try_stream};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
+use pgwire::pg_server::BoxedError;
+use pgwire::types::Row;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
@@ -99,15 +101,17 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    pub async fn collect_rows(self, format: bool) -> SchedulerResult<QueryResultSet> {
-        let data_stream = self.run();
-        let mut rows = vec![];
+    #[try_stream(ok = Vec<Row>, error = BoxedError)]
+    async fn stream_row_inner(data_stream: BoxedDataChunkStream, format: bool) {
         #[for_await]
         for chunk in data_stream {
-            rows.extend(to_pg_rows(chunk?, format));
+            let rows = to_pg_rows(chunk?, format);
+            yield rows;
         }
+    }
 
-        Ok(rows)
+    pub fn stream_rows(self, format: bool) -> QueryResultSet {
+        Box::pin(Self::stream_row_inner(self.run(), format))
     }
 
     /// Convert query to plan fragment.
@@ -311,10 +315,10 @@ impl LocalQueryExecution {
                 match &mut node_body {
                     NodeBody::LookupJoin(node) => {
                         let side_table_desc = node
-                            .probe_side_table_desc
+                            .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        node.probe_side_vnode_mapping = self
+                        node.inner_side_vnode_mapping = self
                             .front_env
                             .catalog_reader()
                             .read_guard()

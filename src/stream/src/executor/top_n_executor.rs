@@ -18,7 +18,6 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -129,7 +128,7 @@ pub(crate) fn generate_output(
         let columns = schema
             .create_array_builders(0)
             .into_iter()
-            .map(|x| Column::new(Arc::new(x.finish())))
+            .map(|x| x.finish().into())
             .collect_vec();
         Ok(StreamChunk::new(vec![], columns, None))
     }

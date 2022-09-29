@@ -22,7 +22,7 @@ use crate::hummock::iterator::{
     DirectedUserIterator, DirectedUserIteratorBuilder, Forward, ForwardUserIteratorType,
     HummockIterator, UserIteratorPayloadType,
 };
-use crate::hummock::local_version::PinnedVersion;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIterator};
 use crate::monitor::StoreLocalStatistic;

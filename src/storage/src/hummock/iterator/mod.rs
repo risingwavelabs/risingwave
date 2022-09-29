@@ -36,7 +36,7 @@ pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
-use crate::hummock::local_version::PinnedVersion;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::SharedBufferIteratorType;
 use crate::hummock::{BackwardSstableIterator, SstableIterator, SstableIteratorType};

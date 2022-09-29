@@ -23,12 +23,14 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
+use crate::cache::LruManagerRef;
 use crate::common::StreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
@@ -101,6 +103,8 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     pub state_table: StateTable<S>,
 
+    pub lru_manager: Option<LruManagerRef>,
+
     pub cache_size: usize,
 }
 
@@ -118,6 +122,7 @@ impl<S: StateStore> LookupExecutor<S> {
             schema: output_schema,
             column_mapping,
             state_table,
+            lru_manager,
             cache_size,
         } = params;
 
@@ -214,7 +219,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(cache_size),
+            lookup_cache: LookupCache::new(lru_manager, cache_size),
         }
     }
 
@@ -249,6 +254,10 @@ impl<S: StateStore> LookupExecutor<S> {
                         // arrange barrier. So we flush now.
                         self.lookup_cache.flush();
                     }
+
+                    // Use the new stream barrier epoch as new cache epoch
+                    self.lookup_cache.update_epoch(barrier.epoch.curr);
+
                     self.process_barrier(barrier.clone()).await?;
                     if self.arrangement.use_current_epoch {
                         // When lookup this epoch, stream side barrier always come after arrangement
@@ -278,7 +287,7 @@ impl<S: StateStore> LookupExecutor<S> {
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {
-                    let chunk = chunk.compact()?;
+                    let chunk = chunk.compact();
                     let (chunk, ops) = chunk.into_parts();
 
                     let mut builder = StreamChunkBuilder::new(

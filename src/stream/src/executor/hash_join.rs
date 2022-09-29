@@ -38,6 +38,7 @@ use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
+use crate::cache::LruManagerRef;
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::JoinType::LeftAnti;
 use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
@@ -426,6 +427,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
         degree_state_table_r: StateTable<S>,
+        lru_manager: Option<LruManagerRef>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -543,6 +545,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
+                    lru_manager.clone(),
                     cache_size,
                     join_key_data_types_l,
                     state_all_data_types_l.clone(),
@@ -564,6 +567,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
+                    lru_manager,
                     cache_size,
                     join_key_data_types_r,
                     state_all_data_types_r.clone(),
@@ -673,20 +677,28 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
                     }
 
+                    // Update epoch for managed cache.
+                    self.side_l.ht.update_epoch(barrier.epoch.curr);
+                    self.side_r.ht.update_epoch(barrier.epoch.curr);
+
                     // Report metrics of cached join rows/entries
                     for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
-                        self.metrics
-                            .join_cached_rows
-                            .with_label_values(&[&actor_id_str, side])
-                            .set(ht.cached_rows() as i64);
+                        // TODO(yuhao): Those two metric calculation cost too much time (>250ms).
+                        // Those will result in that barrier is always ready
+                        // in source. Since select barrier is preferred,
+                        // chunk would never be selected.
+                        // self.metrics
+                        //     .join_cached_rows
+                        //     .with_label_values(&[&actor_id_str, side])
+                        //     .set(ht.cached_rows() as i64);
                         self.metrics
                             .join_cached_entries
                             .with_label_values(&[&actor_id_str, side])
                             .set(ht.entry_count() as i64);
-                        self.metrics
-                            .join_cached_estimated_size
-                            .with_label_values(&[&actor_id_str, side])
-                            .set(ht.estimated_size() as i64);
+                        // self.metrics
+                        //     .join_cached_estimated_size
+                        //     .with_label_values(&[&actor_id_str, side])
+                        //     .set(ht.estimated_size() as i64);
                     }
 
                     yield Message::Barrier(barrier);
@@ -703,8 +715,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         self.side_r.ht.flush(epoch).await?;
 
         // We need to manually evict the cache to the target capacity.
-        self.side_l.ht.evict_to_target_cap();
-        self.side_r.ht.evict_to_target_cap();
+        self.side_l.ht.evict();
+        self.side_r.ht.evict();
 
         Ok(())
     }
@@ -751,7 +763,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         chunk: StreamChunk,
         append_only_optimize: bool,
     ) {
-        let chunk = chunk.compact()?;
+        let chunk = chunk.compact();
 
         let (side_update, side_match) = if SIDE == SideType::Left {
             (&mut side_l, &mut side_r)
@@ -1036,6 +1048,7 @@ mod tests {
             degree_state_l,
             state_r,
             degree_state_r,
+            None,
             false,
             Arc::new(StreamingMetrics::unused()),
         );
@@ -1105,6 +1118,7 @@ mod tests {
             degree_state_l,
             state_r,
             degree_state_r,
+            None,
             true,
             Arc::new(StreamingMetrics::unused()),
         );

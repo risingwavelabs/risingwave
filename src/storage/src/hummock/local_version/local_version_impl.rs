@@ -15,72 +15,27 @@
 use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, HashMap};
 use std::mem::swap;
-use std::ops::{Deref, RangeBounds};
+use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, summarize_level_deltas, HummockLevelsExt, HummockVersionExt,
-    LevelDeltasSummary,
+    add_new_sub_level, summarize_level_deltas, HummockLevelsExt, LevelDeltasSummary,
 };
-use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo, INVALID_VERSION_ID,
-};
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::shared_buffer::SharedBuffer;
-use crate::hummock::shared_buffer::{to_order_sorted, OrderSortedUncommittedData, UncommittedData};
+use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
+use crate::hummock::local_version::{
+    LocalVersion, ReadVersion, SyncUncommittedData, SyncUncommittedDataStage,
+};
+use crate::hummock::shared_buffer::{
+    to_order_sorted, OrderSortedUncommittedData, SharedBuffer, UncommittedData,
+};
 use crate::hummock::utils::{check_subset_preserve_order, filter_single_sst, range_overlap};
-
-#[derive(Clone)]
-pub struct LocalVersion {
-    shared_buffer: BTreeMap<HummockEpoch, SharedBuffer>,
-    pinned_version: PinnedVersion,
-    local_related_version: PinnedVersion,
-    // TODO: save uncommitted data that needs to be flushed to disk.
-    /// Save uncommitted data that needs to be synced or finished syncing.
-    /// We need to save data in reverse order of epoch,
-    /// because we will traverse `sync_uncommitted_data` in the forward direction and return the
-    /// key when we find it
-    pub sync_uncommitted_data: BTreeMap<HummockEpoch, SyncUncommittedData>,
-    max_sync_epoch: HummockEpoch,
-    /// The max readable epoch, and epochs smaller than it will not be written again.
-    sealed_epoch: HummockEpoch,
-}
-
-#[derive(Debug, Clone)]
-pub enum PinVersionAction {
-    Pin(HummockVersionId),
-    Unpin(HummockVersionId),
-}
-
-#[derive(Debug, Clone)]
-pub enum SyncUncommittedDataStage {
-    /// Before we start syncing, we need to mv the shared buffer to `sync_uncommitted_data` and
-    /// wait for flush task to complete
-    CheckpointEpochSealed(BTreeMap<HummockEpoch, SharedBuffer>),
-    /// Task payload when we start syncing
-    Syncing(OrderSortedUncommittedData),
-    /// Sync task is failed
-    Failed(OrderSortedUncommittedData),
-    /// After we finish syncing, we changed `Syncing` to `Synced`.
-    Synced(Vec<LocalSstableInfo>, usize),
-}
-
-#[derive(Debug, Clone)]
-pub struct SyncUncommittedData {
-    #[allow(dead_code)]
-    sync_epoch: HummockEpoch,
-    /// The previous `max_sync_epoch` when we start syncing `sync_epoch` and advance to a new
-    /// `max_sync_epoch`.
-    prev_max_sync_epoch: HummockEpoch,
-    // newer epochs come first
-    epochs: Vec<HummockEpoch>,
-    stage: SyncUncommittedDataStage,
-}
 
 // state transition
 impl SyncUncommittedData {
@@ -222,8 +177,6 @@ impl LocalVersion {
     }
 
     pub fn seal_epoch(&mut self, epoch: HummockEpoch, is_checkpoint: bool) {
-        // TODO: remove it when non-checkpoint barrier is enabled
-        assert!(is_checkpoint, "current seal_epoch must be a checkpoint");
         assert!(
             epoch > self.sealed_epoch,
             "sealed epoch not advance. new epoch: {}, current {}",
@@ -231,7 +184,9 @@ impl LocalVersion {
             self.sealed_epoch
         );
         self.sealed_epoch = epoch;
-        self.advance_max_sync_epoch(epoch)
+        if is_checkpoint {
+            self.advance_max_sync_epoch(epoch)
+        }
     }
 
     pub fn get_sealed_epoch(&self) -> HummockEpoch {
@@ -641,136 +596,4 @@ impl LocalVersion {
 
         clean_epochs
     }
-}
-
-struct PinnedVersionGuard {
-    version_id: HummockVersionId,
-    pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
-}
-
-impl PinnedVersionGuard {
-    /// Creates a new `PinnedVersionGuard` and send a pin request to `pinned_version_worker`.
-    fn new(
-        version_id: HummockVersionId,
-        pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
-    ) -> Self {
-        if pinned_version_manager_tx
-            .send(PinVersionAction::Pin(version_id))
-            .is_err()
-        {
-            tracing::warn!("failed to send req pin version id{}", version_id);
-        }
-
-        Self {
-            version_id,
-            pinned_version_manager_tx,
-        }
-    }
-}
-
-impl Drop for PinnedVersionGuard {
-    fn drop(&mut self) {
-        if self
-            .pinned_version_manager_tx
-            .send(PinVersionAction::Unpin(self.version_id))
-            .is_err()
-        {
-            tracing::warn!("failed to send req unpin version id:{}", self.version_id);
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct PinnedVersion {
-    version: Arc<HummockVersion>,
-    guard: Arc<PinnedVersionGuard>,
-}
-
-impl PinnedVersion {
-    fn new(
-        version: HummockVersion,
-        pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
-    ) -> Self {
-        let version_id = version.id;
-
-        PinnedVersion {
-            version: Arc::new(version),
-            guard: Arc::new(PinnedVersionGuard::new(
-                version_id,
-                pinned_version_manager_tx,
-            )),
-        }
-    }
-
-    fn new_pin_version(&self, version: HummockVersion) -> Self {
-        assert!(
-            version.id > self.version.id,
-            "pinning a older version {}. Current is {}",
-            version.id,
-            self.version.id
-        );
-        let version_id = version.id;
-        PinnedVersion {
-            version: Arc::new(version),
-            guard: Arc::new(PinnedVersionGuard::new(
-                version_id,
-                self.guard.pinned_version_manager_tx.clone(),
-            )),
-        }
-    }
-
-    fn new_local_related_pin_version(&self, version: HummockVersion) -> Self {
-        assert_eq!(
-            self.version.id, version.id,
-            "local related version {} to pin not equal to current version id {}",
-            version.id, self.version.id
-        );
-        PinnedVersion {
-            version: Arc::new(version),
-            guard: self.guard.clone(),
-        }
-    }
-
-    pub fn id(&self) -> HummockVersionId {
-        self.version.id
-    }
-
-    pub fn is_valid(&self) -> bool {
-        self.version.id != INVALID_VERSION_ID
-    }
-
-    pub fn levels(&self, compaction_group_id: Option<CompactionGroupId>) -> Vec<&Level> {
-        match compaction_group_id {
-            None => self.version.get_combined_levels(),
-            Some(compaction_group_id) => {
-                let levels = self
-                    .version
-                    .get_compaction_group_levels(compaction_group_id);
-                let mut ret = vec![];
-                ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
-                ret.extend(levels.levels.iter());
-                ret
-            }
-        }
-    }
-
-    pub fn max_committed_epoch(&self) -> u64 {
-        self.version.max_committed_epoch
-    }
-
-    pub fn safe_epoch(&self) -> u64 {
-        self.version.safe_epoch
-    }
-
-    /// ret value can't be used as `HummockVersion`. it must be modified with delta
-    pub fn version(&self) -> HummockVersion {
-        self.version.deref().clone()
-    }
-}
-
-pub struct ReadVersion {
-    // The shared buffers are sorted by epoch descendingly
-    pub shared_buffer_data: Vec<OrderSortedUncommittedData>,
-    pub pinned_version: PinnedVersion,
-    pub sync_uncommitted_data: Vec<OrderSortedUncommittedData>,
 }

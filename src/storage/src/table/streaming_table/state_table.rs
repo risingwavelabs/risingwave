@@ -339,7 +339,8 @@ impl<S: StateStore> StateTable<S> {
         self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).curr
     }
 
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    /// get the previous epoch of the state store and panic if the `init_epoch()` has never be
+    /// called
     pub fn prev_epoch(&self) -> u64 {
         self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).prev
     }
@@ -369,7 +370,7 @@ impl<S: StateStore> StateTable<S> {
     fn get_read_option(&self, epoch: u64) -> ReadOptions {
         ReadOptions {
             epoch,
-            table_id: Some(self.table_id()),
+            table_id: self.table_id(),
             retention_seconds: self.table_option.retention_seconds,
         }
     }
@@ -497,6 +498,14 @@ impl<S: StateStore> StateTable<S> {
                 new_value.serialize(&self.value_indices),
             )
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
+    }
+
+    /// Update or insert a row. If the row with the same pk exists, update it. Otherwise, insert it.
+    pub fn upsert(&mut self, value: Row) {
+        let pk = value.by_indices(self.pk_indices());
+        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode(&pk));
+        let value_bytes = value.serialize(&self.value_indices);
+        self.mem_table.upsert(key_bytes, value_bytes);
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
