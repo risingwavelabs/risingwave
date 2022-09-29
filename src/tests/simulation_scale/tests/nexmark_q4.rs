@@ -3,7 +3,9 @@ use std::time::Duration;
 use anyhow::Result;
 use madsim::time::sleep;
 use risingwave_simulation_scale::cluster::Cluster;
-use risingwave_simulation_scale::ctl_ext::predicates::identity_contains;
+use risingwave_simulation_scale::ctl_ext::predicates::{
+    identity_contains, upstream_fragment_count,
+};
 use risingwave_simulation_scale::utils::AssertResult;
 
 const CREATE_MVIEW: &str = r#"
@@ -38,18 +40,14 @@ const RESULT: &str = r#"
 
 const SELECT: &str = "select * from nexmark_q4 order by category;";
 
-#[madsim::test]
-async fn test_nexmark_q4() -> Result<()> {
+async fn init() -> Result<Cluster> {
     let mut cluster = Cluster::start().await?;
     cluster.create_nexmark_source(6, Some(200000)).await?;
     cluster.run(CREATE_MVIEW).await?;
+    Ok(cluster)
+}
 
-    let fragment = cluster
-        .locate_one_fragment([identity_contains("materialize")])
-        .await?;
-    let id = fragment.id();
-
-    // 0s
+async fn wait_initial_data(cluster: &mut Cluster) -> Result<String> {
     cluster
         .wait_until(
             SELECT,
@@ -57,6 +55,33 @@ async fn test_nexmark_q4() -> Result<()> {
             Duration::from_millis(1000),
             Duration::from_secs(10),
         )
+        .await
+}
+
+#[madsim::test]
+async fn nexmark_q4_ref() -> Result<()> {
+    let mut cluster = init().await?;
+
+    sleep(Duration::from_secs(25)).await;
+    cluster.run(SELECT).await?.assert_result_eq(RESULT);
+
+    Ok(())
+}
+
+#[madsim::test]
+async fn nexmark_q4_materialize_agg() -> Result<()> {
+    let mut cluster = init().await?;
+
+    let fragment = cluster
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            identity_contains("hashagg"),
+        ])
+        .await?;
+    let id = fragment.id();
+
+    // 0s
+    wait_initial_data(&mut cluster)
         .await?
         .assert_result_ne(RESULT);
 
@@ -68,6 +93,94 @@ async fn test_nexmark_q4() -> Result<()> {
     // 5~15s
     cluster.run(SELECT).await?.assert_result_ne(RESULT);
     cluster.reschedule(format!("{id}-[2,3]+[0,1]")).await?;
+
+    sleep(Duration::from_secs(20)).await;
+
+    // 25~35s
+    cluster.run(SELECT).await?.assert_result_eq(RESULT);
+
+    Ok(())
+}
+
+#[madsim::test]
+async fn nexmark_q4_agg_join() -> Result<()> {
+    let mut cluster = init().await?;
+
+    let fragment = cluster
+        .locate_one_fragment([
+            identity_contains("hashagg"),
+            identity_contains("hashjoin"),
+            upstream_fragment_count(2),
+        ])
+        .await?;
+    let id = fragment.id();
+
+    // 0s
+    wait_initial_data(&mut cluster)
+        .await?
+        .assert_result_ne(RESULT);
+
+    // 0~10s
+    cluster.reschedule(format!("{id}-[0,1]")).await?;
+
+    sleep(Duration::from_secs(5)).await;
+
+    // 5~15s
+    cluster.run(SELECT).await?.assert_result_ne(RESULT);
+    cluster.reschedule(format!("{id}-[2,3]+[0,1]")).await?;
+
+    sleep(Duration::from_secs(20)).await;
+
+    // 25~35s
+    cluster.run(SELECT).await?.assert_result_eq(RESULT);
+
+    Ok(())
+}
+
+#[madsim::test]
+async fn nexmark_q4_cascade() -> Result<()> {
+    let mut cluster = init().await?;
+
+    let fragment_1 = cluster
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            identity_contains("hashagg"),
+        ])
+        .await?;
+
+    let fragment_2 = cluster
+        .locate_one_fragment([
+            identity_contains("hashagg"),
+            identity_contains("hashjoin"),
+            upstream_fragment_count(2),
+        ])
+        .await?;
+
+    // 0s
+    wait_initial_data(&mut cluster)
+        .await?
+        .assert_result_ne(RESULT);
+
+    // 0~10s
+    cluster
+        .reschedule(format!(
+            "{}-[0,1]; {}-[0,2,4]",
+            fragment_1.id(),
+            fragment_2.id()
+        ))
+        .await?;
+
+    sleep(Duration::from_secs(5)).await;
+
+    // 5~15s
+    cluster.run(SELECT).await?.assert_result_ne(RESULT);
+    cluster
+        .reschedule(format!(
+            "{}-[2,4]+[0,1]; {}-[3]+[0,4]",
+            fragment_1.id(),
+            fragment_2.id()
+        ))
+        .await?;
 
     sleep(Duration::from_secs(20)).await;
 

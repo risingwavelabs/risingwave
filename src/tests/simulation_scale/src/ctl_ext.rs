@@ -11,6 +11,8 @@ use self::predicates::BoxedPredicate;
 use crate::cluster::Cluster;
 
 pub mod predicates {
+    use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
+
     use super::*;
 
     trait Predicate = Fn(&ProstFragment) -> bool + Send + 'static;
@@ -20,26 +22,44 @@ pub mod predicates {
         fragment.actors.first().unwrap().nodes.as_ref().unwrap()
     }
 
-    fn count(root: &StreamNode, p: impl Fn(&StreamNode) -> bool) -> usize {
-        let child = root.input.iter().filter(|n| p(n)).count();
+    fn count(root: &StreamNode, p: &impl Fn(&StreamNode) -> bool) -> usize {
+        let child = root.input.iter().map(|n| count(n, p)).sum::<usize>();
         child + if p(root) { 1 } else { 0 }
     }
 
-    fn any(root: &StreamNode, p: impl Fn(&StreamNode) -> bool) -> bool {
-        p(root) || root.input.iter().any(p)
+    fn any(root: &StreamNode, p: &impl Fn(&StreamNode) -> bool) -> bool {
+        p(root) || root.input.iter().any(|n| any(n, p))
     }
 
     pub fn identity_contains_n(n: usize, s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
         let p = move |f: &ProstFragment| {
-            count(root(f), |n| n.identity.to_lowercase().contains(&s)) == n
+            count(root(f), &|n| n.identity.to_lowercase().contains(&s)) == n
         };
         Box::new(p)
     }
 
     pub fn identity_contains(s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
-        let p = move |f: &ProstFragment| any(root(f), |n| n.identity.to_lowercase().contains(&s));
+        let p = move |f: &ProstFragment| any(root(f), &|n| n.identity.to_lowercase().contains(&s));
+        Box::new(p)
+    }
+
+    pub fn upstream_fragment_count(n: usize) -> BoxedPredicate {
+        let p = move |f: &ProstFragment| f.upstream_fragment_ids.len() == n;
+        Box::new(p)
+    }
+
+    pub fn can_scale() -> BoxedPredicate {
+        let p = |f: &ProstFragment| {
+            let distributed = f.distribution_type() == FragmentDistributionType::Hash;
+            let has_downstream_mv = identity_contains("materialize")(f)
+                && f.actors.first().unwrap().dispatcher.len() > 0;
+            let has_source = identity_contains("source")(f);
+            let has_chain = identity_contains("chain")(f);
+
+            distributed && !(has_downstream_mv || has_source || has_chain)
+        };
         Box::new(p)
     }
 }
