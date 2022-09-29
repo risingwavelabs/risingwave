@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use clap::Parser;
+
 #[cfg(target_os = "linux")]
 mod analyze;
 #[cfg(target_os = "linux")]
@@ -75,7 +77,6 @@ pub struct Args {
 
 #[cfg(target_os = "linux")]
 async fn main_okk() {
-    use clap::Parser;
     use tokio::sync::oneshot;
 
     let args = Args::parse();
