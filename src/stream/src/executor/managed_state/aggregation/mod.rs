@@ -177,17 +177,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
         );
         match agg_call.kind {
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
-                Ok(Self::Value(ManagedValueState::new(
-                    agg_call,
-                    row_count,
-                    group_key,
-                    prev_output,
-                )?))
+                Ok(Self::Value(ManagedValueState::new(agg_call, prev_output)?))
             }
             // optimization: use single-value state for append-only min/max
-            AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, group_key, prev_output)?,
-            )),
+            AggKind::Max | AggKind::Min if agg_call.append_only => {
+                Ok(Self::Value(ManagedValueState::new(agg_call, prev_output)?))
+            }
             AggKind::Max | AggKind::Min => Ok(Self::Table(Box::new(GenericExtremeState::new(
                 agg_call,
                 group_key,

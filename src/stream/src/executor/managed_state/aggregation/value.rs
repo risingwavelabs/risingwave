@@ -14,11 +14,9 @@
 
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Row};
+use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
-use risingwave_storage::StateStore;
 
 use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
 use crate::executor::error::StreamExecutorResult;
@@ -32,24 +30,11 @@ pub struct ManagedValueState {
 
     /// The internal single-value state.
     state: Box<dyn StreamingAggStateImpl>,
-
-    /// Indicates whether this managed state is dirty. If this state is dirty, we cannot evict the
-    /// state from memory.
-    is_dirty: bool,
-
-    /// Primary key to look up in relational table. For value state, there is only one row.
-    /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
-    group_key: Option<Row>, // TODO(rc): to be removed
 }
 
 impl ManagedValueState {
     /// Create a single-value managed state based on `AggCall` and `Keyspace`.
-    pub fn new(
-        agg_call: AggCall,
-        row_count: Option<usize>,
-        group_key: Option<&Row>,
-        prev_output: Option<Datum>,
-    ) -> StreamExecutorResult<Self> {
+    pub fn new(agg_call: AggCall, prev_output: Option<Datum>) -> StreamExecutorResult<Self> {
         // Create the internal state based on the value we get.
         Ok(Self {
             arg_indices: agg_call.args.val_indices().to_vec(),
@@ -59,8 +44,6 @@ impl ManagedValueState {
                 &agg_call.return_type,
                 prev_output,
             )?,
-            is_dirty: false,
-            group_key: group_key.cloned(),
         })
     }
 
@@ -72,7 +55,6 @@ impl ManagedValueState {
         columns: &[&ArrayImpl],
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, columns));
-        self.is_dirty = true;
         let data = self
             .arg_indices
             .iter()
@@ -88,40 +70,6 @@ impl ManagedValueState {
         self.state
             .get_output()
             .expect("agg call throw an error in streamAgg")
-    }
-
-    /// Check if this state needs a flush.
-    pub fn is_dirty(&self) -> bool {
-        warn!("[rc] may need to remove this");
-        self.is_dirty
-    }
-
-    pub fn flush<S: StateStore>(
-        &mut self,
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()> {
-        warn!("[rc] may need to remove this");
-        // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
-        // cause incorrect result: it will only produce more I/O.
-        debug_assert!(self.is_dirty());
-
-        // Persist value into relational table. The inserted row should concat with pk (pk is in
-        // front of value). In this case, the pk is just group key.
-
-        let output = self.state.get_output()?;
-        let row = Row::new(
-            self.group_key
-                .as_ref()
-                .unwrap_or_else(Row::empty)
-                .values()
-                .cloned()
-                .chain(std::iter::once(output))
-                .collect(),
-        );
-        state_table.upsert(row);
-
-        self.is_dirty = false;
-        Ok(())
     }
 }
 
