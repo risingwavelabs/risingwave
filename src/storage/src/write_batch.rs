@@ -115,35 +115,21 @@ impl<'a, S: StateStore> KeySpaceWriteBatch<'a, S> {
     /// Pushes `key` and `value` into the `WriteBatch`.
     /// If `key` is valid, it will be prefixed with `keyspace` key.
     /// Otherwise, only `keyspace` key is pushed.
-    fn do_push(&mut self, key: Option<&[u8]>, value: StorageValue) {
-        let key = match key {
-            Some(key) => self.keyspace.prefixed_key(key),
-            None => self.keyspace.key().to_vec(),
-        }
-        .into();
+    fn do_push(&mut self, key: &[u8], value: StorageValue) {
+        let key = self.keyspace.prefixed_key(key).into();
         self.global.batch.push((key, value));
-    }
-
-    /// Treats the keyspace as a single key, and put a value.
-    pub fn put_single(&mut self, value: StorageValue) {
-        self.do_push(None, value);
-    }
-
-    /// Treats the keyspace as a single key, and delete a value.
-    pub fn delete_single(&mut self) {
-        self.do_push(None, StorageValue::new_delete());
     }
 
     /// Puts a value, with the key prepended by the prefix of `keyspace`, like `[prefix | given
     /// key]`.
     pub fn put(&mut self, key: impl AsRef<[u8]>, value: StorageValue) {
-        self.do_push(Some(key.as_ref()), value);
+        self.do_push(key.as_ref(), value);
     }
 
     /// Deletes a value, with the key prepended by the prefix of `keyspace`, like `[prefix | given
     /// key]`.
     pub fn delete(&mut self, key: impl AsRef<[u8]>) {
-        self.do_push(Some(key.as_ref()), StorageValue::new_delete());
+        self.do_push(key.as_ref(), StorageValue::new_delete());
     }
 
     pub async fn ingest(self) -> StorageResult<()> {
