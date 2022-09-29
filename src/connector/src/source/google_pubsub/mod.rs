@@ -16,12 +16,6 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.subscription")]
     pub subscription: String,
 
-    // optionally filter by attribute
-    // ? Is there an equivalent for other sources
-    // ? Should we support filtering
-    #[serde(rename = "pubsub.attributes")]
-    pub attributes: Option<HashMap<String, String>>,
-
     // use against the pubsub emulator
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
