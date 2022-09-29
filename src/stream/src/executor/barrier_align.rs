@@ -193,11 +193,10 @@ mod tests {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
         }
         .boxed();
-        let output: Vec<_> = barrier_align_for_test(left, right)
+        let _output: Vec<_> = barrier_align_for_test(left, right)
             .try_collect()
             .await
             .unwrap();
-        assert_eq!(output, vec![]);
     }
 
     #[tokio::test]
