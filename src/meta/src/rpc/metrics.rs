@@ -226,8 +226,8 @@ impl MetaMetrics {
             "idle_compactor_num",
             "number of idle compactor in the cluster",
             registry,
-        ).unwrap();
-
+        )
+        .unwrap();
 
         Self {
             registry,

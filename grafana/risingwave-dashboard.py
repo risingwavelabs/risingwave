@@ -223,7 +223,11 @@ def section_compaction(outer_panels):
                     "avg(storage_compact_task_pending_num) by(job, instance)", "compactor_task_split_count - {{job}} @ {{instance}}"
                 ),
             ]),
-
+            panels.timeseries_count("Idle Compactor Count", [
+                panels.target(
+                    "avg(idle_compactor_num)", "idle compactor count"
+                ),
+            ]),
             panels.timeseries_latency("Compaction Duration", [
                 *quantile(lambda quantile, legend: panels.target(
                     f"histogram_quantile({quantile}, sum(rate(state_store_compact_task_duration_bucket[$__rate_interval])) by (le, job, instance))", f"compact-task p{legend}" + " - {{job}} @ {{instance}}"

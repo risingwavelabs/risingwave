@@ -824,7 +824,8 @@ where
                     .or_insert(1);
             });
         drop(compaction_guard);
-        let (compactor, idle_count) = self.compactor_manager
+        let (compactor, idle_count) = self
+            .compactor_manager
             .next_idle_compactor(&compactor_assigned_task_num);
         self.metrics.idle_compactor_num.set(idle_count as i64);
         compactor
