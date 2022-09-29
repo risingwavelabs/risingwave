@@ -73,6 +73,8 @@ pub struct MetaMetrics {
 
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
+
+    pub idle_compactor_num: IntGauge,
 }
 
 impl MetaMetrics {
@@ -220,6 +222,13 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let idle_compactor_num = register_int_gauge_with_registry!(
+            "idle_compactor_num",
+            "number of idle compactor in the cluster",
+            registry,
+        ).unwrap();
+
+
         Self {
             registry,
 
@@ -246,6 +255,7 @@ impl MetaMetrics {
             time_after_last_observation: AtomicU64::new(0),
 
             worker_num,
+            idle_compactor_num,
         }
     }
 

@@ -75,7 +75,7 @@ pub trait CompactionSchedulePolicy: Send + Sync {
     fn report_compact_task(&mut self, context_id: HummockContextId, compact_task: &CompactTask);
 
     fn compactor_num(&self) -> usize;
-
+    fn idle_compactor_num(&self, compactor_assigned_task_num: &HashMap<HummockContextId, u64>) -> usize;
     fn max_concurrent_task_num(&self) -> usize;
 }
 
@@ -181,6 +181,22 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
 
     fn compactor_num(&self) -> usize {
         self.compactors.len()
+    }
+
+    fn idle_compactor_num(&self, compactor_assigned_task_num: &HashMap<HummockContextId, u64>) -> usize {
+        let mut idle_count = 0;
+        for context_id in &self.compactors {
+            let compactor = self.compactor_map.get(context_id).unwrap();
+            if compactor_assigned_task_num
+                .get(&compactor.context_id())
+                .cloned()
+                .unwrap_or(0)
+                < compactor.max_concurrent_task_number()
+            {
+                idle_count += 1;
+            }
+        }
+        idle_count
     }
 
     fn max_concurrent_task_num(&self) -> usize {
@@ -352,6 +368,21 @@ impl CompactionSchedulePolicy for ScoredPolicy {
 
     fn compactor_num(&self) -> usize {
         self.score_to_compactor.len()
+    }
+
+    fn idle_compactor_num(&self, compactor_assigned_task_num: &HashMap<HummockContextId, u64>) -> usize {
+        let mut idle_count = 0;
+        for (_, compactor)  in &self.score_to_compactor {
+            if compactor_assigned_task_num
+                .get(&compactor.context_id())
+                .cloned()
+                .unwrap_or(0)
+                < compactor.max_concurrent_task_number()
+            {
+                idle_count += 1;
+            }
+        }
+        idle_count
     }
 
     fn max_concurrent_task_num(&self) -> usize {

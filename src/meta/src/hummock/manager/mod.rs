@@ -824,8 +824,10 @@ where
                     .or_insert(1);
             });
         drop(compaction_guard);
-        self.compactor_manager
-            .next_idle_compactor(&compactor_assigned_task_num)
+        let (compactor, idle_count) = self.compactor_manager
+            .next_idle_compactor(&compactor_assigned_task_num);
+        self.metrics.idle_compactor_num.set(idle_count as i64);
+        compactor
     }
 
     /// Assign a compaction task to the compactor identified by `assignee_context_id`.
