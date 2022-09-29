@@ -247,7 +247,10 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
             from_avro_datetime!(
                 field_value,
                 TimestampMillis,
-                |millis| NaiveDateTimeWrapper::with_secs_nsecs(millis, 0),
+                |millis| NaiveDateTimeWrapper::with_secs_nsecs(
+                    millis / 1000,
+                    (millis % 1000) as u32 * 1_000_000
+                ),
                 ScalarImpl::NaiveDateTime
             )
         }
@@ -529,7 +532,10 @@ mod test {
                     let datetime = from_avro_datetime!(
                         value,
                         TimestampMillis,
-                        |millis| NaiveDateTimeWrapper::with_secs_nsecs(millis, 0),
+                        |millis| NaiveDateTimeWrapper::with_secs_nsecs(
+                            millis / 1000,
+                            (millis % 1000) as u32 * 1_000_000
+                        ),
                         ScalarImpl::NaiveDateTime
                     )
                     .ok();
@@ -637,7 +643,7 @@ mod test {
                     }
                     Schema::TimestampMillis => {
                         let datetime = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
-                        let timestamp_mills = Value::TimestampMillis(datetime.timestamp());
+                        let timestamp_mills = Value::TimestampMillis(datetime.timestamp() * 1_000);
                         record.put(field.name.as_str(), timestamp_mills);
                     }
                     _ => {
