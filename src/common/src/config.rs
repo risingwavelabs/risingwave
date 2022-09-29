@@ -85,13 +85,17 @@ pub struct StreamingConfig {
     #[serde(default = "default::chunk_size")]
     pub chunk_size: u32,
 
-    /// The interval of periodic checkpointing.
-    #[serde(default = "default::checkpoint_interval_ms")]
-    pub checkpoint_interval_ms: u32,
+    /// The interval of periodic barrier.
+    #[serde(default = "default::barrier_interval_ms")]
+    pub barrier_interval_ms: u32,
 
     /// The maximum number of barriers in-flight in the compute nodes.
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
+
+    /// There will be a checkpoint for every n barriers
+    #[serde(default = "default::checkpoint_frequency")]
+    pub checkpoint_frequency: usize,
 
     /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
     /// fragment on one parallel unit per compute node.
@@ -106,6 +110,9 @@ pub struct StreamingConfig {
     /// decided by `tokio`.
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
+
+    #[serde(default = "default::total_memory_available_bytes")]
+    pub total_memory_available_bytes: usize,
 
     #[serde(default)]
     pub developer: DeveloperConfig,
@@ -259,6 +266,7 @@ impl Default for DeveloperConfig {
 }
 
 mod default {
+    use sysinfo::{System, SystemExt};
 
     pub fn heartbeat_interval_ms() -> u32 {
         1000
@@ -325,12 +333,16 @@ mod default {
         "tempdisk".to_string()
     }
 
-    pub fn checkpoint_interval_ms() -> u32 {
+    pub fn barrier_interval_ms() -> u32 {
         250
     }
 
     pub fn in_flight_barrier_nums() -> usize {
         40
+    }
+
+    pub fn checkpoint_frequency() -> usize {
+        10
     }
 
     pub fn share_buffer_upload_concurrency() -> usize {
@@ -339,6 +351,12 @@ mod default {
 
     pub fn worker_node_parallelism() -> usize {
         std::thread::available_parallelism().unwrap().get()
+    }
+
+    pub fn total_memory_available_bytes() -> usize {
+        let mut sys = System::new();
+        sys.refresh_memory();
+        sys.total_memory() as usize
     }
 
     pub fn compactor_memory_limit_mb() -> usize {

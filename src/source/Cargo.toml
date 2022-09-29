@@ -17,6 +17,8 @@ crc32fast = "1"
 enum-as-inner = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
+futures-concurrency = "3"
 itertools = "0.10"
 maplit = "1"
 memcomparable = { path = "../utils/memcomparable" }
@@ -28,7 +30,6 @@ prost = "0.11"
 protobuf = "2"
 protobuf-codegen-pure = "2"
 rand = "0.8"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }

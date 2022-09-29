@@ -1590,7 +1590,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3495912c9c1ccf2e18976439f4443f3fee0fd61f424ff99fde6a66b15ecb448f"
 dependencies = [
  "cfg-if",
- "hashbrown 0.12.3",
+ "hashbrown",
  "lock_api",
  "parking_lot_core 0.9.3",
 ]
@@ -2172,6 +2172,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
+name = "global_stats_alloc"
+version = "0.1.11"
+dependencies = [
+ "stats_alloc",
+ "tikv-jemallocator",
+ "workspace-hack",
+]
+
+[[package]]
 name = "globset"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2215,17 +2224,8 @@ version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce69ed202df415a3d4a01e6f3341320ca88b9bd4f0bf37be6fa239cdea06d9bf"
 dependencies = [
- "hashbrown 0.12.3",
+ "hashbrown",
  "serde",
-]
-
-[[package]]
-name = "hashbrown"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
-dependencies = [
- "ahash",
 ]
 
 [[package]]
@@ -2444,7 +2444,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10a35a97730320ffe8e2d410b5d3b69279b98d2c14bdb8b70ea89ecf7888d41e"
 dependencies = [
  "autocfg",
- "hashbrown 0.12.3",
+ "hashbrown",
 ]
 
 [[package]]
@@ -2736,6 +2736,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
+name = "local_stats_alloc"
+version = "0.1.11"
+dependencies = [
+ "workspace-hack",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2757,9 +2764,9 @@ dependencies = [
 [[package]]
 name = "lru"
 version = "0.7.6"
-source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
+source = "git+https://github.com/risingwavelabs/lru-rs.git?branch=evict_by_timestamp#b972b4e486311c0eb3e4e48a849003bcc440224d"
 dependencies = [
- "hashbrown 0.11.2",
+ "hashbrown",
 ]
 
 [[package]]
@@ -2768,7 +2775,7 @@ version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e999beba7b6e8345721bd280141ed958096a2e4abdf74f67ff4ce49b4b54e47a"
 dependencies = [
- "hashbrown 0.12.3",
+ "hashbrown",
 ]
 
 [[package]]
@@ -2813,9 +2820,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.7"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1553e1ee8f12e9b4d04aa430b6e8e38380f89cec07cf3881d410f2d2690798ea"
+checksum = "98c6ebce9e84d0df01090c5e221e0b38091565d39335eba972b0d7a8589bf683"
 dependencies = [
  "ahash",
  "async-channel",
@@ -2840,11 +2847,12 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.6"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54cc5db0885f71b5e8eb71ec1002b94bf5b8f5b1011c4d709b23a1fd3b5c01d8"
+checksum = "0d6c5383c2297a0a3306fbcc0475a6ab1decb5b49c3cd20adae6fd8d149dbde0"
 dependencies = [
  "etcd-client",
+ "futures-util",
  "http",
  "madsim",
  "spin 0.9.4",
@@ -2862,6 +2870,30 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "madsim-rdkafka"
+version = "0.2.8-alpha"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ed71583c1f7ea964e5dd0c1ea4ae1133ff9092775772b22cc9c0fa0151a6441"
+dependencies = [
+ "async-channel",
+ "async-trait",
+ "futures",
+ "futures-util",
+ "libc",
+ "log",
+ "madsim",
+ "rdkafka-sys",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "slab",
+ "spin 0.9.4",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3227,6 +3259,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ntapi"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c28774a7fd2fbb4f0babd8237ce554b73af68021b5f695a3cebd6c59bac0980f"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3469,6 +3510,32 @@ dependencies = [
  "smallvec",
  "thread-id",
  "windows-sys",
+]
+
+[[package]]
+name = "parse-display"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b25af4ef94a8528b41fb49a696e361dc6ef975c782417268072d987ac327964"
+dependencies = [
+ "once_cell",
+ "parse-display-derive",
+ "regex",
+]
+
+[[package]]
+name = "parse-display-derive"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73f106cced1f4b645e3fca6125105cdf7407e35d1af710f290aac530f6b826b9"
+dependencies = [
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "regex-syntax",
+ "structmeta",
+ "syn",
 ]
 
 [[package]]
@@ -4119,23 +4186,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdkafka"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1de127f294f2dba488ed46760b129d5ecbeabbd337ccbf3739cb29d50db2161c"
-dependencies = [
- "futures",
- "libc",
- "log",
- "rdkafka-sys",
- "serde",
- "serde_derive",
- "serde_json",
- "slab",
- "tokio",
-]
-
-[[package]]
 name = "rdkafka-sys"
 version = "4.2.0+1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4300,7 +4350,6 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
@@ -4368,6 +4417,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
+ "global_stats_alloc",
  "log",
  "madsim-tokio",
  "risingwave_compactor",
@@ -4376,6 +4426,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
+ "stats_alloc",
  "tikv-jemallocator",
  "tracing",
  "workspace-hack",
@@ -4388,6 +4439,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
+ "global_stats_alloc",
  "log",
  "madsim-tokio",
  "risedev",
@@ -4398,6 +4450,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
+ "stats_alloc",
  "sync-point",
  "tikv-jemallocator",
  "tracing",
@@ -4435,6 +4488,7 @@ dependencies = [
  "more-asserts",
  "num-traits",
  "parking_lot 0.12.1",
+ "parse-display",
  "paste",
  "pin-project",
  "postgres-types",
@@ -4453,6 +4507,7 @@ dependencies = [
  "spin 0.9.4",
  "strum",
  "strum_macros",
+ "sysinfo",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -4535,7 +4590,6 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_batch",
  "risingwave_common",
  "risingwave_common_service",
@@ -4592,6 +4646,7 @@ dependencies = [
  "humantime",
  "hyper",
  "itertools",
+ "madsim-rdkafka",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -4602,7 +4657,6 @@ dependencies = [
  "prost",
  "pulsar",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_common",
  "risingwave_pb",
  "risingwave_storage",
@@ -4669,12 +4723,12 @@ dependencies = [
  "dyn-clone",
  "either",
  "itertools",
- "lru 0.7.8",
  "madsim-tokio",
  "madsim-tonic",
  "md5",
  "memcomparable",
  "num-traits",
+ "parse-display",
  "paste",
  "prost",
  "regex",
@@ -4717,6 +4771,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "parking_lot 0.12.1",
+ "parse-display",
  "paste",
  "pgwire",
  "prometheus",
@@ -4754,6 +4809,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "parking_lot 0.12.1",
+ "parse-display",
  "prost",
  "risingwave_common",
  "risingwave_pb",
@@ -4972,6 +5028,7 @@ dependencies = [
  "glob",
  "madsim",
  "madsim-etcd-client",
+ "madsim-rdkafka",
  "madsim-tokio",
  "rand 0.8.5",
  "risingwave_compactor",
@@ -4980,6 +5037,7 @@ dependencies = [
  "risingwave_meta",
  "risingwave_sqlsmith",
  "sqllogictest",
+ "tempfile",
  "tokio-postgres",
  "tracing",
  "workspace-hack",
@@ -5004,6 +5062,8 @@ dependencies = [
  "enum-as-inner",
  "farmhash",
  "futures",
+ "futures-async-stream",
+ "futures-concurrency",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5017,7 +5077,6 @@ dependencies = [
  "protobuf",
  "protobuf-codegen-pure",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
@@ -5177,9 +5236,12 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "global_stats_alloc",
  "hyper",
  "iter-chunks",
  "itertools",
+ "local_stats_alloc",
+ "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -5193,7 +5255,6 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
- "rdkafka",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
@@ -5815,10 +5876,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stats_alloc"
-version = "0.1.11"
-dependencies = [
- "workspace-hack",
-]
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
 
 [[package]]
 name = "str_stack"
@@ -5841,6 +5901,29 @@ name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
+
+[[package]]
+name = "structmeta"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bd9c2155aa89fb2c2cb87d99a610c689e7c47099b3e9f1c8a8f53faf4e3d2e3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "structmeta-derive",
+ "syn",
+]
+
+[[package]]
+name = "structmeta-derive"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bafede0d0a2f21910f36d47b1558caae3076ed80f6f3ad0fc85a91e6ba7e5938"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "strum"
@@ -5963,6 +6046,21 @@ dependencies = [
  "quote",
  "syn",
  "unicode-xid",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ae2421f3e16b3afd4aa692d23b83d0ba42ee9b0081d5deeb7d21428d7195fb1"
+dependencies = [
+ "cfg-if",
+ "core-foundation-sys",
+ "libc",
+ "ntapi",
+ "once_cell",
+ "rayon",
+ "winapi",
 ]
 
 [[package]]
@@ -6864,7 +6962,7 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
- "hashbrown 0.12.3",
+ "hashbrown",
  "hdrhistogram",
  "hyper",
  "indexmap",

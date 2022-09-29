@@ -21,14 +21,11 @@ use std::sync::Arc;
 use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
 use itertools::{repeat_n, Itertools};
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::{
-    calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
-};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
@@ -222,7 +219,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let build_chunk = build_chunk?;
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
-                build_side.push(build_chunk.compact()?)
+                build_side.push(build_chunk.compact())
             }
         }
         let mut hash_map =
@@ -1396,7 +1393,7 @@ impl DataChunkMutator {
             // Is it really safe to use Arc::try_unwrap here?
             let mut array = Arc::try_unwrap(build_column.into_inner()).unwrap();
             array.set_bitmap(filter.clone());
-            columns.push(Column::new(Arc::new(array)));
+            columns.push(array.into());
         }
 
         Self(DataChunk::new(columns, vis))
@@ -1636,47 +1633,60 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             .map(|&idx| right_data_types[idx].clone())
             .collect_vec();
 
-        let hash_key_kind = calc_hash_key_kind(&right_key_types);
-
         let output_indices: Vec<usize> = hash_join_node
             .get_output_indices()
             .iter()
             .map(|&x| x as usize)
             .collect();
 
-        Ok(HashJoinExecutor::dispatch_by_kind(
-            hash_key_kind,
-            HashJoinExecutor::new(
-                join_type,
-                output_indices,
-                left_child,
-                right_child,
-                left_key_idxs,
-                right_key_idxs,
-                hash_join_node.get_null_safe().clone(),
-                cond,
-                context.plan_node().get_identity().clone(),
-            ),
-        ))
+        Ok(HashJoinExecutorArgs {
+            join_type,
+            output_indices,
+            probe_side_source: left_child,
+            build_side_source: right_child,
+            probe_key_idxs: left_key_idxs,
+            build_key_idxs: right_key_idxs,
+            null_matched: hash_join_node.get_null_safe().clone(),
+            cond,
+            identity: context.plan_node().get_identity().clone(),
+            right_key_types,
+        }
+        .dispatch())
     }
 }
 
-impl HashKeyDispatcher for HashJoinExecutor<()> {
-    type Input = Self;
+struct HashJoinExecutorArgs {
+    join_type: JoinType,
+    output_indices: Vec<usize>,
+    probe_side_source: BoxedExecutor,
+    build_side_source: BoxedExecutor,
+    probe_key_idxs: Vec<usize>,
+    build_key_idxs: Vec<usize>,
+    null_matched: Vec<bool>,
+    cond: Option<BoxedExpression>,
+    identity: String,
+    right_key_types: Vec<DataType>,
+}
+
+impl HashKeyDispatcher for HashJoinExecutorArgs {
     type Output = BoxedExecutor;
 
-    fn dispatch<K: HashKey>(input: Self::Input) -> Self::Output {
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Box::new(HashJoinExecutor::<K>::new(
-            input.join_type,
-            input.output_indices,
-            input.probe_side_source,
-            input.build_side_source,
-            input.probe_key_idxs,
-            input.build_key_idxs,
-            input.null_matched,
-            input.cond,
-            input.identity,
+            self.join_type,
+            self.output_indices,
+            self.probe_side_source,
+            self.build_side_source,
+            self.probe_key_idxs,
+            self.build_key_idxs,
+            self.null_matched,
+            self.cond,
+            self.identity,
         ))
+    }
+
+    fn data_types(&self) -> &[DataType] {
+        &self.right_key_types
     }
 }
 
@@ -1731,11 +1741,9 @@ impl<K> HashJoinExecutor<K> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
@@ -1785,7 +1793,7 @@ mod tests {
             let columns = self
                 .array_builders
                 .into_iter()
-                .map(|b| Column::new(Arc::new(b.finish())))
+                .map(|b| b.finish().into())
                 .collect();
 
             Ok(DataChunk::new(columns, self.array_len))
@@ -1990,7 +1998,7 @@ mod tests {
 
             while let Some(data_chunk) = stream.next().await {
                 let data_chunk = data_chunk.unwrap();
-                let data_chunk = data_chunk.compact().unwrap();
+                let data_chunk = data_chunk.compact();
                 data_chunk_merger.append(&data_chunk).unwrap();
             }
 
@@ -2464,8 +2472,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2494,8 +2501,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2524,8 +2530,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2564,8 +2569,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2591,8 +2595,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2618,8 +2621,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2660,8 +2662,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2689,8 +2690,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2718,8 +2718,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -2782,8 +2781,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.build_row_ids, Vec::new());
@@ -2823,8 +2821,7 @@ mod tests {
                 &mut state
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(state.build_row_ids, Vec::new());
@@ -2971,8 +2968,7 @@ mod tests {
                 &mut right_state,
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());
@@ -3019,8 +3015,7 @@ mod tests {
                 &mut right_state,
             )
             .unwrap()
-            .compact()
-            .unwrap(),
+            .compact(),
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());

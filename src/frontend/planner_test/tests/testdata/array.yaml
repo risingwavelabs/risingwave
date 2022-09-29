@@ -107,49 +107,49 @@
 - sql: |
     select array_prepend(array[233], array[array[66]]);
   binder_error: 'Bind error: Cannot prepend integer[] to integer[][]'
-- sql: |
-    /* string from/to varchar[] in implicit context */
+- name: string from/to varchar[] in implicit context 
+  sql: |
     values (array['a', 'b']), ('{c,' || 'd}');
   binder_error: 'Bind error: types List { datatype: Varchar } and Varchar cannot be
     matched'
-- sql: |
-    /* string to varchar[] in assign context */
+- name: string to varchar[] in assign context 
+  sql: |
     create table t (v1 varchar[]);
     insert into t values ('{c,' || 'd}');
   binder_error: 'Bind error: cannot cast type "varchar" to "varchar[]" in Assign context'
-- sql: |
-    /* string to varchar[] in explicit context */
+- name: string to varchar[] in explicit context 
+  sql: |
     select ('{c,' || 'd}')::varchar[];
   logical_plan: |
     LogicalProject { exprs: [ConcatOp('{c,':Varchar, 'd}':Varchar)::List { datatype: Varchar }] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- sql: |
-    /* unknown to varchar[] in implicit context */
+- name: unknown to varchar[] in implicit context 
+  sql: |
     values (array['a', 'b']), ('{c,d}');
   logical_plan: |
     LogicalValues { rows: [[Array('a':Varchar, 'b':Varchar)], ['{c,d}':Varchar::List { datatype: Varchar }]], schema: Schema { fields: [*VALUES*_0.column_0:List { datatype: Varchar }] } }
-- sql: |
-    /* unknown to varchar[] in assign context */
+- name: unknown to varchar[] in assign context 
+  sql: |
     create table t (v1 varchar[]);
     insert into t values ('{c,d}');
   logical_plan: |
     LogicalInsert { table: t }
     └─LogicalValues { rows: [['{c,d}':Varchar::List { datatype: Varchar }]], schema: Schema { fields: [*VALUES*_0.column_0:List { datatype: Varchar }] } }
-- sql: |
-    /* unknown to varchar[] in explicit context */
+- name: unknown to varchar[] in explicit context 
+  sql: |
     select ('{c,d}')::varchar[];
   logical_plan: |
     LogicalProject { exprs: ['{c,d}':Varchar::List { datatype: Varchar }] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- sql: |
-    /* varchar[] to string in assign context */
+- name: varchar[] to string in assign context 
+  sql: |
     create table t (v1 varchar);
     insert into t values (array['a', 'b']);
   logical_plan: |
     LogicalInsert { table: t }
     └─LogicalValues { rows: [[Array('a':Varchar, 'b':Varchar)::Varchar]], schema: Schema { fields: [*VALUES*_0.column_0:Varchar] } }
-- sql: |
-    /* varchar[] to string in explicit context */
+- name: varchar[] to string in explicit context 
+  sql: |
     select array['a', 'b']::varchar;
   logical_plan: |
     LogicalProject { exprs: [Array('a':Varchar, 'b':Varchar)::Varchar] }

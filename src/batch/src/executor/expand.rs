@@ -53,7 +53,7 @@ impl ExpandExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk: DataChunk = data_chunk?.compact()?;
+            let data_chunk: DataChunk = data_chunk?.compact();
             assert!(
                 data_chunk.dimension() > 0,
                 "The input data chunk of expand can't be dummy chunk."

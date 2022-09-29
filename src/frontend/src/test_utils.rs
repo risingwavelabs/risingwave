@@ -110,8 +110,10 @@ impl LocalFrontend {
         let mut rsp = self.run_sql(sql).await.unwrap();
         let mut res = vec![];
         #[for_await]
-        for row in rsp.values_stream() {
-            res.push(format!("{:?}", row.unwrap()));
+        for row_set in rsp.values_stream() {
+            for row in row_set.unwrap() {
+                res.push(format!("{:?}", row))
+            }
         }
         res
     }
@@ -612,7 +614,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
-    async fn flush(&self) -> RpcResult<HummockSnapshot> {
+    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot {
             committed_epoch: 0,
             current_epoch: 0,

@@ -62,7 +62,7 @@ pub struct CreateMaterializedViewContext {
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
     /// Internal TableID to Table mapping
-    pub internal_table_id_map: HashMap<u32, Option<Table>>,
+    pub internal_table_id_map: HashMap<u32, Table>,
     /// The upstream tables of all fragments containing chain nodes.
     /// These fragments need to be colocated with their upstream tables.
     ///
@@ -79,11 +79,7 @@ pub struct CreateMaterializedViewContext {
 
 impl CreateMaterializedViewContext {
     pub fn internal_tables(&self) -> Vec<Table> {
-        self.internal_table_id_map
-            .values()
-            .flatten()
-            .cloned()
-            .collect()
+        self.internal_table_id_map.values().cloned().collect()
     }
 
     pub fn internal_table_ids(&self) -> Vec<u32> {
@@ -899,9 +895,15 @@ mod tests {
             _request: Request<BarrierCompleteRequest>,
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
             Ok(Response::new(BarrierCompleteResponse {
-                checkpoint: true,
                 ..Default::default()
             }))
+        }
+
+        async fn wait_epoch_commit(
+            &self,
+            _request: Request<WaitEpochCommitRequest>,
+        ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
+            unimplemented!()
         }
     }
 
@@ -974,7 +976,7 @@ mod tests {
             );
 
             let (barrier_scheduler, scheduled_barriers) =
-                BarrierScheduler::new_pair(hummock_manager.clone());
+                BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
 
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await?);

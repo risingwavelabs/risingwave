@@ -15,6 +15,7 @@
 use std::str::FromStr;
 
 use itertools::Itertools;
+use parse_display::Display;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
 
@@ -35,7 +36,8 @@ pub struct WindowFunction {
     pub order_by: OrderBy,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Display, Copy, Clone, PartialEq, Eq, Hash)]
+#[display(style = "SNAKE_CASE")]
 pub enum WindowFunctionType {
     RowNumber,
     Rank,
@@ -43,14 +45,6 @@ pub enum WindowFunctionType {
 }
 
 impl WindowFunctionType {
-    pub fn name(&self) -> &str {
-        match self {
-            WindowFunctionType::RowNumber => "ROW_NUMBER",
-            WindowFunctionType::Rank => "RANK",
-            WindowFunctionType::DenseRank => "DENSE_RANK",
-        }
-    }
-
     pub fn is_rank_function(&self) -> bool {
         matches!(
             self,
@@ -65,17 +59,14 @@ impl FromStr for WindowFunctionType {
     type Err = ErrorCode;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("row_number") {
-            Ok(WindowFunctionType::RowNumber)
-        } else if s.eq_ignore_ascii_case("rank") {
-            Ok(WindowFunctionType::Rank)
-        } else if s.eq_ignore_ascii_case("dense_rank") {
-            Ok(WindowFunctionType::DenseRank)
-        } else {
-            Err(ErrorCode::NotImplemented(
+        match s.to_ascii_lowercase().as_str() {
+            "row_number" => Ok(WindowFunctionType::RowNumber),
+            "rank" => Ok(WindowFunctionType::Rank),
+            "dense_rank" => Ok(WindowFunctionType::DenseRank),
+            _ => Err(ErrorCode::NotImplemented(
                 format!("unknown table function kind: {s}"),
                 None.into(),
-            ))
+            )),
         }
     }
 }
@@ -91,8 +82,7 @@ impl WindowFunction {
     ) -> Result<Self> {
         if !args.is_empty() {
             return Err(ErrorCode::BindError(format!(
-                "the length of args of {} function should be 0",
-                function_type.name()
+                "the length of args of {function_type} function should be 0"
             ))
             .into());
         }
@@ -118,7 +108,7 @@ impl std::fmt::Debug for WindowFunction {
                 .field("order_by", &format_args!("{}", self.order_by))
                 .finish()
         } else {
-            write!(f, "{}() OVER(", self.function_type.name())?;
+            write!(f, "{}() OVER(", self.function_type)?;
 
             let mut delim = "";
             if !self.partition_by.is_empty() {

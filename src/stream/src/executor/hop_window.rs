@@ -197,7 +197,7 @@ impl HopWindowExecutor {
             let msg = msg?;
             if let Message::Chunk(chunk) = msg {
                 // TODO: compact may be not necessary here.
-                let chunk = chunk.compact()?;
+                let chunk = chunk.compact();
                 let (data_chunk, ops) = chunk.into_parts();
                 let hop_start = hop_start
                     .eval_infallible(&data_chunk, |err| ctx.on_compute_error(err, &info.identity));
