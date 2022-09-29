@@ -67,3 +67,17 @@ impl Drop for TaskProgressGuard {
             .expect("task progress should exist when task is finished");
     }
 }
+
+mod tests {
+    use super::{TaskProgressGuard, TaskProgressManagerRef};
+
+    #[test]
+    fn test_progress_removal() {
+        let task_progress_manager = TaskProgressManagerRef::default();
+        {
+            let _guard = TaskProgressGuard::new(1, task_progress_manager.clone());
+            assert_eq!(task_progress_manager.lock().len(), 1);
+        }
+        assert_eq!(task_progress_manager.lock().len(), 0);
+    }
+}
