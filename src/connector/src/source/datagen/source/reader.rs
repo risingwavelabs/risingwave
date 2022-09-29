@@ -67,7 +67,7 @@ impl SplitReader for DatagenSplitReader {
         let split_index = assigned_split.split_index as u64;
         let split_num = assigned_split.split_num as u64;
 
-        let rows_per_second = properties.rows_per_second.parse::<u64>()?;
+        let rows_per_second = properties.rows_per_second;
         let fields_option_map = properties.fields;
         let mut fields_map = HashMap::<String, FieldGeneratorImpl>::new();
 
@@ -260,7 +260,7 @@ mod tests {
         })]);
         let properties = DatagenProperties {
             split_num: None,
-            rows_per_second: "10".to_string(),
+            rows_per_second: 10,
             fields: convert_args!(hashmap!(
                 "fields.random_int.min" => "1",
                 "fields.random_int.max" => "1000",
@@ -312,7 +312,7 @@ mod tests {
         })]);
         let properties = DatagenProperties {
             split_num: None,
-            rows_per_second: "10".to_string(),
+            rows_per_second: 10,
             fields: HashMap::new(),
         };
         let mut reader =
