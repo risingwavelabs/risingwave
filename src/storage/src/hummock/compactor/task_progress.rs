@@ -68,6 +68,7 @@ impl Drop for TaskProgressGuard {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::{TaskProgressGuard, TaskProgressManagerRef};
 
