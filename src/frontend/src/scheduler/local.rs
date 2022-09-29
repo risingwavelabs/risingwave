@@ -14,8 +14,11 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
+use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
@@ -36,13 +39,35 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
-use crate::handler::query::QueryResultSet;
+use crate::handler::query::{QueryResultSet, QueryStreamImpl};
 use crate::handler::util::to_pg_rows;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::SchedulerResult;
 use crate::session::{AuthContext, FrontendEnv};
+
+pub struct LocalQueryStream {
+    data_stream: BoxedDataChunkStream,
+    format: bool,
+}
+
+impl Stream for LocalQueryStream {
+    type Item = Result<Vec<Row>, BoxedError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.data_stream.as_mut().poll_next(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(chunk) => match chunk {
+                Some(chunk_result) => match chunk_result {
+                    Ok(chunk) => Poll::Ready(Some(Ok(to_pg_rows(chunk, self.format)))),
+                    Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
+                },
+                None => Poll::Ready(None),
+            },
+        }
+    }
+}
 
 pub struct LocalQueryExecution {
     sql: String,
@@ -101,17 +126,11 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    #[try_stream(ok = Vec<Row>, error = BoxedError)]
-    async fn stream_row_inner(data_stream: BoxedDataChunkStream, format: bool) {
-        #[for_await]
-        for chunk in data_stream {
-            let rows = to_pg_rows(chunk?, format);
-            yield rows;
-        }
-    }
-
     pub fn stream_rows(self, format: bool) -> QueryResultSet {
-        Box::pin(Self::stream_row_inner(self.run(), format))
+        QueryStreamImpl::Local(LocalQueryStream {
+            data_stream: self.run(),
+            format,
+        })
     }
 
     /// Convert query to plan fragment.

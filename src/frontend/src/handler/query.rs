@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use futures::{Stream, StreamExt};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, PgResultSet, StatementType};
+use pgwire::pg_server::BoxedError;
+use pgwire::types::Row;
+use pin_project::pin_project;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
@@ -25,11 +31,29 @@ use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{force_local_mode, to_pg_field};
 use crate::planner::Planner;
 use crate::scheduler::{
-    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
+    BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
+    LocalQueryExecution, LocalQueryStream,
 };
 use crate::session::{OptimizerContext, SessionImpl};
 
-pub type QueryResultSet = PgResultSet;
+pub type QueryResultSet = QueryStreamImpl;
+
+#[pin_project(project = QueryStreamImplProj)]
+pub enum QueryStreamImpl {
+    Local(LocalQueryStream),
+    Distributed(DistributedQueryStream),
+}
+
+impl Stream for QueryStreamImpl {
+    type Item = std::result::Result<Vec<Row>, BoxedError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.project() {
+            QueryStreamImplProj::Local(inner) => inner.poll_next_unpin(cx),
+            QueryStreamImplProj::Distributed(inner) => inner.poll_next_unpin(cx),
+        }
+    }
+}
 
 pub async fn handle_query(
     context: OptimizerContext,
@@ -96,7 +120,11 @@ pub async fn handle_query(
     }
 
     Ok(PgResponse::new_for_stream(
-        stmt_type, rows_count, row_stream, pg_descs,
+        stmt_type,
+        rows_count,
+        // TODO(zhidong.guo): change this
+        Box::pin(row_stream),
+        pg_descs,
     ))
 }
 

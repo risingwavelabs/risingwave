@@ -42,6 +42,7 @@ mod planner;
 pub use planner::Planner;
 #[expect(dead_code)]
 mod scheduler;
+pub use scheduler::{DistributedQueryStream, SchedulerResult};
 pub mod session;
 mod stream_fragmenter;
 pub use stream_fragmenter::build_graph;
