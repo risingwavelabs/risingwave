@@ -339,7 +339,8 @@ impl<S: StateStore> StateTable<S> {
         self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).curr
     }
 
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    /// get the previous epoch of the state store and panic if the `init_epoch()` has never be
+    /// called
     pub fn prev_epoch(&self) -> u64 {
         self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).prev
     }
