@@ -41,7 +41,6 @@ use crate::error::StorageResult;
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
     ForwardUserIteratorType, HummockIteratorDirection, HummockIteratorUnion,
-    UnorderedMergeIteratorInner, UserIteratorPayloadType,
 };
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::local_version_manager::SyncResult;

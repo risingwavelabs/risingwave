@@ -19,112 +19,13 @@ use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
-    Backward, BackwardUserIterator, ConcatIteratorInner, Forward, HummockIterator,
-    HummockIteratorDirection, HummockIteratorUnion,
+    DirectedUserIterator, DirectedUserIteratorBuilder, Forward, ForwardUserIteratorType,
+    HummockIterator, UserIteratorPayloadType,
 };
 use crate::hummock::local_version::PinnedVersion;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
-use crate::hummock::shared_buffer::SharedBufferIteratorType;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{
-    BackwardSstableIterator, HummockResult, SstableIterator, SstableIteratorType,
-};
+use crate::hummock::{HummockResult, SstableIterator};
 use crate::monitor::StoreLocalStatistic;
-
-#[allow(type_alias_bounds)]
-pub type UserIteratorPayloadType<
-    D: HummockIteratorDirection,
-    I: SstableIteratorType<Direction = D>,
-> = HummockIteratorUnion<
-    D,
-    SharedBufferBatchIterator<D>,
-    SharedBufferIteratorType<D, I>,
-    ConcatIteratorInner<I>,
-    I,
->;
-
-pub type ForwardUserIteratorType =
-    UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>;
-pub type BackwardUserIteratorType =
-    UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>;
-
-pub enum DirectedUserIterator {
-    Forward(UserIterator<ForwardUserIteratorType>),
-    Backward(BackwardUserIterator<BackwardUserIteratorType>),
-}
-
-pub trait DirectedUserIteratorBuilder {
-    type Direction: HummockIteratorDirection;
-    type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
-    /// Initialize an `DirectedUserIterator`.
-    /// The `key_range` should be from smaller key to larger key.
-    fn create(
-        iterator_iter: impl IntoIterator<
-            Item = UserIteratorPayloadType<Self::Direction, Self::SstableIteratorType>,
-        >,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_epoch: u64,
-        min_epoch: u64,
-        version: Option<PinnedVersion>,
-    ) -> DirectedUserIterator;
-}
-
-impl DirectedUserIterator {
-    #[inline(always)]
-    pub async fn next(&mut self) -> HummockResult<()> {
-        match self {
-            Self::Forward(ref mut iter) => iter.next().await,
-            Self::Backward(ref mut iter) => iter.next().await,
-        }
-    }
-
-    #[inline(always)]
-    pub fn key(&self) -> &[u8] {
-        match self {
-            Self::Forward(iter) => iter.key(),
-            Self::Backward(iter) => iter.key(),
-        }
-    }
-
-    #[inline(always)]
-    pub fn value(&self) -> &[u8] {
-        match self {
-            Self::Forward(iter) => iter.value(),
-            Self::Backward(iter) => iter.value(),
-        }
-    }
-
-    #[inline(always)]
-    pub async fn rewind(&mut self) -> HummockResult<()> {
-        match self {
-            Self::Forward(ref mut iter) => iter.rewind().await,
-            Self::Backward(ref mut iter) => iter.rewind().await,
-        }
-    }
-
-    #[inline(always)]
-    pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
-        match self {
-            Self::Forward(ref mut iter) => iter.seek(user_key).await,
-            Self::Backward(ref mut iter) => iter.seek(user_key).await,
-        }
-    }
-
-    #[inline(always)]
-    pub fn is_valid(&self) -> bool {
-        match self {
-            Self::Forward(iter) => iter.is_valid(),
-            Self::Backward(iter) => iter.is_valid(),
-        }
-    }
-
-    pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        match self {
-            DirectedUserIterator::Forward(iter) => iter.collect_local_statistic(stats),
-            DirectedUserIterator::Backward(iter) => iter.collect_local_statistic(stats),
-        }
-    }
-}
 
 /// [`UserIterator`] can be used by user directly.
 pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
@@ -361,6 +262,7 @@ mod tests {
         iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_value_of,
         mock_sstable_store, TEST_KEYS_COUNT,
     };
+    use crate::hummock::iterator::HummockIteratorUnion;
     use crate::hummock::sstable::{
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
