@@ -14,19 +14,18 @@
 
 #![cfg_attr(not(madsim), allow(dead_code))]
 #![feature(once_cell)]
+#![feature(trait_alias)]
+#![feature(lint_reasons)]
 
 use std::time::Duration;
 
+use anyhow::Result;
 use clap::Parser;
 
 pub mod cluster;
+pub mod ctl_ext;
 pub mod nexmark_ext;
 pub mod utils;
-
-#[cfg(not(madsim))]
-fn main() {
-    println!("This binary is only available in simulation.");
-}
 
 /// Deterministic simulation end-to-end test runner.
 ///
@@ -58,12 +57,12 @@ pub struct Args {
     compute_node_cores: usize,
 }
 
-struct Risingwave {
+struct RisingWave {
     client: tokio_postgres::Client,
     task: tokio::task::JoinHandle<()>,
 }
 
-impl Risingwave {
+impl RisingWave {
     async fn connect(host: String, dbname: String) -> Self {
         let (client, connection) = tokio_postgres::Config::new()
             .host(&host)
@@ -77,21 +76,10 @@ impl Risingwave {
         let task = tokio::spawn(async move {
             connection.await.expect("Postgres connection error");
         });
-        Risingwave { client, task }
+        RisingWave { client, task }
     }
-}
 
-// impl Drop for Risingwave {
-//     fn drop(&mut self) {
-//         self.task.abort();
-//     }
-// }
-
-#[async_trait::async_trait]
-impl sqllogictest::AsyncDB for Risingwave {
-    type Error = tokio_postgres::error::Error;
-
-    async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
+    async fn run(&mut self, sql: &str) -> Result<String> {
         use std::fmt::Write;
 
         let mut output = String::new();
@@ -118,11 +106,8 @@ impl sqllogictest::AsyncDB for Risingwave {
         Ok(output)
     }
 
-    fn engine_name(&self) -> &str {
-        "risingwave"
-    }
-
-    async fn sleep(dur: Duration) {
-        tokio::time::sleep(dur).await
+    async fn close(self) {
+        drop(self.client);
+        self.task.await.unwrap();
     }
 }

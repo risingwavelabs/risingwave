@@ -1,9 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use madsim::time::sleep;
 use risingwave_simulation_scale::cluster::Cluster;
-use risingwave_simulation_scale::utils::AssertResultExt;
+use risingwave_simulation_scale::ctl_ext::predicates::identity_contains;
+use risingwave_simulation_scale::utils::AssertResult;
 
 const CREATE_MVIEW: &str = r#"
 CREATE MATERIALIZED VIEW nexmark_q4
@@ -43,6 +44,11 @@ async fn test_nexmark_q4() -> Result<()> {
     cluster.create_nexmark_source(6, Some(200000)).await?;
     cluster.run(CREATE_MVIEW).await?;
 
+    let fragment = cluster
+        .locate_one_fragment([identity_contains("materialize")])
+        .await?;
+    let id = fragment.id();
+
     // 0s
     cluster
         .wait_until(
@@ -55,13 +61,13 @@ async fn test_nexmark_q4() -> Result<()> {
         .assert_result_ne(RESULT);
 
     // 0~10s
-    cluster.reschedule("1-[0,1]").await?;
+    cluster.reschedule(format!("{id}-[0,1]")).await?;
 
     sleep(Duration::from_secs(5)).await;
 
     // 5~15s
     cluster.run(SELECT).await?.assert_result_ne(RESULT);
-    cluster.reschedule("1-[2,3]+[0,1]").await?;
+    cluster.reschedule(format!("{id}-[2,3]+[0,1]")).await?;
 
     sleep(Duration::from_secs(20)).await;
 

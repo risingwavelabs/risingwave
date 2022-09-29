@@ -1,4 +1,4 @@
-pub trait AssertResultExt: AsRef<str> {
+pub trait AssertResult: AsRef<str> {
     #[track_caller]
     fn assert_result_eq(&self, other: impl AsRef<str>) {
         assert_eq!(self.as_ref().trim(), other.as_ref().trim());
@@ -10,4 +10,4 @@ pub trait AssertResultExt: AsRef<str> {
     }
 }
 
-impl<S: AsRef<str>> AssertResultExt for S {}
+impl<S: AsRef<str>> AssertResult for S {}

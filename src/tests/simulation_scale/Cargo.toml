@@ -10,6 +10,7 @@ async-trait = "0.1"
 clap = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
+itertools = "0.10"
 madsim = "0.2.7"
 rand = "0.8"
 risingwave_compactor = { path = "../../storage/compactor" }
@@ -17,6 +18,7 @@ risingwave_compute = { path = "../../compute" }
 risingwave_ctl = { path = "../../ctl" }
 risingwave_frontend = { path = "../../frontend" }
 risingwave_meta = { path = "../../meta" }
+risingwave_pb = { path = "../../prost" }
 sqllogictest = "0.6.4"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio" }

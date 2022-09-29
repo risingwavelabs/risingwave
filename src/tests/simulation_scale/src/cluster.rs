@@ -5,20 +5,16 @@ use anyhow::{bail, Result};
 use clap::Parser;
 use madsim::rand::thread_rng;
 use madsim::runtime::{Handle, NodeHandle};
-use madsim::time::timeout;
 use rand::seq::SliceRandom;
-use sqllogictest::AsyncDB;
 
-use crate::{Args, Risingwave};
+use crate::{Args, RisingWave};
 
 pub struct Cluster {
-    meta: IpAddr,
     frontends: Vec<IpAddr>,
 
-    handle: Handle,
-
-    client: NodeHandle,
-    ctl: NodeHandle,
+    _handle: Handle,
+    pub(crate) client: NodeHandle,
+    pub(crate) ctl: NodeHandle,
 }
 
 impl Cluster {
@@ -73,7 +69,7 @@ impl Cluster {
                         "--client-address",
                         &format!("{frontend_ip}:4566"),
                         "--meta-addr",
-                        &format!("192.168.1.1:5690"),
+                        &format!("{meta}:5690"),
                     ]);
                     risingwave_frontend::start(opts).await
                 })
@@ -144,46 +140,16 @@ impl Cluster {
         // risectl
         let ctl = handle
             .create_node()
-            .name(format!("ctl"))
+            .name("ctl")
             .ip([192, 168, 101, 1].into())
             .build();
 
         Ok(Self {
-            meta,
             frontends,
-            handle,
+            _handle: handle,
             client,
             ctl,
         })
-    }
-
-    pub async fn cluster_info(&mut self) -> Result<()> {
-        self.ctl
-            .spawn(async move {
-                let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "cluster-info"]);
-                risingwave_ctl::start(opts).await
-            })
-            .await??;
-
-        Ok(())
-    }
-
-    pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {
-        let plan: String = plan.into();
-        self.ctl
-            .spawn(async move {
-                let opts = risingwave_ctl::CliOpts::parse_from([
-                    "ctl",
-                    "meta",
-                    "reschedule",
-                    "--plan",
-                    &plan,
-                ]);
-                risingwave_ctl::start(opts).await
-            })
-            .await??;
-
-        Ok(())
     }
 
     pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
@@ -197,8 +163,9 @@ impl Cluster {
         let result = self
             .client
             .spawn(async move {
-                let mut session = Risingwave::connect(frontend, "dev".to_string()).await;
+                let mut session = RisingWave::connect(frontend, "dev".to_string()).await;
                 let result = session.run(&sql).await?;
+                session.close().await;
                 Ok::<_, anyhow::Error>(result)
             })
             .await??;
