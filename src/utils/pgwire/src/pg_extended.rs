@@ -463,24 +463,24 @@ impl PreparedStatement {
                     format!("{}::DECIMAL", tmp)
                 }
                 TypeOid::Timestampz => {
-                    if param_format {
-                        return Err(PsqlError::BindError(
-                            "Can't support Timestampz type in binary format".into(),
-                        ));
+                    let tmp = if param_format {
+                        chrono::DateTime::<chrono::Utc>::from_sql(&place_hodler, raw_param)
+                            .unwrap()
+                            .to_string()
                     } else {
-                        let tmp = cstr_to_str(raw_param).unwrap().to_string();
-                        format!("'{}'::TIMESTAMPZ", tmp)
-                    }
+                        cstr_to_str(raw_param).unwrap().to_string()
+                    };
+                    format!("'{}'::TIMESTAMPZ", tmp)
                 }
                 TypeOid::Interval => {
-                    if param_format {
-                        return Err(PsqlError::BindError(
-                            "Can't support Interval type in binary format".into(),
-                        ));
+                    let tmp = if param_format {
+                        pg_interval::Interval::from_sql(&place_hodler, raw_param)
+                            .unwrap()
+                            .to_postgres()
                     } else {
-                        let tmp = cstr_to_str(raw_param).unwrap().to_string();
-                        format!("'{}'::INTERVAL", tmp)
-                    }
+                        cstr_to_str(raw_param).unwrap().to_string()
+                    };
+                    format!("'{}'::INTERVAL", tmp)
                 }
             };
             params.push(str)
@@ -507,15 +507,9 @@ impl PreparedStatement {
                 TypeOid::Timestamp => params.push("'2021-01-01 00:00:00'::TIMESTAMP".to_string()),
                 TypeOid::Decimal => params.push("'0'::DECIMAL".to_string()),
                 TypeOid::Timestampz => {
-                    return Err(PsqlError::ParseError(
-                        "Can't support Timestampz type in extended query mode".into(),
-                    ))
+                    params.push("'1970-01-01 00:01:01 UTC'::timestamp".to_string())
                 }
-                TypeOid::Interval => {
-                    return Err(PsqlError::ParseError(
-                        "Can't support Interval type in extended query mode".into(),
-                    ))
-                }
+                TypeOid::Interval => params.push("'2 months ago'::interval".to_string()),
             };
         }
         Ok(params)

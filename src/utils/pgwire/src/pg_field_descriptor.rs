@@ -128,7 +128,7 @@ impl TypeOid {
             1114 => Ok(TypeOid::Timestamp),
             1184 => Ok(TypeOid::Timestampz),
             1700 => Ok(TypeOid::Decimal),
-            2201 => Ok(TypeOid::Interval),
+            1186 => Ok(TypeOid::Interval),
             v => Err(TypeOidError(v)),
         }
     }
