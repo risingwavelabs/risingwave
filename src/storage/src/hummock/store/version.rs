@@ -71,16 +71,14 @@ impl StagingVersion {
     pub fn prune_overlap<'a>(
         &'a self,
         epoch: HummockEpoch,
-        compaction_group_id: Option<CompactionGroupId>,
+        compaction_group_id: CompactionGroupId,
         key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> (
         impl Iterator<Item = &ImmutableMemtable> + 'a,
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
         let overlapped_imms = self.imm.iter().filter(move |imm| {
-            compaction_group_id
-                .map(|group_id| group_id == imm.compaction_group_id())
-                .unwrap_or(true)
+            compaction_group_id == imm.compaction_group_id()
                 && imm.epoch() <= epoch
                 && range_overlap(key_range, imm.start_user_key(), imm.end_user_key())
         });
@@ -89,9 +87,7 @@ impl StagingVersion {
             .sst
             .iter()
             .filter(move |staging_sst| {
-                compaction_group_id
-                    .map(|group_id| group_id == staging_sst.compaction_group_id)
-                    .unwrap_or(true)
+                compaction_group_id == staging_sst.compaction_group_id
                     && *staging_sst.epochs.last().expect("epochs not empty") <= epoch
                     && filter_single_sst(&staging_sst.sst_info, key_range)
             })

@@ -152,7 +152,7 @@ impl HummockStorageCore {
         use parking_lot::RwLockReadGuard;
 
         // TODO: remove option
-        let compaction_group_id = Some(self.get_compaction_group_id(read_options.table_id).await?);
+        let compaction_group_id = self.get_compaction_group_id(read_options.table_id).await?;
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
         let (staging_imm, staging_sst, committed_version) = {
