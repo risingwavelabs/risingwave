@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use std::ops::Bound;
 
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, SstableInfo};
+use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
@@ -105,31 +105,22 @@ pub struct HummockReadVersion {
     committed: CommittedVersion,
 }
 
-impl Default for HummockReadVersion {
-    fn default() -> Self {
-        use crate::hummock::INVALID_VERSION_ID;
-
-        // This version cannot be used in query. It must be replaced by valid version.
-        let basic_version = HummockVersion {
-            id: INVALID_VERSION_ID,
-            ..Default::default()
-        };
-
-        let (pinned_version_manager_tx, _pinned_version_manager_rx) =
-            tokio::sync::mpsc::unbounded_channel();
-
+impl HummockReadVersion {
+    pub fn new(committed_version: CommittedVersion) -> Self {
+        // before build `HummockReadVersion`, we need to get the a initial version which obtained
+        // from meta. want this initialization after version is initialized (now with
+        // notification), so add a assert condition to guarantee correct initialization order
+        assert!(committed_version.is_valid());
         Self {
             staging: StagingVersion {
                 imm: VecDeque::default(),
                 sst: VecDeque::default(),
             },
 
-            committed: PinnedVersion::new(basic_version, pinned_version_manager_tx),
+            committed: committed_version,
         }
     }
-}
 
-impl HummockReadVersion {
     /// Updates the read version with `VersionUpdate`.
     /// A `OrderIdx` that can uniquely identify the newly added entry will be returned.
     pub fn update(&mut self, info: VersionUpdate) {

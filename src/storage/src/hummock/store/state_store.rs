@@ -121,7 +121,7 @@ impl HummockStorageCore {
             options.sstable_id_remote_fetch_number,
         ));
 
-        let read_version = HummockReadVersion::default();
+        let read_version = HummockReadVersion::new(uploader.get_pinned_version());
 
         let instance = Self {
             options,
@@ -203,6 +203,7 @@ impl HummockStorageCore {
         }
 
         // 2. read from committed_version sst file
+        assert!(committed_version.is_valid());
         for level in committed_version.levels(compaction_group_id) {
             if level.table_infos.is_empty() {
                 continue;

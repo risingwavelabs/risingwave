@@ -22,7 +22,6 @@ use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
-use risingwave_storage::hummock::store::version::VersionUpdate;
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::SstableIdManager;
@@ -59,14 +58,6 @@ async fn test_storage_basic() {
         filter_key_extractor_manager.clone(),
     );
 
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        uploader.clone(),
-    )
-    .unwrap();
-
     let observer_manager = get_observer_manager(
         env,
         hummock_manager_ref,
@@ -76,8 +67,13 @@ async fn test_storage_basic() {
     )
     .await;
     observer_manager.start().await.unwrap();
-    let basic_version = uploader.get_pinned_version();
-    hummock_storage.update(VersionUpdate::CommittedSnapshot(basic_version));
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options,
+        sstable_store,
+        hummock_meta_client.clone(),
+        uploader.clone(),
+    )
+    .unwrap();
 
     let anchor = Bytes::from("aa");
 
