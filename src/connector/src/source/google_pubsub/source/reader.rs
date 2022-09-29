@@ -27,25 +27,9 @@ impl SplitReader for PubsubSplitReader {
     ) -> Result<Self> {
         let client = Client::default().await.map_err(|e| anyhow!(e))?;
 
-        let topic = client.topic(&properties.topic);
-        let subscription = client.subscription(&properties.subscription);
 
-        // ! Perhaps the split enumerator should be responsible for creating subscriptions.
-        if !subscription
-            .exists(None, None)
-            .await
-            .map_err(|e| anyhow!(e))?
-        {
-            subscription
-                .create(
-                    topic.fully_qualified_name(),
-                    SubscriptionConfig::default(),
-                    None,
-                    None,
-                )
-                .await
-                .map_err(to_anyhow)?;
-        }
+        let client = Client::default().await.map_err(|e| anyhow!(e))?;
+        let subscription = client.subscription(&properties.subscription);
 
         Ok(Self { subscription })
     }
@@ -61,7 +45,6 @@ impl SplitReader for PubsubSplitReader {
             return Ok(None);
         }
 
-        // TODO: acks go here?
         let ack_ids: Vec<String> = next_batch.iter().map(|m| m.ack_id().into()).collect();
 
         // ? is this the right way to handle an ack failure
