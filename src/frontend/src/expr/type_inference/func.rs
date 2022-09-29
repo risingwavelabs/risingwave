@@ -21,7 +21,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeName};
 
 use super::{align_types, cast_ok_base, CastContext};
-use crate::expr::type_inference::cast::{align_array_and_element, lhs_is_more_nested};
+use crate::expr::type_inference::cast::align_array_and_element;
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types

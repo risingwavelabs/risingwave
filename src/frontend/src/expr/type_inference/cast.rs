@@ -20,37 +20,6 @@ use risingwave_common::types::{DataType, DataTypeName};
 
 use crate::expr::{Expr as _, ExprImpl};
 
-// helper for determine_nesting_level
-fn calc_nesting_level_inner(dt: DataType, level: i32) -> i32 {
-    let return_val: i32 = match dt {
-        DataType::List { datatype: inner } => calc_nesting_level_inner(*inner, level + 1),
-        _ => level,
-    };
-    return_val
-}
-
-/// True if lhs is more nested, else false
-///
-/// Examples:
-/// `calc_nesting_level(DataType::Boolean) -> 0`
-/// `calc_nesting_level(List{DataType::Int16}) -> 1`
-/// `calc_nesting_level(List{List{DataType::Boolean}}) -> 2`
-pub fn calc_nesting_level(dt: DataType) -> i32 {
-    calc_nesting_level_inner(dt, 0)
-}
-
-/// True if lhs is more nested, else false
-///
-/// Examples:
-/// `lhs_is_more_nested(DataType::Boolean, DataType::Boolean) -> false`
-/// `lhs_is_more_nested(List{List{DataType::Boolean}}, DataType::Date) -> true`
-/// `lhs_is_more_nested(List{DataType::Int16}, List{List{DataType::Boolean}}) -> false`
-pub fn lhs_is_more_nested(lhs: DataType, rhs: DataType) -> bool {
-    let lhs_level = calc_nesting_level(lhs);
-    let rhs_level = calc_nesting_level(rhs);
-    lhs_level > rhs_level
-}
-
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
 /// It is a simplified version of the rule used in
 /// [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
@@ -393,49 +362,5 @@ mod tests {
                 "       T   T ",
             ]
         );
-    }
-
-    #[test]
-    fn test_nesting_level_ok() {
-        let dt = DataType::Boolean;
-        let nested_1 = DataType::List {
-            datatype: Box::new(dt.clone()),
-        };
-        let nested_2 = DataType::List {
-            datatype: Box::new(nested_1.clone()),
-        };
-        let nested_3 = DataType::List {
-            datatype: Box::new(nested_2.clone()),
-        };
-        assert_eq!(calc_nesting_level(dt), 0);
-        assert_eq!(calc_nesting_level(nested_1), 1);
-        assert_eq!(calc_nesting_level(nested_2), 2);
-        assert_eq!(calc_nesting_level(nested_3), 3);
-    }
-
-    #[test]
-    fn test_lhs_is_more_nested_ok() {
-        let dt = DataType::Boolean;
-        let nested_1 = DataType::List {
-            datatype: Box::new(dt.clone()),
-        };
-        let nested_2 = DataType::List {
-            datatype: Box::new(nested_1.clone()),
-        };
-        let nested_3 = DataType::List {
-            datatype: Box::new(nested_2.clone()),
-        };
-        assert!(lhs_is_more_nested(nested_3.clone(), dt.clone()));
-        assert!(lhs_is_more_nested(nested_1.clone(), dt.clone()));
-        assert!(lhs_is_more_nested(nested_2.clone(), dt.clone()));
-        assert!(lhs_is_more_nested(nested_3.clone(), nested_2.clone()));
-        assert!(lhs_is_more_nested(nested_3.clone(), nested_1.clone()));
-
-        // negated
-        assert!(!lhs_is_more_nested(dt.clone(), nested_3.clone()));
-        assert!(!lhs_is_more_nested(dt.clone(), nested_1.clone()));
-        assert!(!lhs_is_more_nested(dt, nested_2.clone()));
-        assert!(!lhs_is_more_nested(nested_2, nested_3.clone()));
-        assert!(!lhs_is_more_nested(nested_1, nested_3));
     }
 }
