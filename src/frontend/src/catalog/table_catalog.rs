@@ -319,6 +319,7 @@ mod tests {
             fragment_id: 0,
             vnode_col_idx: None,
             value_indices: vec![0],
+            definition: "".into(),
         }
         .into();
 
@@ -375,6 +376,7 @@ mod tests {
                 fragment_id: 0,
                 vnode_col_idx: None,
                 value_indices: vec![0],
+                definition: "".into(),
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
