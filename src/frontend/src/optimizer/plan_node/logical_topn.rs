@@ -100,6 +100,10 @@ impl LogicalTopN {
         self.core.offset
     }
 
+    pub fn with_ties(&self) -> bool {
+        self.core.with_ties
+    }
+
     /// `topn_order` returns the order of the Top-N operator. This naming is because `order()`
     /// already exists and it was designed to return the operator's physical property order.
     ///
@@ -145,7 +149,7 @@ impl LogicalTopN {
         let schema = &self.base.schema;
         let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
-        let field_order = &self.order().field_order;
+        let field_order = &self.topn_order().field_order;
         let mut internal_table_catalog_builder =
             TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
@@ -243,7 +247,7 @@ impl LogicalTopN {
                 self.limit() + self.offset(),
                 0,
                 self.with_ties(),
-                self.order().clone(),
+                self.topn_order().clone(),
                 vec![vnode_col_idx],
             ),
             Some(vnode_col_idx),
@@ -255,7 +259,7 @@ impl LogicalTopN {
             self.limit(),
             self.offset(),
             self.with_ties(),
-            self.order().clone(),
+            self.topn_order().clone(),
         ));
 
         // use another projection to remove the column we added before.
@@ -276,7 +280,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
             self.limit(),
             self.offset(),
             self.with_ties(),
-            self.order().clone(),
+            self.topn_order().clone(),
             self.group_key().to_vec(),
         )
     }
@@ -294,7 +298,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
                 self.offset(),
                 self.with_ties(),
                 input_col_change
-                    .rewrite_required_order(self.order())
+                    .rewrite_required_order(self.topn_order())
                     .unwrap(),
                 self.group_key()
                     .iter()
@@ -317,7 +321,7 @@ impl ColPrunable for LogicalTopN {
         let input_required_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
         let order_required_cols = {
             let mut order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
-            self.order()
+            self.topn_order()
                 .field_order
                 .iter()
                 .for_each(|fo| order_required_cols.insert(fo.index));
@@ -394,7 +398,7 @@ impl ToBatch for LogicalTopN {
             )
             .into());
         }
-        if self.with_ties {
+        if self.with_ties() {
             return Err(ErrorCode::NotImplemented(
                 "TopN with ties in batch mode".to_string(),
                 5302.into(),

@@ -28,6 +28,7 @@ pub struct TopN<PlanRef> {
     pub input: PlanRef,
     pub limit: usize,
     pub offset: usize,
+    pub with_ties: bool,
     pub order: Order,
     pub group_key: Vec<usize>,
 }
