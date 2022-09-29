@@ -420,7 +420,7 @@ where
             bail!("table is in creating procedure");
         } else {
             core.mark_creating(&key);
-            core.mark_creating_table(table.id);
+            core.mark_creating_streaming_job(table.id);
             for &dependent_relation_id in &table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
@@ -437,7 +437,7 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
-            core.unmark_creating_table(table.id);
+            core.unmark_creating_streaming_job(table.id);
             let mut transaction = Transaction::default();
             for table in &internal_tables {
                 table.upsert_in_transaction(&mut transaction)?;
@@ -467,7 +467,7 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
-            core.unmark_creating_table(table.id);
+            core.unmark_creating_streaming_job(table.id);
             for &dependent_relation_id in &table.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
@@ -745,7 +745,7 @@ where
         } else {
             core.mark_creating(&source_key);
             core.mark_creating(&mview_key);
-            core.mark_creating_table(mview.id);
+            core.mark_creating_streaming_job(mview.id);
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
         }
@@ -767,7 +767,7 @@ where
         {
             core.unmark_creating(&source_key);
             core.unmark_creating(&mview_key);
-            core.unmark_creating_table(mview.id);
+            core.unmark_creating_streaming_job(mview.id);
 
             let mut transaction = Transaction::default();
             source.upsert_in_transaction(&mut transaction)?;
@@ -813,6 +813,7 @@ where
         {
             core.unmark_creating(&source_key);
             core.unmark_creating(&mview_key);
+            core.unmark_creating_streaming_job(mview.id);
             Ok(())
         } else {
             bail!("source already exist or not in creating procedure");
@@ -919,6 +920,7 @@ where
             bail!("index already in creating procedure");
         } else {
             core.mark_creating(&key);
+            core.mark_creating_streaming_job(index_table.id);
             for &dependent_relation_id in &index_table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
@@ -935,6 +937,7 @@ where
         let key = (index.database_id, index.schema_id, index.name.clone());
         if !core.has_index(index) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(index_table.id);
             for &dependent_relation_id in &index_table.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
@@ -954,6 +957,7 @@ where
         let key = (table.database_id, table.schema_id, index.name.clone());
         if !core.has_index(index) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(table.id);
             let mut transaction = Transaction::default();
 
             index.upsert_in_transaction(&mut transaction)?;
@@ -998,6 +1002,7 @@ where
             bail!("sink already in creating procedure");
         } else {
             core.mark_creating(&key);
+            core.mark_creating_streaming_job(sink.id);
             for &dependent_relation_id in &sink.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
@@ -1013,6 +1018,7 @@ where
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(sink.id);
             sink.insert(self.env.meta_store()).await?;
             core.add_sink(sink);
 
@@ -1031,6 +1037,7 @@ where
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(sink.id);
             Ok(())
         } else {
             bail!("sink already exist or not in creating procedure");
@@ -1088,7 +1095,7 @@ where
         let mut all_streaming_jobs: HashSet<TableId> =
             guard.database.list_stream_job_ids().await?.collect();
 
-        all_streaming_jobs.extend(guard.database.all_creating_tables());
+        all_streaming_jobs.extend(guard.database.all_creating_streaming_jobs());
         Ok(all_streaming_jobs)
     }
 
