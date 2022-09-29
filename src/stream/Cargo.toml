@@ -53,6 +53,7 @@ smallvec = "1"
 static_assertions = "1"
 stats_alloc = { version = "0.1", features = ["nightly"] }
 thiserror = "1"
+tikv-jemalloc-ctl = "0.5"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
