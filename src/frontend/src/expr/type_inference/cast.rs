@@ -65,10 +65,13 @@ pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<
     Ok(ret_type)
 }
 
-/// aligns an array and an element by returning a possible common array type and casting them into
-/// the common type
-/// array_idx and element_idx indicate which element in inputs is the array and which the element
-///  Example: align_array_and_element(numeric[], int) -> numeric[]
+/// Aligns an array and an element by returning a possible common array type and casting them into
+/// the common type.
+///
+/// `array_idx` and `element_idx` indicate which element in inputs is the array and which the
+/// element.
+///
+/// Example: `align_array_and_element(numeric[], int) -> numeric[]`
 pub fn align_array_and_element(
     array_idx: usize,
     element_idx: usize,

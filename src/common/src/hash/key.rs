@@ -192,7 +192,6 @@ impl<const N: usize> EstimateSize for FixedSizeKey<N> {
     }
 }
 
-/// Fix clippy warning.
 impl<const N: usize> PartialEq for FixedSizeKey<N> {
     fn eq(&self, other: &Self) -> bool {
         (self.key == other.key) && (self.null_bitmap == other.null_bitmap)
@@ -636,13 +635,13 @@ where
 impl ArrayImpl {
     fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut [S]) {
         macro_rules! impl_all_serialize_to_hash_key {
-            ([$self:ident, $serializers: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match $self {
-                    $( Self::$variant_name(inner) => serialize_array_to_hash_key(inner, $serializers), )*
+            ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match self {
+                    $( Self::$variant_name(inner) => serialize_array_to_hash_key(inner, serializers), )*
                 }
             };
         }
-        for_all_variants! { impl_all_serialize_to_hash_key, self, serializers }
+        for_all_variants! { impl_all_serialize_to_hash_key }
     }
 }
 
@@ -652,13 +651,13 @@ impl ArrayBuilderImpl {
         deserializer: &mut S,
     ) -> ArrayResult<()> {
         macro_rules! impl_all_deserialize_from_hash_key {
-            ([$self:ident, $deserializer: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match $self {
-                    $( Self::$variant_name(inner) => deserialize_array_element_from_hash_key(inner, $deserializer), )*
+            ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match self {
+                    $( Self::$variant_name(inner) => deserialize_array_element_from_hash_key(inner, deserializer), )*
                 }
             };
         }
-        for_all_variants! { impl_all_deserialize_from_hash_key, self, deserializer }
+        for_all_variants! { impl_all_deserialize_from_hash_key }
     }
 }
 

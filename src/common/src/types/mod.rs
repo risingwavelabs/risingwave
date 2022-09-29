@@ -65,8 +65,8 @@ use crate::array::{
 pub type ParallelUnitId = u32;
 pub type VnodeMapping = Vec<ParallelUnitId>;
 
-// VirtualNode (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
-// consistent hashing.
+/// `VirtualNode` (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
+/// consistent hashing.
 pub type VirtualNode = u8;
 pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
 pub const VNODE_BITS: usize = 8;
