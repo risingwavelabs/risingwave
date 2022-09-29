@@ -18,7 +18,7 @@ use std::time::SystemTime;
 
 use fail::fail_point;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::HummockContextId;
+use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
@@ -34,7 +34,6 @@ use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
-type TaskId = u64;
 
 /// Wraps the stream between meta node and compactor node.
 /// Compactor node will re-establish the stream when the previous one fails.
@@ -121,7 +120,8 @@ pub struct CompactorManager {
 
     pub task_expiry_seconds: u64,
     // A map: { context_id -> { task_id -> heartbeat } }
-    task_heartbeats: RwLock<HashMap<HummockContextId, HashMap<TaskId, TaskHeartbeat>>>,
+    task_heartbeats:
+        RwLock<HashMap<HummockContextId, HashMap<HummockCompactionTaskId, TaskHeartbeat>>>,
 }
 
 impl CompactorManager {

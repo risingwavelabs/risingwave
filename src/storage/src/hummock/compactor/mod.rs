@@ -19,6 +19,7 @@ mod context;
 mod iterator;
 mod shared_buffer_compact;
 mod sstable_store;
+mod task_progress;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,7 +32,7 @@ pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
     TtlCompactionFilter,
 };
-pub use context::{CompactorContext, Context, TaskProgressTracker};
+pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 pub use iterator::ConcatSstableIterator;
