@@ -75,3 +75,33 @@ pub fn align_down<U: Unsigned>(align: U, v: U) -> U {
     debug_assert_pow2(align);
     v & !(align - U::from(1))
 }
+
+macro_rules! bpf_buffer_trace {
+    ($buf:expr, $span:expr) => {
+        #[cfg(feature = "bpf")]
+        {
+            if $buf.len() >= 8 {
+                use bytes::BufMut;
+
+                const BPF_BUFFER_TRACE_MAGIC: u64 = 0xdeadbeefdeadbeef;
+
+                (&mut $buf[0..8]).put_u64_le(BPF_BUFFER_TRACE_MAGIC);
+
+                // Uncomment the followings, modify the len limits and uncomment bpf code to pass
+                // more fields.
+
+                // if let Some(id) = $span.id() {
+                //     (&mut $buf[8..16]).put_u64_le(id.into_u64());
+                // }
+
+                // let tts = std::time::SystemTime::now()
+                //     .duration_since(std::time::UNIX_EPOCH)
+                //     .unwrap()
+                //     .as_nanos();
+                // (&mut $buf[16..32]).put_u128_le(tts);
+            }
+        }
+    };
+}
+
+pub(crate) use bpf_buffer_trace;

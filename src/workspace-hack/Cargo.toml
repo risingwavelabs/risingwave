@@ -33,6 +33,7 @@ frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 futures = { version = "0.3", features = ["alloc", "async-await", "executor", "futures-executor", "std"] }
 futures-channel = { version = "0.3", features = ["alloc", "futures-sink", "sink", "std"] }
 futures-core = { version = "0.3", features = ["alloc", "std"] }
+futures-executor = { version = "0.3", features = ["std"] }
 futures-io = { version = "0.3", features = ["std"] }
 futures-sink = { version = "0.3", features = ["alloc", "std"] }
 futures-task = { version = "0.3", default-features = false, features = ["alloc", "std"] }
@@ -41,11 +42,12 @@ hashbrown = { version = "0.12", features = ["ahash", "inline-more", "raw"] }
 hdrhistogram = { version = "7", features = ["base64", "crossbeam-channel", "flate2", "nom", "serialization", "sync"] }
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
+isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
 itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
+log = { version = "0.4", default-features = false, features = ["kv_unstable", "release_max_level_info", "std", "value-bag"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
@@ -106,6 +108,7 @@ frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 futures = { version = "0.3", features = ["alloc", "async-await", "executor", "futures-executor", "std"] }
 futures-channel = { version = "0.3", features = ["alloc", "futures-sink", "sink", "std"] }
 futures-core = { version = "0.3", features = ["alloc", "std"] }
+futures-executor = { version = "0.3", features = ["std"] }
 futures-io = { version = "0.3", features = ["std"] }
 futures-sink = { version = "0.3", features = ["alloc", "std"] }
 futures-task = { version = "0.3", default-features = false, features = ["alloc", "std"] }
@@ -114,11 +117,12 @@ hashbrown = { version = "0.12", features = ["ahash", "inline-more", "raw"] }
 hdrhistogram = { version = "7", features = ["base64", "crossbeam-channel", "flate2", "nom", "serialization", "sync"] }
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
+isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
 itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
+log = { version = "0.4", default-features = false, features = ["kv_unstable", "release_max_level_info", "std", "value-bag"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }

@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Buf, BufMut};
-use clap::Parser;
 use futures::future::join_all;
 use itertools::Itertools;
 use prometheus::Registry;
@@ -26,52 +25,12 @@ use risingwave_storage::hummock::file_cache::cache::{FileCache, FileCacheOptions
 use risingwave_storage::hummock::file_cache::metrics::FileCacheMetrics;
 use risingwave_storage::hummock::{TieredCacheKey, TieredCacheValue};
 use tokio::sync::oneshot;
+use tracing::Instrument;
 
 use crate::analyze::{analyze, monitor, Hook, Metrics};
 use crate::rate::RateLimiter;
 use crate::utils::{dev_stat_path, iostat};
-
-#[derive(Parser, Debug, Clone)]
-struct Args {
-    #[clap(short, long)]
-    path: String,
-    /// (MiB)
-    #[clap(long, default_value = "1024")]
-    capacity: usize,
-    /// (MiB)
-    #[clap(long, default_value = "128")]
-    total_buffer_capacity: usize,
-    /// (MiB)
-    #[clap(long, default_value = "512")]
-    cache_file_fallocate_unit: usize,
-    /// (MiB)
-    #[clap(long, default_value = "16")]
-    cache_meta_fallocate_unit: usize,
-
-    /// (KiB)
-    #[clap(long, default_value = "1024")]
-    bs: usize,
-    #[clap(long, default_value = "8")]
-    concurrency: usize,
-    /// (s)
-    #[clap(long, default_value = "600")]
-    time: u64,
-    #[clap(long, default_value = "1")]
-    read: usize,
-    #[clap(long, default_value = "1")]
-    write: usize,
-    #[clap(long, default_value = "10000")]
-    look_up_range: u32,
-    /// (MiB/s), 0 for inf.
-    #[clap(long, default_value = "0")]
-    r_rate: f64,
-    /// (MiB/s), 0 for inf.
-    #[clap(long, default_value = "0")]
-    w_rate: f64,
-    /// (s)
-    #[clap(long, default_value = "1")]
-    report_interval: u64,
-}
+use crate::Args;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 struct Index {
@@ -96,9 +55,7 @@ impl TieredCacheKey for Index {
     }
 }
 
-pub async fn run() {
-    let args = Args::parse();
-
+pub async fn run(args: Args, stop: oneshot::Receiver<()>) {
     let metrics = Metrics::default();
     let hook = Arc::new(Hook::new(metrics.clone()));
 
@@ -157,7 +114,7 @@ pub async fn run() {
     });
 
     tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.unwrap();
+        stop.await.unwrap();
         for tx in txs {
             let _ = tx.send(());
         }
@@ -301,7 +258,12 @@ async fn read(
         }
 
         let start = Instant::now();
-        let hit = cache.get(&key).await.unwrap().is_some();
+        let hit = cache
+            .get(&key)
+            .instrument(tracing::info_span!("read_once").or_current())
+            .await
+            .unwrap()
+            .is_some();
         let lat = start.elapsed().as_micros() as u64;
         if hit {
             metrics

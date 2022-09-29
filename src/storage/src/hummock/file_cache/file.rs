@@ -21,6 +21,7 @@ use std::sync::Arc;
 use nix::fcntl::{fallocate, FallocateFlags};
 use nix::sys::stat::fstat;
 use nix::unistd::ftruncate;
+use tracing::Instrument;
 
 use super::error::Result;
 use super::{asyncify, utils, DioBuffer, DIO_BUFFER_ALLOCATOR, LOGICAL_BLOCK_SIZE, ST_BLOCK_SIZE};
@@ -122,6 +123,7 @@ impl CacheFile {
         Ok(cache_file)
     }
 
+    #[tracing::instrument]
     pub async fn append(&self, buf: DioBuffer) -> Result<u64> {
         utils::debug_assert_aligned(self.core.block_size, buf.len());
 
@@ -129,6 +131,8 @@ impl CacheFile {
         let fallocate_unit = self.fallocate_unit;
 
         let offset = core.len.fetch_add(buf.len(), Ordering::SeqCst);
+
+        let span = tracing::info_span!("write_all_at");
 
         asyncify(move || {
             let mut capacity = core.capacity.load(Ordering::Acquire);
@@ -166,7 +170,7 @@ impl CacheFile {
                 }
             }
 
-            core.file.write_all_at(&buf, offset as u64)?;
+            span.in_scope(|| core.file.write_all_at(&buf, offset as u64))?;
 
             Ok(())
         })
@@ -176,18 +180,26 @@ impl CacheFile {
     }
 
     #[allow(clippy::uninit_vec)]
+    #[tracing::instrument(skip(self))]
     pub async fn read(&self, offset: u64, len: usize) -> Result<DioBuffer> {
         utils::debug_assert_aligned(self.core.block_size, len);
         let core = self.core.clone();
+
+        let span = tracing::info_span!("read_exact_at");
+
         asyncify(move || {
             let mut buf = DioBuffer::with_capacity_in(len, &DIO_BUFFER_ALLOCATOR);
             buf.reserve(len);
             unsafe {
                 buf.set_len(len);
             }
-            core.file.read_exact_at(&mut buf, offset)?;
+
+            utils::bpf_buffer_trace!(buf, span);
+
+            span.in_scope(|| core.file.read_exact_at(&mut buf, offset))?;
             Ok(buf)
         })
+        .instrument(tracing::info_span!("asyncify"))
         .await
     }
 
