@@ -143,7 +143,7 @@ impl LogicalScan {
             .map(|i| {
                 format!(
                     "{}.{}",
-                    self.table_name().clone(),
+                    self.table_name(),
                     self.table_desc().columns[*i].name
                 )
             })
@@ -165,7 +165,7 @@ impl LogicalScan {
             .map(|&i| {
                 format!(
                     "{}.{}",
-                    self.table_name().clone(),
+                    self.table_name(),
                     self.table_desc().columns[i].name
                 )
             })
