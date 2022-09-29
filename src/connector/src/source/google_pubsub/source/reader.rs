@@ -25,8 +25,12 @@ impl SplitReader for PubsubSplitReader {
         _state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let client = Client::default().await.map_err(|e| anyhow!(e))?;
+        // set emulator host
+        if let Some(emulator_host) = properties.emulator_host {
+            std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host);
+        }
 
+        // Set credentials
 
         let client = Client::default().await.map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);
