@@ -111,9 +111,19 @@ pub struct TaskOutput {
 }
 
 impl TaskOutput {
-    /// Writes the data in serialized format to `ExchangeWriter`.
-    pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
+    /// Return whether finish taking data.
+    async fn take_data_inner(
+        &mut self,
+        writer: &mut dyn ExchangeWriter,
+        at_most_num: Option<usize>,
+    ) -> Result<bool> {
+        let mut cnt: usize = 0;
+        let unlimited = at_most_num.is_none();
+        let at_most_num = at_most_num.unwrap_or(0);
         loop {
+            if !unlimited && cnt >= at_most_num {
+                return Ok(false);
+            }
             match self.receiver.recv().await {
                 // Received some data
                 Ok(Some(chunk)) => {
@@ -145,7 +155,24 @@ impl TaskOutput {
                     };
                 }
             }
+            cnt += 1;
         }
+        Ok(true)
+    }
+
+    /// Return whether finish taking data.
+    pub async fn take_data_with_num(
+        &mut self,
+        writer: &mut dyn ExchangeWriter,
+        num: usize,
+    ) -> Result<bool> {
+        self.take_data_inner(writer, Some(num)).await
+    }
+
+    /// Writes the data in serialized format to `ExchangeWriter`.
+    pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
+        let finish = self.take_data_inner(writer, None).await?;
+        assert_eq!(finish, true);
         Ok(())
     }
 
