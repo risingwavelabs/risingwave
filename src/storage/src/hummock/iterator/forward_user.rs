@@ -43,17 +43,14 @@ pub type UserIteratorPayloadType<
     I,
 >;
 
+pub type ForwardUserIteratorType =
+    UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>;
+pub type BackwardUserIteratorType =
+    UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>;
+
 pub enum DirectedUserIterator {
-    Forward(
-        UserIterator<
-            UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
-        >,
-    ),
-    Backward(
-        BackwardUserIterator<
-            UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
-        >,
-    ),
+    Forward(UserIterator<ForwardUserIteratorType>),
+    Backward(BackwardUserIterator<BackwardUserIteratorType>),
 }
 
 pub trait DirectedUserIteratorBuilder {
@@ -313,17 +310,17 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 }
 
 #[cfg(test)]
-impl UserIterator<UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>> {
+impl UserIterator<ForwardUserIteratorType> {
     /// Create [`UserIterator`] with maximum epoch.
     pub(crate) fn for_test(
-        iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
+        iterator: ForwardUserIteratorType,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
         Self::new(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
 
     pub(crate) fn for_test_with_epoch(
-        iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
+        iterator: ForwardUserIteratorType,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
@@ -332,9 +329,7 @@ impl UserIterator<UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, S
     }
 }
 
-impl DirectedUserIteratorBuilder
-    for UserIterator<UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>>
-{
+impl DirectedUserIteratorBuilder for UserIterator<ForwardUserIteratorType> {
     type Direction = Forward;
     type SstableIteratorType = SstableIterator;
 
