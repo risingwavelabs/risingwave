@@ -14,10 +14,10 @@
 
 //! Global Streaming Hash Aggregators
 
-use std::marker::PhantomData;
 use std::sync::Arc;
 
-use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::types::DataType;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::agg_call::build_agg_call_from_prost;
@@ -26,8 +26,6 @@ use crate::cache::LruManagerRef;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
-
-pub struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
@@ -42,28 +40,32 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     state_table_col_mappings: Vec<Vec<usize>>,
     lru_manager: Option<LruManagerRef>,
     metrics: Arc<StreamingMetrics>,
+    key_types: Vec<DataType>,
 }
 
-impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
-    type Input = HashAggExecutorDispatcherArgs<S>;
+impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
     type Output = StreamResult<BoxedExecutor>;
 
-    fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Ok(HashAggExecutor::<K, S>::new(
-            args.ctx,
-            args.input,
-            args.agg_calls,
-            args.pk_indices,
-            args.executor_id,
-            args.key_indices,
-            args.group_by_cache_size,
-            args.extreme_cache_size,
-            args.state_tables,
-            args.state_table_col_mappings,
-            args.lru_manager,
-            args.metrics,
+            self.ctx,
+            self.input,
+            self.agg_calls,
+            self.pk_indices,
+            self.executor_id,
+            self.key_indices,
+            self.group_by_cache_size,
+            self.extreme_cache_size,
+            self.state_tables,
+            self.state_table_col_mappings,
+            self.lru_manager,
+            self.metrics,
         )?
         .boxed())
+    }
+
+    fn data_types(&self) -> &[DataType] {
+        &self.key_types
     }
 }
 
@@ -97,7 +99,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
-        let kind = calc_hash_key_kind(&keys);
 
         let vnodes = params.vnode_bitmap.expect("vnodes not set for hash agg");
         let state_tables =
@@ -116,7 +117,8 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             state_table_col_mappings,
             lru_manager: stream.context.lru_manager.clone(),
             metrics: params.executor_stats,
+            key_types: keys,
         };
-        HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
+        args.dispatch()
     }
 }

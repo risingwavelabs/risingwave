@@ -221,7 +221,7 @@ pub trait StateStoreIter: Send + 'static {
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     pub epoch: u64,
-    pub table_id: Option<TableId>,
+    pub table_id: TableId,
     pub retention_seconds: Option<u32>, // second
 }
 
