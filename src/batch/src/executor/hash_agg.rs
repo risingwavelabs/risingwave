@@ -230,7 +230,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             for (key, states) in result.by_ref().take(cardinality) {
                 has_next = true;
                 array_len += 1;
-                key.deserialize_to_builders(&mut group_builders[..])?;
+                key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
                 states
                     .into_iter()
                     .zip_eq(&mut agg_builders)
