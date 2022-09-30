@@ -347,7 +347,7 @@ impl ColPrunable for LogicalTopN {
         );
         let new_order = Order {
             field_order: self
-                .order()
+                .topn_order()
                 .field_order
                 .iter()
                 .map(|fo| FieldOrder {
