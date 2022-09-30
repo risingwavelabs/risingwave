@@ -23,7 +23,7 @@ use tracing::error;
 
 use super::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::local_version_manager::LocalVersionManagerRef;
+use crate::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;

@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::vec::IntoIter;
 
 use bytes::Bytes;
 use futures::stream::FusedStream;
@@ -30,6 +31,7 @@ use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
 use crate::pg_protocol::{cstr_to_str, PgStream};
 use crate::pg_response::PgResponse;
 use crate::pg_server::{Session, SessionManager};
+use crate::types::Row;
 
 #[derive(Default)]
 pub struct PgStatement {
@@ -82,6 +84,7 @@ impl PgStatement {
             is_query: self.is_query,
             row_description: self.row_description.clone(),
             result: None,
+            row_cache: vec![].into_iter(),
         })
     }
 
@@ -92,7 +95,6 @@ impl PgStatement {
     }
 }
 
-#[derive(Default)]
 pub struct PgPortal {
     name: String,
     query_string: String,
@@ -100,6 +102,7 @@ pub struct PgPortal {
     is_query: bool,
     row_description: Vec<PgFieldDescriptor>,
     result: Option<PgResponse>,
+    row_cache: IntoIter<Row>,
 }
 
 impl PgPortal {
@@ -135,6 +138,7 @@ impl PgPortal {
             self.result.as_mut().unwrap()
         };
 
+        // Indicate all data from stream have been completely consumed.
         let mut query_end = false;
         let mut query_row_count = 0;
         if result.is_empty() {
@@ -143,23 +147,32 @@ impl PgPortal {
             // fetch row data
             // if row_limit is 0, fetch all rows
             // if row_limit > 0, fetch row_limit rows
-            let stream = result.values_stream();
             while row_limit == 0 || query_row_count < row_limit {
-                if let Some(row) = stream
-                    .try_next()
-                    .await
-                    .map_err(|err| PsqlError::ExecuteError(err))?
-                {
-                    msg_stream.write_no_flush(&BeMessage::DataRow(&row))?;
-                    query_row_count += 1;
+                if self.row_cache.len() > 0 {
+                    for row in self.row_cache.by_ref() {
+                        msg_stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                        query_row_count += 1;
+                        if row_limit > 0 && query_row_count >= row_limit {
+                            break;
+                        }
+                    }
                 } else {
-                    query_end = true;
-                    break;
+                    self.row_cache = if let Some(rows) = result
+                        .values_stream()
+                        .try_next()
+                        .await
+                        .map_err(|err| PsqlError::ExecuteError(err))?
+                    {
+                        rows.into_iter()
+                    } else {
+                        query_end = true;
+                        break;
+                    };
                 }
             }
             // Check if the result is consumed completely.
             // If not, cache the result.
-            if stream.peekable().is_terminated() {
+            if self.row_cache.len() == 0 && result.values_stream().peekable().is_terminated() {
                 query_end = true;
             }
             if query_end {
@@ -177,7 +190,9 @@ impl PgPortal {
             msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                 stmt_type: result.get_stmt_type(),
                 notice: result.get_notice(),
-                rows_cnt: result.get_effected_rows_cnt(),
+                rows_cnt: result
+                    .get_effected_rows_cnt()
+                    .expect("row count should be set"),
             }))?;
         }
 

@@ -169,7 +169,7 @@ impl S3FileReader {
                 tokio::select! {
                     s3_split = split_r.recv() => {
                         if let Some(s3_split) = s3_split {
-                            let _rs =S3FileReader::stream_read(s3_client.clone(), s3_split.clone(), tx.clone()).await;
+                            let _rs = S3FileReader::stream_read(s3_client.clone(), s3_split.clone(), tx.clone()).await;
                         } else {
                             continue;
                         }
@@ -195,9 +195,7 @@ impl S3FileReader {
     ) -> Result<()> {
         let bucket = s3_file_split.bucket.clone();
         let s3_file = s3_file_split.s3_file.clone();
-        let obj_val =
-            S3FileReader::get_object(&client_for_s3, &s3_file.clone(), bucket.clone().as_str())
-                .await;
+        let obj_val = S3FileReader::get_object(&client_for_s3, &s3_file, bucket.as_str()).await;
         match obj_val {
             Ok(byte_stream) => {
                 let stream_reader = StreamReader::new(
@@ -211,8 +209,7 @@ impl S3FileReader {
                         if buffer.is_empty() {
                             info!(
                                 "current s3_file is empty.bucket={}, file_path={}",
-                                bucket.clone(),
-                                s3_file.clone().object.path
+                                bucket, s3_file.object.path
                             );
                             Ok(true)
                         } else {
@@ -239,8 +236,7 @@ impl S3FileReader {
                         Ok(read_bytes) => {
                             let msg_id = format!(
                                 "s3://{}/{}",
-                                s3_file_split.clone().bucket.clone(),
-                                s3_file_split.clone().s3_file.object.path
+                                s3_file_split.bucket, s3_file_split.s3_file.object.path
                             );
                             let s3_inner_msg = S3InnerMessage {
                                 msg_id,
@@ -248,8 +244,8 @@ impl S3FileReader {
                             };
                             if s3_msg_sender.send(s3_inner_msg).await.is_err() {
                                 return Err(anyhow::Error::from(crate::source::filesystem::s3::s3_dir::FileSystemOptError::GetS3ObjectError(
-                                    bucket.clone(),
-                                    s3_file.clone().object.path,
+                                    bucket,
+                                    s3_file.object.path,
                                 )));
                             }
                         }
@@ -272,8 +268,8 @@ impl S3FileReader {
         s3_file: &S3File,
         bucket: &str,
     ) -> anyhow::Result<ByteStream> {
-        let path = s3_file.clone().object.path;
-        let s3_object_key = std::path::Path::new(path.as_str())
+        let path = s3_file.object.path.as_str();
+        let s3_object_key = std::path::Path::new(path)
             .file_name()
             .unwrap()
             .to_os_string()
@@ -319,8 +315,8 @@ impl SplitReader for S3FileReader {
             AwsCredentialV2::None
         } else {
             AwsCredentialV2::Static {
-                access_key: s3_basic_config.clone().access,
-                secret_access: s3_basic_config.clone().secret,
+                access_key: s3_basic_config.access.clone(),
+                secret_access: s3_basic_config.secret.clone(),
                 session_token: None,
             }
         };

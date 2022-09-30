@@ -14,13 +14,15 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
+use super::command::CommandContext;
 use super::notifier::Notifier;
 use crate::model::ActorId;
+use crate::storage::MetaStore;
 
 type CreateMviewEpoch = Epoch;
 
@@ -78,48 +80,58 @@ impl Progress {
     }
 }
 
+/// The command tracking by the [`CreateMviewProgressTracker`].
+pub(super) struct TrackingCommand<S: MetaStore> {
+    /// The context of the command.
+    pub context: Arc<CommandContext<S>>,
+
+    /// Should be called when the command is finished.
+    pub notifiers: Vec<Notifier>,
+}
+
 /// Track the progress of all creating mviews. When creation is done, `notify_finished` will be
 /// called on registered notifiers.
-#[derive(Default)]
-pub(super) struct CreateMviewProgressTracker {
+pub(super) struct CreateMviewProgressTracker<S: MetaStore> {
     /// Progress of the create-mview DDL indicated by the epoch.
-    progress_map: HashMap<CreateMviewEpoch, (Progress, Vec<Notifier>)>,
+    progress_map: HashMap<CreateMviewEpoch, (Progress, TrackingCommand<S>)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the chain node.
     actor_map: HashMap<ActorId, CreateMviewEpoch>,
 }
 
-impl CreateMviewProgressTracker {
-    /// Add a new create-mview DDL command to track with current epoch as `ddl_epoch` and
-    /// `notifiers`, that needs to wait for `actors` to report progress.
+impl<S: MetaStore> CreateMviewProgressTracker<S> {
+    pub fn new() -> Self {
+        Self {
+            progress_map: Default::default(),
+            actor_map: Default::default(),
+        }
+    }
+
+    /// Add a new create-mview DDL command to track.
     ///
-    /// If `actors` is empty, [`Notifier::notify_finished`] will be called immediately.
-    pub fn add(
-        &mut self,
-        ddl_epoch: Epoch,
-        actors: impl IntoIterator<Item = ActorId>,
-        notifiers: impl IntoIterator<Item = Notifier>,
-    ) -> Vec<Notifier> {
-        let notifiers = notifiers.into_iter().collect();
-        let actors = actors.into_iter().collect_vec();
+    /// If the actors to track is empty, return the given command as it can be finished immediately.
+    pub fn add(&mut self, command: TrackingCommand<S>) -> Option<TrackingCommand<S>> {
+        let actors = command.context.actors_to_track();
         if actors.is_empty() {
             // The command can be finished immediately.
-            return notifiers;
+            return Some(command);
         }
 
+        let ddl_epoch = command.context.curr_epoch;
         for &actor in &actors {
             self.actor_map.insert(actor, ddl_epoch);
         }
 
         let progress = Progress::new(actors);
-        let old = self.progress_map.insert(ddl_epoch, (progress, notifiers));
+        let old = self.progress_map.insert(ddl_epoch, (progress, command));
         assert!(old.is_none());
-        vec![]
+        None
     }
 
-    /// Update the progress of `actor` according to the Prost struct. If all actors in this MV have
-    /// finished, `notify_finished` will be called on registered notifiers.
-    pub fn update(&mut self, progress: &CreateMviewProgress) -> Option<Vec<Notifier>> {
+    /// Update the progress of `actor` according to the Prost struct.
+    ///
+    /// If all actors in this MV have finished, returns the command.
+    pub fn update(&mut self, progress: &CreateMviewProgress) -> Option<TrackingCommand<S>> {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
             panic!("no tracked progress for actor {}, is it already finished?", actor);
@@ -143,14 +155,17 @@ impl CreateMviewProgressTracker {
                     for actor in o.get().0.actors() {
                         self.actor_map.remove(&actor);
                     }
-                    // Notify about finishing.
-                    let notifiers = o.remove().1;
-                    Some(notifiers)
+                    Some(o.remove().1)
                 } else {
                     None
                 }
             }
-            Entry::Vacant(_) => unreachable!(),
+            Entry::Vacant(_) => {
+                tracing::warn!(
+                    "update the progress of an inexistent create-mview DDL: {progress:?}"
+                );
+                None
+            }
         }
     }
 }

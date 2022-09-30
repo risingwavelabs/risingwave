@@ -320,6 +320,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Utf8(schema.clone())),
                             Some(ScalarImpl::Int32(t.owner as i32)),
                             Some(ScalarImpl::Utf8(json!(fragments).to_string())),
+                            Some(ScalarImpl::Utf8(t.definition.clone())),
                         ]));
                     }
                 });

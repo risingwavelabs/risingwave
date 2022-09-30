@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn test_create_array() {
         macro_rules! gen_rand_array {
-            ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+            ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
             $(
                 {
                     let array = seed_rand_array::<$array>(10, 1024);
