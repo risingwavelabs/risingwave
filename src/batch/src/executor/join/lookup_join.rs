@@ -879,15 +879,18 @@ mod tests {
              2 8.4 2 5.5",
         );
 
-        let condition = Some(new_binary_expr(
-            Type::LessThan,
-            DataType::Boolean,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(5)),
-            )),
-            Box::new(InputRefExpression::new(DataType::Float32, 3)),
-        ));
+        let condition = Some(
+            new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::Int32(5)),
+                )),
+                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+            )
+            .unwrap(),
+        );
 
         do_test(JoinType::Inner, condition, false, expected).await;
     }
@@ -905,15 +908,18 @@ mod tests {
              . .   . .",
         );
 
-        let condition = Some(new_binary_expr(
-            Type::LessThan,
-            DataType::Boolean,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(5)),
-            )),
-            Box::new(InputRefExpression::new(DataType::Float32, 3)),
-        ));
+        let condition = Some(
+            new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::Int32(5)),
+                )),
+                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+            )
+            .unwrap(),
+        );
 
         do_test(JoinType::LeftOuter, condition, false, expected).await;
     }
@@ -927,15 +933,18 @@ mod tests {
              2 8.4",
         );
 
-        let condition = Some(new_binary_expr(
-            Type::LessThan,
-            DataType::Boolean,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(5)),
-            )),
-            Box::new(InputRefExpression::new(DataType::Float32, 3)),
-        ));
+        let condition = Some(
+            new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::Int32(5)),
+                )),
+                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+            )
+            .unwrap(),
+        );
 
         do_test(JoinType::LeftSemi, condition, false, expected).await;
     }
@@ -950,15 +959,18 @@ mod tests {
             . .",
         );
 
-        let condition = Some(new_binary_expr(
-            Type::LessThan,
-            DataType::Boolean,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(5)),
-            )),
-            Box::new(InputRefExpression::new(DataType::Float32, 3)),
-        ));
+        let condition = Some(
+            new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::Int32(5)),
+                )),
+                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+            )
+            .unwrap(),
+        );
 
         do_test(JoinType::LeftAnti, condition, false, expected).await;
     }
