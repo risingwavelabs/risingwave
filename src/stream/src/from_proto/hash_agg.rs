@@ -24,6 +24,7 @@ use super::agg_common::{build_agg_call_from_prost, build_agg_state_tables_from_p
 use super::*;
 use crate::cache::LruManagerRef;
 use crate::executor::aggregation::{AggCall, AggStateTable};
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
@@ -32,14 +33,14 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     agg_calls: Vec<AggCall>,
     agg_state_tables: Vec<Option<AggStateTable<S>>>,
     result_table: StateTable<S>,
-    key_indices: Vec<usize>,
+    group_key_indices: Vec<usize>,
+    group_key_types: Vec<DataType>,
     pk_indices: PkIndices,
     group_by_cache_size: usize,
     extreme_cache_size: usize,
     executor_id: u64,
     lru_manager: Option<LruManagerRef>,
     metrics: Arc<StreamingMetrics>,
-    key_types: Vec<DataType>,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
@@ -54,7 +55,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
             self.result_table,
             self.pk_indices,
             self.executor_id,
-            self.key_indices,
+            self.group_key_indices,
             self.group_by_cache_size,
             self.extreme_cache_size,
             self.lru_manager,
@@ -64,7 +65,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
     }
 
     fn data_types(&self) -> &[DataType] {
-        &self.key_types
+        &self.group_key_types
     }
 }
 
@@ -78,13 +79,13 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashAgg)?;
-        let key_indices = node
+        let group_key_indices = node
             .get_group_key()
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let keys = key_indices
+        let group_key_types = group_key_indices
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
@@ -112,14 +113,14 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             agg_calls,
             agg_state_tables,
             result_table,
-            key_indices,
+            group_key_indices,
+            group_key_types,
             pk_indices: params.pk_indices,
             group_by_cache_size: stream.config.developer.unsafe_hash_agg_cache_size,
             extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
             executor_id: params.executor_id,
             lru_manager: stream.context.lru_manager.clone(),
             metrics: params.executor_stats,
-            key_types: keys,
         };
         args.dispatch()
     }

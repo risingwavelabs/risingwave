@@ -107,7 +107,7 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     /// Cache size (one per group by key)
-    group_by_key_cache_size: usize,
+    group_by_cache_size: usize,
 
     /// Extreme state cache size
     extreme_cache_size: usize,
@@ -145,7 +145,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         group_key_indices: Vec<usize>,
-        group_by_key_cache_size: usize,
+        group_by_cache_size: usize,
         extreme_cache_size: usize,
         lru_manager: Option<LruManagerRef>,
         metrics: Arc<StreamingMetrics>,
@@ -175,7 +175,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 agg_state_tables,
                 result_table,
                 group_key_indices,
-                group_by_key_cache_size,
+                group_by_cache_size,
                 extreme_cache_size,
                 lru_manager,
                 group_change_set: HashSet::new(),
@@ -274,7 +274,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // TODO: this might be inefficient if there are not too many duplicated keys in one batch.
         let unique_keys = Self::get_unique_keys(keys, hash_codes, &visibility)?;
 
-        let key_data_types = &schema.data_types()[..group_key_indices.len()];
+        let group_key_types = &schema.data_types()[..group_key_indices.len()];
         let mut futures = vec![];
         for (key, _hash_code, _) in &unique_keys {
             // Retrieve previous state from the KeyedState.
@@ -297,7 +297,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
                             Box::new(
                                 generate_managed_agg_state(
-                                    Some(&key.clone().deserialize(key_data_types)?),
+                                    Some(&key.clone().deserialize(group_key_types)?),
                                     agg_calls,
                                     agg_state_tables,
                                     result_table,
@@ -475,7 +475,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher(
-                extra.group_by_key_cache_size,
+                extra.group_by_cache_size,
                 PrecomputedBuildHasher,
             ))
         };
