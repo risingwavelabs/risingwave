@@ -22,8 +22,8 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::utils::TableCatalogBuilder;
 use super::{
-    gen_filter_and_pushdown, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    StreamGroupTopN, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
@@ -36,12 +36,7 @@ use crate::TableCatalog;
 #[derive(Debug, Clone)]
 pub struct LogicalTopN {
     pub base: PlanBase,
-    input: PlanRef,
-    limit: usize,
-    offset: usize,
-    with_ties: bool,
-    order: Order,
-    group_key: Vec<usize>,
+    core: generic::TopN<PlanRef>,
 }
 
 impl LogicalTopN {
@@ -56,12 +51,14 @@ impl LogicalTopN {
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalTopN {
             base,
-            input,
-            limit,
-            offset,
-            with_ties,
-            order,
-            group_key: vec![],
+            core: generic::TopN {
+                input,
+                limit,
+                offset,
+                with_ties,
+                order,
+                group_key: vec![],
+            },
         }
     }
 
@@ -74,7 +71,7 @@ impl LogicalTopN {
         group_key: Vec<usize>,
     ) -> Self {
         let mut topn = Self::new(input, limit, offset, with_ties, order);
-        topn.group_key = group_key;
+        topn.core.group_key = group_key;
         topn
     }
 
@@ -96,15 +93,15 @@ impl LogicalTopN {
     }
 
     pub fn limit(&self) -> usize {
-        self.limit
+        self.core.limit
     }
 
     pub fn offset(&self) -> usize {
-        self.offset
+        self.core.offset
     }
 
     pub fn with_ties(&self) -> bool {
-        self.with_ties
+        self.core.with_ties
     }
 
     /// `topn_order` returns the order of the Top-N operator. This naming is because `order()`
@@ -114,11 +111,11 @@ impl LogicalTopN {
     /// implies the output ordering of an operator, is never guaranteed; while `topn_order()` must
     /// be non-null because it's a critical information for Top-N operators to work
     pub fn topn_order(&self) -> &Order {
-        &self.order
+        &self.core.order
     }
 
     pub fn group_key(&self) -> &[usize] {
-        &self.group_key
+        &self.core.group_key
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -138,11 +135,11 @@ impl LogicalTopN {
         builder
             .field("limit", &format_args!("{}", self.limit()))
             .field("offset", &format_args!("{}", self.offset()));
-        if self.with_ties {
+        if self.with_ties() {
             builder.field("with_ties", &format_args!("{}", true));
         }
-        if !self.group_key.is_empty() {
-            builder.field("group_key", &self.group_key);
+        if !self.group_key().is_empty() {
+            builder.field("group_key", &self.group_key());
         }
         builder.finish()
     }
@@ -152,7 +149,7 @@ impl LogicalTopN {
         let schema = &self.base.schema;
         let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
-        let field_order = &self.order.field_order;
+        let field_order = &self.topn_order().field_order;
         let mut internal_table_catalog_builder =
             TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
@@ -247,10 +244,10 @@ impl LogicalTopN {
         let local_top_n = StreamGroupTopN::new(
             LogicalTopN::with_group(
                 project.into(),
-                self.limit + self.offset,
+                self.limit() + self.offset(),
                 0,
-                self.with_ties,
-                self.order.clone(),
+                self.with_ties(),
+                self.topn_order().clone(),
                 vec![vnode_col_idx],
             ),
             Some(vnode_col_idx),
@@ -259,13 +256,13 @@ impl LogicalTopN {
             RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;
         let global_top_n = StreamTopN::new(LogicalTopN::new(
             exchange,
-            self.limit,
-            self.offset,
-            self.with_ties,
-            self.order.clone(),
+            self.limit(),
+            self.offset(),
+            self.with_ties(),
+            self.topn_order().clone(),
         ));
 
-        // use another projectiton to remove the column we added before.
+        // use another projection to remove the column we added before.
         exprs.pop();
         let project = StreamProject::new(LogicalProject::new(global_top_n.into(), exprs));
         Ok(project.into())
@@ -274,17 +271,17 @@ impl LogicalTopN {
 
 impl PlanTreeNodeUnary for LogicalTopN {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::with_group(
             input,
-            self.limit,
-            self.offset,
-            self.with_ties,
-            self.order.clone(),
-            self.group_key.clone(),
+            self.limit(),
+            self.offset(),
+            self.with_ties(),
+            self.topn_order().clone(),
+            self.group_key().to_vec(),
         )
     }
 
@@ -297,13 +294,13 @@ impl PlanTreeNodeUnary for LogicalTopN {
         (
             Self::with_group(
                 input,
-                self.limit,
-                self.offset,
-                self.with_ties,
+                self.limit(),
+                self.offset(),
+                self.with_ties(),
                 input_col_change
-                    .rewrite_required_order(&self.order)
+                    .rewrite_required_order(self.topn_order())
                     .unwrap(),
-                self.group_key
+                self.group_key()
                     .iter()
                     .map(|idx| input_col_change.map(*idx))
                     .collect(),
@@ -324,7 +321,7 @@ impl ColPrunable for LogicalTopN {
         let input_required_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
         let order_required_cols = {
             let mut order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
-            self.order
+            self.topn_order()
                 .field_order
                 .iter()
                 .for_each(|fo| order_required_cols.insert(fo.index));
@@ -332,7 +329,7 @@ impl ColPrunable for LogicalTopN {
         };
         let group_required_cols = {
             let mut group_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
-            self.group_key
+            self.group_key()
                 .iter()
                 .for_each(|idx| group_required_cols.insert(*idx));
             group_required_cols
@@ -350,7 +347,7 @@ impl ColPrunable for LogicalTopN {
         );
         let new_order = Order {
             field_order: self
-                .order
+                .topn_order()
                 .field_order
                 .iter()
                 .map(|fo| FieldOrder {
@@ -359,12 +356,12 @@ impl ColPrunable for LogicalTopN {
                 })
                 .collect(),
         };
-        let new_input = self.input.prune_col(&input_required_cols);
+        let new_input = self.input().prune_col(&input_required_cols);
         let top_n = Self::new(
             new_input,
-            self.limit,
-            self.offset,
-            self.with_ties,
+            self.limit(),
+            self.offset(),
+            self.with_ties(),
             new_order,
         )
         .into();
@@ -394,14 +391,14 @@ impl PredicatePushdown for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
-        if !self.group_key.is_empty() {
+        if !self.group_key().is_empty() {
             return Err(ErrorCode::NotImplemented(
                 "Group TopN in batch mode".to_string(),
                 4847.into(),
             )
             .into());
         }
-        if self.with_ties {
+        if self.with_ties() {
             return Err(ErrorCode::NotImplemented(
                 "TopN with ties in batch mode".to_string(),
                 5302.into(),
@@ -417,24 +414,24 @@ impl ToBatch for LogicalTopN {
 
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> Result<PlanRef> {
-        if self.offset() != 0 && self.limit == LIMIT_ALL_COUNT {
+        if self.offset() != 0 && self.limit() == LIMIT_ALL_COUNT {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "OFFSET without LIMIT in streaming mode".to_string(),
             )));
         }
-        Ok(if !self.group_key.is_empty() {
+        Ok(if !self.group_key().is_empty() {
             let input = self.input().to_stream()?;
             let input = RequiredDist::hash_shard(self.group_key())
                 .enforce_if_not_satisfies(input, &Order::any())?;
             let logical = self.clone_with_input(input);
             StreamGroupTopN::new(logical, None).into()
         } else {
-            self.gen_dist_stream_top_n_plan(self.input.to_stream()?)?
+            self.gen_dist_stream_top_n_plan(self.input().to_stream()?)?
         })
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((top_n.into(), out_col_change))
     }
