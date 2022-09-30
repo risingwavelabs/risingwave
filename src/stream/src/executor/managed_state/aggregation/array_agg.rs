@@ -203,8 +203,6 @@ impl<S: StateStore> ManagedTableState<S> for ManagedArrayAggState<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use itertools::Itertools;
     use risingwave_common::array::{Row, StreamChunk, StreamChunkTestExt};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
@@ -238,13 +236,13 @@ mod tests {
             filter: None,
         };
 
-        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
         let table_id = TableId::new(6666);
         let columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // _row_id
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // a
         ];
-        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![3, 0]));
+        let state_table_col_mapping = StateTableColumnMapping::new(vec![3, 0]);
         let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -253,8 +251,13 @@ mod tests {
             vec![0], // [_row_id]
         );
 
-        let mut agg_state =
-            ManagedArrayAggState::new(agg_call, None, input_pk_indices, state_table_col_mapping, 0);
+        let mut managed_state = ManagedArrayAggState::new(
+            &agg_call,
+            None,
+            &input_pk_indices,
+            state_table_col_mapping,
+            0,
+        );
 
         let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
@@ -270,15 +273,14 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
         let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
-        agg_state
+        managed_state
             .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
             .await?;
 
         epoch.inc();
-        agg_state.flush(&mut state_table)?;
         state_table.commit_for_test(epoch).await.unwrap();
 
-        let res = agg_state.get_output(&state_table).await?;
+        let res = managed_state.get_output(&state_table).await?;
         match res {
             Some(ScalarImpl::List(res)) => {
                 let res = res
@@ -323,7 +325,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
             ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32), // b
         ];
-        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 0, 3, 1]));
+        let state_table_col_mapping = StateTableColumnMapping::new(vec![2, 0, 3, 1]);
         let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -336,8 +338,13 @@ mod tests {
             vec![0, 1, 2], // [c, a, _row_id]
         );
 
-        let mut agg_state =
-            ManagedArrayAggState::new(agg_call, None, input_pk_indices, state_table_col_mapping, 0);
+        let mut managed_state = ManagedArrayAggState::new(
+            &agg_call,
+            None,
+            &input_pk_indices,
+            state_table_col_mapping,
+            0,
+        );
 
         let epoch = EpochPair::new_test_epoch(1);
         state_table.init_epoch(epoch);
@@ -353,15 +360,14 @@ mod tests {
             );
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
-            agg_state
+            managed_state
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            agg_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
-            let res = agg_state.get_output(&state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::List(res)) => {
                     let res = res
@@ -383,14 +389,13 @@ mod tests {
             );
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
-            agg_state
+            managed_state
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            agg_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
 
-            let res = agg_state.get_output(&state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::List(res)) => {
                     let res = res
@@ -431,7 +436,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
             ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar), // a
         ];
-        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 1, 3, 0]));
+        let state_table_col_mapping = StateTableColumnMapping::new(vec![2, 1, 3, 0]);
         let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -444,10 +449,10 @@ mod tests {
             vec![0, 1, 2], // [c, b, _row_id]
         );
 
-        let mut agg_state = ManagedArrayAggState::new(
-            agg_call,
+        let mut managed_state = ManagedArrayAggState::new(
+            &agg_call,
             Some(&Row::new(vec![Some(8.into())])),
-            input_pk_indices,
+            &input_pk_indices,
             state_table_col_mapping,
             0,
         );
@@ -465,15 +470,14 @@ mod tests {
             );
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
-            agg_state
+            managed_state
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            agg_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
-            let res = agg_state.get_output(&state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::List(res)) => {
                     let res = res
@@ -495,14 +499,13 @@ mod tests {
             );
             let (ops, columns, visibility) = chunk.into_inner();
             let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
-            agg_state
+            managed_state
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            agg_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
 
-            let res = agg_state.get_output(&state_table).await?;
+            let res = managed_state.get_output(&state_table).await?;
             match res {
                 Some(ScalarImpl::List(res)) => {
                     let res = res
