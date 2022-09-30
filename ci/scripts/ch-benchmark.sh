@@ -82,20 +82,3 @@ cargo make clean-data
 cargo make ci-start ci-kafka
 ./scripts/tpcc/prepare_ci_kafka.sh
 ./risedev slt -p 4566 -d dev ./e2e_test/ch-benchmark/ch_benchmark.slt
-
-
-
-# echo "--- Generate Tpch-Bench Args"
-# mkdir ~/risingwave-deploy
-# echo "--frontend-url ${endpoint}" > ~/risingwave-deploy/tpch-bench-args-frontend
-# echo "--kafka-addr ${HOST_IP}:29092" >  ~/risingwave-deploy/tpch-bench-args-kafka
-# cat ~/risingwave-deploy/tpch-bench-args-frontend
-# cat ~/risingwave-deploy/tpch-bench-args-kafka
-
-# echo "--- Clone Tpch-Bench Repo"
-# git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/tpch-bench.git
-
-# echo "--- Run Tpch-Bench"
-# cd tpch-bench/
-# ./scripts/build.sh
-# ./scripts/launch_risedev_bench.sh
