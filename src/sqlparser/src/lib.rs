@@ -15,7 +15,7 @@
 //! Example code:
 //!
 //! This crate provides an ANSI:SQL 2011 lexer and parser that can parse SQL
-//! into an Abstract Syntax Tree (AST).
+//! into an Abstract Syntax Tree (AST). Maybe work here? Where is the parser used?
 //!
 //! ```
 //! use risingwave_sqlparser::parser::Parser;
