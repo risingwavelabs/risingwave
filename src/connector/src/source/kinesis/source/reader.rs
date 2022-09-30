@@ -21,9 +21,10 @@ use aws_sdk_kinesis::model::ShardIteratorType;
 use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::types::SdkError;
 use aws_sdk_kinesis::Client as KinesisClient;
-use futures::stream::{select_all, FuturesUnordered};
+use futures::stream::FuturesUnordered;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::util::select_all;
 
 use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};

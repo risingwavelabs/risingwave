@@ -16,12 +16,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::future::try_join_all;
-use futures::stream::{select_all, BoxStream};
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::util::select_all;
 use risingwave_connector::source::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SplitId, SplitMetaData,
     SplitReaderImpl,
