@@ -766,8 +766,8 @@
     create table a (a1 int, a2 int);
     select string_agg('', '' order by unnest(array[1])) from a;
   planner_error: |-
-    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
+    Feature is not yet implemented: table function inside aggregation calls order by
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - name: agg input - subquery
   sql: |
     /* This case is valid in PostgreSQL */
@@ -793,8 +793,8 @@
     create table a (a1 int, a2 int);
     select count(a1 + unnest(array[1])) from a;
   planner_error: |-
-    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
+    Feature is not yet implemented: table function inside aggregation calls
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - name: group by - subquery
   sql: |
     /* This case is valid in PostgreSQL */
@@ -820,5 +820,5 @@
     create table a (a1 int, a2 int);
     select count(a1) from a group by unnest(array[1]);
   planner_error: |-
-    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
+    Feature is not yet implemented: table function inside GROUP BY
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
