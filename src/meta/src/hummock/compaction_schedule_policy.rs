@@ -381,7 +381,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> usize {
         let mut idle_count = 0;
-        for (_, compactor) in &self.score_to_compactor {
+        for compactor in self.score_to_compactor.values() {
             if compactor_assigned_task_num
                 .get(&compactor.context_id())
                 .cloned()
