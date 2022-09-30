@@ -179,12 +179,15 @@ mod tests {
     #[test]
     fn test_selective_agg() -> Result<()> {
         // filter (where $1 > 5)
-        let condition = Arc::from(new_binary_expr(
-            ProstType::GreaterThan,
-            DataType::Boolean,
-            InputRefExpression::new(DataType::Int64, 0).boxed(),
-            LiteralExpression::new(DataType::Int64, Some((5_i64).into())).boxed(),
-        ));
+        let condition = Arc::from(
+            new_binary_expr(
+                ProstType::GreaterThan,
+                DataType::Boolean,
+                InputRefExpression::new(DataType::Int64, 0).boxed(),
+                LiteralExpression::new(DataType::Int64, Some((5_i64).into())).boxed(),
+            )
+            .unwrap(),
+        );
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
             condition,
@@ -218,12 +221,15 @@ mod tests {
 
     #[test]
     fn test_selective_agg_null_condition() -> Result<()> {
-        let condition = Arc::from(new_binary_expr(
-            ProstType::Equal,
-            DataType::Boolean,
-            InputRefExpression::new(DataType::Int64, 0).boxed(),
-            LiteralExpression::new(DataType::Int64, None).boxed(),
-        ));
+        let condition = Arc::from(
+            new_binary_expr(
+                ProstType::Equal,
+                DataType::Boolean,
+                InputRefExpression::new(DataType::Int64, 0).boxed(),
+                LiteralExpression::new(DataType::Int64, None).boxed(),
+            )
+            .unwrap(),
+        );
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
             condition,
